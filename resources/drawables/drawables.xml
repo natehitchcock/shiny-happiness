@@ -1,0 +1,5 @@
+<drawables>
+    <!-- Launcher icon. Connect IQ scales this per device; a single PNG is fine.
+         Regenerate/replace with your own artwork any time. -->
+    <bitmap id="LauncherIcon" filename="launcher_icon.png"/>
+</drawables>

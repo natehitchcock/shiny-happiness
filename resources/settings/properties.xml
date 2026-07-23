@@ -1,0 +1,9 @@
+<properties>
+    <!-- Persisted app properties (Toybox.Application.Properties).
+         orientation: 0 = heading-up, 1 = north-up
+         environment: 0 = outdoor, 1 = mixed, 2 = indoor  (sets path-loss n)
+         units:       0 = meters,  1 = feet                -->
+    <property id="orientation" type="number">0</property>
+    <property id="environment" type="number">0</property>
+    <property id="units" type="number">0</property>
+</properties>

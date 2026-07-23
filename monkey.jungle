@@ -1,0 +1,12 @@
+# Connect IQ build configuration.
+# Build:  monkeyc -f monkey.jungle -o out/BleRadar.prg -d venu4 -y developer_key.der
+# Run:    open out/BleRadar.prg in the Connect IQ simulator (VS Code: "Build and Run")
+
+project.manifest = manifest.xml
+
+# All source lives under source/ (globbed recursively).
+base.sourcePath = source
+
+# Test / mock scaffolding is compiled in too so you can exercise the engine in
+# the simulator (BLE cannot be simulated). Guard mock usage behind a build flag
+# or a debug menu; see source/test/ and docs/08-testing-validation.md.

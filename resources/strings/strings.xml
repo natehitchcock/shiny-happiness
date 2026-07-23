@@ -1,0 +1,34 @@
+<strings>
+    <string id="AppName">BLE Radar</string>
+
+    <!-- Scan list -->
+    <string id="SelectTarget">Select target</string>
+    <string id="Scanning">Scanning…</string>
+    <string id="NoDevices">No devices yet</string>
+    <string id="UnstableId">unstable id</string>
+
+    <!-- Radar / states -->
+    <string id="Acquiring">Collecting… walk a bit</string>
+    <string id="WaitingGps">Waiting for GPS…</string>
+    <string id="SignalLost">Signal lost — rescan?</string>
+    <string id="Arrived">You\'re here</string>
+    <string id="Warmer">warmer</string>
+    <string id="Colder">colder</string>
+    <string id="Locating">Locating…</string>
+    <string id="RotateHint">Rotate slowly for a bearing</string>
+    <string id="WalkHint">Walk a few meters</string>
+    <string id="PoorGps">Poor GPS — move to open sky</string>
+
+    <!-- Settings -->
+    <string id="Settings">Settings</string>
+    <string id="Orientation">Orientation</string>
+    <string id="HeadingUp">Heading up</string>
+    <string id="NorthUp">North up</string>
+    <string id="Environment">Environment</string>
+    <string id="Outdoor">Outdoor</string>
+    <string id="Mixed">Mixed</string>
+    <string id="Indoor">Indoor</string>
+    <string id="Units">Units</string>
+    <string id="Meters">Meters</string>
+    <string id="Feet">Feet</string>
+</strings>
