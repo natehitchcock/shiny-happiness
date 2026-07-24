@@ -8,10 +8,17 @@ using Toybox.Activity;
 class HeadingSource {
     hidden var _motionHeading;
     hidden var _motionOk;
+    hidden var _override;   // simulator-only heading injection (see MockSignalSource)
 
     function initialize() {
         _motionHeading = null;
         _motionOk = false;
+        _override = null;
+    }
+
+    // Force a heading (used by the mock in the simulator). Pass null to clear.
+    function setOverride(h) {
+        _override = h;
     }
 
     // Called from the controller on each GPS fix; hdg is non-null only when
@@ -27,6 +34,9 @@ class HeadingSource {
 
     // Returns [headingRad or null, reliable].
     function current() {
+        if (_override != null) {
+            return [_override, true];
+        }
         if (_motionOk && _motionHeading != null) {
             return [_motionHeading, true];
         }

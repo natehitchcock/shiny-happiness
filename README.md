@@ -22,10 +22,10 @@ honestly** rather than faked when physics won't cooperate (see `docs/09`).
 
 ## Status
 
-Implemented: **M0–M3** from `docs/07-implementation-plan.md` — scan list, sampling +
-sensor fusion, gradient guidance + radar UI, and the Bayesian grid filter, plus a
-mock/replay layer for simulator testing and a minimal settings menu. Body-shadow
-bearing (`ShadowBearing`) is implemented but not yet wired into a rotate-gesture flow.
+Implemented: **M0–M3** plus the body-shadow assist from M4 (`docs/07`) — scan list,
+sampling + sensor fusion, gradient guidance + radar UI, the Bayesian grid filter, and
+a wired **body-shadow bearing** (stand-and-rotate sweep detection + fusion), plus a
+mock/replay layer for simulator testing and a minimal settings menu.
 
 > ⚠️ **Not built or tested in this environment.** Needs Garmin's Connect IQ SDK to
 > compile and a physical Venu 4 to exercise BLE. See `BUILD.md`.

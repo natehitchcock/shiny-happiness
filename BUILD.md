@@ -41,10 +41,15 @@ track:
 
 1. In `source/core/Const.mc` set `MOCK_ENABLED = true`.
 2. Build & run. A **"MOCK Beacon"** appears in the scan list; select it.
-3. The `MockSignalSource` plays a scripted track (`SyntheticTracks.walkPast()` by
-   default; switch to `homeIn()` in `MockSignalSource.initialize` to test the
-   ARRIVED state). Watch the arrow, distance, confidence, and warmer/colder cue
-   respond as the synthetic user "walks."
+3. Pick a scenario with `MOCK_SCENARIO` in `Const.mc`:
+   - `0` **walk-past** — the synthetic user walks a track (`SyntheticTracks.walkPast()`;
+     switch to `homeIn()` in `MockSignalSource.initialize` to test ARRIVED). Watch the
+     arrow, distance, confidence, and warmer/colder cue respond as they "walk."
+   - `1` **stand-and-rotate** — fixed position, heading sweeps a full turn, and RSSI is
+     modulated by a body-shadow term (emitter due east). Exercises `ShadowBearing`:
+     after roughly one rotation the arrow should point east (clearest in **north-up**
+     mode — tap the radar to toggle orientation). The hint reads "rotate slowly" until
+     a bearing locks.
 4. Set `MOCK_ENABLED = false` again before shipping.
 
 See `docs/08-testing-validation.md` for the field-test protocol and tuning table.
@@ -57,14 +62,17 @@ See `docs/08-testing-validation.md` for the field-test protocol and tuning table
 | M1 Sampling + fusion | ✅ | `GeoProvider`, `MotionProvider`, `HeadingSource`, `SampleBuilder`, `SampleBuffer`, `Geo` (ENU). |
 | M2 Gradient + radar UI | ✅ | `GradientEstimator`, `PathLoss`, `RadarView`, state machine in `SessionController`. Shippable MVP. |
 | M3 Bayesian grid | ✅ | `GridFilter` (occupancy grid, MAP centroid, confidence), fused with gradient. `PathLoss.calibrate` for self-tuning n. |
-| M4 Assists/polish | ◐ | Settings menu + orientation toggle done. `ShadowBearing` implemented but **not wired** to a rotate gesture yet. |
+| M4 Assists/polish | ◐ | Settings menu + orientation toggle done. `ShadowBearing` **wired**: `SessionController` detects a stand-and-rotate sweep, feeds it, and fuses the bearing (confirms the grid, or fills the standing-still gap). Testable in-sim via `MOCK_SCENARIO = 1`. |
 | M5 Validation | ☐ | Field testing + tuning is on-device work (docs/08). |
 
 ## Known gaps / next steps for the PC session
 
-- **Wire `ShadowBearing`** to a rotate-in-place detector (extend `MotionProvider`
-  with a heading-change gesture; feed `ShadowBearing.add(heading, rssi)` during the
-  sweep; fuse `result()` into the Estimate in `SessionController.populateEstimate`).
+- **Validate `ShadowBearing` on hardware.** It is wired (`SessionController.updateShadow`
+  detects a stationary heading sweep, accumulates it, and `populateEstimate` fuses the
+  result), but it depends on a usable **stationary compass heading** — confirm that
+  works on the Venu 4, and tune the sweep gates in `Const.mc` (`SHADOW_*`) against real
+  rotations. The sweep requires ~6 of 8 heading sectors and ~258° of cumulative
+  rotation before trusting a bearing, so standing still never fabricates one.
 - **Confirm the accel path** on hardware — `MotionProvider` reads `Sensor.Info.accel`;
   some devices need `Sensor.registerSensorDataListener` instead. The app still works
   if motion state is unavailable (the `moving` flag is currently advisory).

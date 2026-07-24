@@ -53,6 +53,15 @@ module Const {
     const CONF_TRACK     = 0.30;   // confidence to enter TRACKING
     const CONF_ARRIVED   = 0.50;   // confidence + strong RSSI to ARRIVE
 
+    // Body-shadow bearing sweep (docs/05). A near-full in-place rotation is
+    // required before a bearing is trusted, so standing still doesn't fabricate one.
+    const SHADOW_STATIONARY_SPEED = 0.4;   // m/s; above this we're translating
+    const SHADOW_MIN_COUNT    = 12;        // min (heading,rssi) pairs
+    const SHADOW_MIN_COVERAGE = 4.5;       // rad of cumulative rotation (~258 deg)
+    const SHADOW_MIN_SECTORS  = 6;         // of 8 x 45-deg sectors visited
+    const SHADOW_MAX_MS       = 25000;     // abort a sweep that never completes
+    const SHADOW_VALID_MS     = 12000;     // how long a solved bearing stays usable
+
     // Settings: environment preset -> path-loss exponent n.
     const N_OUTDOOR = 2.2;
     const N_MIXED   = 2.7;
@@ -61,4 +70,8 @@ module Const {
     // Flip to true (PC build) to drive the engine from MockSignalSource in the
     // simulator, where real BLE is unavailable. See docs/08 + source/test.
     const MOCK_ENABLED = false;
+
+    // Mock scenario when MOCK_ENABLED: 0 = walk-past (gradient/grid),
+    // 1 = stand-and-rotate (exercises ShadowBearing via the mock's body-shadow term).
+    const MOCK_SCENARIO = 0;
 }

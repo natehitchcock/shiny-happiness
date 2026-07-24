@@ -37,6 +37,17 @@ class SessionController {
     hidden var _haveFix;
 
     hidden var _moving;
+    hidden var _curSpeed;
+
+    // Body-shadow bearing sweep state
+    hidden var _swActive;
+    hidden var _swCoverage;    // cumulative |heading change|, radians
+    hidden var _swLastHeading;
+    hidden var _swCount;
+    hidden var _swStartT;
+    hidden var _swSectors;     // Boolean[8]: which 45-deg sectors were visited
+    hidden var _shadowResult;  // { :bearing, :conf } or null
+    hidden var _shadowResultT;
 
     // Output
     hidden var _state;
@@ -73,6 +84,11 @@ class SessionController {
         _lastSeenT = null;
         _curE = 0.0; _curN = 0.0; _posAcc = 100.0; _haveFix = false;
         _moving = false;
+        _curSpeed = 0.0;
+        _swSectors = new [8];
+        shadowReset();
+        _shadowResult = null;
+        _shadowResultT = 0;
         _state = Const.STATE_SCANNING;
         _estimate = new Estimate();
         _lastGridEst = null;
@@ -127,7 +143,9 @@ class SessionController {
         _buffer.clear();
         _grid.reset();
         _sampleBuilder.reset();
-        _shadow.clear();
+        shadowReset();
+        _shadowResult = null;
+        _shadowResultT = 0;
         _rssiSmooth = null;
         _lastSeenT = null;
         _lastGridEst = null;
@@ -154,6 +172,7 @@ class SessionController {
         _curN = en[1];
         _posAcc = accM;
         _haveFix = true;
+        _curSpeed = (speed == null) ? 0.0 : speed;
         _headingSource.updateMotionHeading(motionHeading);
     }
 
@@ -185,6 +204,9 @@ class SessionController {
             }
         }
 
+        // Opportunistically fit a body-shadow bearing while standing + rotating.
+        updateShadow(now);
+
         // Grid estimate is heavier; run it every other tick.
         var gridEst;
         if (_tickCount % 2 == 0) {
@@ -203,18 +225,30 @@ class SessionController {
         WatchUi.requestUpdate();
     }
 
-    // Fusion policy (docs/05).
+    // Fusion policy (docs/05). Grid (motion diversity) is preferred; the gradient
+    // fills in before the grid converges; the body-shadow bearing fills the
+    // standing-still gap where neither of the motion methods can help.
     hidden function populateEstimate(est, gridEst, gradEst, now) {
         var gridConf = (gridEst == null) ? 0.0 : gridEst[:conf];
+        var shadow = getRecentShadow(now);
 
         if (gridEst != null && gridConf > 0.35) {
-            var be = Geo.bearing(_curE, _curN, gridEst[:e], gridEst[:n]);
+            var gb = Geo.bearing(_curE, _curN, gridEst[:e], gridEst[:n]);
             est.hasBearing = true;
-            est.bearingRad = smoothBearing(be);
+            est.bearingRad = smoothBearing(gb);
             est.hasDistance = true;
             est.distanceM = Geo.distance(_curE, _curN, gridEst[:e], gridEst[:n]);
             est.confidence = gridConf;
             est.mode = Const.MODE_GRID;
+            // A recent body-shadow bearing confirms or contradicts the grid.
+            if (shadow != null) {
+                if (MathUtil.angDiff(gb, shadow[:bearing]) < 0.5) {
+                    est.confidence = MathUtil.clamp(est.confidence + 0.1, 0.0, 1.0);
+                } else {
+                    est.confidence *= 0.85;
+                }
+                est.mode = Const.MODE_FUSED;
+            }
         } else if (gradEst != null) {
             est.hasBearing = true;
             est.bearingRad = smoothBearing(gradEst[:bearing]);
@@ -224,32 +258,141 @@ class SessionController {
                 est.hasDistance = true;
                 est.distanceM = _pathloss.distanceFor(_rssiSmooth);
             }
+        } else if (shadow != null) {
+            est.hasBearing = true;
+            est.bearingRad = smoothBearing(shadow[:bearing]);
+            est.confidence = shadow[:conf];
+            est.mode = Const.MODE_SHADOW;
+            if (_rssiSmooth != null) {
+                est.hasDistance = true;
+                est.distanceM = _pathloss.distanceFor(_rssiSmooth);
+            }
         } else {
             est.mode = Const.MODE_NONE;
             est.confidence = 0.0;
-            est.hint = _haveFix ? Const.HINT_WALK : Const.HINT_GPS;
         }
 
         // Warmer/colder always comes from the gradient when available.
         if (gradEst != null) { est.warmer = gradEst[:warmer]; }
 
         // Cross-check: if grid and gradient bearings disagree strongly, we are
-        // not really converged -> drop confidence and coach movement.
+        // not really converged -> drop confidence.
         if (gridEst != null && gradEst != null) {
-            var gb = Geo.bearing(_curE, _curN, gridEst[:e], gridEst[:n]);
-            if (MathUtil.angDiff(gb, gradEst[:bearing]) > 1.2) {
+            var gb2 = Geo.bearing(_curE, _curN, gridEst[:e], gridEst[:n]);
+            if (MathUtil.angDiff(gb2, gradEst[:bearing]) > 1.2) {
                 est.confidence *= 0.5;
-                if (est.hint == Const.HINT_NONE) { est.hint = Const.HINT_WALK; }
             }
         }
 
-        if (est.mode != Const.MODE_NONE && est.confidence < 0.2 &&
-            est.hint == Const.HINT_NONE) {
-            est.hint = Const.HINT_WALK;
-        }
+        est.hint = computeHint(est, now);
+    }
+
+    // Coach the user toward whichever method can currently help.
+    hidden function computeHint(est, now) {
         if (_lastSeenT != null && (now - _lastSeenT) > Const.LOST_MS) {
-            est.hint = Const.HINT_LOST;
+            return Const.HINT_LOST;
         }
+        if (!_haveFix) { return Const.HINT_GPS; }
+        if (est.hasBearing && est.confidence >= 0.3) { return Const.HINT_NONE; }
+
+        var hs = _headingSource.current();
+        var haveHeading = (hs[0] != null);
+        if (_curSpeed <= Const.SHADOW_STATIONARY_SPEED && haveHeading) {
+            return Const.HINT_ROTATE;   // stand + rotate -> body-shadow bearing
+        }
+        return Const.HINT_WALK;         // walk -> gradient / grid
+    }
+
+    // --- Body-shadow bearing sweep ---------------------------------------
+    // Runs every tick. When the user is stationary with a heading and live
+    // signal, it accumulates (heading, rssi) pairs; once a near-full rotation is
+    // covered it fits the sinusoid and caches the bearing. Translating (walking)
+    // invalidates the in-place assumption and resets the sweep. See docs/05.
+    hidden function updateShadow(now) {
+        if (!_haveFix || _rssiSmooth == null) { shadowReset(); return; }
+        if ((now - _rssiT) > Const.RSSI_STALE_MS) { shadowReset(); return; }
+        if (_curSpeed > Const.SHADOW_STATIONARY_SPEED) { shadowReset(); return; }
+
+        var hs = _headingSource.current();
+        var heading = hs[0];
+        if (heading == null) { shadowReset(); return; }
+
+        if (!_swActive) {
+            beginSweep(heading, now);
+        } else {
+            _swCoverage += MathUtil.angDiff(heading, _swLastHeading);
+            _swLastHeading = heading;
+        }
+        markSector(heading);
+        _shadow.add(heading, _rssiSmooth);
+        _swCount++;
+
+        if ((now - _swStartT) > Const.SHADOW_MAX_MS) { shadowReset(); return; }
+
+        if (_swCount >= Const.SHADOW_MIN_COUNT &&
+            _swCoverage >= Const.SHADOW_MIN_COVERAGE &&
+            sectorsVisited() >= Const.SHADOW_MIN_SECTORS) {
+            _shadow.solve();
+            var r = _shadow.result();
+            if (r != null) {
+                _shadowResult = r;
+                _shadowResultT = now;
+            }
+            shadowReset();   // begin a fresh sweep so the bearing keeps refreshing
+        }
+    }
+
+    hidden function beginSweep(heading, now) {
+        _shadow.clear();
+        _swActive = true;
+        _swStartT = now;
+        _swLastHeading = heading;
+        _swCoverage = 0.0;
+        _swCount = 0;
+        for (var i = 0; i < 8; i++) { _swSectors[i] = false; }
+    }
+
+    hidden function shadowReset() {
+        _swActive = false;
+        _swCoverage = 0.0;
+        _swCount = 0;
+        _swStartT = 0;
+        for (var i = 0; i < 8; i++) { _swSectors[i] = false; }
+        if (_shadow != null) { _shadow.clear(); }
+        // Note: leaves _shadowResult intact; it ages out via SHADOW_VALID_MS.
+    }
+
+    hidden function markSector(heading) {
+        var hn = heading;
+        while (hn < 0) { hn += 2.0 * Math.PI; }
+        while (hn >= 2.0 * Math.PI) { hn -= 2.0 * Math.PI; }
+        var idx = (hn / (Math.PI / 4.0)).toNumber();
+        if (idx < 0) { idx = 0; }
+        if (idx > 7) { idx = 7; }
+        _swSectors[idx] = true;
+    }
+
+    hidden function sectorsVisited() {
+        var c = 0;
+        for (var i = 0; i < 8; i++) {
+            if (_swSectors[i] == true) { c++; }
+        }
+        return c;
+    }
+
+    hidden function getRecentShadow(now) {
+        if (_shadowResult == null) { return null; }
+        if ((now - _shadowResultT) > Const.SHADOW_VALID_MS) {
+            _shadowResult = null;
+            return null;
+        }
+        return _shadowResult;
+    }
+
+    // Lets the mock drive a stationary heading sweep in the simulator, where a
+    // real compass isn't available. No effect in normal (non-mock) operation.
+    function mockHeading(h) {
+        _headingSource.setOverride(h);
     }
 
     hidden function advanceState(est, now) {

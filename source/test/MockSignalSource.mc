@@ -20,16 +20,27 @@ class MockSignalSource {
     hidden var _rssi1m;
     hidden var _lastE;
     hidden var _lastN;
+    hidden var _scenario;
+    hidden var _shadowDepth;   // dB of body-shadow attenuation (rotate scenario)
 
     const REF_LAT = 45.0;
     const REF_LON = -122.0;
+    const ROTATE_SWEEP_MS = 24000.0;
 
     function initialize(controller) {
         _c = controller;
         _geo = new Geo();
         _geo.setRef(REF_LAT, REF_LON);
-        _emitterE = 25.0;
-        _emitterN = 10.0;
+        _scenario = Const.MOCK_SCENARIO;
+        _shadowDepth = 12.0;
+        if (_scenario == 1) {
+            // Stand-and-rotate: fixed position, emitter due east (bearing +pi/2).
+            _emitterE = 15.0;
+            _emitterN = 0.0;
+        } else {
+            _emitterE = 25.0;
+            _emitterN = 10.0;
+        }
         _track = SyntheticTracks.walkPast();   // swap to homeIn() to test ARRIVED
         _started = false;
         _n = 2.4;
@@ -48,6 +59,8 @@ class MockSignalSource {
     }
 
     function step(now) {
+        if (_scenario == 1) { stepRotate(now); return; }
+
         if (!_started) {
             _startT = now;
             _started = true;
@@ -73,6 +86,35 @@ class MockSignalSource {
         _c.onGeoFix(ll[0], ll[1], 5.0, hdg, spd, now);
         _c.onSignalObservation(rssi.toNumber(), now);
         _c.onMotion(spd > 0.3);
+    }
+
+    // Stand-and-rotate: position is fixed, the watch heading sweeps a full turn,
+    // and RSSI is modulated by a body-shadow term that peaks when the watch faces
+    // the emitter. Lets ShadowBearing be validated in the simulator (docs/08).
+    hidden function stepRotate(now) {
+        if (!_started) {
+            _startT = now;
+            _started = true;
+        }
+        var elapsed = now - _startT;
+        var heading = 2.0 * Math.PI * ((elapsed % ROTATE_SWEEP_MS) / ROTATE_SWEEP_MS);
+
+        var e = 0.0;
+        var n = 0.0;   // fixed position (session reference)
+        var d = Geo.distance(e, n, _emitterE, _emitterN);
+        var dd = (d < 0.5) ? 0.5 : d;
+
+        // Body-shadow: 0 dB when facing the emitter, up to _shadowDepth when the
+        // body is between the watch and the emitter.
+        var bearingToEmitter = Geo.bearing(e, n, _emitterE, _emitterN);
+        var att = _shadowDepth * (1.0 - Math.cos(heading - bearingToEmitter)) / 2.0;
+        var rssi = _rssi1m - 10.0 * _n * Math.log(dd, 10) - att + noise();
+
+        var ll = _geo.toGeo(e, n);
+        _c.onGeoFix(ll[0], ll[1], 5.0, null, 0.0, now);
+        _c.mockHeading(heading);
+        _c.onSignalObservation(rssi.toNumber(), now);
+        _c.onMotion(false);
     }
 
     hidden function samplePos(elapsed) {
