@@ -115,7 +115,7 @@ POST /api/v1/decks/:id/recommendations
   {
     groups?: CandidateGroupKey[],   // omit for all
     limitPerGroup?: number,         // default 60
-    filters?: { maxPrice?, sets?, excludeReserved?, roles? },
+    query?: string,                 // candidate query, doc 13
     weights?: Partial<ScoringWeights>
   }
   →
@@ -129,9 +129,24 @@ POST /api/v1/decks/:id/recommendations
       total: number,                // before limitPerGroup
       items: Recommendation[]       // ordered; see doc 05 §5.6
     }>,
-    unavailable: Array<{ key: CandidateGroupKey, reason: string }>
+    unavailable: Array<{ key: CandidateGroupKey, reason: string }>,
+    query?: {
+      matched: number,              // pool size after the filter
+      total: number,                // pool size before it
+      withheldByGroup: Record<CandidateGroupKey, number>,
+      errors: QueryParseError[]     // non-empty ⇒ query NOT applied, see below
+    }
   }
 ```
+
+`withheldByGroup` is what lets a group say *"+3 more complete 3+ combos but don't
+match your filter"* (doc 13 §13.1). A group that withheld cards and does not report
+it is a bug.
+
+**A query that fails to parse is never partially applied.** `errors` is returned
+with the *unfiltered* result and the UI underlines the bad token. Applying the
+half of a query that happened to parse would produce a wrong answer that looks
+right.
 
 `unavailable` is how degradation is communicated (doc 05 §5.3) — a group that
 could not be computed is reported, never silently omitted.
@@ -143,6 +158,21 @@ GET /api/v1/decks/:id/combo-index
 
 Lets the client run local incremental patches (doc 09 §9.4) without shipping the
 whole combo database to the phone.
+
+### Query support
+
+```
+POST /api/v1/query/validate   { query }
+     → { ok: true, canonical: string, describe: string, estimatedMatches: number }
+     → { ok: false, errors: QueryParseError[] }   { position, length, message, suggestion }
+
+GET  /api/v1/query/suggest?prefix=&field=&deckId=
+     → { items: Array<{ insert: string, label: string, hint: string, count: number }> }
+```
+
+`suggest` backs autocomplete: field names when no `field` is given, values from
+the corpus otherwise, each with a match count so a useless term is visible before
+it is committed to. Counts come from precomputed histograms, not live queries.
 
 ## 10.5 Analysis
 

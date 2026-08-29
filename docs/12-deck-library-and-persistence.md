@@ -139,7 +139,8 @@ interface WorkspaceState {
   sheetDetent: 'peek' | 'half' | 'full'   // mobile
   acceptedGroupBy: 'role' | 'manaValue' | 'color' | 'type' | 'origin'
   collapsedGroups: string[]
-  candidateFilters: CandidateFilters
+  candidateQuery: string             // raw query text; see doc 13
+  savedQueries: Array<{ name: string, query: string }>
   scoringWeights: Partial<ScoringWeights>
 }
 ```

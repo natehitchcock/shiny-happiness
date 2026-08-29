@@ -60,6 +60,11 @@ and people will use it constantly.
 Candidate-region grouping is **fixed** to the doc 05 order. It is the product's
 opinion. Users can collapse and hide groups, not reorder them.
 
+The candidate region header also carries the **query bar** — a Scryfall-style
+filter over the candidate pool, as chips plus text, with a faceted sheet on mobile.
+It narrows which cards are eligible to be grouped; it does not change the grouping.
+See [../13-candidate-query.md](../13-candidate-query.md).
+
 ## 6.3 Card states and their affordances
 
 | State | Where it lives | Primary action | Secondary |

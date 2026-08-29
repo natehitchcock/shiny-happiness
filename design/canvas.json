@@ -1,31 +1,167 @@
 {
   "pages": [
-    { "id": "page-1", "name": "Desktop" },
-    { "id": "page-2", "name": "Mobile & decks" }
+    {
+      "id": "page-1",
+      "name": "Desktop"
+    },
+    {
+      "id": "page-2",
+      "name": "Mobile & decks"
+    }
   ],
   "artboards": [
-    { "file": "Main.dc.html",              "x": 0,    "y": 0,    "w": 1440, "h": 900, "page": "page-1", "title": "Workspace — L2 Card" },
-    { "file": "ZoomGrid.dc.html",          "x": 1560, "y": 0,    "w": 1440, "h": 900, "page": "page-1", "title": "Workspace — L1 Grid" },
-    { "file": "ZoomConstellation.dc.html", "x": 3120, "y": 0,    "w": 1440, "h": 900, "page": "page-1", "title": "Workspace — L0 Constellation" },
-    { "file": "Inspect.dc.html",           "x": 0,    "y": 1020, "w": 1440, "h": 900, "page": "page-1", "title": "Inspect — L3 detail" },
-    { "file": "Library.dc.html",           "x": 1560, "y": 1020, "w": 1440, "h": 900, "page": "page-1", "title": "Deck library" },
-
-    { "file": "MobilePeek.dc.html",        "x": 0,    "y": 0,    "w": 390,  "h": 844, "page": "page-2", "title": "Mobile — peek detent" },
-    { "file": "MobileHalf.dc.html",        "x": 510,  "y": 0,    "w": 390,  "h": 844, "page": "page-2", "title": "Mobile — half detent" },
-    { "file": "MobileInspect.dc.html",     "x": 1020, "y": 0,    "w": 390,  "h": 844, "page": "page-2", "title": "Mobile — inspect + swipe" },
-    { "file": "Switcher.dc.html",          "x": 1530, "y": 0,    "w": 560,  "h": 620, "page": "page-2", "title": "Deck switcher" }
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "page": "page-1",
+      "title": "Workspace \u2014 L2 Card"
+    },
+    {
+      "file": "ZoomGrid.dc.html",
+      "x": 1560,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "page": "page-1",
+      "title": "Workspace \u2014 L1 Grid"
+    },
+    {
+      "file": "ZoomConstellation.dc.html",
+      "x": 3120,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "page": "page-1",
+      "title": "Workspace \u2014 L0 Constellation"
+    },
+    {
+      "file": "Filter.dc.html",
+      "x": 4680,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "page": "page-1",
+      "title": "Candidate query \u2014 active filter"
+    },
+    {
+      "file": "Inspect.dc.html",
+      "x": 0,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "page": "page-1",
+      "title": "Inspect \u2014 L3 detail"
+    },
+    {
+      "file": "Library.dc.html",
+      "x": 1560,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "page": "page-1",
+      "title": "Deck library"
+    },
+    {
+      "file": "MobilePeek.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-2",
+      "title": "Mobile \u2014 peek detent"
+    },
+    {
+      "file": "MobileHalf.dc.html",
+      "x": 510,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-2",
+      "title": "Mobile \u2014 half detent"
+    },
+    {
+      "file": "MobileInspect.dc.html",
+      "x": 1020,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-2",
+      "title": "Mobile \u2014 inspect + swipe"
+    },
+    {
+      "file": "Switcher.dc.html",
+      "x": 1530,
+      "y": 0,
+      "w": 560,
+      "h": 620,
+      "page": "page-2",
+      "title": "Deck switcher"
+    },
+    {
+      "file": "MobileFilter.dc.html",
+      "x": 1530,
+      "y": 800,
+      "w": 390,
+      "h": 844,
+      "page": "page-2",
+      "title": "Mobile \u2014 faceted filter sheet"
+    }
   ],
   "annotations": [
-    { "id": "zoom-axis", "page": "page-1", "x": 0, "y": -150, "w": 1440,
-      "text": "One zoom control, four representations — not a scale transform.\nL2 Card → L1 Grid → L0 Constellation. Both panes always move together, so \"spread everything out in front of me\" is one gesture." },
-    { "id": "l0-note", "page": "page-1", "x": 3120, "y": 950, "w": 460,
-      "text": "L0 colours every card in the pool by combo degree — a heat map of where your synergies actually are. Nothing is filtered or sampled away: every candidate has a pip." },
-    { "id": "insp-note", "page": "page-1", "x": 0, "y": 1950, "w": 460,
-      "text": "Every recommendation states its case. Kiki-Jiki's three combos share a piece and still count as three — distinct combos, per the domain rule." },
-    { "id": "mobile-note", "page": "page-2", "x": 0, "y": -190, "w": 900,
-      "text": "Same product, not a reduced one. The deck is a bottom sheet at three detents so both regions stay on screen; swipe accepts and rejects, and every swipe has a tap equivalent in the inspect sheet." },
-    { "id": "switch-note", "page": "page-2", "x": 1530, "y": 680, "w": 560,
-      "text": "There is no save button anywhere in this design, so switching decks never prompts. The chip in the command bar is the switcher." }
+    {
+      "id": "zoom-axis",
+      "page": "page-1",
+      "x": 0,
+      "y": -150,
+      "w": 1440,
+      "text": "One zoom control, four representations \u2014 not a scale transform.\nL2 Card \u2192 L1 Grid \u2192 L0 Constellation. Both panes always move together, so \"spread everything out in front of me\" is one gesture."
+    },
+    {
+      "id": "l0-note",
+      "page": "page-1",
+      "x": 3120,
+      "y": 950,
+      "w": 460,
+      "text": "L0 colours every card in the pool by combo degree \u2014 a heat map of where your synergies actually are. Nothing is filtered or sampled away: every candidate has a pip."
+    },
+    {
+      "id": "insp-note",
+      "page": "page-1",
+      "x": 0,
+      "y": 1950,
+      "w": 460,
+      "text": "Every recommendation states its case. Kiki-Jiki's three combos share a piece and still count as three \u2014 distinct combos, per the domain rule."
+    },
+    {
+      "id": "mobile-note",
+      "page": "page-2",
+      "x": 0,
+      "y": -190,
+      "w": 900,
+      "text": "Same product, not a reduced one. The deck is a bottom sheet at three detents so both regions stay on screen; swipe accepts and rejects, and every swipe has a tap equivalent in the inspect sheet."
+    },
+    {
+      "id": "switch-note",
+      "page": "page-2",
+      "x": 2150,
+      "y": 0,
+      "w": 420,
+      "text": "There is no save button anywhere in this design, so switching decks never prompts. The chip in the command bar is the switcher."
+    },
+    {
+      "id": "query-note",
+      "page": "page-1",
+      "x": 4680,
+      "y": 950,
+      "w": 520,
+      "text": "A Scryfall-style query narrows the pool before grouping \u2014 the groups still form, over fewer cards.\nFiltering never silently hides a good card: each group reports what it withheld, and accepted cards dim rather than disappear."
+    }
   ],
-  "launch": { "view": "canvas", "page": "page-1" }
+  "launch": {
+    "view": "canvas",
+    "page": "page-1"
+  }
 }

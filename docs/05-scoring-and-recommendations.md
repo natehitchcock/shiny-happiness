@@ -41,7 +41,9 @@ A card is a candidate iff all hold:
 - `colorIdentity ⊆ deck.colorIdentity`
 - not already `accepted`
 - not `excluded` (P6 — permanently, for this deck)
-- passes active user filters (budget cap, set/era, "no reserved list", etc.)
+- passes the active candidate query, if any — a Scryfall-style filter over card
+  data *and* our own annotations (`t:instant mv<=2`, `combo>=2 role:ramp`). Full
+  syntax and UI in [13-candidate-query.md](13-candidate-query.md)
 
 Basic lands are excluded from candidate generation entirely; land count is handled
 by the mana base tool, not by card-by-card suggestion.
@@ -66,6 +68,11 @@ pool size.
 Groups 1–4 need only Spellbook data. Groups 6–7 need EDHREC. **If the stats source
 is unavailable the app still works** — groups 6 and 7 are omitted with an inline
 notice, and 1–5, 8 carry the experience. This is the degradation path from §4.3.
+
+When a candidate query is active, group headers show the filtered count and each
+group footers any cards the query withheld (`+3 more complete 3+ combos but don't
+match your filter · show`). Filtering narrows the pool; it never flattens the
+groups and never silently hides a high-degree card.
 
 Group headers show a count and a one-line explanation. Empty groups are hidden,
 except a deficit group with zero candidates, which is itself a finding worth

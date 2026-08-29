@@ -27,6 +27,7 @@ implementing agents will build from.
 | [docs/10-api-contract.md](docs/10-api-contract.md) | HTTP surface between web and api |
 | [docs/11-work-breakdown.md](docs/11-work-breakdown.md) | Parallelizable task graph for implementing agents |
 | [docs/12-deck-library-and-persistence.md](docs/12-deck-library-and-persistence.md) | Saving, switching decks, offline sync, snapshots |
+| [docs/13-candidate-query.md](docs/13-candidate-query.md) | Scryfall-style query filter for the candidate pool |
 | [AGENTS.md](AGENTS.md) | **Rules every implementing agent must follow** |
 
 Architecture decisions with lasting consequences are recorded in [docs/adr/](docs/adr/).

@@ -47,6 +47,7 @@ runs fully parallel with the data work. That is the point of the pure-domain rul
 | `DOM-04` | Role derivation: heuristics + curated override table + precedence | DOM-01 | ≥ 95% agreement with a 300-card hand-labelled fixture set |
 | `DOM-05` | Grouping + scoring engine (doc 05 §5.3, §5.6) | DOM-02, DOM-04 | Deterministic; golden-file tests over 5 fixture decks; every output carries non-empty `reasons` |
 | `DOM-06` | Bracket rules, legality validation, composition targets | DOM-01, DATA-05 | Legality tests incl. colour identity, partners, singleton exceptions |
+| `DOM-08` | Candidate query language: lexer, parser, evaluator, `formatQuery`, `describeQuery` (doc 13 §13.2–13.3) | DOM-01, DOM-04 | Property test: `formatQuery(parse(s))` idempotent; partial parses usable; unknown field errors with position and suggestion; **no regex support** |
 | `DOM-07` | Decklist text parser (doc 10 §10.7) | DOM-01 | Parses Moxfield/Archidekt/TappedOut/MTGO export formats from fixtures; reports unresolved lines rather than throwing |
 
 ## 11.4 Data and ingestion
@@ -75,6 +76,7 @@ runs fully parallel with the data work. That is the point of the pure-domain rul
 | `API-05` | Deck library: list/filter/sort, `recent`, duplicate, archive, soft delete (doc 12 §12.2–12.4) | API-01 | `DeckSummary` projection never loads entries; duplicate copies exclusions and locks |
 | `API-06` | Optimistic concurrency: `baseVersion`, `409` with `since`, workspace-state endpoint (doc 12 §12.6–12.7) | API-01 | Concurrent-edit test from two clients converges without data loss |
 | `API-07` | Snapshots: auto before bulk ops, manual, restore (doc 12 §12.8) | API-01 | Restore is itself undoable; retention enforced |
+| `API-08` | Query validate/suggest endpoints, corpus histograms for autocomplete counts (doc 10 §10.4) | API-02, DOM-08 | Suggest p95 < 40 ms; counts served from precomputed histograms |
 
 ## 11.6 Frontend
 
@@ -97,12 +99,15 @@ runs fully parallel with the data work. That is the point of the pure-domain rul
 | `WEB-14` | Deck creation flow: commander search, partner pairing, bracket pick, core-package offer (doc 12 §12.5) | WEB-11, API-05 | Abandonable at every step; commander search filtered to legal commanders |
 | `WEB-15` | Local-first persistence: IndexedDB replica, command queue, offline drain, `409` replay (doc 12 §12.7) | WEB-01, API-06 | Deck fully editable offline; queue survives reload; conflict resolves without a modal |
 | `WEB-16` | Snapshot UI: automatic labels, manual creation, restore with preview (doc 12 §12.8) | WEB-01, API-07 | Bracket experiment can be fully reverted |
+| `WEB-17` | Desktop query bar: chips ⇄ text, autocomplete with counts, raw-mode fallback for nested queries (doc 13 §13.4) | WEB-02, DOM-08, API-08 | Chip edits and text edits round-trip; nested query drops to raw mode with a stated reason |
+| `WEB-18` | Mobile faceted filter sheet, live match count, active-filter chip row (doc 13 §13.5) | WEB-07, DOM-08 | Every field in doc 13 §13.2 reachable without typing syntax; count updates before Apply |
+| `WEB-19` | Withheld-by-filter footers and Accepted-region dim-not-hide highlight (doc 13 §13.1) | WEB-17 | A filtered-out `combo-3plus` card is always reported, never silently absent |
 
 ## 11.7 Cross-cutting gates
 
 | ID | Task | DoD |
 | --- | --- | --- |
-| `E2E-01` | Playwright suite, desktop + mobile viewports, covering: build a deck from empty to 100, apply and partially dismantle a core package, exclude and confirm no re-suggestion, switch decks mid-edit and confirm nothing is lost, edit offline and reconcile | Green in CI on both viewports |
+| `E2E-01` | Playwright suite, desktop + mobile viewports, covering: build a deck from empty to 100, apply and partially dismantle a core package, exclude and confirm no re-suggestion, switch decks mid-edit and confirm nothing is lost, edit offline and reconcile, filter candidates by query on desktop and by facets on mobile | Green in CI on both viewports |
 | `PERF-01` | Budgets from doc 07 §7.3 and doc 08 §8.5 enforced in CI | Regressions fail the build, not a dashboard |
 | `A11Y-01` | Automated axe pass + a manual screen-reader script for both drag and tap paths | Zero critical violations; manual script documented and passing |
 | `LEGAL-01` | Fan Content Policy compliance, attribution surfaces, name clearance (doc 04 §4.6) | Reviewed and signed off **before any public deployment** |
