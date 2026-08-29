@@ -163,13 +163,19 @@ list reshuffling between renders.
 
 Every `Recommendation` carries ordered `reasons`. Rendered verbatim at L3:
 
-> **Dockside Extortionist**
-> - Completes **2 combos** with cards you have accepted:
->   - *Dockside + Temur Sabertooth* → infinite mana
->   - *Dockside + Ghostly Flicker + Dualcaster Mage* → infinite treasures
-> - **93%** of Krenko decks on EDHREC play it (synergy +0.31)
-> - Fills your **ramp** deficit (8/11)
-> - ⚠️ **Game Changer** — your target Bracket 3 allows 3, you have 2
+> **Kiki-Jiki, Mirror Breaker**
+> - Completes **3 combos** with cards you have accepted:
+>   - *Kiki-Jiki + Zealous Conscripts* → infinite hasty creature copies
+>   - *Kiki-Jiki + Zealous Conscripts + Goblin Bombardment* → infinite damage
+>   - *Kiki-Jiki + Zealous Conscripts + Purphoros* → infinite damage
+> - **61%** of Krenko decks on EDHREC play it (synergy +0.44)
+> - ⚠️ **Game Changer** — your target Bracket 3 allows 3, you already have 3
+
+Note what that example demonstrates: three combos sharing a piece still count as
+three. Degree counts distinct combos, not distinct partner cards (doc 02 §2.3).
+Note also that every card named is red or colourless — a reason referencing a
+card outside the deck's colour identity is a bug in the eligibility filter, not a
+display bug.
 
 Reasons are generated from the annotation record, not written by hand per card,
 and the generator is unit-tested against fixture decks. If a reason cannot be

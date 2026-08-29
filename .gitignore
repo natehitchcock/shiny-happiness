@@ -38,3 +38,7 @@ test-results/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Seeded design canvas (build output of design/*.dc.html — regenerate, do not commit)
+design/*.html
+!design/*.dc.html

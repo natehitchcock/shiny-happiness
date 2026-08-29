@@ -1,0 +1,239 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Archivo:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <style>
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--ink-900);color:var(--ink-100);
+  font-family:Archivo,'Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased}
+:root{
+  --ink-900:#0e0d0c; --ink-850:#141312; --ink-800:#1a1918; --ink-780:#1f1d1b;
+  --ink-750:#232120; --ink-700:#2c2926; --ink-650:#35322e; --ink-600:#413d38;
+  --ink-500:#5a554e; --ink-400:#847d74; --ink-300:#a9a199; --ink-200:#cbc4bb;
+  --ink-100:#eae4dc;
+  --amber:#e0a24a; --amber-2:#c2853a; --amber-3:#8a6428; --amber-ink:#2a1c07;
+  --good:#7a9e6b; --warn:#d4863f; --danger:#c4584a;
+  --mW:#ede4cf; --mU:#5182b0; --mB:#4b4550; --mR:#b0503f; --mG:#4f8558;
+}
+a{color:var(--amber);text-decoration:none} a:hover{color:var(--amber-2)}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.disp{font-family:'Space Grotesk',Archivo,sans-serif}
+.lbl{font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-400);font-weight:600}
+
+/* ---- chrome ---- */
+.bar{background:var(--ink-850);border-bottom:1px solid var(--ink-700)}
+.bar-r1{display:flex;align-items:center;gap:14px;padding:12px 18px}
+.bar-r2{display:flex;align-items:center;gap:6px;padding:0 18px 11px}
+.cmdr{display:flex;align-items:center;gap:10px;padding:5px 10px 5px 5px;border-radius:7px;
+  border:1px solid var(--ink-650);background:var(--ink-800);cursor:pointer}
+.cmdr-art{width:38px;height:38px;border-radius:5px;flex:none;
+  background:linear-gradient(150deg,#8e3a26,#c26a3a 45%,#5c2318);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)}
+.cmdr-nm{font-family:'Space Grotesk',sans-serif;font-size:14.5px;font-weight:600;line-height:1.15}
+.cmdr-sub{font-size:10.5px;color:var(--ink-400);margin-top:2px;letter-spacing:.02em}
+.chev{color:var(--ink-400);font-size:10px;margin-left:2px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;
+  border:1px solid var(--ink-650);background:var(--ink-800);font-size:12px;color:var(--ink-200)}
+.chip.warnish{border-color:#6a4a1e;background:#241a0c;color:var(--warn)}
+.count{font-size:20px;font-weight:600;letter-spacing:-.02em}
+.count small{font-size:12px;color:var(--ink-400);font-weight:400}
+.zoom{display:flex;border:1px solid var(--ink-650);border-radius:7px;overflow:hidden;background:var(--ink-800)}
+.zoom button{all:unset;width:36px;height:28px;display:grid;place-items:center;cursor:pointer;
+  border-right:1px solid var(--ink-700)}
+.zoom button:last-child{border-right:0}
+.zoom .on{background:var(--amber);}
+.zoom .on svg{color:var(--amber-ink)}
+.zoom svg{color:var(--ink-300)}
+.spacer{flex:1}
+
+/* meters */
+.meter{display:flex;flex-direction:column;gap:4px;padding:5px 11px 6px;border-radius:6px;
+  border:1px solid transparent;min-width:88px;cursor:pointer}
+.meter:hover{border-color:var(--ink-650);background:var(--ink-800)}
+.meter-top{display:flex;align-items:baseline;gap:6px}
+.meter-v{font-size:12px;font-weight:600;letter-spacing:.01em}
+.meter-track{height:3px;border-radius:2px;background:var(--ink-700);overflow:hidden}
+.meter-fill{height:100%;border-radius:2px;background:var(--ink-500)}
+.meter.short .meter-v{color:var(--warn)} .meter.short .meter-fill{background:var(--warn)}
+.meter.ok .meter-fill{background:var(--good)}
+.mdiv{width:1px;height:26px;background:var(--ink-700);margin:0 4px}
+
+/* ---- panes ---- */
+.work{display:flex;height:calc(100% - 92px)}
+.pane{display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.pane-hd{display:flex;align-items:center;gap:10px;padding:11px 16px 10px;border-bottom:1px solid var(--ink-780)}
+.pane-body{overflow:hidden;padding:0 16px 16px;flex:1}
+.vdiv{width:1px;background:var(--ink-700);position:relative;flex:none}
+.vdiv::after{content:'';position:absolute;top:50%;left:-2px;width:5px;height:34px;border-radius:3px;
+  background:var(--ink-600);transform:translateY(-50%)}
+.mini{all:unset;display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 8px;border-radius:5px;
+  border:1px solid var(--ink-650);background:var(--ink-800);font-size:11px;color:var(--ink-300);cursor:pointer}
+
+/* group */
+.grp{margin-top:14px}
+.grp-hd{display:flex;align-items:center;gap:8px;padding:7px 2px 6px;border-bottom:1px solid var(--ink-780)}
+.grp-nm{font-size:12.5px;font-weight:600;color:var(--ink-200);letter-spacing:.005em}
+.grp-ct{margin-left:auto;font-size:11.5px;color:var(--ink-400);font-weight:500}
+.grp-why{font-size:10.5px;color:var(--ink-500);margin:5px 2px 0;line-height:1.4}
+.caret{color:var(--ink-500);font-size:9px;width:9px}
+.dot{width:6px;height:6px;border-radius:50%;flex:none}
+.row{display:flex;gap:9px;flex-wrap:wrap;margin-top:11px}
+
+/* ---- card L2 ---- */
+.c2{width:150px;border-radius:8px;background:var(--ink-780);border:1px solid var(--ink-650);
+  padding:5px;position:relative;flex:none;box-shadow:0 1px 3px rgba(0,0,0,.45)}
+.c2-hd{display:flex;align-items:center;gap:4px;padding:1px 2px 4px}
+.c2-nm{font-size:9.5px;font-weight:600;color:var(--ink-100);overflow:hidden;white-space:nowrap;
+  text-overflow:ellipsis;letter-spacing:.01em}
+.c2-cost{margin-left:auto;display:flex;gap:2px;flex:none}
+.pip{width:9px;height:9px;border-radius:50%;box-shadow:inset 0 -1px 1px rgba(0,0,0,.3)}
+.c2-art{height:78px;border-radius:3px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.5)}
+.c2-tl{font-size:8px;color:var(--ink-400);padding:4px 2px 3px;overflow:hidden;white-space:nowrap;
+  text-overflow:ellipsis}
+.c2-tx{background:var(--ink-800);border-radius:3px;padding:5px;display:flex;flex-direction:column;gap:3px;height:40px}
+.c2-tx i{display:block;height:2px;border-radius:1px;background:var(--ink-650)}
+.badge{position:absolute;top:-6px;right:-6px;height:20px;min-width:20px;padding:0 5px;border-radius:10px;
+  background:var(--amber);color:var(--amber-ink);font-size:11px;font-weight:600;display:flex;
+  align-items:center;justify-content:center;gap:3px;box-shadow:0 2px 5px rgba(0,0,0,.5);
+  font-family:'IBM Plex Mono',monospace}
+.badge.d2{background:var(--amber-2)} .badge.d1{background:var(--amber-3);color:#e8d5b0}
+.flag{position:absolute;top:-6px;left:-6px;width:20px;height:20px;border-radius:50%;background:#3a2408;
+  border:1px solid #7a5620;display:grid;place-items:center;box-shadow:0 2px 5px rgba(0,0,0,.5)}
+.lock{position:absolute;bottom:5px;right:5px;width:16px;height:16px;border-radius:4px;
+  background:rgba(14,13,12,.85);display:grid;place-items:center}
+
+/* ---- card L1 ---- */
+.c1{width:96px;flex:none;position:relative}
+.c1-art{height:58px;border-radius:4px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.5)}
+.c1-nm{font-size:8.5px;color:var(--ink-300);margin-top:4px;line-height:1.25;overflow:hidden;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;height:22px}
+.c1-b{position:absolute;top:-4px;right:-4px;height:16px;min-width:16px;padding:0 4px;border-radius:8px;
+  background:var(--amber);color:var(--amber-ink);font-size:9.5px;font-weight:600;display:grid;
+  place-items:center;font-family:'IBM Plex Mono',monospace}
+.c1-b.d2{background:var(--amber-2)} .c1-b.d1{background:var(--amber-3);color:#e8d5b0}
+
+/* ---- L0 ---- */
+.cl{padding:14px 4px 0}
+.cl-hd{display:flex;align-items:baseline;gap:8px;margin-bottom:9px}
+.cl-nm{font-size:11px;font-weight:600;color:var(--ink-300)}
+.cl-ct{font-size:10px;color:var(--ink-500)}
+.cl-field{display:flex;flex-wrap:wrap;gap:4px;align-content:flex-start}
+.px{border-radius:50%}
+
+/* ---- inspect ---- */
+.insp{width:392px;flex:none;background:var(--ink-850);border-left:1px solid var(--ink-700);
+  display:flex;flex-direction:column}
+.insp-hd{display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid var(--ink-780)}
+.insp-b{padding:16px;overflow:hidden;flex:1}
+.reason{display:flex;gap:9px;padding:10px 0;border-bottom:1px solid var(--ink-780)}
+.reason-i{width:19px;height:19px;border-radius:5px;flex:none;display:grid;place-items:center;margin-top:1px}
+.reason-t{font-size:11.5px;line-height:1.5;color:var(--ink-200)}
+.reason-t b{color:var(--ink-100);font-weight:600}
+.combo-line{font-size:10.5px;color:var(--ink-400);line-height:1.55;padding-left:1px;margin-top:5px}
+.combo-line em{color:var(--amber);font-style:normal}
+.act{display:flex;gap:8px;padding:13px 16px;border-top:1px solid var(--ink-700);background:var(--ink-800)}
+.btn{all:unset;flex:1;height:38px;border-radius:7px;display:grid;place-items:center;font-size:12.5px;
+  font-weight:600;cursor:pointer;text-align:center}
+.btn-p{background:var(--amber);color:var(--amber-ink)}
+.btn-s{border:1px solid var(--ink-650);color:var(--ink-300)}
+
+/* ---- mobile ---- */
+.ph{width:390px;height:844px;background:var(--ink-900);display:flex;flex-direction:column;
+  position:relative;overflow:hidden}
+.ph-bar{padding:52px 14px 0;background:var(--ink-850);border-bottom:1px solid var(--ink-700)}
+.ph-r1{display:flex;align-items:center;gap:10px;padding-bottom:10px}
+.ph-r2{display:flex;gap:5px;padding-bottom:10px;overflow:hidden}
+.ph-m{flex:1;min-width:0}
+.ph-m .meter-top{gap:4px} .ph-m .lbl{font-size:8.5px;letter-spacing:.07em}
+.ph-m .meter-v{font-size:10.5px}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--ink-820,#1c1a19);
+  border-top:1px solid var(--ink-650);border-radius:15px 15px 0 0;
+  box-shadow:0 -10px 34px rgba(0,0,0,.6);display:flex;flex-direction:column}
+.grab{width:36px;height:4px;border-radius:2px;background:var(--ink-600);margin:9px auto 0;flex:none}
+.sheet-hd{display:flex;align-items:center;gap:9px;padding:10px 15px 11px}
+.swipe{position:absolute;inset:0;border-radius:8px;pointer-events:none}
+
+/* library */
+.lib{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px}
+.deck{border-radius:9px;border:1px solid var(--ink-700);background:var(--ink-800);overflow:hidden}
+.deck-art{height:96px;position:relative}
+.deck-b{padding:11px 12px 12px}
+.deck-nm{font-family:'Space Grotesk',sans-serif;font-size:13.5px;font-weight:600;line-height:1.2}
+.deck-sub{font-size:10.5px;color:var(--ink-400);margin-top:3px}
+.deck-ft{display:flex;align-items:center;gap:7px;margin-top:10px}
+.bar-mini{flex:1;height:3px;border-radius:2px;background:var(--ink-700);overflow:hidden}
+.bar-mini i{display:block;height:100%;background:var(--amber-3);border-radius:2px}
+.ci{display:flex;gap:2px}
+
+/* switcher */
+.pop{width:340px;border-radius:10px;border:1px solid var(--ink-650);background:var(--ink-800);
+  box-shadow:0 18px 44px rgba(0,0,0,.66);overflow:hidden}
+.pop-hd{display:flex;align-items:center;padding:11px 13px 10px;border-bottom:1px solid var(--ink-750)}
+.srow{display:flex;align-items:center;gap:10px;padding:9px 13px;cursor:pointer;border-left:2px solid transparent}
+.srow:hover{background:var(--ink-780)}
+.srow.cur{background:var(--ink-780);border-left-color:var(--amber)}
+.srow-art{width:34px;height:34px;border-radius:5px;flex:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)}
+.srow-nm{font-size:12.5px;font-weight:600;color:var(--ink-100)}
+.srow-sub{font-size:10px;color:var(--ink-400);margin-top:2px}
+.kbd{font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--ink-500);
+  border:1px solid var(--ink-650);border-radius:3px;padding:1px 4px;margin-left:auto}
+.pop-ft{padding:9px 13px;border-top:1px solid var(--ink-750);display:flex;align-items:center}
+
+.legend{display:flex;align-items:center;gap:13px;margin-left:auto}
+.lg{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--ink-400)}
+.lg span.px{width:8px;height:8px}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;flex-direction:column;overflow:hidden"><div class="bar"><div class="bar-r1"><div class="cmdr"><span class="cmdr-art"></span><span><span class="cmdr-nm">Krenko, Mob Boss</span><span class="cmdr-sub">Goblins, all the way down</span></span><span class="chev">▾</span></div><span class="chip">Bracket 3 <span class="chev">▾</span></span><span class="chip warnish"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 3 19h18L12 4z"/><path d="M12 10v4M12 17h.01"/></svg> 4/3 Game Changers</span><span class="spacer"></span><span class="chip" style="border:0;background:transparent;padding:0 4px"><span class="lbl">Combos</span><span class="mono" style="font-size:14px;font-weight:600;color:var(--amber)">14</span></span><span class="count mono">64<small>/100</small></span><div class="zoom"><button class="on"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="4" cy="4" r="1.5"/><circle cx="10" cy="4" r="1.5"/><circle cx="16" cy="4" r="1.5"/><circle cx="22" cy="4" r="1.5"/><circle cx="4" cy="10" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="16" cy="10" r="1.5"/><circle cx="22" cy="10" r="1.5"/><circle cx="4" cy="16" r="1.5"/><circle cx="10" cy="16" r="1.5"/><circle cx="16" cy="16" r="1.5"/><circle cx="22" cy="16" r="1.5"/><circle cx="4" cy="22" r="1.5"/><circle cx="10" cy="22" r="1.5"/><circle cx="16" cy="22" r="1.5"/><circle cx="22" cy="22" r="1.5"/></svg></button><button class=""><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="4" height="4" rx=".7"/><rect x="10" y="3" width="4" height="4" rx=".7"/><rect x="17" y="3" width="4" height="4" rx=".7"/><rect x="3" y="10" width="4" height="4" rx=".7"/><rect x="10" y="10" width="4" height="4" rx=".7"/><rect x="17" y="10" width="4" height="4" rx=".7"/><rect x="3" y="17" width="4" height="4" rx=".7"/><rect x="10" y="17" width="4" height="4" rx=".7"/><rect x="17" y="17" width="4" height="4" rx=".7"/></svg></button><button class=""><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg></button><button class=""><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3" width="10" height="18" rx="1.5"/><path d="M9 8h6M9 12h6"/></svg></button></div></div><div class="bar-r2"><div class="meter short"><div class="meter-top"><span class="lbl">Lands</span><span class="meter-v mono">34/36</span></div><div class="meter-track"><span class="meter-fill" style="width:94%"></span></div></div><div class="meter short"><div class="meter-top"><span class="lbl">Ramp</span><span class="meter-v mono">8/11</span></div><div class="meter-track"><span class="meter-fill" style="width:73%"></span></div></div><div class="meter short"><div class="meter-top"><span class="lbl">Draw</span><span class="meter-v mono">6/9</span></div><div class="meter-track"><span class="meter-fill" style="width:67%"></span></div></div><span class="mdiv"></span><div class="meter short"><div class="meter-top"><span class="lbl">Interaction</span><span class="meter-v mono">5/8</span></div><div class="meter-track"><span class="meter-fill" style="width:62%"></span></div></div><div class="meter ok"><div class="meter-top"><span class="lbl">Wipes</span><span class="meter-v mono">3/3</span></div><div class="meter-track"><span class="meter-fill" style="width:100%"></span></div></div><div class="meter ok"><div class="meter-top"><span class="lbl">Wincons</span><span class="meter-v mono">4/4</span></div><div class="meter-track"><span class="meter-fill" style="width:100%"></span></div></div><span class="spacer"></span><span class="lbl" style="color:var(--ink-500)">avg MV <span class="mono" style="color:var(--ink-300)">2.94</span></span></div></div><div class="work"><div class="pane" style="width:38%"><div class="pane-hd"><span class="lbl">Accepted</span><span class="mono" style="font-size:11px;color:var(--ink-500)">64</span><span class="spacer"></span><button class="mini">Group: Role <span class="chev">▾</span></button></div><div class="pane-body" style="padding-top:2px"><sc-for list="{{accepted}}" as="cl" hint-placeholder-count="4"><div class="cl"><div class="cl-hd"><span class="cl-nm">{{cl.name}}</span><span class="cl-ct mono">{{cl.count}}</span></div><div class="cl-field"><sc-for list="{{cl.pips}}" as="p" hint-placeholder-count="18"><span class="px" style="{{p.s}}"></span></sc-for></div></div></sc-for></div></div><div class="vdiv"></div><div class="pane" style="flex:1"><div class="pane-hd"><span class="lbl">Candidates</span><span class="mono" style="font-size:11px;color:var(--ink-500)">248</span><span class="legend"><span class="lbl" style="color:var(--ink-500)">Colour by</span><button class="mini">Combo degree <span class="chev">▾</span></button><span class="lg"><span class="px" style="background:#e0a24a"></span>3+</span><span class="lg"><span class="px" style="background:#c2853a"></span>2</span><span class="lg"><span class="px" style="background:#8a6428"></span>1</span><span class="lg"><span class="px" style="background:#4a4640"></span>0</span></span></div><div class="pane-body" style="padding-top:2px"><sc-for list="{{candidates}}" as="cl" hint-placeholder-count="4"><div class="cl"><div class="cl-hd"><span class="cl-nm">{{cl.name}}</span><span class="cl-ct mono">{{cl.count}}</span></div><div class="cl-field"><sc-for list="{{cl.pips}}" as="p" hint-placeholder-count="18"><span class="px" style="{{p.s}}"></span></sc-for></div></div></sc-for></div></div></div></div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  rng(seed){ let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  cluster(name, count, tone, seed){
+    const r = this.rng(seed), pips = [];
+    for (let i = 0; i < count; i++){
+      const d = r(), sz = 6 + Math.round(r() * 3);
+      let bg = tone.base, op = 0.55 + d * 0.45;
+      if (tone.heat && d > 1 - tone.heat) bg = tone.hot;
+      pips.push({ id: name + '-' + i,
+        s: 'width:' + sz + 'px;height:' + sz + 'px;background:' + bg + ';opacity:' + op.toFixed(2) });
+    }
+    return { name, count, pips };
+  }
+  renderVals(){
+    const DIM = { base: '#4a4640' }, WARM = { base: '#6b5c46' };
+    const HOT3 = { base: '#8a6428', hot: '#e0a24a', heat: 0.75 };
+    const HOT2 = { base: '#7a5a28', hot: '#c2853a', heat: 0.45 };
+    const HOT1 = { base: '#5e4c30', hot: '#8a6428', heat: 0.3 };
+    const GAP  = { base: '#6b5230', hot: '#d4863f', heat: 0.35 };
+    return {
+      accepted: [
+        this.cluster('Lands', 34, DIM, 11), this.cluster('Ramp', 8, WARM, 22),
+        this.cluster('Draw', 6, WARM, 33), this.cluster('Interaction', 5, WARM, 44),
+        this.cluster('Board wipes', 3, WARM, 55), this.cluster('Win conditions', 4, HOT2, 66),
+        this.cluster('Synergy', 4, HOT1, 77)
+      ],
+      candidates: [
+        this.cluster('Completes 3+ combos', 6, HOT3, 101),
+        this.cluster('Completes 2 combos', 14, HOT2, 202),
+        this.cluster('Completes 1 combo', 38, HOT1, 303),
+        this.cluster('One card away', 9, HOT1, 404),
+        this.cluster('Fills gap · Ramp −3', 22, GAP, 505),
+        this.cluster('Top sorceries · EDHREC', 10, WARM, 606),
+        this.cluster('High synergy', 50, WARM, 707),
+        this.cluster('Staples', 99, DIM, 808)
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
