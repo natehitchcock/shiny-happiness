@@ -45,6 +45,8 @@ interface Deck {
   name: string
   commanders: OracleId[]          // 1, or 2 for Partner / Background / Friends forever
   targetBracket: Bracket          // 1..5, see doc 03
+  archetype: ArchetypeKey         // the deck's plan, see doc 14
+  archetypeSecondary: ArchetypeKey | null   // hybrid; targets blend 70/30
   colorIdentity: Color[]          // derived from commanders; cached
   entries: DeckEntry[]
   budget: BudgetConstraint | null
@@ -160,6 +162,8 @@ type Role =
   | 'land' | 'ramp' | 'draw' | 'tutor'
   | 'spot-removal' | 'board-wipe' | 'graveyard-hate' | 'protection'
   | 'recursion' | 'wincon' | 'synergy' | 'stax'
+  // added for archetype targets — see doc 14 and ADR-0005
+  | 'sac-outlet' | 'token-maker' | 'anthem' | 'equipment' | 'aura' | 'evasion'
 ```
 
 Role assignment is **derived and imperfect**. The pipeline, in precedence order:

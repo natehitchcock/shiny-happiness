@@ -46,7 +46,8 @@ runs fully parallel with the data work. That is the point of the pure-domain rul
 | `DOM-03` | Incremental degree patching (doc 05 §5.8) | DOM-02 | Property test: incremental result ≡ full recompute, over randomised accept/exclude sequences |
 | `DOM-04` | Role derivation: heuristics + curated override table + precedence | DOM-01 | ≥ 95% agreement with a 300-card hand-labelled fixture set |
 | `DOM-05` | Grouping + scoring engine (doc 05 §5.3, §5.6) | DOM-02, DOM-04 | Deterministic; golden-file tests over 5 fixture decks; every output carries non-empty `reasons` |
-| `DOM-06` | Bracket rules, legality validation, composition targets | DOM-01, DATA-05 | Legality tests incl. colour identity, partners, singleton exceptions |
+| `DOM-06` | Bracket rules, legality validation, composition targets over `CompositionDimension` | DOM-01, DATA-05, DOM-09 | Legality tests incl. colour identity, partners, singleton exceptions |
+| `DOM-09` | Archetype definitions, target vectors, 70/30 hybrid blending, `assessArchetype` (doc 14) | DOM-01, DOM-04 | Blend rounds to whole cards; assessment deterministic and reports its drivers; every archetype row covered by a fixture deck |
 | `DOM-08` | Candidate query language: lexer, parser, evaluator, `formatQuery`, `describeQuery` (doc 13 §13.2–13.3) | DOM-01, DOM-04 | Property test: `formatQuery(parse(s))` idempotent; partial parses usable; unknown field errors with position and suggestion; **no regex support** |
 | `DOM-07` | Decklist text parser (doc 10 §10.7) | DOM-01 | Parses Moxfield/Archidekt/TappedOut/MTGO export formats from fixtures; reports unresolved lines rather than throwing |
 
@@ -62,7 +63,7 @@ runs fully parallel with the data work. That is the point of the pure-domain rul
 | `ING-02` | Spellbook combo ingest + oracle-id mapping, **failing loudly on unmapped cards** | DATA-02, DB-01 | Unmapped cards reported, not dropped |
 | `ING-03` | EDHREC stats fetcher: on-demand + warm cache, robots.txt honoured at runtime, serve-stale-on-error | DATA-03, DB-01 | Degrades cleanly when disabled; single-flight verified by test |
 | `ING-04` | Image caching pipeline to object store, three sizes (doc 07 §7.3) | ING-01 | No client request ever hits a third-party image host |
-| `ING-05` | Core package generation (doc 05 §5.5), emitting versioned checked-in artifacts | ING-03, DOM-04 | Reproducible from a fixed corpus; output diff is human-reviewable |
+| `ING-05` | Core package generation (doc 05 §5.5), per bracket and — where the corpus supports it — per archetype | ING-03, DOM-04, DOM-09 | Reproducible from a fixed corpus; output diff is human-reviewable; falls back to the bracket's general package rather than emitting one built from too few decks |
 
 ## 11.5 Backend
 
@@ -77,6 +78,7 @@ runs fully parallel with the data work. That is the point of the pure-domain rul
 | `API-06` | Optimistic concurrency: `baseVersion`, `409` with `since`, workspace-state endpoint (doc 12 §12.6–12.7) | API-01 | Concurrent-edit test from two clients converges without data loss |
 | `API-07` | Snapshots: auto before bulk ops, manual, restore (doc 12 §12.8) | API-01 | Restore is itself undoable; retention enforced |
 | `API-08` | Query validate/suggest endpoints, corpus histograms for autocomplete counts (doc 10 §10.4) | API-02, DOM-08 | Suggest p95 < 40 ms; counts served from precomputed histograms |
+| `API-09` | Archetype endpoints incl. per-commander suggestion with `source`, and archetype on deck create/patch (doc 10 §10.6) | API-01, DOM-09, ING-03 | `source: 'default'` returned honestly when no statistics exist |
 
 ## 11.6 Frontend
 
@@ -102,6 +104,8 @@ runs fully parallel with the data work. That is the point of the pure-domain rul
 | `WEB-17` | Desktop query bar: chips ⇄ text, autocomplete with counts, raw-mode fallback for nested queries (doc 13 §13.4) | WEB-02, DOM-08, API-08 | Chip edits and text edits round-trip; nested query drops to raw mode with a stated reason |
 | `WEB-18` | Mobile faceted filter sheet, live match count, active-filter chip row (doc 13 §13.5) | WEB-07, DOM-08 | Every field in doc 13 §13.2 reachable without typing syntax; count updates before Apply |
 | `WEB-19` | Withheld-by-filter footers and Accepted-region dim-not-hide highlight (doc 13 §13.1) | WEB-17 | A filtered-out `combo-3plus` card is always reported, never silently absent |
+| `WEB-20` | Archetype step in the creation flow: nine cards, suggested one preselected with its statistic, target-vector disclosure (doc 14 §14.6) | WEB-14, API-09 | Suggestion reason always shown; `default` source stated as such |
+| `WEB-21` | Archetype switching with the non-destructive change summary, plus the assessed-archetype note (doc 14 §14.4–14.5) | WEB-20, API-02 | Switching provably adds and removes zero cards; assessment surfaces as a note, never auto-switches |
 
 ## 11.7 Cross-cutting gates
 

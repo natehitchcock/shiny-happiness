@@ -80,16 +80,30 @@ showing ("Ramp −3, no eligible candidates under your budget filter").
 
 ## 5.4 Composition targets
 
-The "how many lands / ramp / interaction should I have" feature. Targets are a
-function of `(bracket, commander archetype, average mana value)`.
+The "how many lands / ramp / interaction / creatures should I have" feature.
+Targets are a function of `(bracket, archetype, average mana value)`.
 
 ```ts
-interface CompositionTarget { role: Role; min: number; ideal: number; max: number }
+type CompositionDimension =
+  | { kind: 'role'; role: Role }
+  | { kind: 'type'; type: CardType }
+
+interface CompositionTarget {
+  dimension: CompositionDimension
+  min: number; ideal: number; max: number
+}
 ```
 
-**Seed values** — heuristics from established Commander deckbuilding practice, to
-be *replaced* by percentiles derived from EDHREC averages and our own corpus once
-`DATA-03` lands. They are a starting point, not a claim of optimality:
+**Archetype supplies the base vector** — an aggro deck and a control deck do not
+want the same numbers, and a single universal table is wrong for every deck that
+is not midrange. The nine archetypes and their vectors are
+[14-archetypes.md](14-archetypes.md); the table below is the `midrange` row,
+reproduced here because the modifiers that follow apply on top of whichever row
+the archetype selects.
+
+**Seed values** (`midrange`) — heuristics from established Commander deckbuilding
+practice, to be *replaced* by percentiles derived from EDHREC averages and our own
+corpus once `DATA-03` lands. A starting point, not a claim of optimality:
 
 | Role | min | ideal | max |
 | --- | --- | --- | --- |
@@ -100,15 +114,16 @@ be *replaced* by percentiles derived from EDHREC averages and our own corpus onc
 | board-wipe | 1 | 3 | 5 |
 | wincon | 2 | 4 | 6 |
 
-Adjustments to apply as pure modifiers, each individually testable:
+Adjustments to apply as pure modifiers on top of the archetype row, each
+individually testable:
 
 - Low average mana value (< 2.8) → land ideal −1; high (> 3.5) → +1.
 - Each ~2 modal double-faced land-back cards → land ideal −1.
 - Each 2 cheap cantrip-ish rocks beyond the ramp ideal → land ideal −1.
 - Bracket 4–5 → draw and interaction ideals +1 to +2; bracket 1 → −1.
 
-The header shows `role current/ideal` with a deficit/surplus colour, and each
-deficit opens the corresponding `fills-<role>` candidate group. That is the whole
+The header shows `dimension current/ideal` with a deficit/surplus colour, and each
+deficit opens the corresponding `fills-<dimension>` candidate group. That is the whole
 loop: *see the gap → tap the gap → see cards that close it.*
 
 Show targets as a **range with the ideal marked**, never a single number. A deck

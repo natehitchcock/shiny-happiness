@@ -13,6 +13,7 @@ laid out by `canvas.json`.
 | `Filter.dc.html` | Active candidate query — chips, autocomplete, withheld-by-filter footers |
 | `Inspect.dc.html` | L3 detail panel with generated reasons and combo lines |
 | `Library.dc.html` | Deck library (doc 12 §12.4) |
+| `NewDeck.dc.html` | Creation flow, archetype step (doc 14 §14.6) |
 | `Switcher.dc.html` | Command-bar deck switcher (doc 12 §12.3) |
 | `MobilePeek.dc.html` | Phone, deck sheet at peek detent |
 | `MobileHalf.dc.html` | Phone, deck sheet at half detent — both regions visible |
@@ -28,6 +29,9 @@ Warm-dark "workshop" palette: chrome is desaturated so card art carries the only
 saturation, with a single amber accent chosen not to collide with the five mana
 colours. Space Grotesk for display, Archivo for UI text, IBM Plex Mono for every
 number — this interface is mostly counts.
+
+Mobile adaptations of the library and the creation flow are not drawn — both are
+single-column reflows of drawn screens, with no new interaction to settle.
 
 **Card art is placeholder.** The gradients stand in for real Scryfall imagery,
 keyed to colour identity. Card names, mana costs, type lines and combo lines are

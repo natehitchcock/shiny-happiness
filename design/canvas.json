@@ -108,6 +108,15 @@
       "h": 844,
       "page": "page-2",
       "title": "Mobile \u2014 faceted filter sheet"
+    },
+    {
+      "file": "NewDeck.dc.html",
+      "x": 0,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "page": "page-1",
+      "title": "New deck \u2014 archetype step"
     }
   ],
   "annotations": [
@@ -130,9 +139,9 @@
     {
       "id": "insp-note",
       "page": "page-1",
-      "x": 0,
-      "y": 1950,
-      "w": 460,
+      "x": 3120,
+      "y": 1020,
+      "w": 440,
       "text": "Every recommendation states its case. Kiki-Jiki's three combos share a piece and still count as three \u2014 distinct combos, per the domain rule."
     },
     {
@@ -158,6 +167,14 @@
       "y": 950,
       "w": 520,
       "text": "A Scryfall-style query narrows the pool before grouping \u2014 the groups still form, over fewer cards.\nFiltering never silently hides a good card: each group reports what it withheld, and accepted cards dim rather than disappear."
+    },
+    {
+      "id": "arch-note",
+      "page": "page-1",
+      "x": 1560,
+      "y": 2040,
+      "w": 520,
+      "text": "Archetype is what makes composition targets mean anything \u2014 an aggro deck and a control deck do not want the same numbers.\nIt is suggested from the commander's own statistics rather than asked blind, and switching it later moves targets without touching a single card."
     }
   ],
   "launch": {

@@ -34,9 +34,13 @@ POST /api/v1/cards/batch   { oracleIds: OracleId[] }
 ## 10.3 Decks
 
 ```
-POST   /api/v1/decks     { name, commanders, targetBracket }            → Deck
+POST   /api/v1/decks     { name, commanders, targetBracket, archetype,
+                           archetypeSecondary? }                        → Deck
 GET    /api/v1/decks/:id                                                → Deck
-PATCH  /api/v1/decks/:id { name?, targetBracket?, budget?, status? }    → Deck
+PATCH  /api/v1/decks/:id { name?, targetBracket?, archetype?,
+                           archetypeSecondary?, budget?, status? }      → Deck
+       Changing archetype moves targets only — it never adds or removes a
+       card (doc 14 §14.4).
 DELETE /api/v1/decks/:id                       soft delete, 30-day recovery
 POST   /api/v1/decks/:id/duplicate  { name? }  → Deck   full copy: entries,
                                                         origins, exclusions, locks
@@ -179,9 +183,21 @@ it is committed to. Counts come from precomputed histograms, not live queries.
 ```
 GET /api/v1/decks/:id/analysis
   → {
-      counts: { total, byRole: Record<Role, number>, byManaValue: number[] },
+      counts: {
+        total: number,
+        byRole: Record<Role, number>,
+        byType: Record<CardType, number>,
+        byManaValue: number[]
+      },
       targets: CompositionTarget[],
-      deficits: Array<{ role: Role, delta: number }>,
+      deficits: Array<{ dimension: CompositionDimension, delta: number }>,
+      archetype: {
+        declared: ArchetypeKey,
+        secondary: ArchetypeKey | null,
+        assessed: ArchetypeKey,       // what the deck actually looks like
+        confidence: number,           // 0..1
+        drivers: CompositionDimension[]  // which dimensions drove the assessment
+      },
       curve: { averageManaValue: number, histogram: number[] },
       colorBalance: { pips: Record<Color, number>, sources: Record<Color, number> },
       bracket: {
@@ -198,7 +214,19 @@ GET /api/v1/decks/:id/analysis
 this reads as a 3" is more useful than a pass/fail, and it is the honest framing
 for a social power-level system.
 
-## 10.6 Brackets and core packages
+## 10.6 Archetypes, brackets and core packages
+
+```
+GET /api/v1/archetypes                        → ArchetypeDefinition[]
+GET /api/v1/archetypes/suggest?commander=<oracleId>
+    → { items: Array<{ archetype, share: number, deckCount: number }>,
+        suggested: ArchetypeKey, source: 'edhrec' | 'corpus' | 'default' }
+```
+
+`source: 'default'` means no statistics were available and `suggested` is
+`midrange` — the UI must say so rather than implying a data-backed recommendation
+(doc 14 §14.3).
+
 
 ```
 GET /api/v1/brackets                          → BracketRules[]

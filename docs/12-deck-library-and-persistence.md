@@ -23,6 +23,7 @@ interface Deck {
   // ...as doc 02 §2.2
   version: number            // monotonic; incremented server-side per accepted command batch
   status: 'active' | 'archived'
+  archetype: ArchetypeKey        // doc 14
   lastOpenedAt: string
   workspace: WorkspaceState  // per-deck UI state, see §12.6
 }
@@ -34,6 +35,7 @@ interface DeckSummary {       // the list projection; never loads entries
   commanderArt: string        // resolved printing art crop
   colorIdentity: Color[]
   targetBracket: Bracket
+  archetype: ArchetypeKey
   cardCount: number           // accepted, incl. commander
   deckCombos: number
   status: 'active' | 'archived'
@@ -111,16 +113,20 @@ drops the user straight into the commander picker.
 
 ## 12.5 Creating a deck
 
-Three steps, no wizard chrome, abandonable at any point.
+Four steps, no wizard chrome, abandonable at any point.
 
 1. **Pick a commander.** Search by name, filtered to cards legal as a commander.
    Results show art, colour identity and popularity. Partner/Background pairings
    are offered inline when the chosen card supports one (doc 03 §3.1) — never as
    a separate step, because most decks do not need it.
-2. **Pick a target bracket.** The five brackets with one-line descriptions
+2. **Pick an archetype.** The nine archetypes (doc 14), with the statistically
+   likely one for this commander preselected and its reason shown — *"Tokens —
+   54% of Krenko decks build this way"*. This is what sets the composition
+   targets, so it is asked before the bracket.
+3. **Pick a target bracket.** The five brackets with one-line descriptions
    (doc 03 §3.2). Defaults to 2. Changeable at any time afterwards, and the UI
    says so, so this choice carries no weight.
-3. **Offer the core package.** "Add the 24 Bracket 2 core cards for these colours?"
+4. **Offer the core package.** "Add the 24 Bracket 2 core cards for these colours?"
    — with a preview and a per-card opt-out. Declining is one tap and gives an
    empty deck.
 
