@@ -1,0 +1,25 @@
+{
+  "$comment": [
+    "Commander bracket rules and the Game Changers list.",
+    "",
+    "STATUS: NOT POPULATED. These values are maintained by Wizards of the Coast and",
+    "have been revised since the bracket system was introduced. Task DATA-05 owns",
+    "fetching them; see docs/adr/0006-data-source-terms-verification.md.",
+    "",
+    "Filling this in from memory is exactly the failure ADR-0006 exists to prevent,",
+    "so the allowances are null and loadBracketRules() reports the data as unloaded",
+    "rather than letting the app assert a bracket verdict it cannot support.",
+    "",
+    "When populating: set sourceUrl and retrievedAt, and record the exact wording."
+  ],
+  "sourceUrl": null,
+  "retrievedAt": null,
+  "brackets": [
+    { "bracket": 1, "name": "Exhibition", "gameChangersAllowed": null, "massLandDenial": null, "extraTurnChaining": null, "twoCardInfinites": null, "tutorDensity": null },
+    { "bracket": 2, "name": "Core", "gameChangersAllowed": null, "massLandDenial": null, "extraTurnChaining": null, "twoCardInfinites": null, "tutorDensity": null },
+    { "bracket": 3, "name": "Upgraded", "gameChangersAllowed": null, "massLandDenial": null, "extraTurnChaining": null, "twoCardInfinites": null, "tutorDensity": null },
+    { "bracket": 4, "name": "Optimized", "gameChangersAllowed": null, "massLandDenial": null, "extraTurnChaining": null, "twoCardInfinites": null, "tutorDensity": null },
+    { "bracket": 5, "name": "cEDH", "gameChangersAllowed": null, "massLandDenial": null, "extraTurnChaining": null, "twoCardInfinites": null, "tutorDensity": null }
+  ],
+  "gameChangers": []
+}

@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node -e \"require('fs').cpSync('src/brackets','dist/brackets',{recursive:true})\"",
     "clean": "tsc -b --clean"
   }
 }
