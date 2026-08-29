@@ -1,0 +1,160 @@
+# 10. API contract
+
+The seam between `apps/web` and `apps/api`. Request and response types are
+**generated from `packages/domain`** — they are not hand-maintained parallel
+definitions. Fastify validates with JSON Schema derived from the same source.
+
+This document is the interface agents build against. Changing a shape here is a
+breaking change and needs an ADR plus a note in the work-breakdown task.
+
+## 10.1 Conventions
+
+- Base path `/api/v1`. Version in the path; never break v1 in place.
+- All responses `application/json`. Errors follow RFC 9457 `application/problem+json`.
+- Every recommendation-bearing response carries `datasetSnapshotId` for
+  reproducibility (doc 09 §9.6).
+- Cursor pagination: `?cursor=&limit=` → `{ items, nextCursor }`. No offsets.
+- Idempotency keys on all mutations, so the optimistic-offline client (doc 08 §8.5)
+  can safely retry.
+
+## 10.2 Cards
+
+```
+GET /api/v1/cards/search?q=&colors=&limit=&cursor=
+    → { items: Card[], nextCursor }
+    q uses Scryfall-like syntax; parsing lives in packages/domain.
+
+GET /api/v1/cards/:oracleId
+    → Card & { printings: Printing[], combos: Combo[], edhrec?: CardStats }
+
+POST /api/v1/cards/batch   { oracleIds: OracleId[] }
+    → { items: Card[] }     ≤ 500 per call; the client hydrates grids with this.
+```
+
+## 10.3 Decks
+
+```
+POST   /api/v1/decks               { name, commanders, targetBracket }  → Deck
+GET    /api/v1/decks/:id                                                → Deck
+PATCH  /api/v1/decks/:id           { name?, targetBracket?, budget? }   → Deck
+DELETE /api/v1/decks/:id
+GET    /api/v1/decks               ?cursor=  → { items: DeckSummary[] }
+```
+
+### Entry mutations
+
+One endpoint, a batch of typed commands. Batching matters: applying a core package
+is ~24 changes and must be a single undoable, atomic unit (doc 06 §6.6).
+
+```
+POST /api/v1/decks/:id/commands
+  { commands: DeckCommand[], idempotencyKey: string }
+  → { deck: Deck, applied: DeckCommand[], rejected: RejectedCommand[] }
+
+type DeckCommand =
+  | { type: 'accept';   oracleId; origin: Origin; lock?: boolean }
+  | { type: 'exclude';  oracleId }
+  | { type: 'restore';  oracleId }          // excluded → absent (candidate again)
+  | { type: 'lock';     oracleId; locked: boolean }
+  | { type: 'setRole';  oracleId; roles: Role[] }
+  | { type: 'applyCorePackage';  bracket: Bracket }
+  | { type: 'removeCorePackage'; bracket: Bracket }
+```
+
+Partial success is explicit: `rejected` names each failed command and why (colour
+identity, singleton, already excluded). The client does not have to guess.
+
+## 10.4 Recommendations
+
+The main event.
+
+```
+POST /api/v1/decks/:id/recommendations
+  {
+    groups?: CandidateGroupKey[],   // omit for all
+    limitPerGroup?: number,         // default 60
+    filters?: { maxPrice?, sets?, excludeReserved?, roles? },
+    weights?: Partial<ScoringWeights>
+  }
+  →
+  {
+    datasetSnapshotId: string,
+    generatedAt: string,
+    groups: Array<{
+      key: CandidateGroupKey,
+      label: string,
+      rationale: string,
+      total: number,                // before limitPerGroup
+      items: Recommendation[]       // ordered; see doc 05 §5.6
+    }>,
+    unavailable: Array<{ key: CandidateGroupKey, reason: string }>
+  }
+```
+
+`unavailable` is how degradation is communicated (doc 05 §5.3) — a group that
+could not be computed is reported, never silently omitted.
+
+```
+GET /api/v1/decks/:id/combo-index
+    → { comboDegreeByOracleId: Record<OracleId, number>, snapshotId }
+```
+
+Lets the client run local incremental patches (doc 09 §9.4) without shipping the
+whole combo database to the phone.
+
+## 10.5 Analysis
+
+```
+GET /api/v1/decks/:id/analysis
+  → {
+      counts: { total, byRole: Record<Role, number>, byManaValue: number[] },
+      targets: CompositionTarget[],
+      deficits: Array<{ role: Role, delta: number }>,
+      curve: { averageManaValue: number, histogram: number[] },
+      colorBalance: { pips: Record<Color, number>, sources: Record<Color, number> },
+      bracket: {
+        target: Bracket,
+        assessed: Bracket,          // what the deck actually looks like
+        violations: BracketViolation[]
+      },
+      deckCombos: Array<{ comboId, pieces: OracleId[], produces: ComboResult[] }>,
+      legality: { legal: boolean, problems: LegalityProblem[] }
+    }
+```
+
+`assessed` vs `target` is worth having: telling someone "you said Bracket 2 but
+this reads as a 3" is more useful than a pass/fail, and it is the honest framing
+for a social power-level system.
+
+## 10.6 Brackets and core packages
+
+```
+GET /api/v1/brackets                          → BracketRules[]
+GET /api/v1/brackets/:n/core?colors=WUBRG&commander=<oracleId>
+    → { bracket, colors, cards: Array<{ oracleId, tier, inclusionRate }>,
+        generatedAt, corpusSize }
+```
+
+## 10.7 Import / export
+
+```
+POST /api/v1/import/text   { text: string }
+     → { deck: ImportedDeck, unresolved: Array<{ line, reason }> }
+
+POST /api/v1/import/url    { url: string }
+     → 501 NotImplemented for Moxfield, with an explanatory problem document
+       pointing at text import (doc 04 §4.4).
+
+GET  /api/v1/decks/:id/export?format=text|json|csv
+```
+
+`unresolved` never blocks an import: bring in what parsed, list what did not, let
+the user fix it in place.
+
+## 10.8 Rate limiting and errors
+
+- Per-user limits on recommendation generation (it is the expensive endpoint);
+  `429` with `Retry-After`.
+- Upstream failure ⇒ **degrade, do not 500**. If EDHREC is down, return the groups
+  that could be computed plus an `unavailable` entry. A `500` here would take the
+  whole workspace down over an optional statistic.

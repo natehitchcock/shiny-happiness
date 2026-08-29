@@ -1,0 +1,190 @@
+# 5. Grouping, scoring, and recommendations
+
+Pure functions in `packages/domain/src/recommend/`. Deterministic: same deck +
+same dataset snapshot = same output, always. This is a hard requirement, because
+a recommendation engine you cannot reproduce is one you cannot debug or test.
+
+## 5.1 The pipeline
+
+```
+                accepted set A (incl. commanders)
+                            │
+        ┌───────────────────┼───────────────────┐
+        ▼                   ▼                   ▼
+   eligibility          combo index        stats (EDHREC
+   filter               (Spellbook)        + own corpus)
+        │                   │                   │
+        └───────────────────┼───────────────────┘
+                            ▼
+                   annotate each candidate
+              (comboDegree, nearCombos, synergy,
+               inclusion, roleFit, bracketFlags)
+                            │
+                            ▼
+                 ── ASSIGN TO GROUP ──   (P5: grouping first)
+                            │
+                            ▼
+                 ── SCORE WITHIN GROUP ──
+                            │
+                            ▼
+                    ordered CandidateGroup[]
+```
+
+**Grouping happens before scoring, and scoring only orders within a group.** There
+is no global "top card" ranking anywhere in the product.
+
+## 5.2 Eligibility filter
+
+A card is a candidate iff all hold:
+
+- `legalities.commander === 'legal'`
+- `colorIdentity ⊆ deck.colorIdentity`
+- not already `accepted`
+- not `excluded` (P6 — permanently, for this deck)
+- passes active user filters (budget cap, set/era, "no reserved list", etc.)
+
+Basic lands are excluded from candidate generation entirely; land count is handled
+by the mana base tool, not by card-by-card suggestion.
+
+## 5.3 Candidate groups
+
+Groups are produced in this fixed order. A card appears in **exactly one** group —
+the first it qualifies for — so the region has no duplicates and counts sum to the
+pool size.
+
+| # | Group | Membership | Why it exists |
+| --- | --- | --- | --- |
+| 1 | `combo-3plus` | `comboDegree ≥ 3` | The headline feature |
+| 2 | `combo-2` | `comboDegree == 2` | Includes the two-separate-combos case (doc 02) |
+| 3 | `combo-1` | `comboDegree == 1` | |
+| 4 | `near-combo` | `comboDegree == 0 ∧ nearCombosAt1 ≥ 2` | "One card away, more than once" — surfaces *pairs* to add together |
+| 5 | `fills-<role>` | Deficit in that role ≥ 1, card's `primaryRole` matches | Directly actionable; one group per deficient role |
+| 6 | `top-<type>` | Top N by EDHREC inclusion for the commander, per card type | The "top ten sorceries" ask |
+| 7 | `high-synergy` | EDHREC synergy above threshold | Commander-specific, non-obvious cards |
+| 8 | `staple` | High global inclusion, colour-legal | The long tail; collapsed by default |
+
+Groups 1–4 need only Spellbook data. Groups 6–7 need EDHREC. **If the stats source
+is unavailable the app still works** — groups 6 and 7 are omitted with an inline
+notice, and 1–5, 8 carry the experience. This is the degradation path from §4.3.
+
+Group headers show a count and a one-line explanation. Empty groups are hidden,
+except a deficit group with zero candidates, which is itself a finding worth
+showing ("Ramp −3, no eligible candidates under your budget filter").
+
+## 5.4 Composition targets
+
+The "how many lands / ramp / interaction should I have" feature. Targets are a
+function of `(bracket, commander archetype, average mana value)`.
+
+```ts
+interface CompositionTarget { role: Role; min: number; ideal: number; max: number }
+```
+
+**Seed values** — heuristics from established Commander deckbuilding practice, to
+be *replaced* by percentiles derived from EDHREC averages and our own corpus once
+`DATA-03` lands. They are a starting point, not a claim of optimality:
+
+| Role | min | ideal | max |
+| --- | --- | --- | --- |
+| land | 33 | 36 | 39 |
+| ramp | 8 | 11 | 14 |
+| draw | 6 | 9 | 12 |
+| spot-removal | 5 | 8 | 11 |
+| board-wipe | 1 | 3 | 5 |
+| wincon | 2 | 4 | 6 |
+
+Adjustments to apply as pure modifiers, each individually testable:
+
+- Low average mana value (< 2.8) → land ideal −1; high (> 3.5) → +1.
+- Each ~2 modal double-faced land-back cards → land ideal −1.
+- Each 2 cheap cantrip-ish rocks beyond the ramp ideal → land ideal −1.
+- Bracket 4–5 → draw and interaction ideals +1 to +2; bracket 1 → −1.
+
+The header shows `role current/ideal` with a deficit/surplus colour, and each
+deficit opens the corresponding `fills-<role>` candidate group. That is the whole
+loop: *see the gap → tap the gap → see cards that close it.*
+
+Show targets as a **range with the ideal marked**, never a single number. A deck
+at 34 lands is not broken and the UI must not say it is.
+
+## 5.5 Core package generation
+
+Core packages (doc 03) are generated offline, checked in, and versioned.
+
+For each `(bracket, colorIdentity)` pair:
+
+1. Take the deck corpus for that bracket and colour identity (EDHREC aggregates,
+   plus our own corpus weighted by volume).
+2. Compute inclusion rate per card among decks whose colour identity *contains*
+   the target — a mono-red staple is core for every deck containing red.
+3. Keep cards above an inclusion threshold, tiered: `essential` (very high
+   inclusion), `standard`, `optional`.
+4. Drop anything carrying a `BracketFlag` disallowed at that bracket.
+5. Cap package size by role so a core package cannot itself blow the composition
+   targets — a core package that hands you 20 ramp spells is a bug.
+6. Emit `packages/domain/src/core-packages/<bracket>-<colors>.json`, with the
+   generation date, corpus size, and thresholds in the file.
+
+Generated artifacts are committed so a build is reproducible and a human can
+review a diff before it reaches users. A core package that changes silently under
+users is a P6 violation.
+
+## 5.6 Scoring — within a group only
+
+```
+score(X) = w_combo   · log2(1 + comboDegree(X))
+         + w_near    · log2(1 + nearCombosAt1(X))
+         + w_syn     · norm(edhrecSynergy(X))
+         + w_inc     · edhrecInclusion(X)
+         + w_fill    · roleDeficitFit(X)
+         + w_curve   · curveFit(X)
+         − p_bracket · bracketRisk(X)
+         − p_budget  · budgetOverrun(X)
+```
+
+Notes that matter:
+
+- `log2(1 + degree)` keeps a single 9-combo card from dominating a group. Degree
+  is already the *grouping* key, so its job in the score is tie-breaking, not
+  ranking.
+- `norm()` normalises across the current candidate pool, not globally, so scores
+  stay comparable within a rendering.
+- `curveFit` rewards cards at mana values where the deck is thin.
+- `bracketRisk` is a **soft penalty** that reorders; it never filters. Doc 03: the
+  user is allowed to cross their own line knowingly.
+- Weights live in one checked-in config with defaults, are overridable per deck by
+  a small set of user-facing sliders ("weight combos / statistics / filling gaps"),
+  and are **never** tuned by silent A/B on live users without saying so.
+
+Ties break by `edhrecRank`, then by name, so ordering is total and stable — no
+list reshuffling between renders.
+
+## 5.7 Explanations (P4)
+
+Every `Recommendation` carries ordered `reasons`. Rendered verbatim at L3:
+
+> **Dockside Extortionist**
+> - Completes **2 combos** with cards you have accepted:
+>   - *Dockside + Temur Sabertooth* → infinite mana
+>   - *Dockside + Ghostly Flicker + Dualcaster Mage* → infinite treasures
+> - **93%** of Krenko decks on EDHREC play it (synergy +0.31)
+> - Fills your **ramp** deficit (8/11)
+> - ⚠️ **Game Changer** — your target Bracket 3 allows 3, you have 2
+
+Reasons are generated from the annotation record, not written by hand per card,
+and the generator is unit-tested against fixture decks. If a reason cannot be
+generated, the card is not recommended.
+
+## 5.8 Performance budget
+
+`comboDegree` over a ~30k-card pool against a 100-card accepted set, recomputed on
+every accept, is the hot path.
+
+- Precompute `oracleId → ComboId[]` and `ComboId → pieces` at ingest.
+- On accept/exclude, do **not** recompute the whole pool: only candidates sharing
+  a combo with the changed card can change degree. Walk
+  `combosContaining(changedCard) → pieces → candidates` and patch. This is a small
+  set — typically dozens.
+- Full recompute only on deck load and commander change.
+- Budget: full recompute < 200 ms server-side; incremental patch < 16 ms so it can
+  run in the client between frames.
