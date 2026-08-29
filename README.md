@@ -50,6 +50,18 @@ pnpm build
 
 Requires Node 22+ and pnpm 10. `pnpm check` is what CI runs on every PR.
 
+`packages/db`'s tests run against a **real PostgreSQL**, never a mock — array
+containment, partial unique indexes and `SELECT … FOR UPDATE` are exactly what is
+worth testing, and none of them exist in a fake. Point `DATABASE_URL` at any
+Postgres 16 and they run; without it they skip with a warning rather than
+silently passing.
+
+```bash
+docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
+pnpm test
+```
+
 ```
 apps/
   web/      React SPA          — WEB-01 replaces the tsc build with Vite

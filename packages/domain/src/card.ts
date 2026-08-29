@@ -43,7 +43,8 @@ export interface Card {
   readonly legalities: { readonly commander: Legality }
   /** Lower is more played overall. Null when Scryfall has no rank. */
   readonly edhrecRank: number | null
-  readonly defaultPrinting: PrintingId
+  /** Null until ING-04 resolves imagery for this card — see ADR-0007. */
+  readonly defaultPrinting: PrintingId | null
   /** Derived, imperfect, and overridable (doc 02 §2.4). */
   readonly roles: readonly Role[]
   readonly primaryRole: Role

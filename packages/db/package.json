@@ -14,9 +14,14 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "clean": "tsc -b --clean"
+    "clean": "tsc -b --clean",
+    "migrate": "node dist/cli.js"
   },
   "dependencies": {
-    "@roundtable/domain": "workspace:*"
+    "@roundtable/domain": "workspace:*",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
   }
 }

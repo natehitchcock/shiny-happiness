@@ -12,6 +12,27 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+
+    # packages/db's tests run against a REAL PostgreSQL, never a mock
+    # (AGENTS.md §4). Without DATABASE_URL they skip loudly rather than
+    # silently passing.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
     steps:
       - uses: actions/checkout@v4
 
