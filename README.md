@@ -17,6 +17,10 @@ required.
 What remains needs a database, a browser, or an answer from a third party. See
 [docs/11-work-breakdown.md](docs/11-work-breakdown.md) §11.8.
 
+**Picking this up fresh?** Start at
+[docs/11-work-breakdown.md §11.0](docs/11-work-breakdown.md) — what is done, what
+is next, what is blocked and why — then [AGENTS.md](AGENTS.md).
+
 ## Read in this order
 
 | Doc                                                                                | What it settles                                                              |

@@ -10,6 +10,9 @@ automatically.
 
 ## 1. Before you start
 
+0. Read [docs/11-work-breakdown.md](docs/11-work-breakdown.md) **§11.0 — Current
+   state**. It says what is done, what to pick up next, and what is blocked and
+   why. Start there or you will re-derive it.
 1. Read [docs/01-vision-and-pillars.md](docs/01-vision-and-pillars.md). The six
    pillars are binding.
 2. Read the doc your task references, and [docs/02-domain-model.md](docs/02-domain-model.md)
@@ -132,7 +135,31 @@ something is broken and out of your scope, leave it failing and say so in the PR
   is allowed to cross their own line knowingly.
 - Re-suggesting an excluded card (pillar P6).
 
-## 9. When the spec is wrong
+## 9. Working agreement
+
+How this project is built, established in the first build session and expected to
+continue:
+
+- **One task per commit**, with the task id in the subject. Not one commit per
+  session, and not one commit per file.
+- **Review every task before committing it**, with fresh eyes rather than the
+  context that just wrote the code — `/code-review high` is what has been used.
+  The DB-01 review returned twelve findings, of which two were bugs that would
+  have shipped silently. Do not skip this because the tests are green; the tests
+  were green.
+- **Fix every finding, or say plainly why not.** A finding waved away without a
+  reason is a finding that comes back as a bug.
+- **Add a regression test for each fix.** Two of DB-01's bugs were only found
+  because a fix made them fail loudly; the tests that now pin them are the point.
+- **Verify, do not assume.** Run the thing. Check a clean clone. Mutate the
+  implementation and confirm the tests catch it — `DOM-02` and the R1/R3 lint
+  rules were both checked that way, and both had been passing for the wrong
+  reasons before someone looked.
+- **Keep `pnpm check` green.** Never commit red.
+- **Update doc 11's §11.0 state block and the task's ✅ marker** as part of the
+  task. A task list that lies is worse than no task list.
+
+## 10. When the spec is wrong
 
 It will be. It was written before the code.
 

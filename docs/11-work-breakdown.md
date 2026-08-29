@@ -5,6 +5,55 @@ scope (files it may touch), explicit dependencies, and a definition of done.
 
 **Read [AGENTS.md](../AGENTS.md) before picking up any task.**
 
+## 11.0 Current state — read this first
+
+Last updated: 2026-08-29, end of the first build session.
+
+**Done (12 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`. That is the monorepo
+and CI, the whole of `packages/domain`, and the Postgres layer.
+
+**Verify it in one command** — from a clean clone, this must be green:
+
+```bash
+pnpm install && pnpm check          # lint + typecheck + 301 tests
+```
+
+`packages/db`'s 40 integration tests need a real Postgres and SKIP (loudly) without
+one:
+
+```bash
+docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
+pnpm test                            # now 301, not 261
+```
+
+**Next, in order of value:**
+
+| Pick up | Why now |
+| --- | --- |
+| `API-01` | `packages/domain` has the whole computation and `packages/db` the persistence; the API is transport over both. The obvious next move. |
+| `DATA-01`, `DATA-02`, `DATA-03`, `DATA-05` | **Unblocked on a normal machine.** See below. |
+| `FOUND-02` → `UI-01` | Independent of everything above; can run in parallel. |
+
+**`DATA-*` were blocked by the environment, not by the work.** The first build
+session ran in a sandbox whose egress reached package registries only, so
+`scryfall.com`, `commanderspellbook.com` and `edhrec.com` were unreachable and no
+terms of service were ever read. **On a machine with ordinary internet access
+these are simply doable** — they are an afternoon with a browser.
+[ADR-0006](adr/0006-data-source-terms-verification.md) lists the exact questions
+and what each one gates. Until they are answered:
+
+- `brackets/rules.data.json` stays unpopulated, and `loadBracketRules` correctly
+  returns a `not-populated` error rather than asserting a bracket verdict.
+- Nothing that ingests third-party data may be deployed publicly.
+
+The highest-risk single unknown is **Scryfall question 4** — whether card *data*
+and card *images* are licensed separately — because it gates the whole `ING-04`
+image pipeline and the consequences are outside the codebase.
+
+**Nothing else is blocked.** Every remaining task needs a database (running),
+a browser toolchain (installable), or just time.
+
 ## 11.1 Dependency graph
 
 ```
