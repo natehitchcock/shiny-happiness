@@ -7,9 +7,10 @@ how many combos they complete with cards you have already accepted.
 
 > `Roundtable` is a placeholder codename. Rename freely.
 
-**Status: scaffolded, not implemented.** The monorepo, toolchain and CI exist
-(`FOUND-01`); the features do not. Everything else here is the design, the domain
-rules, and the work breakdown that implementing agents build from.
+**Status: foundations built.** The monorepo, toolchain and CI exist
+(`FOUND-01`), as do the domain entity types (`DOM-01`) and combo degree
+(`DOM-02`) — the computation the whole product rests on. Everything else is
+design, domain rules, and the work breakdown that implementing agents build from.
 
 ## Read in this order
 

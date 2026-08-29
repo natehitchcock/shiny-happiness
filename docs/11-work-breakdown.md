@@ -9,7 +9,8 @@ scope (files it may touch), explicit dependencies, and a definition of done.
 
 ```
  FOUND-01 ─┬─→ DOM-01 ─┬─→ DOM-02 ─→ DOM-03 ─→ DOM-05 ─┐
-   (done)  │           ├─→ DOM-04 ─┬─→ DOM-09 ─→ DOM-06 ┤
+   (done)  │  (done)   │  (done)   ├─→ DOM-09 ─→ DOM-06 ┤
+           │           ├─→ DOM-04 ─┘                    │
            │           ├─→ DOM-07  └─→ DOM-08           │
            │           │                                ├─→ API-02 ─┬─→ API-05..09
            ├─→ DATA-01 ─→ ING-01 ─┐                     │           │
@@ -33,8 +34,9 @@ scope (files it may touch), explicit dependencies, and a definition of done.
                                                                                LEGAL-01
 ```
 
-`FOUND-01` is **merged** — the monorepo, toolchain and CI exist, so every task
-below has somewhere to land.
+`FOUND-01`, `DOM-01` and `DOM-02` are **merged** — the monorepo, toolchain, CI,
+entity types and combo degree all exist. The feature the product rests on is
+built and tested; everything else is assembly.
 
 Everything under `DOM-*` and `UI-*` can start immediately and runs fully parallel
 with the data work. That is the point of the pure-domain rule: no domain task
@@ -55,8 +57,8 @@ against their interfaces; nothing depending on an unanswered question ships.
 
 | ID       | Task                                                                                                                                 | Depends                 | DoD                                                                                                                                                                                                                                       |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DOM-01` | Entity types per doc 02, branded ids, exhaustive discriminated unions                                                                | FOUND-01                | Types exported; no `any`; typecheck green                                                                                                                                                                                                 |
-| `DOM-02` | Combo index + `comboDegree` / `nearCombos` **exactly per doc 02 §2.3**                                                               | DOM-01                  | Unit tests incl. the two-separate-combos case, the shared-pieces case, and empty/degenerate inputs                                                                                                                                        |
+| `DOM-01` | ✅ **Done.** Entity types per doc 02, branded ids, exhaustive discriminated unions, `assertNever`, role precedence | FOUND-01 | ✅ Types exported; no `any`; typecheck green |
+| `DOM-02` | ✅ **Done.** Combo index, `comboDegree`, `nearCombos`, `annotateCombos`, `deckCombos`, `candidatesAffectedBy` — exactly per doc 02 §2.3 | DOM-01 | ✅ 29 tests covering the shared-pieces case, the two-separate-combos case, and degenerate inputs (empty combo, empty pool, empty accepted set, duplicate ids, duplicate pieces, already-accepted candidate). Mutation-tested: four deliberate breaks to the definition are each caught |
 | `DOM-03` | Incremental degree patching (doc 05 §5.8)                                                                                            | DOM-02                  | Property test: incremental result ≡ full recompute, over randomised accept/exclude sequences                                                                                                                                              |
 | `DOM-04` | Role derivation: heuristics + curated override table + precedence                                                                    | DOM-01                  | ≥ 95% agreement with a 300-card hand-labelled fixture set                                                                                                                                                                                 |
 | `DOM-05` | Grouping + scoring engine (doc 05 §5.3, §5.6)                                                                                        | DOM-02, DOM-04          | Deterministic; golden-file tests over 5 fixture decks; every output carries non-empty `reasons`                                                                                                                                           |
@@ -133,21 +135,24 @@ against their interfaces; nothing depending on an unanswered question ships.
 | `A11Y-01`  | Automated axe pass + a manual screen-reader script for both drag and tap paths                                                                                                                                                                                                                                                                                                                                                                              | Zero critical violations; manual script documented and passing |
 | `LEGAL-01` | Fan Content Policy compliance, attribution surfaces, name clearance (doc 04 §4.6)                                                                                                                                                                                                                                                                                                                                                                           | Reviewed and signed off **before any public deployment**       |
 
-## 11.8 Suggested first wave
+## 11.8 What to pick up next
 
-`FOUND-01` is merged, so these six can start now, in parallel, with no file
-conflicts and no ordering between them:
+`FOUND-01`, `DOM-01` and `DOM-02` are merged. These five can start now, in
+parallel, with no file conflicts and no ordering between them:
 
-1. `DOM-01` → `DOM-02` — **highest value.** Combo degree is the feature that
-   distinguishes this product, it is pure, and it is fully testable before any
-   data pipeline exists.
-2. `FOUND-02` → `UI-01` — design tokens and the four card representations.
-3. `DB-01` — schema and migrations.
-4. `DOM-07` — the decklist parser; self-contained and fixture-driven.
-5. `DOM-04` — role derivation, which `DOM-05`, `DOM-08` and `DOM-09` all need.
+1. `DOM-03` — incremental degree patching, on top of `candidatesAffectedBy`,
+   which `DOM-02` already provides. The property test (incremental ≡ full
+   recompute) is the whole task.
+2. `DOM-04` — role derivation. `DOM-05`, `DOM-08` and `DOM-09` all need it, so
+   it is the next bottleneck.
+3. `FOUND-02` → `UI-01` — design tokens and the four card representations.
+4. `DB-01` — schema and migrations; `Combo` and `Card` types are settled now.
+5. `DOM-07` — the decklist parser; self-contained and fixture-driven.
+
+And the one that needs a browser rather than a compiler:
+
 6. `DATA-01` + `DATA-02` + `DATA-05` — the terms questions in
-   [ADR-0006](adr/0006-data-source-terms-verification.md). Needs a browser, not a
-   compiler, and unblocks all ingestion.
-
-`DATA-03` (EDHREC permission request) should go out early too — it is one email
-and the reply time is outside our control.
+   [ADR-0006](adr/0006-data-source-terms-verification.md). These block *deployment*
+   of anything that ingests, so the sooner they are answered the better.
+   `DATA-03` (the EDHREC permission request) should go out now — it is one email
+   and the reply time is outside our control.
