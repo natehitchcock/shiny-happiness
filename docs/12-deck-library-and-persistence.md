@@ -102,6 +102,10 @@ Each card: commander art as the background, name, bracket chip, completion ring
   Delete.
 - **Bulk select** for archive, export and delete.
 
+`Delete` offers the deck's export first — *"copy it out, then get rid of it"* is
+one workflow, not two errands (doc 15 §15.5). `Import` and `Export` sit in the
+same per-deck menu; bulk-select exports many at once.
+
 `Duplicate` is a first-class action, not a nicety: it is how a person tries a
 variant without risking the original, and it is the honest alternative to a
 branching model we are not going to build. A duplicate copies entries, origins,
@@ -115,10 +119,12 @@ drops the user straight into the commander picker.
 
 Four steps, no wizard chrome, abandonable at any point.
 
-1. **Pick a commander.** Search by name, filtered to cards legal as a commander.
-   Results show art, colour identity and popularity. Partner/Background pairings
-   are offered inline when the chosen card supports one (doc 03 §3.1) — never as
-   a separate step, because most decks do not need it.
+1. **Pick a commander**, or **paste a decklist**. Search by name, filtered to
+   cards legal as a commander; results show art, colour identity and popularity.
+   Partner/Background pairings are offered inline when the chosen card supports
+   one (doc 03 §3.1) — never as a separate step, because most decks do not need
+   it. The *"or paste a decklist"* path detects the commander from the list and
+   rejoins at step 2 (doc 15 §15.1).
 2. **Pick an archetype.** The nine archetypes (doc 14), with the statistically
    likely one for this commander preselected and its reason shown — *"Tokens —
    54% of Krenko decks build this way"*. This is what sets the composition

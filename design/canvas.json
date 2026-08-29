@@ -117,6 +117,24 @@
       "h": 900,
       "page": "page-1",
       "title": "New deck \u2014 archetype step"
+    },
+    {
+      "file": "Import.dc.html",
+      "x": 1560,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "page": "page-1",
+      "title": "Import \u2014 paste and preview"
+    },
+    {
+      "file": "Export.dc.html",
+      "x": 3120,
+      "y": 2040,
+      "w": 620,
+      "h": 900,
+      "page": "page-1",
+      "title": "Export, and export-before-delete"
     }
   ],
   "annotations": [
@@ -171,10 +189,18 @@
     {
       "id": "arch-note",
       "page": "page-1",
-      "x": 1560,
-      "y": 2040,
-      "w": 520,
+      "x": 4680,
+      "y": 1020,
+      "w": 460,
       "text": "Archetype is what makes composition targets mean anything \u2014 an aggro deck and a control deck do not want the same numbers.\nIt is suggested from the commander's own statistics rather than asked blind, and switching it later moves targets without touching a single card."
+    },
+    {
+      "id": "io-note",
+      "page": "page-1",
+      "x": 3860,
+      "y": 2040,
+      "w": 440,
+      "text": "Nothing here touches another site's servers \u2014 you copy, you paste. That one path covers Moxfield, Archidekt, TappedOut and a text file alike.\nImport always previews before it commits, a typo costs one line rather than the whole paste, and only JSON round-trips losslessly \u2014 which the export panel says out loud rather than hiding in a tooltip."
     }
   ],
   "launch": {

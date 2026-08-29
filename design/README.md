@@ -14,6 +14,8 @@ laid out by `canvas.json`.
 | `Inspect.dc.html` | L3 detail panel with generated reasons and combo lines |
 | `Library.dc.html` | Deck library (doc 12 §12.4) |
 | `NewDeck.dc.html` | Creation flow, archetype step (doc 14 §14.6) |
+| `Import.dc.html` | Import dialog — paste, preview, fix a bad line in place (doc 15 §15.3) |
+| `Export.dc.html` | Export panel and the export-before-delete confirm (doc 15 §15.4–15.5) |
 | `Switcher.dc.html` | Command-bar deck switcher (doc 12 §12.3) |
 | `MobilePeek.dc.html` | Phone, deck sheet at peek detent |
 | `MobileHalf.dc.html` | Phone, deck sheet at half detent — both regions visible |

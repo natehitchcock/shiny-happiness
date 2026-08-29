@@ -29,6 +29,7 @@ implementing agents will build from.
 | [docs/12-deck-library-and-persistence.md](docs/12-deck-library-and-persistence.md) | Saving, switching decks, offline sync, snapshots |
 | [docs/13-candidate-query.md](docs/13-candidate-query.md) | Scryfall-style query filter for the candidate pool |
 | [docs/14-archetypes.md](docs/14-archetypes.md) | Deck archetypes and the composition targets they drive |
+| [docs/15-import-export.md](docs/15-import-export.md) | Getting decklists in and out; export before delete |
 | [AGENTS.md](AGENTS.md) | **Rules every implementing agent must follow** |
 
 Architecture decisions with lasting consequences are recorded in [docs/adr/](docs/adr/).

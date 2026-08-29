@@ -237,19 +237,32 @@ GET /api/v1/brackets/:n/core?colors=WUBRG&commander=<oracleId>
 
 ## 10.7 Import / export
 
+Full UI and format detail in [15-import-export.md](15-import-export.md).
+
 ```
-POST /api/v1/import/text   { text: string }
-     → { deck: ImportedDeck, unresolved: Array<{ line, reason }> }
+POST /api/v1/import/preview   { text | file, targetDeckId? }
+     → {
+         detectedCommander: { oracleId, source: 'marker'|'section'|'inferred' }
+                          | { candidates: OracleId[] }   // ask, never guess
+         resolved: Array<{ line, oracleId, quantity, tags: string[] }>,
+         unresolved: Array<{ line, text, reason, suggestions: OracleId[] }>,
+         illegal: Array<{ line, oracleId, reason: 'color-identity'|'banned' }>,
+         previouslyExcluded: OracleId[],   // in the list, but you removed them before
+         canMerge: boolean                 // false when commanders differ
+       }
 
-POST /api/v1/import/url    { url: string }
-     → 501 NotImplemented for Moxfield, with an explanatory problem document
-       pointing at text import (doc 04 §4.4).
+POST /api/v1/import/commit    { previewToken, mode: 'new'|'merge',
+                                skipLines: number[], includeIllegal: boolean }
+     → { deck: Deck, applied: DeckCommand[] }
 
-GET  /api/v1/decks/:id/export?format=text|json|csv
+GET  /api/v1/decks/:id/export?format=text|moxfield|mtgo|csv|json
+     → the formatted list; `json` alone round-trips losslessly
 ```
 
-`unresolved` never blocks an import: bring in what parsed, list what did not, let
-the user fix it in place.
+Preview and commit are separate calls: **nothing is applied until the user has
+seen what will happen** (doc 15 §15.3). `unresolved` and `illegal` never block —
+they are reported for in-place fixing, and `previouslyExcluded` exists so a merge
+cannot silently resurrect a card the user removed (P6).
 
 ## 10.8 Rate limiting and errors
 
