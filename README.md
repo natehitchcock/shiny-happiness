@@ -26,6 +26,7 @@ implementing agents will build from.
 | [docs/09-architecture.md](docs/09-architecture.md) | Monorepo layout, stack, package boundaries |
 | [docs/10-api-contract.md](docs/10-api-contract.md) | HTTP surface between web and api |
 | [docs/11-work-breakdown.md](docs/11-work-breakdown.md) | Parallelizable task graph for implementing agents |
+| [docs/12-deck-library-and-persistence.md](docs/12-deck-library-and-persistence.md) | Saving, switching decks, offline sync, snapshots |
 | [AGENTS.md](AGENTS.md) | **Rules every implementing agent must follow** |
 
 Architecture decisions with lasting consequences are recorded in [docs/adr/](docs/adr/).

@@ -17,11 +17,14 @@ scope (files it may touch), explicit dependencies, and a definition of done.
            ├─→ DATA-03 ─→ ING-03 ─┘                                 │
            ├─→ DATA-05 ─→ DOM-06                                    │
            │                                                        │
-           └─→ UI-01 ─┬─→ WEB-01 ─→ WEB-02 ─┬─→ WEB-03 ─→ WEB-04 ───┤
-                      │                     ├─→ WEB-05              │
-                      └─→ WEB-06 ───────────┴─→ WEB-07 ─→ WEB-08 ───┴─→ E2E-01
-                                                                        PERF-01
-                                                                        A11Y-01
+           └─→ UI-01 ─┬─→ WEB-01 ─┬─→ WEB-02 ─┬─→ WEB-03 ─→ WEB-04 ─┤
+                      │           │           ├─→ WEB-05            │
+                      │           │           └─→ WEB-07 ─→ WEB-08 ─┤
+                      │           └─→ WEB-12 ─→ WEB-13 ─→ WEB-14 ───┤
+                      │                        WEB-15   WEB-16      │
+                      └─→ WEB-06 ──────────────────────────────────┴─→ E2E-01
+                                                                       PERF-01
+                                                                       A11Y-01
 ```
 
 Everything under `DOM-*` and `UI-*` can start immediately after `FOUND-01` and
@@ -53,7 +56,6 @@ runs fully parallel with the data work. That is the point of the pure-domain rul
 | `DATA-01` | **Read current Scryfall API docs + terms**; write [ADR-0002](adr/0002-data-sources.md) addendum with the actual rate limits, bulk endpoints, attribution and image-caching requirements | — | ADR updated with quoted terms + retrieval date |
 | `DATA-02` | Same for Commander Spellbook: API shape, export format, terms, attribution; contact them | — | ADR addendum; contact attempt recorded |
 | `DATA-03` | Same for EDHREC: `robots.txt`, terms, endpoints. **Send the permission request.** | — | ADR addendum; email sent; feature flag defaults to off until answered |
-| `DATA-04` | Apply for Moxfield API access. Do not scrape in the meantime | — | Request submitted and recorded; `MoxfieldImporter` throws `NotAuthorizedError` |
 | `DATA-05` | Fetch the **current official** Commander bracket rules + Game Changers list into `brackets/rules.data.json` with source URL and date | — | File checked in; no bracket constant hardcoded anywhere else |
 | `ING-01` | Scryfall bulk ingest: download, stream-parse, map to `Card`, snapshot-and-swap | DATA-01, DB-01 | Full ingest completes; shared rate limiter enforced; re-run is idempotent |
 | `ING-02` | Spellbook combo ingest + oracle-id mapping, **failing loudly on unmapped cards** | DATA-02, DB-01 | Unmapped cards reported, not dropped |
@@ -70,6 +72,9 @@ runs fully parallel with the data work. That is the point of the pure-domain rul
 | `API-02` | Recommendations + analysis endpoints, incl. `unavailable` degradation | API-01, DOM-05, DOM-06 | Full recompute < 200 ms p95 on a 100-card deck; degradation test with each source disabled |
 | `API-03` | Auth, per-user rate limiting, deck ownership | API-01 | No deck readable cross-user; 429 with `Retry-After` |
 | `API-04` | Import/export endpoints | DOM-07 | Round-trip: export JSON → import → identical deck incl. origins, exclusions, locks |
+| `API-05` | Deck library: list/filter/sort, `recent`, duplicate, archive, soft delete (doc 12 §12.2–12.4) | API-01 | `DeckSummary` projection never loads entries; duplicate copies exclusions and locks |
+| `API-06` | Optimistic concurrency: `baseVersion`, `409` with `since`, workspace-state endpoint (doc 12 §12.6–12.7) | API-01 | Concurrent-edit test from two clients converges without data loss |
+| `API-07` | Snapshots: auto before bulk ops, manual, restore (doc 12 §12.8) | API-01 | Restore is itself undoable; retention enforced |
 
 ## 11.6 Frontend
 
@@ -87,12 +92,17 @@ runs fully parallel with the data work. That is the point of the pure-domain rul
 | `WEB-09` | Inspect panel / detail sheet with combo lines and reasons (doc 06 §6.5) | WEB-01 | Every recommendation renders its reasons; accept/exclude reachable without closing |
 | `WEB-10` | Composition meters wired to deficit groups (doc 05 §5.4) | WEB-02, API-02 | Tapping a meter scrolls to the matching `fills-<role>` group |
 | `WEB-11` | Bracket selector, core package apply/remove with the change summary (doc 03 §3.3) | WEB-01, API-01 | Locked and manual entries provably survive a bracket change; single undo reverts the whole operation |
+| `WEB-12` | Deck switcher: command-bar popover, `⌘K` fuzzy filter, `⌘1–9`, mobile sheet (doc 12 §12.3) | WEB-01, API-05 | Switch to interactive < 300 ms; opens without waiting on a request |
+| `WEB-13` | Deck library: grid/list, sort, filter, search, per-deck and bulk actions, empty state (doc 12 §12.4) | WEB-01, API-05 | Works at 360 px; every action reachable by keyboard |
+| `WEB-14` | Deck creation flow: commander search, partner pairing, bracket pick, core-package offer (doc 12 §12.5) | WEB-11, API-05 | Abandonable at every step; commander search filtered to legal commanders |
+| `WEB-15` | Local-first persistence: IndexedDB replica, command queue, offline drain, `409` replay (doc 12 §12.7) | WEB-01, API-06 | Deck fully editable offline; queue survives reload; conflict resolves without a modal |
+| `WEB-16` | Snapshot UI: automatic labels, manual creation, restore with preview (doc 12 §12.8) | WEB-01, API-07 | Bracket experiment can be fully reverted |
 
 ## 11.7 Cross-cutting gates
 
 | ID | Task | DoD |
 | --- | --- | --- |
-| `E2E-01` | Playwright suite, desktop + mobile viewports, covering: build a deck from empty to 100, apply and partially dismantle a core package, exclude and confirm no re-suggestion | Green in CI on both viewports |
+| `E2E-01` | Playwright suite, desktop + mobile viewports, covering: build a deck from empty to 100, apply and partially dismantle a core package, exclude and confirm no re-suggestion, switch decks mid-edit and confirm nothing is lost, edit offline and reconcile | Green in CI on both viewports |
 | `PERF-01` | Budgets from doc 07 §7.3 and doc 08 §8.5 enforced in CI | Regressions fail the build, not a dashboard |
 | `A11Y-01` | Automated axe pass + a manual screen-reader script for both drag and tap paths | Zero critical violations; manual script documented and passing |
 | `LEGAL-01` | Fan Content Policy compliance, attribution surfaces, name clearance (doc 04 §4.6) | Reviewed and signed off **before any public deployment** |
@@ -103,7 +113,7 @@ Six agents, no file conflicts, no ordering between them:
 
 1. `FOUND-01` — must land first; everything else waits on it.
 2. Then simultaneously: `DOM-01`→`DOM-02` · `DATA-01`+`DATA-02`+`DATA-05` ·
-   `FOUND-02`→`UI-01` · `DB-01` · `DOM-07` · `DATA-03`+`DATA-04` (correspondence).
+   `FOUND-02`→`UI-01` · `DB-01` · `DOM-07` · `DATA-03` (correspondence).
 
 `DOM-02` is the highest-value early task: it is the feature that distinguishes
 this product, it is pure, and it is fully testable before any data pipeline exists.

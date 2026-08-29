@@ -103,38 +103,39 @@ before launch.** This is the correct move and costs one email. Until it is
 answered, EDHREC-derived features stay behind a config flag and are not deployed
 publicly.
 
-## 4.4 Moxfield — deck import. **Do not scrape. Adapter stays dark.**
+## 4.4 Moxfield — out of scope
 
-The user asked for Moxfield parsing for bracket/colour statistical relationships.
-Speccing that as a scraper would be speccing a feature that gets us blocked.
+**Decision: not pursued.** Moxfield restricts automated access and their API is
+not public. Rather than build on access we do not have, the need it was meant to
+serve is covered elsewhere:
 
-Moxfield actively restricts automated access: their API is not public, unapproved
-automated traffic is blocked, and they have publicly asked third parties to stop
-scraping and to request access instead. Building on top of that is building on
-sand, and knowingly routing around their access controls is not something this
-project will do.
+- *"Get my existing deck in"* → user-pasted decklist text or file upload (§4.4.1).
+  Works for Moxfield, Archidekt, TappedOut and MTGO exports alike, touches no
+  third-party server, and is strictly more useful.
+- *"Bracket × colour card statistics"* → EDHREC aggregates (§4.3) plus our own
+  corpus (§4.5).
 
-**What we do instead:**
+`DeckImporter` keeps a URL-import seam so the door stays open, and
+`/api/v1/import/url` returns `501` with a problem document pointing at text
+import. No agent should spend time here.
 
-1. **Build the `DeckImporter` adapter and leave it unimplemented**, with a clear
-   `NotAuthorizedError`. The seam exists so that the day access is granted, it is
-   a contained piece of work.
-2. **Apply for API access** (task `DATA-04`). State the use case plainly.
-3. **Ship user-initiated import that does not touch Moxfield's servers:** paste a
-   decklist as text, or upload an exported `.txt`/`.csv`. This covers the actual
-   user need — "get my existing deck in" — with zero third-party risk, and it works
-   for Archidekt, TappedOut and anything else too. Build a robust decklist text
-   parser (`1 Sol Ring`, `1x Sol Ring (C21) 263`, category headers, sideboard/
-   maybeboard markers).
-4. **For the aggregate statistics the user wanted from Moxfield** — bracket ×
-   colour × card correlations for generating core packages — use EDHREC's
-   aggregates (§4.3) as the primary source, and our own corpus of imported decks
-   as it grows. We are allowed to compute statistics over decks our own users
-   import to us.
+### 4.4.1 Decklist text import
 
-If the intent was specifically "learn what cards cluster at each bracket," note
-that EDHREC publishes bracket-tagged aggregates and is a legitimate route to the
-same answer.
+The actual import path. Parse the common export formats:
+
+```
+1 Sol Ring
+1x Sol Ring (C21) 263
+SORCERY (12)
+1 Rhystic Study *CMDR*
+// Maybeboard
+```
+
+Handle: quantity prefixes with and without `x`, set/collector annotations,
+category headers, commander markers, sideboard/maybeboard sections, split-card
+names (`Fire // Ice`), and accented card names. Resolve by name against the card
+database with fuzzy fallback. **Report unresolved lines; never fail the whole
+import** — bring in what parsed and let the user fix the rest in place.
 
 ## 4.5 Our own corpus
 

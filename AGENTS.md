@@ -92,8 +92,8 @@ something is broken and out of your scope, leave it failing and say so in the PR
 - Respect every rate limit in doc 04. The shared limiter is not optional and must
   not be bypassed "just for a script".
 - Do not add a new third-party data source without an ADR covering its terms.
-- Do not implement Moxfield scraping. See doc 04 §4.4. If you think you need it,
-  the answer is the text importer.
+- Moxfield is out of scope (doc 04 §4.4). If you think you need it, the answer is
+  the decklist text importer.
 
 ## 6. Git and PRs
 

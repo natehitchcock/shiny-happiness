@@ -34,11 +34,51 @@ POST /api/v1/cards/batch   { oracleIds: OracleId[] }
 ## 10.3 Decks
 
 ```
-POST   /api/v1/decks               { name, commanders, targetBracket }  → Deck
+POST   /api/v1/decks     { name, commanders, targetBracket }            → Deck
 GET    /api/v1/decks/:id                                                → Deck
-PATCH  /api/v1/decks/:id           { name?, targetBracket?, budget? }   → Deck
-DELETE /api/v1/decks/:id
-GET    /api/v1/decks               ?cursor=  → { items: DeckSummary[] }
+PATCH  /api/v1/decks/:id { name?, targetBracket?, budget?, status? }    → Deck
+DELETE /api/v1/decks/:id                       soft delete, 30-day recovery
+POST   /api/v1/decks/:id/duplicate  { name? }  → Deck   full copy: entries,
+                                                        origins, exclusions, locks
+```
+
+### Library (doc 12 §12.3, §12.4)
+
+```
+GET /api/v1/decks
+    ?status=active|archived|all      default active
+    &sort=lastOpened|updated|name|completion
+    &colors=&bracket=&q=&cursor=&limit=
+    → { items: DeckSummary[], nextCursor }
+```
+
+`DeckSummary` never loads entries — it is the list projection (doc 12 §12.2), and
+the switcher and library both render from it alone. Loading 12 full decks to draw
+a menu is the mistake this type exists to prevent.
+
+```
+GET /api/v1/decks/recent?limit=5   → { items: DeckSummary[] }
+```
+
+Backs the deck switcher. Ordered by `lastOpenedAt`, active only. Prefetched on
+app load; the switcher must never wait on a request to open.
+
+### Workspace state (doc 12 §12.6)
+
+```
+PUT /api/v1/decks/:id/workspace   { ...WorkspaceState }   → 204
+```
+
+Debounced client-side (~2 s), fire-and-forget. A failure here is never surfaced
+and never blocks a deck mutation.
+
+### Snapshots (doc 12 §12.8)
+
+```
+GET  /api/v1/decks/:id/snapshots                  → { items: SnapshotSummary[] }
+POST /api/v1/decks/:id/snapshots  { label }       → SnapshotSummary
+POST /api/v1/decks/:id/snapshots/:sid/restore     → Deck
+     Snapshots the current state first, so restore is itself undoable.
 ```
 
 ### Entry mutations
@@ -48,8 +88,10 @@ is ~24 changes and must be a single undoable, atomic unit (doc 06 §6.6).
 
 ```
 POST /api/v1/decks/:id/commands
-  { commands: DeckCommand[], idempotencyKey: string }
-  → { deck: Deck, applied: DeckCommand[], rejected: RejectedCommand[] }
+  { commands: DeckCommand[], idempotencyKey: string, baseVersion: number }
+  → 200 { deck: Deck, applied: DeckCommand[], rejected: RejectedCommand[] }
+  → 409 { deck: Deck, since: DeckCommand[] }   baseVersion is stale; the client
+        replays its queue against `deck` and re-sends (doc 12 §12.7)
 
 type DeckCommand =
   | { type: 'accept';   oracleId; origin: Origin; lock?: boolean }
