@@ -1,0 +1,9 @@
+dist/
+.turbo/
+coverage/
+pnpm-lock.yaml
+design/
+
+# Docs are hand-written prose. Prettier's markdown opinions (emphasis style,
+# table padding) create review churn without improving anything.
+*.md

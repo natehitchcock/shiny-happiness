@@ -1,38 +1,73 @@
 # Roundtable
 
 A web app for building **Magic: The Gathering Commander (EDH)** decks, built around
-two ideas: *scalable focus* — you decide how much of your deck you look at, at how
-much detail — and *combo-aware candidate generation* — suggestions are grouped by
+two ideas: _scalable focus_ — you decide how much of your deck you look at, at how
+much detail — and _combo-aware candidate generation_ — suggestions are grouped by
 how many combos they complete with cards you have already accepted.
 
 > `Roundtable` is a placeholder codename. Rename freely.
 
-**Status: specification only.** There is no implementation yet. This repository
-currently contains the design, the domain rules, and the work breakdown that
-implementing agents will build from.
+**Status: scaffolded, not implemented.** The monorepo, toolchain and CI exist
+(`FOUND-01`); the features do not. Everything else here is the design, the domain
+rules, and the work breakdown that implementing agents build from.
 
 ## Read in this order
 
-| Doc | What it settles |
-| --- | --- |
-| [docs/01-vision-and-pillars.md](docs/01-vision-and-pillars.md) | What we are building, what we are not, non-negotiable pillars |
-| [docs/02-domain-model.md](docs/02-domain-model.md) | Entities, states, and the precise definition of *combo degree* |
-| [docs/03-brackets-and-legality.md](docs/03-brackets-and-legality.md) | Commander Brackets 1–5, Game Changers, deck legality |
-| [docs/04-data-sources.md](docs/04-data-sources.md) | Scryfall, Commander Spellbook, EDHREC, Moxfield — what we may and may not do |
-| [docs/05-scoring-and-recommendations.md](docs/05-scoring-and-recommendations.md) | Grouping, scoring formula, composition targets, core packages |
-| [docs/ux/06-information-architecture.md](docs/ux/06-information-architecture.md) | Accepted / Candidate regions, grouping, card states |
-| [docs/ux/07-focus-scaling.md](docs/ux/07-focus-scaling.md) | The four zoom levels and what each is for |
-| [docs/ux/08-mobile.md](docs/ux/08-mobile.md) | Phone layout, touch interactions, the no-drag-only rule |
-| [docs/09-architecture.md](docs/09-architecture.md) | Monorepo layout, stack, package boundaries |
-| [docs/10-api-contract.md](docs/10-api-contract.md) | HTTP surface between web and api |
-| [docs/11-work-breakdown.md](docs/11-work-breakdown.md) | Parallelizable task graph for implementing agents |
-| [docs/12-deck-library-and-persistence.md](docs/12-deck-library-and-persistence.md) | Saving, switching decks, offline sync, snapshots |
-| [docs/13-candidate-query.md](docs/13-candidate-query.md) | Scryfall-style query filter for the candidate pool |
-| [docs/14-archetypes.md](docs/14-archetypes.md) | Deck archetypes and the composition targets they drive |
-| [docs/15-import-export.md](docs/15-import-export.md) | Getting decklists in and out; export before delete |
-| [AGENTS.md](AGENTS.md) | **Rules every implementing agent must follow** |
+| Doc                                                                                | What it settles                                                              |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [docs/01-vision-and-pillars.md](docs/01-vision-and-pillars.md)                     | What we are building, what we are not, non-negotiable pillars                |
+| [docs/02-domain-model.md](docs/02-domain-model.md)                                 | Entities, states, and the precise definition of _combo degree_               |
+| [docs/03-brackets-and-legality.md](docs/03-brackets-and-legality.md)               | Commander Brackets 1–5, Game Changers, deck legality                         |
+| [docs/04-data-sources.md](docs/04-data-sources.md)                                 | Scryfall, Commander Spellbook, EDHREC, Moxfield — what we may and may not do |
+| [docs/05-scoring-and-recommendations.md](docs/05-scoring-and-recommendations.md)   | Grouping, scoring formula, composition targets, core packages                |
+| [docs/ux/06-information-architecture.md](docs/ux/06-information-architecture.md)   | Accepted / Candidate regions, grouping, card states                          |
+| [docs/ux/07-focus-scaling.md](docs/ux/07-focus-scaling.md)                         | The four zoom levels and what each is for                                    |
+| [docs/ux/08-mobile.md](docs/ux/08-mobile.md)                                       | Phone layout, touch interactions, the no-drag-only rule                      |
+| [docs/09-architecture.md](docs/09-architecture.md)                                 | Monorepo layout, stack, package boundaries                                   |
+| [docs/10-api-contract.md](docs/10-api-contract.md)                                 | HTTP surface between web and api                                             |
+| [docs/11-work-breakdown.md](docs/11-work-breakdown.md)                             | Parallelizable task graph for implementing agents                            |
+| [docs/12-deck-library-and-persistence.md](docs/12-deck-library-and-persistence.md) | Saving, switching decks, offline sync, snapshots                             |
+| [docs/13-candidate-query.md](docs/13-candidate-query.md)                           | Scryfall-style query filter for the candidate pool                           |
+| [docs/14-archetypes.md](docs/14-archetypes.md)                                     | Deck archetypes and the composition targets they drive                       |
+| [docs/15-import-export.md](docs/15-import-export.md)                               | Getting decklists in and out; export before delete                           |
+| [AGENTS.md](AGENTS.md)                                                             | **Rules every implementing agent must follow**                               |
 
 Architecture decisions with lasting consequences are recorded in [docs/adr/](docs/adr/).
+
+## Getting started
+
+```bash
+pnpm install
+pnpm check        # lint + typecheck + test
+pnpm build
+```
+
+Requires Node 22+ and pnpm 10. `pnpm check` is what CI runs on every PR.
+
+```
+apps/
+  web/      React SPA          — WEB-01 replaces the tsc build with Vite
+  api/      Fastify HTTP service
+  ingest/   Scheduled ingestion workers
+packages/
+  domain/   ★ Pure types + logic. No IO. The shared contract.
+  clients/  Third-party adapters behind one rate limiter
+  db/       Schema, migrations, repositories
+  ui/       Design-system primitives
+```
+
+**The purity rule is enforced, not just documented.** ESLint rejects IO imports,
+`Date.now()`, `Math.random()`, `new Date()` and bare `fetch` inside
+`packages/domain`, and rejects `fetch` anywhere outside `packages/clients`
+(AGENTS.md R1 and R3). Try it: add `Date.now()` to a domain file and run
+`pnpm lint`.
+
+### Toolchain note
+
+TypeScript is pinned to `~6.0.3`. TypeScript 7 (the native compiler) builds and
+typechecks this repo fine, but `typescript-eslint` does not support it yet, and
+lint is where R1 and R3 are enforced — so the pin holds until typescript-eslint
+ships TS 7 support.
 
 ## The shape of the app, in one picture
 
