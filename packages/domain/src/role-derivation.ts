@@ -35,15 +35,24 @@ const HEURISTICS: readonly Heuristic[] = [
 
   // Ramp: produces mana, or fetches lands onto the battlefield.
   { role: 'ramp', test: /^\s*(\{[^}]*\}: )?Add \{/m },
-  { role: 'ramp', test: /\bAdd (\{[WUBRGC0-9X/]+\}|one mana|two mana|.{0,20}mana of any colour|.{0,20}mana of any color)/ },
-  { role: 'ramp', test: /search your library for (a|up to \w+) basic land card[^.]*onto the battlefield/i },
+  {
+    role: 'ramp',
+    test: /\bAdd (\{[WUBRGC0-9X/]+\}|one mana|two mana|.{0,20}mana of any colour|.{0,20}mana of any color)/,
+  },
+  {
+    role: 'ramp',
+    test: /search your library for (a|up to \w+) basic land card[^.]*onto the battlefield/i,
+  },
   { role: 'ramp', test: /\bTreasure token/ },
 
   // Card advantage.
   { role: 'draw', test: /\bdraws? (a|two|three|four|X|that many) cards?\b/i },
   { role: 'draw', test: /\bdraw a card\b/i },
 
-  { role: 'tutor', test: /search your library for (a|any) (?!basic land)[^.]*(card|creature|artifact|enchantment|instant|sorcery)[^.]*(your hand|the top of your library)/i },
+  {
+    role: 'tutor',
+    test: /search your library for (a|any) (?!basic land)[^.]*(card|creature|artifact|enchantment|instant|sorcery)[^.]*(your hand|the top of your library)/i,
+  },
 
   { role: 'board-wipe', test: /destroy all\b/i },
   { role: 'board-wipe', test: /exile all\b/i },
@@ -56,7 +65,10 @@ const HEURISTICS: readonly Heuristic[] = [
   { role: 'spot-removal', test: /deals? \d+ damage to (target|any target)/i },
   { role: 'spot-removal', test: /target (player|opponent) sacrifices a creature/i },
 
-  { role: 'graveyard-hate', test: /exile (all cards from|target player's graveyard|target card from a graveyard)/i },
+  {
+    role: 'graveyard-hate',
+    test: /exile (all cards from|target player's graveyard|target card from a graveyard)/i,
+  },
   { role: 'graveyard-hate', test: /graveyards? .{0,30}exiled instead/i },
 
   { role: 'protection', test: /\b(hexproof|shroud|indestructible|protection from)\b/i },
@@ -68,7 +80,10 @@ const HEURISTICS: readonly Heuristic[] = [
   { role: 'sac-outlet', test: /sacrifice (a|another) (creature|permanent|artifact)[^.]*:/i },
   { role: 'sac-outlet', test: /\bSacrifice a creature:/i },
 
-  { role: 'token-maker', test: /creates? (a|an|two|three|X|that many|\w+) .{0,60}creature tokens?/i },
+  {
+    role: 'token-maker',
+    test: /creates? (a|an|two|three|X|that many|\w+) .{0,60}creature tokens?/i,
+  },
   { role: 'token-maker', test: /creates? .{0,40}token that's a copy/i },
 
   { role: 'anthem', test: /creatures you control get \+\d+\/\+\d+/i },

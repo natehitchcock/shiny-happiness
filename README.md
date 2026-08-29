@@ -7,10 +7,15 @@ how many combos they complete with cards you have already accepted.
 
 > `Roundtable` is a placeholder codename. Rename freely.
 
-**Status: foundations built.** The monorepo, toolchain and CI exist
-(`FOUND-01`), as do the domain entity types (`DOM-01`) and combo degree
-(`DOM-02`) — the computation the whole product rests on. Everything else is
-design, domain rules, and the work breakdown that implementing agents build from.
+**Status: the domain layer is complete.** `packages/domain` — the pure, shared
+contract that `web` and `api` both run — is built and tested end to end: entity
+types, combo degree and its incremental patch, role derivation, archetype targets,
+legality, composition analysis, the candidate query language, the grouping and
+scoring engine, and decklist import/export. 254 tests, no IO, no infrastructure
+required.
+
+What remains needs a database, a browser, or an answer from a third party. See
+[docs/11-work-breakdown.md](docs/11-work-breakdown.md) §11.8.
 
 ## Read in this order
 

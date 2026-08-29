@@ -76,7 +76,9 @@ describe('compositionTargets', () => {
       const blended = idealsOf('control', 'tokens')
       const tokenMaker = blended.get(dimensionKey(roleDimension('token-maker')))
       expect(tokenMaker).toBeDefined()
-      expect(tokenMaker!).toBeLessThan(idealsOf('tokens').get(dimensionKey(roleDimension('token-maker')))!)
+      expect(tokenMaker!).toBeLessThan(
+        idealsOf('tokens').get(dimensionKey(roleDimension('token-maker')))!,
+      )
     })
 
     it('is a no-op when the secondary equals the primary', () => {
@@ -107,9 +109,15 @@ describe('compositionTargets', () => {
     })
 
     it('raises draw and interaction at high brackets and lowers them at bracket 1', () => {
-      expect(idealsOf('midrange', null, 5).get(DRAW)!).toBe(idealsOf('midrange', null, 3).get(DRAW)! + 2)
-      expect(idealsOf('midrange', null, 4).get(REMOVAL)!).toBe(idealsOf('midrange', null, 3).get(REMOVAL)! + 1)
-      expect(idealsOf('midrange', null, 1).get(DRAW)!).toBe(idealsOf('midrange', null, 3).get(DRAW)! - 1)
+      expect(idealsOf('midrange', null, 5).get(DRAW)!).toBe(
+        idealsOf('midrange', null, 3).get(DRAW)! + 2,
+      )
+      expect(idealsOf('midrange', null, 4).get(REMOVAL)!).toBe(
+        idealsOf('midrange', null, 3).get(REMOVAL)! + 1,
+      )
+      expect(idealsOf('midrange', null, 1).get(DRAW)!).toBe(
+        idealsOf('midrange', null, 3).get(DRAW)! - 1,
+      )
     })
 
     it('never produces a negative ideal', () => {

@@ -16,7 +16,11 @@ import {
 
 const card = (name: string): OracleId => oracleId(name)
 
-const combo = (id: string, pieces: readonly string[], produces: Combo['produces'] = ['value']): Combo => ({
+const combo = (
+  id: string,
+  pieces: readonly string[],
+  produces: Combo['produces'] = ['value'],
+): Combo => ({
   id: comboId(id),
   pieces: pieces.map(card),
   prerequisites: '',
@@ -113,10 +117,7 @@ describe('comboDegree', () => {
   // ---- product rests on, so both halves of it are pinned here.
 
   it('counts two combos that SHARE a piece as two', () => {
-    const index = buildComboIndex([
-      combo('c1', ['X', 'A']),
-      combo('c2', ['X', 'A', 'B']),
-    ])
+    const index = buildComboIndex([combo('c1', ['X', 'A']), combo('c2', ['X', 'A', 'B'])])
     expect(comboDegree(index, setOf('A', 'B'), card('X'))).toBe(2)
   })
 
@@ -226,9 +227,21 @@ describe('the documented Krenko example (doc 05 §5.7)', () => {
   const KIKI = 'Kiki-Jiki, Mirror Breaker'
   const combos = [
     combo('kiki-conscripts', [KIKI, 'Zealous Conscripts'], ['infinite-creatures']),
-    combo('kiki-bombardment', [KIKI, 'Zealous Conscripts', 'Goblin Bombardment'], ['infinite-damage']),
-    combo('kiki-purphoros', [KIKI, 'Zealous Conscripts', 'Purphoros, God of the Forge'], ['infinite-damage']),
-    combo('krenko-staff', ['Krenko, Mob Boss', 'Thornbite Staff', 'Skirk Prospector'], ['infinite-creatures']),
+    combo(
+      'kiki-bombardment',
+      [KIKI, 'Zealous Conscripts', 'Goblin Bombardment'],
+      ['infinite-damage'],
+    ),
+    combo(
+      'kiki-purphoros',
+      [KIKI, 'Zealous Conscripts', 'Purphoros, God of the Forge'],
+      ['infinite-damage'],
+    ),
+    combo(
+      'krenko-staff',
+      ['Krenko, Mob Boss', 'Thornbite Staff', 'Skirk Prospector'],
+      ['infinite-creatures'],
+    ),
   ]
   const index = buildComboIndex(combos)
   const accepted = setOf(

@@ -70,8 +70,15 @@ const cardMap = (...cards: Card[]): ReadonlyMap<OracleId, Card> =>
 const legalDeck = () => {
   const fillers = Array.from({ length: 99 }, (_, i) => card(`filler-${i}`))
   const cmdr = card('Krenko')
-  const deck = makeDeck(['Krenko'], fillers.map((f) => f.name))
-  return { deck, cards: cardMap(cmdr, ...fillers), info: new Map([[oracleId('Krenko'), commander]]) }
+  const deck = makeDeck(
+    ['Krenko'],
+    fillers.map((f) => f.name),
+  )
+  return {
+    deck,
+    cards: cardMap(cmdr, ...fillers),
+    info: new Map([[oracleId('Krenko'), commander]]),
+  }
 }
 
 describe('validateDeck', () => {
@@ -83,7 +90,11 @@ describe('validateDeck', () => {
   it('rejects a deck that is not 100 cards', () => {
     const cmdr = card('Krenko')
     const deck = makeDeck(['Krenko'], ['a'])
-    const report = validateDeck(deck, cardMap(cmdr, card('a')), new Map([[oracleId('Krenko'), commander]]))
+    const report = validateDeck(
+      deck,
+      cardMap(cmdr, card('a')),
+      new Map([[oracleId('Krenko'), commander]]),
+    )
     expect(report.legal).toBe(false)
     expect(report.problems).toContainEqual({ kind: 'wrong-card-count', actual: 2, expected: 100 })
   })
@@ -93,7 +104,11 @@ describe('validateDeck', () => {
     const banned = card('banned', { legalities: { commander: 'banned' } })
     const offColor = card('offColor', { colorIdentity: ['G'] })
     const deck = makeDeck(['Krenko'], ['banned', 'offColor'])
-    const report = validateDeck(deck, cardMap(cmdr, banned, offColor), new Map([[oracleId('Krenko'), commander]]))
+    const report = validateDeck(
+      deck,
+      cardMap(cmdr, banned, offColor),
+      new Map([[oracleId('Krenko'), commander]]),
+    )
     const kinds = report.problems.map((p) => p.kind)
     expect(kinds).toContain('banned')
     expect(kinds).toContain('color-identity')
@@ -104,7 +119,11 @@ describe('validateDeck', () => {
     const cmdr = card('Krenko')
     const birds = card('Birds of Paradise', { colorIdentity: ['G'] })
     const deck = makeDeck(['Krenko'], ['Birds of Paradise'])
-    const report = validateDeck(deck, cardMap(cmdr, birds), new Map([[oracleId('Krenko'), commander]]))
+    const report = validateDeck(
+      deck,
+      cardMap(cmdr, birds),
+      new Map([[oracleId('Krenko'), commander]]),
+    )
     expect(report.problems).toContainEqual({
       kind: 'color-identity',
       oracleId: oracleId('Birds of Paradise'),
@@ -139,15 +158,26 @@ describe('singleton', () => {
 
   it('allows any number of basic lands', () => {
     const mountain = card('Mountain', { typeLine: 'Basic Land — Mountain', types: ['land'] })
-    const deck = makeDeck(['Krenko'], Array.from({ length: 5 }, () => 'Mountain'))
-    const report = validateDeck(deck, cardMap(cmdr, mountain), new Map([[oracleId('Krenko'), commander]]))
+    const deck = makeDeck(
+      ['Krenko'],
+      Array.from({ length: 5 }, () => 'Mountain'),
+    )
+    const report = validateDeck(
+      deck,
+      cardMap(cmdr, mountain),
+      new Map([[oracleId('Krenko'), commander]]),
+    )
     expect(report.problems.some((p) => p.kind === 'not-singleton')).toBe(false)
   })
 
   it('rejects a duplicate non-basic', () => {
     const sol = card('Sol Ring', { typeLine: 'Artifact' })
     const deck = makeDeck(['Krenko'], ['Sol Ring', 'Sol Ring'])
-    const report = validateDeck(deck, cardMap(cmdr, sol), new Map([[oracleId('Krenko'), commander]]))
+    const report = validateDeck(
+      deck,
+      cardMap(cmdr, sol),
+      new Map([[oracleId('Krenko'), commander]]),
+    )
     expect(report.problems).toContainEqual({
       kind: 'not-singleton',
       oracleId: oracleId('Sol Ring'),
@@ -158,30 +188,60 @@ describe('singleton', () => {
 
   it('allows unlimited copies of a card on the exception list', () => {
     const rats = card('Relentless Rats')
-    const deck = makeDeck(['Krenko'], Array.from({ length: 9 }, () => 'Relentless Rats'))
-    const report = validateDeck(deck, cardMap(cmdr, rats), new Map([[oracleId('Krenko'), commander]]), {
-      unlimited: new Set([oracleId('Relentless Rats')]),
-      limited: new Map(),
-    })
+    const deck = makeDeck(
+      ['Krenko'],
+      Array.from({ length: 9 }, () => 'Relentless Rats'),
+    )
+    const report = validateDeck(
+      deck,
+      cardMap(cmdr, rats),
+      new Map([[oracleId('Krenko'), commander]]),
+      {
+        unlimited: new Set([oracleId('Relentless Rats')]),
+        limited: new Map(),
+      },
+    )
     expect(report.problems.some((p) => p.kind === 'not-singleton')).toBe(false)
   })
 
   it('enforces a specific higher limit', () => {
     const nazgul = card('Nazgul')
-    const exceptions = { unlimited: new Set<OracleId>(), limited: new Map([[oracleId('Nazgul'), 9]]) }
-    const under = makeDeck(['Krenko'], Array.from({ length: 9 }, () => 'Nazgul'))
-    const over = makeDeck(['Krenko'], Array.from({ length: 10 }, () => 'Nazgul'))
+    const exceptions = {
+      unlimited: new Set<OracleId>(),
+      limited: new Map([[oracleId('Nazgul'), 9]]),
+    }
+    const under = makeDeck(
+      ['Krenko'],
+      Array.from({ length: 9 }, () => 'Nazgul'),
+    )
+    const over = makeDeck(
+      ['Krenko'],
+      Array.from({ length: 10 }, () => 'Nazgul'),
+    )
     const info = new Map([[oracleId('Krenko'), commander]])
-    expect(validateDeck(under, cardMap(cmdr, nazgul), info, exceptions).problems.some((p) => p.kind === 'not-singleton')).toBe(false)
-    expect(validateDeck(over, cardMap(cmdr, nazgul), info, exceptions).problems.some((p) => p.kind === 'not-singleton')).toBe(true)
+    expect(
+      validateDeck(under, cardMap(cmdr, nazgul), info, exceptions).problems.some(
+        (p) => p.kind === 'not-singleton',
+      ),
+    ).toBe(false)
+    expect(
+      validateDeck(over, cardMap(cmdr, nazgul), info, exceptions).problems.some(
+        (p) => p.kind === 'not-singleton',
+      ),
+    ).toBe(true)
   })
 })
 
 describe('partnershipAllowed', () => {
-  const c = (id: string, rule: CommanderInfo['partnerRule']) => ({ oracleId: oracleId(id), partnerRule: rule })
+  const c = (id: string, rule: CommanderInfo['partnerRule']) => ({
+    oracleId: oracleId(id),
+    partnerRule: rule,
+  })
 
   it('allows two Partner commanders', () => {
-    expect(partnershipAllowed(c('a', { kind: 'partner' }), c('b', { kind: 'partner' })).allowed).toBe(true)
+    expect(
+      partnershipAllowed(c('a', { kind: 'partner' }), c('b', { kind: 'partner' })).allowed,
+    ).toBe(true)
   })
 
   it('allows Partner With only when the cards name each other', () => {
@@ -193,11 +253,16 @@ describe('partnershipAllowed', () => {
   })
 
   it('allows Friends Forever with Friends Forever', () => {
-    expect(partnershipAllowed(c('a', { kind: 'friends-forever' }), c('b', { kind: 'friends-forever' })).allowed).toBe(true)
+    expect(
+      partnershipAllowed(c('a', { kind: 'friends-forever' }), c('b', { kind: 'friends-forever' }))
+        .allowed,
+    ).toBe(true)
   })
 
   it('allows a Background with a plain commander', () => {
-    expect(partnershipAllowed(c('a', { kind: 'none' }), c('b', { kind: 'background' })).allowed).toBe(true)
+    expect(
+      partnershipAllowed(c('a', { kind: 'none' }), c('b', { kind: 'background' })).allowed,
+    ).toBe(true)
   })
 
   it('refuses a plain pair, and says why', () => {
@@ -207,7 +272,9 @@ describe('partnershipAllowed', () => {
   })
 
   it('refuses Partner paired with Friends Forever', () => {
-    expect(partnershipAllowed(c('a', { kind: 'partner' }), c('b', { kind: 'friends-forever' })).allowed).toBe(false)
+    expect(
+      partnershipAllowed(c('a', { kind: 'partner' }), c('b', { kind: 'friends-forever' })).allowed,
+    ).toBe(false)
   })
 })
 
@@ -264,8 +331,19 @@ describe('loadBracketRules', () => {
 
   it('rejects an unknown permission value', () => {
     const bad = {
-      sourceUrl: 'x', retrievedAt: 'y',
-      brackets: [{ bracket: 1, name: 'B1', gameChangersAllowed: 0, massLandDenial: 'sometimes', extraTurnChaining: 'allowed', twoCardInfinites: 'allowed', tutorDensity: 'low' }],
+      sourceUrl: 'x',
+      retrievedAt: 'y',
+      brackets: [
+        {
+          bracket: 1,
+          name: 'B1',
+          gameChangersAllowed: 0,
+          massLandDenial: 'sometimes',
+          extraTurnChaining: 'allowed',
+          twoCardInfinites: 'allowed',
+          tutorDensity: 'low',
+        },
+      ],
       gameChangers: [],
     } as RawBracketData
     const result = loadBracketRules(bad)
@@ -275,8 +353,19 @@ describe('loadBracketRules', () => {
 
   it('rejects a file missing brackets', () => {
     const short = {
-      sourceUrl: 'x', retrievedAt: 'y',
-      brackets: [{ bracket: 1, name: 'B1', gameChangersAllowed: 0, massLandDenial: 'allowed', extraTurnChaining: 'allowed', twoCardInfinites: 'allowed', tutorDensity: 'low' }],
+      sourceUrl: 'x',
+      retrievedAt: 'y',
+      brackets: [
+        {
+          bracket: 1,
+          name: 'B1',
+          gameChangersAllowed: 0,
+          massLandDenial: 'allowed',
+          extraTurnChaining: 'allowed',
+          twoCardInfinites: 'allowed',
+          tutorDensity: 'low',
+        },
+      ],
       gameChangers: [],
     } as RawBracketData
     const result = loadBracketRules(short)

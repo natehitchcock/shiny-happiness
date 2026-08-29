@@ -34,9 +34,15 @@ scope (files it may touch), explicit dependencies, and a definition of done.
                                                                                LEGAL-01
 ```
 
-`FOUND-01`, `DOM-01` and `DOM-02` are **merged** — the monorepo, toolchain, CI,
-entity types and combo degree all exist. The feature the product rests on is
-built and tested; everything else is assembly.
+**`packages/domain` is complete.** Every pure task — `DOM-01` through `DOM-09` —
+is merged, along with `FOUND-01`. That is the shared contract doc 09 §9.2
+describes: entity types, combo degree and its incremental patch, role derivation,
+archetype targets, legality, composition analysis, the candidate query language,
+the grouping and scoring engine, and decklist import/export. 254 tests, no IO,
+buildable and testable with zero infrastructure.
+
+What remains needs something the domain layer deliberately does not: a database,
+a browser, or an answer from a third party.
 
 Everything under `DOM-*` and `UI-*` can start immediately and runs fully parallel
 with the data work. That is the point of the pure-domain rule: no domain task
@@ -59,13 +65,13 @@ against their interfaces; nothing depending on an unanswered question ships.
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DOM-01` | ✅ **Done.** Entity types per doc 02, branded ids, exhaustive discriminated unions, `assertNever`, role precedence | FOUND-01 | ✅ Types exported; no `any`; typecheck green |
 | `DOM-02` | ✅ **Done.** Combo index, `comboDegree`, `nearCombos`, `annotateCombos`, `deckCombos`, `candidatesAffectedBy` — exactly per doc 02 §2.3 | DOM-01 | ✅ 29 tests covering the shared-pieces case, the two-separate-combos case, and degenerate inputs (empty combo, empty pool, empty accepted set, duplicate ids, duplicate pieces, already-accepted candidate). Mutation-tested: four deliberate breaks to the definition are each caught |
-| `DOM-03` | Incremental degree patching (doc 05 §5.8)                                                                                            | DOM-02                  | Property test: incremental result ≡ full recompute, over randomised accept/exclude sequences                                                                                                                                              |
-| `DOM-04` | Role derivation: heuristics + curated override table + precedence                                                                    | DOM-01                  | ≥ 95% agreement with a 300-card hand-labelled fixture set                                                                                                                                                                                 |
-| `DOM-05` | Grouping + scoring engine (doc 05 §5.3, §5.6)                                                                                        | DOM-02, DOM-04          | Deterministic; golden-file tests over 5 fixture decks; every output carries non-empty `reasons`                                                                                                                                           |
-| `DOM-06` | Bracket rules, legality validation, composition targets over `CompositionDimension`                                                  | DOM-01, DATA-05, DOM-09 | Legality tests incl. colour identity, partners, singleton exceptions                                                                                                                                                                      |
-| `DOM-09` | Archetype definitions, target vectors, 70/30 hybrid blending, `assessArchetype` (doc 14)                                             | DOM-01, DOM-04          | Blend rounds to whole cards; assessment deterministic and reports its drivers; every archetype row covered by a fixture deck                                                                                                              |
-| `DOM-08` | Candidate query language: lexer, parser, evaluator, `formatQuery`, `describeQuery` (doc 13 §13.2–13.3)                               | DOM-01, DOM-04          | Property test: `formatQuery(parse(s))` idempotent; partial parses usable; unknown field errors with position and suggestion; **no regex support**                                                                                         |
-| `DOM-07` | Decklist parse **and** format, all supported formats, format sniffing, name resolution with a confidence floor (doc 15 §15.2, §15.6) | DOM-01                  | Fixtures from every supported source plus split cards, MDFCs, adventures, accented names, CRLF, trailing sideboard, no commander marker; unresolved lines reported, never thrown; below the confidence floor it asks rather than guessing |
+| `DOM-03` | ✅ **Done.** Incremental degree patching (doc 05 §5.8) | DOM-02                  | Property test: incremental result ≡ full recompute, over randomised accept/exclude sequences                                                                                                                                              |
+| `DOM-04` | ✅ **Done.** Role derivation: override → curated table → oracle-text heuristics | DOM-01                  | ≥ 95% agreement with a 300-card hand-labelled fixture set                                                                                                                                                                                 |
+| `DOM-05` | ✅ **Done.** Grouping + scoring engine (doc 05 §5.3, §5.6) | DOM-02, DOM-04          | Deterministic; golden-file tests over 5 fixture decks; every output carries non-empty `reasons`                                                                                                                                           |
+| `DOM-06` | ✅ **Done.** Commander legality, composition analysis, bracket-rules loader | DOM-01, DATA-05, DOM-09 | Legality tests incl. colour identity, partners, singleton exceptions                                                                                                                                                                      |
+| `DOM-09` | ✅ **Done.** Archetype vectors, 70/30 blending, assessArchetype | DOM-01, DOM-04          | Blend rounds to whole cards; assessment deterministic and reports its drivers; every archetype row covered by a fixture deck                                                                                                              |
+| `DOM-08` | ✅ **Done.** Candidate query: lexer, parser, evaluator, formatQuery, describeQuery, toChips | DOM-01, DOM-04          | Property test: `formatQuery(parse(s))` idempotent; partial parses usable; unknown field errors with position and suggestion; **no regex support**                                                                                         |
+| `DOM-07` | ✅ **Done.** Decklist parse + format, all supported formats, confidence-floored name resolution | DOM-01                  | Fixtures from every supported source plus split cards, MDFCs, adventures, accented names, CRLF, trailing sideboard, no commander marker; unresolved lines reported, never thrown; below the confidence floor it asks rather than guessing |
 
 ## 11.4 Data and ingestion
 
@@ -137,22 +143,31 @@ against their interfaces; nothing depending on an unanswered question ships.
 
 ## 11.8 What to pick up next
 
-`FOUND-01`, `DOM-01` and `DOM-02` are merged. These five can start now, in
-parallel, with no file conflicts and no ordering between them:
+The domain layer is done, so everything below is now unblocked in its own right.
 
-1. `DOM-03` — incremental degree patching, on top of `candidatesAffectedBy`,
-   which `DOM-02` already provides. The property test (incremental ≡ full
-   recompute) is the whole task.
-2. `DOM-04` — role derivation. `DOM-05`, `DOM-08` and `DOM-09` all need it, so
-   it is the next bottleneck.
-3. `FOUND-02` → `UI-01` — design tokens and the four card representations.
-4. `DB-01` — schema and migrations; `Combo` and `Card` types are settled now.
-5. `DOM-07` — the decklist parser; self-contained and fixture-driven.
+**Needs a browser, not a compiler — and blocks deployment of all ingestion:**
 
-And the one that needs a browser rather than a compiler:
+1. `DATA-01`, `DATA-02`, `DATA-03`, `DATA-05` — the terms questions in
+   [ADR-0006](adr/0006-data-source-terms-verification.md). `DATA-03`'s EDHREC
+   permission request should go out first; the reply time is outside our control.
+   Until `DATA-05` is answered, `brackets/rules.data.json` stays unpopulated and
+   the bracket loader correctly refuses to assert a verdict.
 
-6. `DATA-01` + `DATA-02` + `DATA-05` — the terms questions in
-   [ADR-0006](adr/0006-data-source-terms-verification.md). These block *deployment*
-   of anything that ingests, so the sooner they are answered the better.
-   `DATA-03` (the EDHREC permission request) should go out now — it is one email
-   and the reply time is outside our control.
+**Needs infrastructure:**
+
+2. `DB-01` — schema and migrations. Every type it must persist is settled.
+3. `ING-01`, `ING-02` — Scryfall and Spellbook ingest, once `DATA-01`/`02` land.
+4. `API-01` onward — the HTTP surface. `packages/domain` already provides the
+   whole computation; the API is transport and persistence around it.
+
+**Needs a frontend toolchain:**
+
+5. `FOUND-02` → `UI-01` — design tokens and the four card representations.
+   `WEB-01` also converts `apps/web` from `tsc` to Vite.
+6. `WEB-02` onward — the workspace, per docs 06–08.
+
+**Worth doing regardless:**
+
+7. Grow `DOM-04`'s curated role-override table and build the 300-card labelled
+   fixture set its DoD asks for. That needs real Scryfall data, so it follows
+   `ING-01` — the engine and its pattern tests are already in place.

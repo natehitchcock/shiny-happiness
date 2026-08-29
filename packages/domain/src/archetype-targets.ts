@@ -22,25 +22,102 @@ import type { Role } from './role.js'
 type Ideals = Partial<Record<Role, number>> & { readonly creature?: number }
 
 const IDEALS: Record<ArchetypeKey, Ideals> = {
-  aggro: { land: 34, ramp: 9, draw: 8, 'spot-removal': 7, 'board-wipe': 1, tutor: 2, protection: 4, creature: 32 },
-  midrange: { land: 36, ramp: 11, draw: 9, 'spot-removal': 8, 'board-wipe': 3, tutor: 3, protection: 4, creature: 26 },
-  control: { land: 37, ramp: 11, draw: 12, 'spot-removal': 12, 'board-wipe': 5, tutor: 3, protection: 5, creature: 14 },
-  combo: { land: 34, ramp: 13, draw: 10, 'spot-removal': 6, 'board-wipe': 1, tutor: 8, protection: 7, creature: 20 },
-  ramp: { land: 38, ramp: 17, draw: 9, 'spot-removal': 6, 'board-wipe': 3, tutor: 3, protection: 4, creature: 22 },
+  aggro: {
+    land: 34,
+    ramp: 9,
+    draw: 8,
+    'spot-removal': 7,
+    'board-wipe': 1,
+    tutor: 2,
+    protection: 4,
+    creature: 32,
+  },
+  midrange: {
+    land: 36,
+    ramp: 11,
+    draw: 9,
+    'spot-removal': 8,
+    'board-wipe': 3,
+    tutor: 3,
+    protection: 4,
+    creature: 26,
+  },
+  control: {
+    land: 37,
+    ramp: 11,
+    draw: 12,
+    'spot-removal': 12,
+    'board-wipe': 5,
+    tutor: 3,
+    protection: 5,
+    creature: 14,
+  },
+  combo: {
+    land: 34,
+    ramp: 13,
+    draw: 10,
+    'spot-removal': 6,
+    'board-wipe': 1,
+    tutor: 8,
+    protection: 7,
+    creature: 20,
+  },
+  ramp: {
+    land: 38,
+    ramp: 17,
+    draw: 9,
+    'spot-removal': 6,
+    'board-wipe': 3,
+    tutor: 3,
+    protection: 4,
+    creature: 22,
+  },
   aristocrats: {
-    land: 35, ramp: 10, draw: 9, 'spot-removal': 7, 'board-wipe': 2, tutor: 4, protection: 4, creature: 30,
-    'sac-outlet': 5, recursion: 7,
+    land: 35,
+    ramp: 10,
+    draw: 9,
+    'spot-removal': 7,
+    'board-wipe': 2,
+    tutor: 4,
+    protection: 4,
+    creature: 30,
+    'sac-outlet': 5,
+    recursion: 7,
   },
   voltron: {
-    land: 36, ramp: 10, draw: 8, 'spot-removal': 8, 'board-wipe': 2, tutor: 5, protection: 10, creature: 12,
-    equipment: 8, aura: 4, evasion: 6,
+    land: 36,
+    ramp: 10,
+    draw: 8,
+    'spot-removal': 8,
+    'board-wipe': 2,
+    tutor: 5,
+    protection: 10,
+    creature: 12,
+    equipment: 8,
+    aura: 4,
+    evasion: 6,
   },
   tokens: {
-    land: 35, ramp: 10, draw: 9, 'spot-removal': 7, 'board-wipe': 2, tutor: 3, protection: 5, creature: 24,
-    'token-maker': 14, anthem: 6,
+    land: 35,
+    ramp: 10,
+    draw: 9,
+    'spot-removal': 7,
+    'board-wipe': 2,
+    tutor: 3,
+    protection: 5,
+    creature: 24,
+    'token-maker': 14,
+    anthem: 6,
   },
   stax: {
-    land: 35, ramp: 12, draw: 8, 'spot-removal': 8, 'board-wipe': 3, tutor: 5, protection: 5, creature: 16,
+    land: 35,
+    ramp: 12,
+    draw: 8,
+    'spot-removal': 8,
+    'board-wipe': 3,
+    tutor: 5,
+    protection: 5,
+    creature: 16,
     stax: 12,
   },
 }
@@ -65,7 +142,9 @@ const toTarget = (dimension: CompositionDimension, ideal: number): CompositionTa
   }
 }
 
-const dimensionsOf = (ideals: Ideals): Map<string, { dim: CompositionDimension; ideal: number }> => {
+const dimensionsOf = (
+  ideals: Ideals,
+): Map<string, { dim: CompositionDimension; ideal: number }> => {
   const out = new Map<string, { dim: CompositionDimension; ideal: number }>()
   for (const [key, value] of Object.entries(ideals)) {
     if (value === undefined) continue
@@ -166,9 +245,7 @@ export interface ArchetypeAssessment {
  * it. Reported as information — never auto-applied. The user's stated plan is the
  * plan, and a tool that silently rewrites your intent is one you stop trusting.
  */
-export const assessArchetype = (
-  counts: ReadonlyMap<string, number>,
-): ArchetypeAssessment => {
+export const assessArchetype = (counts: ReadonlyMap<string, number>): ArchetypeAssessment => {
   const distances = {} as Record<ArchetypeKey, number>
   let best: ArchetypeKey = 'midrange'
   let bestDistance = Number.POSITIVE_INFINITY

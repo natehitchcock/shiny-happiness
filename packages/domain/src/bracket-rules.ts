@@ -63,7 +63,13 @@ export const loadBracketRules = (
     if (entry.bracket < 1 || entry.bracket > 5 || !Number.isInteger(entry.bracket)) {
       return err({ kind: 'malformed', message: `bracket ${entry.bracket} is not 1–5` })
     }
-    const { gameChangersAllowed, massLandDenial, extraTurnChaining, twoCardInfinites, tutorDensity } = entry
+    const {
+      gameChangersAllowed,
+      massLandDenial,
+      extraTurnChaining,
+      twoCardInfinites,
+      tutorDensity,
+    } = entry
     if (
       gameChangersAllowed === null ||
       massLandDenial === null ||

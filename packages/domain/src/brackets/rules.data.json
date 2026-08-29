@@ -15,11 +15,51 @@
   "sourceUrl": null,
   "retrievedAt": null,
   "brackets": [
-    { "bracket": 1, "name": "Exhibition", "gameChangersAllowed": null, "massLandDenial": null, "extraTurnChaining": null, "twoCardInfinites": null, "tutorDensity": null },
-    { "bracket": 2, "name": "Core", "gameChangersAllowed": null, "massLandDenial": null, "extraTurnChaining": null, "twoCardInfinites": null, "tutorDensity": null },
-    { "bracket": 3, "name": "Upgraded", "gameChangersAllowed": null, "massLandDenial": null, "extraTurnChaining": null, "twoCardInfinites": null, "tutorDensity": null },
-    { "bracket": 4, "name": "Optimized", "gameChangersAllowed": null, "massLandDenial": null, "extraTurnChaining": null, "twoCardInfinites": null, "tutorDensity": null },
-    { "bracket": 5, "name": "cEDH", "gameChangersAllowed": null, "massLandDenial": null, "extraTurnChaining": null, "twoCardInfinites": null, "tutorDensity": null }
+    {
+      "bracket": 1,
+      "name": "Exhibition",
+      "gameChangersAllowed": null,
+      "massLandDenial": null,
+      "extraTurnChaining": null,
+      "twoCardInfinites": null,
+      "tutorDensity": null
+    },
+    {
+      "bracket": 2,
+      "name": "Core",
+      "gameChangersAllowed": null,
+      "massLandDenial": null,
+      "extraTurnChaining": null,
+      "twoCardInfinites": null,
+      "tutorDensity": null
+    },
+    {
+      "bracket": 3,
+      "name": "Upgraded",
+      "gameChangersAllowed": null,
+      "massLandDenial": null,
+      "extraTurnChaining": null,
+      "twoCardInfinites": null,
+      "tutorDensity": null
+    },
+    {
+      "bracket": 4,
+      "name": "Optimized",
+      "gameChangersAllowed": null,
+      "massLandDenial": null,
+      "extraTurnChaining": null,
+      "twoCardInfinites": null,
+      "tutorDensity": null
+    },
+    {
+      "bracket": 5,
+      "name": "cEDH",
+      "gameChangersAllowed": null,
+      "massLandDenial": null,
+      "extraTurnChaining": null,
+      "twoCardInfinites": null,
+      "tutorDensity": null
+    }
   ],
   "gameChangers": []
 }

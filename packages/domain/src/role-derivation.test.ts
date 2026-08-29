@@ -54,7 +54,11 @@ describe('deriveRoles precedence', () => {
 describe('heuristics', () => {
   it.each([
     ['ramp', 'Artifact', '{T}: Add {C}{C}.'],
-    ['ramp', 'Sorcery', 'Search your library for a basic land card, put it onto the battlefield tapped.'],
+    [
+      'ramp',
+      'Sorcery',
+      'Search your library for a basic land card, put it onto the battlefield tapped.',
+    ],
     ['ramp', 'Creature — Goblin', 'When this creature enters, create a Treasure token.'],
     ['draw', 'Instant', 'Draw a card.'],
     ['draw', 'Enchantment', 'Whenever a creature dies, you draw two cards.'],
@@ -63,9 +67,17 @@ describe('heuristics', () => {
     ['spot-removal', 'Sorcery', 'This spell deals 3 damage to any target.'],
     ['board-wipe', 'Sorcery', 'Destroy all creatures.'],
     ['board-wipe', 'Sorcery', 'All creatures get -5/-5 until end of turn.'],
-    ['protection', 'Instant', 'Target creature you control gains hexproof and indestructible until end of turn.'],
+    [
+      'protection',
+      'Instant',
+      'Target creature you control gains hexproof and indestructible until end of turn.',
+    ],
     ['recursion', 'Sorcery', 'Return target creature card from your graveyard to the battlefield.'],
-    ['sac-outlet', 'Enchantment', 'Sacrifice a creature: This enchantment deals 1 damage to any target.'],
+    [
+      'sac-outlet',
+      'Enchantment',
+      'Sacrifice a creature: This enchantment deals 1 damage to any target.',
+    ],
     ['token-maker', 'Sorcery', 'Create two 1/1 red Goblin creature tokens.'],
     ['anthem', 'Enchantment', 'Creatures you control get +1/+1.'],
     ['equipment', 'Artifact — Equipment', 'Equipped creature gets +2/+0.'],
@@ -98,7 +110,9 @@ describe('lands', () => {
   // the first number anyone checks — silently comes up short.
   it('classifies a land as land only, whatever else its text does', () => {
     expect(rolesOf('Land', '{T}: Add {R}.')).toEqual(['land'])
-    expect(rolesOf('Land', '{T}: Add {C}. {2}, {T}, Sacrifice this land: Draw a card.')).toEqual(['land'])
+    expect(rolesOf('Land', '{T}: Add {C}. {2}, {T}, Sacrifice this land: Draw a card.')).toEqual([
+      'land',
+    ])
     expect(rolesOf('Land — Forest', '({T}: Add {G}.)')).toEqual(['land'])
   })
 

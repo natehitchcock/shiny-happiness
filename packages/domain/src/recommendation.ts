@@ -27,7 +27,11 @@ export type Reason =
   | { readonly kind: 'completes-combos'; readonly combos: readonly ComboId[] }
   | { readonly kind: 'near-combo'; readonly combos: readonly ComboId[]; readonly distance: number }
   | { readonly kind: 'edhrec-inclusion'; readonly share: number; readonly synergy: number | null }
-  | { readonly kind: 'fills-deficit'; readonly dimension: CompositionDimension; readonly deficit: number }
+  | {
+      readonly kind: 'fills-deficit'
+      readonly dimension: CompositionDimension
+      readonly deficit: number
+    }
   | { readonly kind: 'curve-fit'; readonly manaValue: number }
   | { readonly kind: 'top-by-type'; readonly type: string; readonly rank: number }
   | { readonly kind: 'bracket-warning'; readonly flag: BracketFlag; readonly detail: string }

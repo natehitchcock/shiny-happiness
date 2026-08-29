@@ -140,16 +140,26 @@ describe('findDeficits', () => {
   })
 
   it('flags a count outside the range, not merely off the ideal', () => {
-    const landTarget = targets.find((t) => dimensionKey(t.dimension) === dimensionKey(roleDimension('land')))!
-    const counts = { ...countComposition(deckOf([]), CARDS), byDimension: new Map([[dimensionKey(roleDimension('land')), landTarget.min]]) }
+    const landTarget = targets.find(
+      (t) => dimensionKey(t.dimension) === dimensionKey(roleDimension('land')),
+    )!
+    const counts = {
+      ...countComposition(deckOf([]), CARDS),
+      byDimension: new Map([[dimensionKey(roleDimension('land')), landTarget.min]]),
+    }
     const atMin = findDeficits(counts, [landTarget])[0]!
     expect(atMin.outsideRange).toBe(false)
     expect(atMin.delta).toBeLessThan(0) // below ideal, but inside the band
   })
 
   it('reports a surplus as well as a shortfall', () => {
-    const counts = { ...countComposition(deckOf([]), CARDS), byDimension: new Map([[dimensionKey(roleDimension('ramp')), 30]]) }
-    const rampTarget = targets.find((t) => dimensionKey(t.dimension) === dimensionKey(roleDimension('ramp')))!
+    const counts = {
+      ...countComposition(deckOf([]), CARDS),
+      byDimension: new Map([[dimensionKey(roleDimension('ramp')), 30]]),
+    }
+    const rampTarget = targets.find(
+      (t) => dimensionKey(t.dimension) === dimensionKey(roleDimension('ramp')),
+    )!
     const deficit = findDeficits(counts, [rampTarget])[0]!
     expect(deficit.delta).toBeGreaterThan(0)
     expect(deficit.outsideRange).toBe(true)
@@ -165,9 +175,14 @@ describe('findDeficits', () => {
 describe('shortfalls', () => {
   it('keeps only what the fills-<dimension> groups act on', () => {
     const targets = compositionTargets('midrange', null, { bracket: 3 })
-    const counts = { ...countComposition(deckOf([]), CARDS), byDimension: new Map([[dimensionKey(roleDimension('ramp')), 99]]) }
+    const counts = {
+      ...countComposition(deckOf([]), CARDS),
+      byDimension: new Map([[dimensionKey(roleDimension('ramp')), 99]]),
+    }
     const result = shortfalls(findDeficits(counts, targets))
     expect(result.every((d) => d.delta < 0)).toBe(true)
-    expect(result.some((d) => dimensionKey(d.dimension) === dimensionKey(roleDimension('ramp')))).toBe(false)
+    expect(
+      result.some((d) => dimensionKey(d.dimension) === dimensionKey(roleDimension('ramp'))),
+    ).toBe(false)
   })
 })

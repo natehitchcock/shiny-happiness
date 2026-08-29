@@ -10,10 +10,19 @@ import type { OracleId } from './ids.js'
 
 export type LegalityProblem =
   | { readonly kind: 'wrong-card-count'; readonly actual: number; readonly expected: 100 }
-  | { readonly kind: 'not-singleton'; readonly oracleId: OracleId; readonly copies: number; readonly allowed: number }
+  | {
+      readonly kind: 'not-singleton'
+      readonly oracleId: OracleId
+      readonly copies: number
+      readonly allowed: number
+    }
   | { readonly kind: 'banned'; readonly oracleId: OracleId }
   | { readonly kind: 'not-legal-in-commander'; readonly oracleId: OracleId }
-  | { readonly kind: 'color-identity'; readonly oracleId: OracleId; readonly offending: readonly Color[] }
+  | {
+      readonly kind: 'color-identity'
+      readonly oracleId: OracleId
+      readonly offending: readonly Color[]
+    }
   | { readonly kind: 'no-commander' }
   | { readonly kind: 'too-many-commanders'; readonly count: number }
   | { readonly kind: 'invalid-commander'; readonly oracleId: OracleId; readonly reason: string }

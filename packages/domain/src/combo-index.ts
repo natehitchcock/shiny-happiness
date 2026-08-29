@@ -60,8 +60,7 @@ export const buildComboIndex = (combos: readonly Combo[]): ComboIndex => {
       continue
     }
 
-    const normalised: Combo =
-      pieces.length === combo.pieces.length ? combo : { ...combo, pieces }
+    const normalised: Combo = pieces.length === combo.pieces.length ? combo : { ...combo, pieces }
 
     byId.set(normalised.id, normalised)
     for (const piece of pieces) {

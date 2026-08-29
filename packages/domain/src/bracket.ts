@@ -27,8 +27,4 @@ export interface BracketRules {
  * user picked the bracket and is allowed to knowingly cross their own line.
  */
 export type BracketFlag =
-  | 'game-changer'
-  | 'mass-land-denial'
-  | 'extra-turn'
-  | 'two-card-infinite'
-  | 'over-budget'
+  'game-changer' | 'mass-land-denial' | 'extra-turn' | 'two-card-infinite' | 'over-budget'
