@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    "types": ["node"]
   },
   "include": ["src/**/*"],
   "exclude": ["src/**/*.test.ts"],
@@ -11,10 +12,10 @@
       "path": "../../packages/domain"
     },
     {
-      "path": "../../packages/clients"
+      "path": "../../packages/db"
     },
     {
-      "path": "../../packages/db"
+      "path": "../../packages/clients"
     }
   ]
 }

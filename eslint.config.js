@@ -99,13 +99,14 @@ export default tseslint.config(
   },
 
   // ---- R3: third-party network access lives only in packages/clients ----
+  //
+  // `packages/domain` is deliberately NOT listed. Flat config REPLACES a rule
+  // rather than merging it, so listing it here overwrote the R1 block's
+  // `no-restricted-globals` — which bans `process` as well as `fetch` — and left
+  // half of R1's guard inert. Domain purity is covered by the R1 block above,
+  // which already bans `fetch`.
   {
-    files: [
-      'apps/**/*.ts',
-      'packages/domain/**/*.ts',
-      'packages/db/**/*.ts',
-      'packages/ui/**/*.ts',
-    ],
+    files: ['apps/**/*.ts', 'packages/db/**/*.ts', 'packages/ui/**/*.ts'],
     rules: {
       'no-restricted-globals': [
         'error',
@@ -119,6 +120,10 @@ export default tseslint.config(
   },
 
   { files: ['**/*.test.ts'], rules: { 'no-console': 'off' } },
+
+  // A CLI's stdout is its product, not a stray debug statement. Only the entry
+  // points, so a stray console.log in a library still warns.
+  { files: ['apps/*/src/main.ts'], rules: { 'no-console': 'off' } },
 
   prettier,
 )

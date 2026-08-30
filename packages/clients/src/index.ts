@@ -1,6 +1,7 @@
 /**
  * @roundtable/clients — third-party source adapters behind one shared rate limiter (AGENTS.md R3, doc 04 §4.0).
  *
- * Implemented by ING-01, ING-02, ING-03. See docs/11-work-breakdown.md.
+ * Scryfall is implemented (ING-01). Spellbook is ING-02. EDHREC is not used and
+ * will not be — see ADR-0008.
  */
-export {}
+export * from './scryfall.js'

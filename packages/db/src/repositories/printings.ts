@@ -40,3 +40,46 @@ export const printingsFor = async (pool: Pool, oracleId: OracleId): Promise<Prin
   )
   return rows.map(toPrinting)
 }
+
+/** See `upsertCards` for why this is jsonb rather than unnest. */
+export const upsertPrintings = async (
+  pool: Pool,
+  printings: readonly Printing[],
+): Promise<number> => {
+  if (printings.length === 0) return 0
+
+  // `ON CONFLICT DO UPDATE` cannot touch the same row twice in one statement.
+  const deduped = [...new Map(printings.map((p) => [p.printingId, p])).values()]
+
+  const payload = deduped.map((p) => ({
+    printing_id: p.printingId,
+    oracle_id: p.oracleId,
+    set_code: p.setCode,
+    set_name: p.setName,
+    collector_number: p.collectorNumber,
+    rarity: p.rarity,
+    image_art_crop: p.imageUris.artCrop === '' ? null : p.imageUris.artCrop,
+    image_normal: p.imageUris.normal === '' ? null : p.imageUris.normal,
+    price_usd: p.priceUsd,
+    reserved: p.reserved,
+  }))
+
+  const { rowCount } = await pool.query(
+    `INSERT INTO printings (printing_id, oracle_id, set_code, set_name, collector_number,
+                            rarity, image_art_crop, image_normal, price_usd, reserved)
+     SELECT printing_id, oracle_id, set_code, set_name, collector_number,
+            rarity, image_art_crop, image_normal, price_usd, reserved
+       FROM jsonb_to_recordset($1::jsonb) AS x(
+         printing_id uuid, oracle_id uuid, set_code text, set_name text,
+         collector_number text, rarity text, image_art_crop text, image_normal text,
+         price_usd numeric(10,2), reserved boolean)
+     ON CONFLICT (printing_id) DO UPDATE SET
+       oracle_id = EXCLUDED.oracle_id, set_code = EXCLUDED.set_code,
+       set_name = EXCLUDED.set_name, collector_number = EXCLUDED.collector_number,
+       rarity = EXCLUDED.rarity, image_art_crop = EXCLUDED.image_art_crop,
+       image_normal = EXCLUDED.image_normal, price_usd = EXCLUDED.price_usd,
+       reserved = EXCLUDED.reserved`,
+    [JSON.stringify(payload)],
+  )
+  return rowCount ?? 0
+}

@@ -18,5 +18,8 @@
   },
   "dependencies": {
     "@roundtable/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0"
   }
 }
