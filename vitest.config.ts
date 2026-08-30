@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
-    include: ['{packages,apps}/*/src/**/*.test.{ts,tsx}'],
+    include: ['{packages,apps}/*/src/**/*.test.{ts,tsx}', 'api/**/*.test.ts'],
     // No network in tests (AGENTS.md §3). Third-party responses come from
     // recorded fixtures in packages/clients/fixtures/.
     //

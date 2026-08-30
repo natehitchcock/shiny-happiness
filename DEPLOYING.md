@@ -98,6 +98,46 @@ nothing can get them back. Export is the only backup.
 migration racing several cold-starting functions is a bad way to find out that
 two of them ran it. Run `migrate up` yourself, before the deploy that needs it.
 
+## Diagnosing a broken deployment
+
+`FUNCTION_INVOCATION_FAILED` is what the platform reports when the function
+fails to *load*. It carries no message, so the first thing to establish is
+whether the code or the environment is at fault:
+
+```bash
+curl -H "x-vercel-protection-bypass: <secret>"      "https://<deployment>/api/v1/decks"
+```
+
+- **`{"title":"API unavailable","detail":"DATABASE_URL is not set…"}`** — the
+  function loaded and told you what is missing. Set it and redeploy.
+- **`FUNCTION_INVOCATION_FAILED` still** — the module itself failed to load,
+  which the handler cannot catch because the imports are static. That is a
+  bundling problem, not a configuration one: check that the build ran
+  `pnpm build` before the web build, so `apps/api/dist` and `packages/*/dist`
+  exist for the function to import.
+- **`{"items":[]}`** — everything works; the database is simply empty. Run the
+  ingest (step 4).
+
+`api/handler.test.ts` runs the same handler locally, so "the imports resolve and
+the env-missing path answers" is checked on every `pnpm test` rather than only
+in production.
+
+## Custom domain
+
+Adding a domain is not just a DNS change. Two other things bite:
+
+- **Deployment Protection must be off** for the domain to be publicly usable. A
+  site behind Vercel Authentication is not public, whatever its address.
+- **Vercel issues the certificate itself**, once the domain resolves to it. Until
+  then a browser reaching the old host over HTTPS gets
+  `ERR_SSL_UNRECOGNIZED_NAME_ALERT` — a TLS handshake to a server holding no
+  certificate for that name. That error means "pointing at the wrong place",
+  never "certificate not issued yet".
+
+Take the exact records from Vercel's Domains page when you add the domain. They
+change, and a value copied from anywhere else is a value that will be wrong
+eventually.
+
 ## Local development is unchanged
 
 ```bash
