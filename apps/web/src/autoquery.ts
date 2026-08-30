@@ -10,15 +10,15 @@ import { useEffect, useRef, useState } from 'react'
  * the middle setting. You still get to finish typing; you do not have to know
  * that a button exists.
  *
- * Four seconds. Long enough to keep typing a card name through, short enough
- * that waiting it out is not a decision — at ten it was, and people sat looking
- * at a ring instead of working.
+ * Two seconds. Long enough to keep typing a card name through, short enough
+ * that waiting it out is never a decision — at ten it plainly was, and people
+ * sat watching a ring instead of working.
  *
  * Still not a debounce: a debounce fires ~400 ms after the last keystroke and
  * would defeat the point of having made querying explicit. This is a safety net
  * for someone who did not notice the button.
  */
-export const AUTO_QUERY_MS = 4_000
+export const AUTO_QUERY_MS = 2_000
 
 export interface AutoQueryState {
   readonly enabled: boolean

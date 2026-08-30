@@ -339,7 +339,25 @@ const WANTS: readonly Rule[] = [
   },
   { tag: 'treasure', test: /\bwhenever .{0,30}Treasure .{0,20}sacrificed\b/i },
   { tag: 'landfall', test: /\bLandfall\b|\bwhenever a land .{0,20}enters\b/i },
-  { tag: 'plus1-counter', test: /\bproliferate\b|\bwhenever .{0,40}\+1\/\+1 counter/i },
+  /*
+   * Wanting counters is caring about ones that already exist.
+   *
+   * This rule used to include `whenever .{0,40}\+1\/\+1 counter`, which is the
+   * PRODUCER's phrasing — "Whenever this attacks, put a +1/+1 counter on it".
+   * It matched 460 cards, 429 of which also produced counters, so the app
+   * paired two counter-makers and announced one as the other's payoff. A
+   * direction inversion is worse than a missing tag: it is a confident
+   * recommendation pointing the wrong way.
+   *
+   * What survives is the vocabulary of USING counters rather than making them:
+   * proliferate adds to what is there, removing one spends it, and "with a
+   * +1/+1 counter on it" is a condition. "enters with" is deliberately not
+   * matched — a card making its own is the produce side.
+   */
+  {
+    tag: 'plus1-counter',
+    test: /\bproliferate\b|\bremove (a|one|two|three|X|\d+) \+1\/\+1 counter|\+1\/\+1 counter is put on|\btarget [a-z ]{0,25}with (a |one or more )?\+1\/\+1 counters? on|\bcreatures? [a-z ]{0,25}with \+1\/\+1 counters? on (them|it)/i,
+  },
   { tag: 'attack-trigger', test: /\bwhenever .{0,30}attacks\b/i },
   // A combat damage trigger is an attack trigger with a harder condition: it
   // only ever fires because the creature attacked. It wants the same evasion,

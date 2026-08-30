@@ -2628,6 +2628,13 @@ export const Workspace = ({
                         aria-label={`Preview ${cards.get(item.oracleId)?.name ?? 'card'}`}
                       >
                         {cards.get(item.oracleId)?.name ?? 'Loading…'}
+                        {/* The type line, in the same dim grey the preview uses.
+                            A name alone does not say whether a suggestion is a
+                            creature or a land, which is the first thing anyone
+                            checks before deciding on it. */}
+                        {cards.get(item.oracleId)?.typeLine === undefined ? null : (
+                          <span className="row-type">{cards.get(item.oracleId)?.typeLine}</span>
+                        )}
                       </button>
                       <span className="reasons">
                         {item.reasons.map((r, i) =>

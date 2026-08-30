@@ -672,3 +672,49 @@ describe('a creature that pays off its own death', () => {
     expect(derive('Creature — Bear', '')).toEqual({ produces: [], wants: [] })
   })
 })
+
+describe('plus1-counter direction', () => {
+  const derive = (typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({
+      oracleId: oracleId('00000000-0000-4000-8000-000000000003'),
+      typeLine,
+      oracleText,
+    })
+
+  it('does not call a counter-MAKER a counter payoff', () => {
+    // The inversion. "Whenever this attacks, put a +1/+1 counter on it" is the
+    // producer's phrasing, and matching it as a want made the app pair two
+    // counter-makers and announce one as the other's payoff — 429 cards of it.
+    const maker = derive(
+      'Creature — Beast',
+      'Whenever this creature attacks, put a +1/+1 counter on it.',
+    )
+    expect(maker.produces).toContain('plus1-counter')
+    expect(maker.wants).not.toContain('plus1-counter')
+  })
+
+  it('does not read "enters with a +1/+1 counter" as wanting them', () => {
+    const enters = derive(
+      'Creature — Construct',
+      'This creature enters with a +1/+1 counter on it.',
+    )
+    expect(enters.produces).toContain('plus1-counter')
+    expect(enters.wants).not.toContain('plus1-counter')
+  })
+
+  it('reads proliferate as wanting them', () => {
+    expect(derive('Instant', 'Proliferate.').wants).toContain('plus1-counter')
+  })
+
+  it('reads spending a counter as wanting them', () => {
+    expect(
+      derive('Creature — Human', 'Remove a +1/+1 counter from this creature: Draw a card.').wants,
+    ).toContain('plus1-counter')
+  })
+
+  it('reads a counter as a CONDITION as wanting them', () => {
+    expect(
+      derive('Instant', 'Target creature with a +1/+1 counter on it gains flying.').wants,
+    ).toContain('plus1-counter')
+  })
+})

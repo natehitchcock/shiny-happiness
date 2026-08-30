@@ -1177,6 +1177,18 @@ select {
 .empty-search .note {
   margin: 0 0 4px;
 }
+/* The type line beside a suggestion's name, matching the preview's grey. It
+   truncates rather than wrapping — the name is what the row is for. */
+.row-type {
+  margin-left: var(--step);
+  color: var(--parchment-dim);
+  font-size: 0.68rem;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pt {
   margin-left: var(--step);
   padding: 0 5px;

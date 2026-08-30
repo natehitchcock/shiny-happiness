@@ -32,7 +32,7 @@ afterEach(() => {
  * server was, so a bar that arrived early does not jump. `ASSUMED_QUERY_MS` is
  * private to the module, so this is its budget plus slack rather than an import.
  */
-const BAR_TO_HALFWAY = 900
+const BAR_TO_HALFWAY = 500
 
 const advance = (ms: number): void => {
   // In 16 ms steps, the way the interval actually fires — a single jump would
@@ -81,7 +81,7 @@ const setup = (): { hook: ReturnType<typeof renderHook>; harness: Harness } => {
 }
 
 describe('the settle is measured from when the answer lands', () => {
-  it('gives a slow query its full three seconds afterwards', async () => {
+  it('gives a slow query its full settle afterwards', async () => {
     // The bug: a query slower than the settle used to leave nothing of it, so
     // the list moved the instant the answer arrived — on exactly the queries
     // after which it moves the most.
@@ -101,14 +101,14 @@ describe('the settle is measured from when the answer lands', () => {
     advance(32)
     expect(result.current.phase).toBe('settling')
 
-    // Still nothing applied one second in.
-    advance(1_000)
+    // Still nothing applied most of the way through — expressed as a fraction
+    // of SETTLE_MS so changing that constant needs no edit here.
+    advance(SETTLE_MS * 0.5)
     expect(harness.applied).toEqual([])
-    // Nor at two.
-    advance(1_000)
+    advance(SETTLE_MS * 0.3)
     expect(harness.applied).toEqual([])
-    // The full three, counted from the answer.
-    advance(1_200)
+    // The whole of it, counted from the answer rather than from the request.
+    advance(SETTLE_MS * 0.4)
     expect(harness.applied).toEqual(['RESULT'])
   })
 

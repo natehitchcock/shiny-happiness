@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  *                          bar HOLDS at 50% if it gets there first — it must
  *                          never suggest progress the server has not made.
  *   50% ──▶ 100%  SETTLE   the answer is in hand and deliberately not applied
- *                          for three seconds, so the list does not reshuffle
+ *                          for a moment, so the list does not reshuffle
  *                          under a user who is mid-click. Anything they add in
  *                          this window restarts the cycle instead.
  *
@@ -32,15 +32,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 export type Phase = 'idle' | 'buffering' | 'querying' | 'settling'
 
 /** How long clicks are collected before anything is sent. */
-export const BUFFER_MS = 1_200
+export const BUFFER_MS = 600
 /** How long the answer is held so more can be added before the list moves. */
-export const SETTLE_MS = 3_000
+export const SETTLE_MS = 1_500
 /**
  * Only used to animate 25%→50% before the server answers. A guess at a typical
  * recompute; the bar clamps at 50% regardless, so guessing low is harmless and
  * guessing high just means the bar arrives late.
  */
-const ASSUMED_QUERY_MS = 700
+const ASSUMED_QUERY_MS = 350
 
 const BUFFER_END = 0.25
 const QUERY_END = 0.5

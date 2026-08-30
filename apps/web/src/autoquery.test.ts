@@ -31,14 +31,14 @@ describe('shouldWait', () => {
 
 describe('secondsLeft', () => {
   it('starts at the full countdown and ends at zero', () => {
-    expect(secondsLeft(0)).toBe(4)
+    expect(secondsLeft(0)).toBe(AUTO_QUERY_MS / 1_000)
     expect(secondsLeft(AUTO_QUERY_MS)).toBe(0)
   })
 
   it('rounds up, so it never shows 0 while there is still time', () => {
     // Showing "0s" for a whole second before anything happens reads as broken.
     expect(secondsLeft(AUTO_QUERY_MS - 500)).toBe(1)
-    expect(secondsLeft(1)).toBe(4)
+    expect(secondsLeft(1)).toBe(AUTO_QUERY_MS / 1_000)
   })
 
   it('never goes negative if a tick lands late', () => {
@@ -70,12 +70,14 @@ describe('useAutoQuery', () => {
       ({ draft }) => useAutoQuery({ enabled: true, draft, committed: '' }, onFire),
       { initialProps: { draft: 'mv' } },
     )
-    act(() => void vi.advanceTimersByTime(3_500))
+    // Nearly the whole wait, twice — timings are fractions of the constant so
+    // changing it needs no edit here.
+    act(() => void vi.advanceTimersByTime(AUTO_QUERY_MS * 0.9))
     rerender({ draft: 'mv<=3' })
-    act(() => void vi.advanceTimersByTime(3_500))
+    act(() => void vi.advanceTimersByTime(AUTO_QUERY_MS * 0.9))
     expect(onFire).not.toHaveBeenCalled()
 
-    act(() => void vi.advanceTimersByTime(1_000))
+    act(() => void vi.advanceTimersByTime(AUTO_QUERY_MS * 0.2))
     expect(onFire).toHaveBeenCalledTimes(1)
   })
 
@@ -92,7 +94,7 @@ describe('useAutoQuery', () => {
       ({ committed }) => useAutoQuery({ enabled: true, draft: 'mv<=3', committed }, onFire),
       { initialProps: { committed: '' } },
     )
-    act(() => void vi.advanceTimersByTime(2_000))
+    act(() => void vi.advanceTimersByTime(AUTO_QUERY_MS * 0.5))
     // The magnifier was clicked: the draft is now what ran.
     rerender({ committed: 'mv<=3' })
     act(() => void vi.advanceTimersByTime(AUTO_QUERY_MS))
@@ -107,9 +109,9 @@ describe('useAutoQuery', () => {
       ({ n }) => useAutoQuery({ enabled: true, draft: 'mv<=3', committed: '' }, () => onFire(n)),
       { initialProps: { n: 1 } },
     )
-    act(() => void vi.advanceTimersByTime(2_000))
+    act(() => void vi.advanceTimersByTime(AUTO_QUERY_MS * 0.5))
     rerender({ n: 2 })
-    act(() => void vi.advanceTimersByTime(2_100))
+    act(() => void vi.advanceTimersByTime(AUTO_QUERY_MS * 0.6))
     expect(onFire).toHaveBeenCalledTimes(1)
     // And it calls the LATEST callback, not the one captured at the start.
     expect(onFire).toHaveBeenCalledWith(2)
@@ -124,13 +126,13 @@ describe('useAutoQuery', () => {
         committed = 'mv<=3'
       }),
     )
-    expect(result.current.remaining).toBe(4)
+    expect(result.current.remaining).toBe(AUTO_QUERY_MS / 1_000)
     expect(result.current.active).toBe(true)
 
-    act(() => void vi.advanceTimersByTime(3_000))
+    act(() => void vi.advanceTimersByTime(AUTO_QUERY_MS - 1_000))
     expect(result.current.remaining).toBe(1)
 
-    act(() => void vi.advanceTimersByTime(1_500))
+    act(() => void vi.advanceTimersByTime(AUTO_QUERY_MS))
     expect(result.current.remaining).toBeNull()
 
     rerender()
