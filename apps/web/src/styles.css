@@ -1177,6 +1177,16 @@ select {
 .empty-search .note {
   margin: 0 0 4px;
 }
+.pt {
+  margin-left: var(--step);
+  padding: 0 5px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--parchment);
+}
+
 .name-matches {
   padding: var(--step) 0 4px;
 }

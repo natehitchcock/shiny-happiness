@@ -117,7 +117,17 @@ export interface ScryfallCard {
   readonly layout?: string
   readonly prices?: Record<string, string | null>
   readonly image_uris?: Record<string, string>
-  readonly card_faces?: { mana_cost?: string | null; oracle_text?: string; type_line?: string }[]
+  readonly power?: string
+  readonly toughness?: string
+  readonly loyalty?: string
+  readonly card_faces?: {
+    mana_cost?: string | null
+    oracle_text?: string
+    type_line?: string
+    power?: string
+    toughness?: string
+    loyalty?: string
+  }[]
 }
 
 /**
@@ -250,6 +260,19 @@ export const toCard = (
   const oracleText =
     raw.oracle_text ?? (raw.card_faces ?? []).map((f) => f.oracle_text ?? '').join('\n') ?? ''
 
+  /*
+   * A double-faced card carries power on its FACES, not on the card.
+   *
+   * Taking `raw.power` alone would report every transforming creature as having
+   * none — and "no power" is what the app renders for a non-creature, so a
+   * werewolf would silently read as a sorcery. The front face is the printed
+   * side, so it wins; the card-level value is the normal case.
+   */
+  const face = (raw.card_faces ?? [])[0]
+  const power = raw.power ?? face?.power ?? null
+  const toughness = raw.toughness ?? face?.toughness ?? null
+  const loyalty = raw.loyalty ?? face?.loyalty ?? null
+
   const id = oracleId(raw.oracle_id)
   const legality = raw.legalities?.['commander'] ?? 'not_legal'
 
@@ -260,6 +283,9 @@ export const toCard = (
 
   return {
     oracleId: id,
+    power,
+    toughness,
+    loyalty,
     name: raw.name,
     manaCost: raw.mana_cost ?? raw.card_faces?.[0]?.mana_cost ?? null,
     manaValue: raw.cmc ?? 0,

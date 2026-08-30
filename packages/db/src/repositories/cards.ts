@@ -11,6 +11,9 @@ interface CardRow {
   readonly type_line: string
   readonly types: string[]
   readonly oracle_text: string
+  readonly power: string | null
+  readonly toughness: string | null
+  readonly loyalty: string | null
   readonly keywords: string[]
   readonly legality_commander: string
   readonly edhrec_rank: number | null
@@ -20,6 +23,13 @@ interface CardRow {
   readonly universes_beyond: boolean
   readonly synergy_produces: string[]
   readonly synergy_wants: string[]
+}
+
+/** A printed value as an integer, or null if it is not one. */
+const wholeNumber = (value: string | null): number | null => {
+  if (value === null) return null
+  const parsed = Number(value)
+  return Number.isInteger(parsed) ? parsed : null
 }
 
 const toCard = (row: CardRow): Card => ({
@@ -32,6 +42,9 @@ const toCard = (row: CardRow): Card => ({
   typeLine: row.type_line,
   types: row.types as Card['types'],
   oracleText: row.oracle_text,
+  power: row.power,
+  toughness: row.toughness,
+  loyalty: row.loyalty,
   keywords: row.keywords,
   legalities: { commander: row.legality_commander as Card['legalities']['commander'] },
   edhrecRank: row.edhrec_rank,
@@ -69,6 +82,16 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
     type_line: c.typeLine,
     types: c.types,
     oracle_text: c.oracleText,
+    power: c.power,
+    toughness: c.toughness,
+    loyalty: c.loyalty,
+    // The parsed value, or null when the printed one is not a fixed WHOLE
+    // number. `*` and `1+*` are the obvious cases; the one that actually broke
+    // the ingest was `1.5`, from the Un-sets, which is finite and still not
+    // something an integer column will take. Null is what a range query should
+    // exclude either way.
+    power_num: wholeNumber(c.power),
+    toughness_num: wholeNumber(c.toughness),
     keywords: c.keywords,
     legality_commander: c.legalities.commander,
     edhrec_rank: c.edhrecRank,
@@ -83,17 +106,21 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
   const { rowCount } = await pool.query(
     `INSERT INTO cards (
        oracle_id, name, mana_cost, mana_value, color_identity, colors, type_line,
-       types, oracle_text, keywords, legality_commander, edhrec_rank,
+       types, oracle_text, power, toughness, loyalty, power_num, toughness_num,
+       keywords, legality_commander, edhrec_rank,
        default_printing, roles, primary_role, universes_beyond,
        synergy_produces, synergy_wants)
      SELECT oracle_id, name, mana_cost, mana_value, color_identity, colors, type_line,
-            types, oracle_text, keywords, legality_commander, edhrec_rank,
+            types, oracle_text, power, toughness, loyalty, power_num, toughness_num,
+            keywords, legality_commander, edhrec_rank,
             default_printing, roles, primary_role, universes_beyond,
             synergy_produces, synergy_wants
        FROM jsonb_to_recordset($1::jsonb) AS x(
          oracle_id uuid, name text, mana_cost text, mana_value real,
          color_identity char(1)[], colors char(1)[], type_line text, types text[],
-         oracle_text text, keywords text[], legality_commander text,
+         oracle_text text, power text, toughness text, loyalty text,
+         power_num integer, toughness_num integer,
+         keywords text[], legality_commander text,
          edhrec_rank integer, default_printing uuid, roles text[], primary_role text,
          universes_beyond boolean, synergy_produces text[], synergy_wants text[])
      ON CONFLICT (oracle_id) DO UPDATE SET
@@ -101,6 +128,9 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
        mana_value = EXCLUDED.mana_value, color_identity = EXCLUDED.color_identity,
        colors = EXCLUDED.colors, type_line = EXCLUDED.type_line,
        types = EXCLUDED.types, oracle_text = EXCLUDED.oracle_text,
+       power = EXCLUDED.power, toughness = EXCLUDED.toughness,
+       loyalty = EXCLUDED.loyalty, power_num = EXCLUDED.power_num,
+       toughness_num = EXCLUDED.toughness_num,
        keywords = EXCLUDED.keywords, legality_commander = EXCLUDED.legality_commander,
        edhrec_rank = EXCLUDED.edhrec_rank, default_printing = EXCLUDED.default_printing,
        roles = EXCLUDED.roles, primary_role = EXCLUDED.primary_role,

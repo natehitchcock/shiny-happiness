@@ -40,6 +40,18 @@ export interface Card {
   readonly typeLine: string
   readonly types: readonly CardType[]
   readonly oracleText: string
+  /**
+   * Printed power and toughness, as TEXT.
+   *
+   * Magic prints `*`, `1+*` and `?`. A numeric field would have to store null
+   * for those, and a card whose power is `*` would then read as having no power
+   * — a different and wrong claim. Null here means the card genuinely has none:
+   * it is not a creature.
+   */
+  readonly power: string | null
+  readonly toughness: string | null
+  /** Starting loyalty, for planeswalkers. Text for the same reason. */
+  readonly loyalty: string | null
   readonly keywords: readonly string[]
   readonly legalities: { readonly commander: Legality }
   /** Lower is more played overall. Null when Scryfall has no rank. */

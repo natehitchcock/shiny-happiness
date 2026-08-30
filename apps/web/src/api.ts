@@ -13,6 +13,10 @@ export interface Card {
   typeLine: string
   types: string[]
   oracleText: string
+  /** Printed values, as text — Magic prints `*` and `1+*`. */
+  power: string | null
+  toughness: string | null
+  loyalty: string | null
   colorIdentity: string[]
   primaryRole: string
   edhrecRank: number | null

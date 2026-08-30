@@ -93,7 +93,9 @@ const recs = (columns: { query: string; matched: string[] }[]): api.Recommendati
   }) as unknown as api.Recommendations
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  // `clearAllMocks` clears CALLS but leaves implementations in place, so a
+  // never-resolving stub from one test stayed in force for the next.
+  vi.resetAllMocks()
   mocked.getRecommendations.mockResolvedValue(recs([]))
   // A complete Analysis, not a partial cast: the right pane reads a dozen
   // nested fields and a half-built fixture just crashes somewhere else.
@@ -306,7 +308,9 @@ describe('locking a card', () => {
 
   it('shows the lock straight away, without waiting for the server', async () => {
     // The command still goes out — the lock has to survive a reload — but it
-    // does not hold the screen up.
+    // does not hold the screen up. While it is in flight the row shows a
+    // spinner in place of the diamond, so a saved lock is distinguishable from
+    // one still being retried; the confirmed state arrives with the response.
     let release: ((v: unknown) => void) | null = null
     mocked.sendCommands.mockReturnValue(
       new Promise((r) => {
@@ -320,14 +324,24 @@ describe('locking a card', () => {
     await act(async () => {
       screen.getAllByLabelText(/^Lock /)[0]?.click()
     })
-    // Already flipped, with the request still in flight.
-    expect(screen.getAllByLabelText(/^Unlock /).length).toBeGreaterThan(0)
-    release?.({ deck: lockedDeck, results: [] })
+    expect(screen.getAllByLabelText(/^Saving lock for/).length).toBeGreaterThan(0)
+
+    await act(async () => {
+      release?.({
+        deck: { ...lockedDeck, entries: [{ oracleId: 'o1', zone: 'accepted', locked: true }] },
+        results: [],
+      })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(screen.getAllByLabelText(/^Unlock /).length).toBeGreaterThan(0))
   })
 
-  it('puts the lock back if the server refuses it', async () => {
-    // A silently-wrong lock is worse than one that visibly did not take.
-    mocked.sendCommands.mockRejectedValue(new Error('conflict'))
+  it('reconciles against the server when the lock will not save', async () => {
+    // The old version restored the deck it had captured before the click, which
+    // is only right if nothing else changed meanwhile — and an accept batch may
+    // well have landed during the retries. Re-reading gives the real state.
+    mocked.sendCommands.mockRejectedValue(new api.ApiError('nope', 400))
+    mocked.getDeck.mockResolvedValue(lockedDeck)
 
     render(<Workspace deck={lockedDeck} />)
     await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
@@ -336,6 +350,7 @@ describe('locking a card', () => {
       screen.getAllByLabelText(/^Lock /)[0]?.click()
     })
     await waitFor(() => expect(screen.getByText(/lock did not save/)).toBeDefined())
+    expect(mocked.getDeck).toHaveBeenCalled()
     expect(screen.queryAllByLabelText(/^Unlock /)).toHaveLength(0)
   })
 
@@ -343,9 +358,17 @@ describe('locking a card', () => {
     // The regression: a requery reads the deck when it STARTS and writes it
     // back when it lands, so a lock set in between was silently overwritten
     // and the icon sprang back open.
-    mocked.sendCommands.mockReturnValue(
-      new Promise(() => undefined) as ReturnType<typeof api.sendCommands>,
-    )
+    // The lock is CONFIRMED before the recompute is held open, so what is under
+    // test is the recompute overwriting a settled lock — not the pending
+    // overlay, which is covered separately.
+    mocked.sendCommands.mockResolvedValue({
+      deck: {
+        ...lockedDeck,
+        version: 2,
+        entries: [{ oracleId: 'o1', zone: 'accepted', locked: true }],
+      },
+      results: [],
+    } as unknown as Awaited<ReturnType<typeof api.sendCommands>>)
     render(<Workspace deck={lockedDeck} />)
     await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
 
@@ -361,11 +384,13 @@ describe('locking a card', () => {
       screen.getByLabelText(/^Run this filter/).click()
     })
 
-    // Locked while it is in flight.
+    // Locked while the recompute is in flight, and confirmed — the spinner
+    // clears when the server answers, which it does immediately here.
     await act(async () => {
       screen.getAllByLabelText(/^Lock /)[0]?.click()
+      await Promise.resolve()
     })
-    expect(screen.getAllByLabelText(/^Unlock /).length).toBeGreaterThan(0)
+    await waitFor(() => expect(screen.getAllByLabelText(/^Unlock /).length).toBeGreaterThan(0))
 
     // The answer lands, carrying a deck captured before the lock. Its label
     // is distinct so the wait below cannot pass until the pipeline has
@@ -498,5 +523,49 @@ describe('deck options survive the query that follows them', () => {
     expect((screen.getByLabelText(/Exclude Universes Beyond/) as HTMLInputElement).checked).toBe(
       true,
     )
+  }, 20_000)
+})
+
+describe('locking a card clears its cut hint at once', () => {
+  it('drops the hint on the click, not on the next recompute', async () => {
+    // The server omits locked cards from `analysis.cuts`, but that analysis is
+    // only as fresh as the last recompute — and locking deliberately no longer
+    // triggers one. So the hint used to sit there after the click meant to
+    // dismiss it, which is exactly what the lock is for.
+    const withCard: api.Deck = {
+      ...deck,
+      entries: [{ oracleId: 'o1', zone: 'accepted', locked: false }],
+    }
+    mocked.getAnalysis.mockResolvedValue({
+      ...(await mocked.getAnalysis.getMockImplementation()?.('')),
+      counts: { total: 1, byRole: {} },
+      targets: [],
+      cuts: [{ oracleId: 'o1', score: 0.5, reasons: [{ kind: 'no-synergy' }] }],
+      deficits: [],
+      archetype: { declared: 'midrange', assessed: 'midrange', confidence: 0.5 },
+      curve: {
+        averageManaValue: 3,
+        histogram: [0, 0, 0, 0, 0, 0, 0, 0],
+        target: [],
+        locked: [0, 0, 0, 0, 0, 0, 0, 0],
+        deltas: [],
+      },
+      legality: { legal: true, problems: [] },
+      deckCombos: [],
+      prices: { deckTotalUsd: 0, pricedCards: 0, unpricedCards: 0, budget: null },
+      unavailable: [],
+    } as unknown as api.Analysis)
+    mocked.sendCommands.mockReturnValue(
+      new Promise(() => undefined) as ReturnType<typeof api.sendCommands>,
+    )
+
+    render(<Workspace deck={withCard} />)
+    await waitFor(() => expect(screen.getByText('no synergy')).toBeDefined(), { timeout: 5_000 })
+
+    await act(async () => {
+      screen.getAllByLabelText(/^Lock /)[0]?.click()
+    })
+    // Immediately — the send is still in flight and will never resolve.
+    expect(screen.queryByText('no synergy')).toBeNull()
   }, 20_000)
 })

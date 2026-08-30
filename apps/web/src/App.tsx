@@ -878,6 +878,18 @@ const Preview = ({
             <ManaCost cost={shown.manaCost} />
           </span>
         )}
+        {/* Power/toughness for a creature, loyalty for a planeswalker. Printed
+            as text because Magic prints `*` and `1+*`, and a card whose power
+            is `*` has a power — it is simply not a number. */}
+        {shown.power !== null && shown.toughness !== null ? (
+          <span className="pt" aria-label={`power ${shown.power}, toughness ${shown.toughness}`}>
+            {shown.power}/{shown.toughness}
+          </span>
+        ) : shown.loyalty !== null ? (
+          <span className="pt" aria-label={`starting loyalty ${shown.loyalty}`}>
+            {shown.loyalty}
+          </span>
+        ) : null}
       </p>
       {/* Oracle text is the card. Newlines are meaningful — they separate
           abilities — so it is rendered pre-wrapped rather than collapsed. */}
@@ -1001,8 +1013,39 @@ const Curve = ({
   )
 }
 
+/**
+ * Send a command batch, retrying a transient failure.
+ *
+ * Four attempts, the delay doubling to a one-second ceiling. Losing a batch
+ * means the user's clicks silently disappear, so a blip on the wire should not
+ * cost them work — but a 400 will not become a 200 by being repeated, and a 409
+ * needs a new version rather than patience, so only network faults and 5xx are
+ * retried.
+ *
+ * Shared by the accept batch and the lock, which want the same behaviour for
+ * the same reason.
+ */
+const BACKOFF_MS = [100, 200, 400, 800]
+
+const sendWithRetry = async (
+  deckId: string,
+  body: Parameters<typeof api.sendCommands>[1],
+  version: number,
+): ReturnType<typeof api.sendCommands> => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await api.sendCommands(deckId, body, version)
+    } catch (error) {
+      const status = error instanceof api.ApiError ? error.status : 0
+      const transient = status === 0 || status >= 500
+      if (!transient || attempt >= BACKOFF_MS.length) throw error
+      await new Promise((resolve) => setTimeout(resolve, BACKOFF_MS[attempt]))
+    }
+  }
+}
+
 interface PendingCommand {
-  readonly type: 'accept' | 'exclude' | 'remove' | 'lock'
+  readonly type: 'accept' | 'exclude' | 'remove' | 'lock' | 'restore'
   readonly oracleId: string
   readonly locked?: boolean
 }
@@ -1409,6 +1452,8 @@ export const Workspace = ({
   const [detail, setDetail] = useState<api.CardDetail | null>(null)
   /** Which card the preview is showing, known before its detail arrives. */
   const [inspect, setInspect] = useState<string | null>(null)
+  /** Locks the server has not answered yet — these rows show a spinner. */
+  const [locking, setLocking] = useState<ReadonlySet<string>>(new Set())
   /**
    * Clicks the server has not seen yet.
    *
@@ -1532,20 +1577,6 @@ export const Workspace = ({
      * Only transient failures. A 400 will not become a 200 by being repeated,
      * and a 409 is handled separately — it needs a new version, not patience.
      */
-    const BACKOFF_MS = [100, 200, 400, 800]
-    const send = async (deckId: string, body: ReturnType<typeof wire>[], version: number) => {
-      for (let attempt = 0; ; attempt += 1) {
-        try {
-          return await api.sendCommands(deckId, body, version)
-        } catch (error) {
-          const status = error instanceof api.ApiError ? error.status : 0
-          const transient = status === 0 || status >= 500
-          if (!transient || attempt >= BACKOFF_MS.length) throw error
-          await new Promise((resolve) => setTimeout(resolve, BACKOFF_MS[attempt]))
-        }
-      }
-    }
-
     const wire = (c: PendingCommand): Parameters<typeof api.sendCommands>[1][number] =>
       c.type === 'accept'
         ? { type: 'accept', oracleId: c.oracleId, origin: 'manual' }
@@ -1558,7 +1589,7 @@ export const Workspace = ({
     if (commands.length > 0) {
       const body = commands.map(wire)
       try {
-        const result = await send(current.id, body, current.version)
+        const result = await sendWithRetry(current.id, body, current.version)
         current = result.deck
       } catch (error) {
         // A 409 means only that our version is behind — the clicks are still
@@ -1566,7 +1597,7 @@ export const Workspace = ({
         // work the user did and making them click it again.
         if (!(error instanceof api.ApiError) || error.status !== 409) throw error
         const fresh = await api.getDeck(current.id)
-        const result = await send(fresh.id, body, fresh.version)
+        const result = await sendWithRetry(fresh.id, body, fresh.version)
         current = result.deck
       }
       serverDeckRef.current = current
@@ -1598,9 +1629,22 @@ export const Workspace = ({
         setPending([])
         return
       }
-      // Through the overlay: a lock set while this run was in flight is newer
-      // than the deck it is about to write, and must survive it.
-      setDeck(withPendingLocks(r.deck))
+      /*
+       * Never write a deck older than the one the server has confirmed.
+       *
+       * A run captures the deck when it STARTS. Anything written in between —
+       * a lock, a deck option — produces a newer server deck, and applying the
+       * captured one would undo it. `withPendingLocks` covers the case where
+       * the write has not landed yet; this covers the case where it HAS, which
+       * the pending overlay cannot see because a confirmed lock is no longer
+       * pending.
+       *
+       * Version is the right comparison: it is the server's own ordering, and
+       * it is what the optimistic-concurrency check uses (doc 12 §12.7).
+       */
+      const known = serverDeckRef.current
+      const freshest = known !== null && known.version > r.deck.version ? known : r.deck
+      setDeck(withPendingLocks(freshest))
       setGroups(r.recs.groups)
       setUnavailable(r.recs.unavailable)
       setAnalysis(r.analysis)
@@ -1676,27 +1720,71 @@ export const Workspace = ({
   const toggleLock = (oracleId: string, locked: boolean): void => {
     const before = serverDeckRef.current ?? deckRef.current
     pendingLocks.current.set(oracleId, locked)
+    // Marks the row as in flight, which is what draws its spinner.
+    setLocking((current) => new Set(current).add(oracleId))
     setDeck((d) => ({
       ...d,
       entries: d.entries.map((e) =>
         e.oracleId === oracleId && e.zone === 'accepted' ? { ...e, locked } : e,
       ),
     }))
-    void api
-      .sendCommands(before.id, [{ type: 'lock', oracleId, locked }], before.version)
+
+    const finish = (): void => {
+      pendingLocks.current.delete(oracleId)
+      setLocking((current) => {
+        const next = new Set(current)
+        next.delete(oracleId)
+        return next
+      })
+    }
+
+    void sendWithRetry(before.id, [{ type: 'lock', oracleId, locked }], before.version)
       .then((r) => {
-        pendingLocks.current.delete(oracleId)
+        finish()
         serverDeckRef.current = r.deck
         setDeck(r.deck)
+        // The lock worked, so whatever failed before it is no longer the state
+        // of the world. Leaving a stale error next to a control that just
+        // succeeded teaches people to ignore errors.
+        setNotice(null)
+        pipeline.clearError()
       })
       .catch(() => {
-        pendingLocks.current.delete(oracleId)
-        // Put it back rather than leaving the screen claiming something the
-        // server did not accept — a stale version is the likely cause, and a
-        // silently-wrong lock is worse than a lock that visibly did not take.
-        setDeck(before)
-        setNotice('That lock did not save. Try again.')
+        finish()
+        /*
+         * Reconcile against the server rather than guessing.
+         *
+         * The old code restored the deck it had captured before the click,
+         * which is only right if nothing else changed in between — and an
+         * accept batch may well have landed while this was retrying. Re-reading
+         * gives the actual state; falling back to the captured deck is for when
+         * even that fails, which means the network is gone and a stale view is
+         * the best available answer.
+         */
+        void api
+          .getDeck(before.id)
+          .then((fresh) => {
+            serverDeckRef.current = fresh
+            setDeck(withPendingLocks(fresh))
+          })
+          .catch(() => setDeck(before))
+        setNotice('That lock did not save.')
       })
+  }
+
+  /**
+   * Take a card out of the excluded list and put it straight into the deck.
+   *
+   * Two commands in one batch, in order. The domain folds a batch one command
+   * at a time, so `restore` lands first and leaves the card absent, and the
+   * `accept` that follows is then a legal move on a card that is no longer
+   * excluded — which it would not be the other way round, and would not be at
+   * all if these were sent as two separate batches with a recompute between.
+   */
+  const restoreIntoDeck = (oracleId: string): void => {
+    setPending((queued) => [...queued, { type: 'restore', oracleId }, { type: 'accept', oracleId }])
+    pipeline.schedule({ type: 'restore', oracleId })
+    pipeline.schedule({ type: 'accept', oracleId })
   }
 
   const setDeckOption = (body: Parameters<typeof api.patchDeck>[1]): void => {
@@ -1816,6 +1904,10 @@ export const Workspace = ({
             ? { ...e, locked: p.locked ?? true }
             : e,
         )
+      } else if (p.type === 'restore') {
+        // excluded -> absent, which makes it a candidate again. Matching the
+        // domain's fold exactly, so the optimistic view and the server agree.
+        entries = entries.filter((e) => !(e.oracleId === p.oracleId && e.zone === 'excluded'))
       } else if (p.type === 'remove') {
         // One copy, and nothing recorded — the card stays suggestible.
         const at = entries.findIndex((e) => e.oracleId === p.oracleId && e.zone === 'accepted')
@@ -1832,11 +1924,6 @@ export const Workspace = ({
 
   const inFlight = useMemo(() => new Set(pending.map((p) => p.oracleId)), [pending])
 
-  /** Cut hints by card, so a deck row can show its own without a scan. */
-  const cutBy = useMemo(
-    () => new Map((analysis?.cuts ?? []).map((c) => [c.oracleId, c])),
-    [analysis],
-  )
   const lockedIds = useMemo(
     () =>
       new Set(
@@ -1844,6 +1931,26 @@ export const Workspace = ({
       ),
     [optimistic],
   )
+  /**
+   * Cut hints by card — with locked cards removed here, not on the server.
+   *
+   * The server already omits locked cards from `analysis.cuts`, but that
+   * analysis is only as fresh as the last recompute, and locking deliberately
+   * no longer triggers one. So the hint sat there after the click that was
+   * supposed to dismiss it, which is the whole point of the lock: it is how the
+   * user says "stop asking about this one", and it has to be obeyed on the
+   * click rather than whenever the server next agrees.
+   */
+  const cutBy = useMemo(
+    () =>
+      new Map(
+        (analysis?.cuts ?? [])
+          .filter((c) => !lockedIds.has(c.oracleId))
+          .map((c) => [c.oracleId, c]),
+      ),
+    [analysis, lockedIds],
+  )
+
   const basicIds = useMemo(() => new Set(basics.map((b) => b.oracleId)), [basics])
 
   /**
@@ -2141,23 +2248,35 @@ export const Workspace = ({
                   />
                   {section.key === 'commander' ? null : (
                     <>
-                      <button
-                        className="act lock"
-                        data-locked={lockedIds.has(line.oracleId)}
-                        onClick={() => toggleLock(line.oracleId, !lockedIds.has(line.oracleId))}
-                        aria-label={
-                          lockedIds.has(line.oracleId)
-                            ? `Unlock ${cards.get(line.oracleId)?.name ?? 'card'}`
-                            : `Lock ${cards.get(line.oracleId)?.name ?? 'card'}, hiding its cut hint`
-                        }
-                        title={
-                          lockedIds.has(line.oracleId)
-                            ? 'Locked — this card is staying, so it is never suggested as a cut'
-                            : 'Lock this card to keep it and hide its cut hint'
-                        }
-                      >
-                        {lockedIds.has(line.oracleId) ? '\u25C6' : '\u25C7'}
-                      </button>
+                      {/* A lock in flight shows a spinner instead of the
+                          diamond: the click already changed the icon, so
+                          without this there is no way to tell a saved lock from
+                          one still being retried. */}
+                      {locking.has(line.oracleId) ? (
+                        <span
+                          className="spinner"
+                          role="status"
+                          aria-label={`Saving lock for ${cards.get(line.oracleId)?.name ?? 'card'}`}
+                        />
+                      ) : (
+                        <button
+                          className="act lock"
+                          data-locked={lockedIds.has(line.oracleId)}
+                          onClick={() => toggleLock(line.oracleId, !lockedIds.has(line.oracleId))}
+                          aria-label={
+                            lockedIds.has(line.oracleId)
+                              ? `Unlock ${cards.get(line.oracleId)?.name ?? 'card'}`
+                              : `Lock ${cards.get(line.oracleId)?.name ?? 'card'}, hiding its cut hint`
+                          }
+                          title={
+                            lockedIds.has(line.oracleId)
+                              ? 'Locked — this card is staying, so it is never suggested as a cut'
+                              : 'Lock this card to keep it and hide its cut hint'
+                          }
+                        >
+                          {lockedIds.has(line.oracleId) ? '\u25C6' : '\u25C7'}
+                        </button>
+                      )}
                       <button
                         className="act exclude"
                         onClick={() => act(line.oracleId, 'exclude')}
@@ -2202,7 +2321,43 @@ export const Workspace = ({
               <p className="note">These are never suggested again.</p>
               {excluded.map((e) => (
                 <div className="card-row" key={e.oracleId}>
-                  <span className="name">{cards.get(e.oracleId)?.name ?? 'Loading…'}</span>
+                  <button
+                    className="name as-link"
+                    onClick={() => open(e.oracleId)}
+                    aria-label={`Preview ${cards.get(e.oracleId)?.name ?? 'card'}`}
+                  >
+                    {cards.get(e.oracleId)?.name ?? 'Loading…'}
+                  </button>
+                  {inFlight.has(e.oracleId) ? (
+                    <span
+                      className="spinner"
+                      role="status"
+                      aria-label={`${cards.get(e.oracleId)?.name ?? 'Card'} restored, updating suggestions`}
+                    />
+                  ) : (
+                    <>
+                      {/* "Never" is a strong word and people change their minds.
+                          Two ways back, because they are different intentions:
+                          one says "let me see it again", the other says "I was
+                          wrong, put it in". */}
+                      <button
+                        className="act"
+                        onClick={() => act(e.oracleId, 'restore')}
+                        aria-label={`Suggest ${cards.get(e.oracleId)?.name ?? 'card'} again`}
+                        title="Put this back in the suggestion pool"
+                      >
+                        Suggest again
+                      </button>
+                      <button
+                        className="act accept"
+                        onClick={() => restoreIntoDeck(e.oracleId)}
+                        aria-label={`Add ${cards.get(e.oracleId)?.name ?? 'card'} to the deck`}
+                        title="Put this straight into the deck"
+                      >
+                        Add
+                      </button>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
