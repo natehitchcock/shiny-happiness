@@ -247,6 +247,7 @@ The domain layer is done, so everything below is now unblocked in its own right.
 | Doc | What it is |
 | --- | --- |
 | [16 — Archetype customiser](16-archetype-customiser.md) | Let a builder tune the role targets and curve their deck is judged against, instead of accepting the archetype preset. Sparse per-deck override so decks keep inheriting preset improvements; both target functions gain one optional parameter and nothing downstream changes. Three open questions at the end. |
+| [17 — The deck web](17-deck-web.md) | A second view of one deck: every card as its art, every relationship as a coloured line. Scoped, not built. Density is the whole problem — a real themed 99 has 1,011 benefits edges and 756 combos one card away — so the reduction rules and the validated four-colour edge palette are most of the document. Three open questions at the end. |
 
 ## 11.10 UI-01: a gallery instead of Storybook
 
