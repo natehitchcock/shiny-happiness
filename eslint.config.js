@@ -31,7 +31,7 @@ const IO_MODULES = [
 ]
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/.turbo/**', 'design/**', 'coverage/**'] },
+  { ignores: ['**/dist/**', '**/dist-web/**', '**/.turbo/**', 'design/**', 'coverage/**'] },
 
   tseslint.configs.recommended,
 
@@ -100,13 +100,25 @@ export default tseslint.config(
 
   // ---- R3: third-party network access lives only in packages/clients ----
   //
+  // `apps/web` is exempt. R3 exists to keep THIRD-PARTY access behind one rate
+  // limiter and one cache (doc 04 §4.0); the SPA calling its own same-origin
+  // `/api/v1` is first-party and has no third party to throttle. The rule was
+  // written before a browser client existed. It still bans third-party fetch
+  // there by review, not by lint — there is no other way for a browser to talk
+  // to its own server.
+  //
   // `packages/domain` is deliberately NOT listed. Flat config REPLACES a rule
   // rather than merging it, so listing it here overwrote the R1 block's
   // `no-restricted-globals` — which bans `process` as well as `fetch` — and left
   // half of R1's guard inert. Domain purity is covered by the R1 block above,
   // which already bans `fetch`.
   {
-    files: ['apps/**/*.ts', 'packages/db/**/*.ts', 'packages/ui/**/*.ts'],
+    files: [
+      'apps/api/**/*.ts',
+      'apps/ingest/**/*.ts',
+      'packages/db/**/*.ts',
+      'packages/ui/**/*.ts',
+    ],
     rules: {
       'no-restricted-globals': [
         'error',

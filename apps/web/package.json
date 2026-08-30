@@ -4,20 +4,22 @@
   "private": true,
   "type": "module",
   "description": "React SPA. WEB-01 replaces the tsc build with Vite.",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
   "scripts": {
-    "build": "tsc -b",
-    "clean": "tsc -b --clean"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "clean": "rm -rf dist dist-web"
   },
   "dependencies": {
     "@roundtable/domain": "workspace:*",
-    "@roundtable/ui": "workspace:*"
+    "@roundtable/ui": "workspace:*",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.2.2"
   }
 }

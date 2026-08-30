@@ -1,0 +1,391 @@
+/*
+ * Roundtable — visual language.
+ *
+ * The ground is a play mat, not a dashboard: deep ink blue rather than neutral
+ * grey, because this is a table you sit at for an hour, and card faces read as
+ * parchment against it. Brass is reserved for ONE thing — combo degree — since
+ * that is the only fact here a spreadsheet could not tell you. Everything else
+ * stays quiet so the brass means something when it appears.
+ */
+
+:root {
+  --ink: #131a2a;
+  --ink-2: #1b2540;
+  --ink-3: #253052;
+  --rule: #2f3c63;
+  --parchment: #ede6d8;
+  --parchment-dim: #b9b2a4;
+  --brass: #c9a227;
+  --brass-dim: #6d5a1a;
+  --sage: #6e9b7c;
+  --rust: #a8503c;
+
+  --display: 'Spectral', Georgia, serif;
+  --ui: 'Karla', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --step: 0.5rem;
+  --radius: 3px;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--parchment);
+  font-family: var(--ui);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Keyboard focus must be visible everywhere: every action in this app is a
+   button, and buttons are the ONLY way to move a card (AGENTS.md R4). */
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- shell */
+
+.masthead {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--step) * 2);
+  padding: calc(var(--step) * 2) calc(var(--step) * 3);
+  border-bottom: 1px solid var(--rule);
+  flex-wrap: wrap;
+}
+
+.wordmark {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 1.35rem;
+  letter-spacing: 0.01em;
+  margin: 0;
+}
+
+.wordmark span {
+  color: var(--brass);
+}
+
+.masthead .meta {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--parchment-dim);
+  letter-spacing: 0.04em;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(230px, 1fr) minmax(0, 2.4fr) minmax(230px, 1fr);
+  gap: 1px;
+  background: var(--rule);
+  min-height: calc(100vh - 62px);
+}
+
+.region {
+  background: var(--ink);
+  padding: calc(var(--step) * 2);
+  min-width: 0;
+}
+
+.region > h2 {
+  font-family: var(--ui);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+  margin: 0 0 var(--step);
+}
+
+/* ---------------------------------------------------------------- cards */
+
+.card-row {
+  display: flex;
+  align-items: center;
+  gap: var(--step);
+  width: 100%;
+  padding: 6px var(--step);
+  background: var(--ink-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--parchment);
+  text-align: left;
+  margin-bottom: 3px;
+}
+
+.card-row:hover {
+  border-color: var(--rule);
+  background: var(--ink-3);
+}
+
+.card-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-row .cost {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--parchment-dim);
+}
+
+/*
+ * The signature. A combo degree is the one number here that is genuinely hard
+ * won, so it gets the only brass on the page and the only ring.
+ */
+.degree {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 0.72rem;
+  min-width: 1.55rem;
+  height: 1.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--brass-dim);
+  color: var(--brass);
+  background: rgba(201, 162, 39, 0.08);
+}
+
+.degree[data-completes='true'] {
+  background: var(--brass);
+  color: var(--ink);
+  border-color: var(--brass);
+}
+
+.degree[data-empty='true'] {
+  border-color: var(--rule);
+  color: var(--parchment-dim);
+  background: none;
+}
+
+.act {
+  border: 1px solid var(--rule);
+  background: none;
+  color: var(--parchment-dim);
+  border-radius: var(--radius);
+  padding: 2px 7px;
+  font-size: 0.72rem;
+}
+
+.act:hover {
+  color: var(--parchment);
+  border-color: var(--parchment-dim);
+}
+
+.act.accept:hover {
+  color: var(--sage);
+  border-color: var(--sage);
+}
+
+.act.exclude:hover {
+  color: var(--rust);
+  border-color: var(--rust);
+}
+
+/* ---------------------------------------------------------------- groups */
+
+.group {
+  margin-bottom: calc(var(--step) * 2.5);
+}
+
+.group-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--step);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 4px;
+  margin-bottom: var(--step);
+}
+
+.group-head h3 {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 1rem;
+  margin: 0;
+}
+
+.group-head .count {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--parchment-dim);
+}
+
+.group-head .rationale {
+  flex: 1;
+  text-align: right;
+  font-size: 0.72rem;
+  color: var(--parchment-dim);
+}
+
+.reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.reason {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  color: var(--parchment-dim);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 0 4px;
+}
+
+.reason[data-kind='completes-combos'],
+.reason[data-kind='near-combo'] {
+  color: var(--brass);
+  border-color: var(--brass-dim);
+}
+
+/* ---------------------------------------------------------------- meters */
+
+.meter {
+  margin-bottom: var(--step);
+}
+
+.meter-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  margin-bottom: 2px;
+}
+
+.meter-label .delta {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+}
+
+.meter-track {
+  height: 4px;
+  background: var(--ink-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--sage);
+}
+
+.meter-fill[data-short='true'] {
+  background: var(--rust);
+}
+
+/* ---------------------------------------------------------------- forms */
+
+input[type='text'],
+select {
+  width: 100%;
+  padding: 7px var(--step);
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  color: var(--parchment);
+  font: inherit;
+}
+
+.start {
+  max-width: 560px;
+  margin: 12vh auto;
+  padding: 0 calc(var(--step) * 2);
+}
+
+.start h1 {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 2rem;
+  line-height: 1.15;
+  margin: 0 0 var(--step);
+}
+
+.start p {
+  color: var(--parchment-dim);
+  margin: 0 0 calc(var(--step) * 3);
+}
+
+.field {
+  margin-bottom: calc(var(--step) * 2);
+}
+
+.field label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+  margin-bottom: 4px;
+}
+
+.row {
+  display: flex;
+  gap: var(--step);
+}
+
+.primary {
+  background: var(--brass);
+  color: var(--ink);
+  border: 1px solid var(--brass);
+  border-radius: var(--radius);
+  padding: 8px calc(var(--step) * 2);
+  font-weight: 700;
+}
+
+.primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.note {
+  font-size: 0.75rem;
+  color: var(--parchment-dim);
+}
+
+.problem {
+  color: var(--rust);
+  font-size: 0.78rem;
+}
+
+.unavailable {
+  font-size: 0.7rem;
+  color: var(--parchment-dim);
+  border-left: 2px solid var(--rule);
+  padding-left: var(--step);
+  margin-top: var(--step);
+}
+
+/* Deliberately no transition on card movement when the user asks for less
+   motion — the list simply reorders. */
+@media (prefers-reduced-motion: no-preference) {
+  .card-row {
+    transition:
+      background 120ms ease,
+      border-color 120ms ease;
+  }
+}
+
+@media (max-width: 900px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+}

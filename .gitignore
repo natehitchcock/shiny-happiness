@@ -45,3 +45,6 @@ design/*.html
 
 # Turborepo
 .turbo/
+
+# Vite build output for apps/web
+dist-web/
