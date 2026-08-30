@@ -710,3 +710,114 @@ select {
   color: var(--parchment-dim);
   text-align: right;
 }
+
+/* ---------------------------------------------------------------- header */
+
+/*
+ * The masthead follows the viewport. The deck rail is long — a hundred cards —
+ * and the progress bar it carries is only useful if it is visible at the moment
+ * the user clicks, which is wherever they happen to be scrolled to.
+ */
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--ink);
+}
+
+.deck-count {
+  margin-left: auto;
+}
+
+.progress {
+  flex: 1;
+  min-width: 180px;
+  max-width: 520px;
+  margin: 0 auto;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.progress[data-active='true'] {
+  opacity: 1;
+}
+
+.progress-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  color: var(--parchment-dim);
+  text-align: center;
+  margin-bottom: 3px;
+  min-height: 0.9rem;
+}
+
+.progress-track {
+  position: relative;
+  height: 3px;
+  background: var(--ink-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+/*
+ * No CSS transition on the width: the fill is driven frame by frame from the
+ * pipeline's own clock. Letting CSS ease it as well would put a second,
+ * disagreeing animation on top and the bar would lie about where it is.
+ */
+.progress-fill {
+  height: 100%;
+  background: var(--brass);
+  border-radius: 2px;
+}
+
+/* The grace period is a different kind of waiting, so it is a different
+   colour: sage means "yours now", not "still working". */
+.progress-fill[data-phase='settling'] {
+  background: var(--sage);
+}
+
+.progress-half {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--parchment);
+  opacity: 0.25;
+}
+
+/* ---------------------------------------------------------------- spinner */
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--rule);
+  border-top-color: var(--sage);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+  flex: 0 0 auto;
+  margin: 0 6px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A rotating element is the motion most worth removing. The dot still says
+   "in flight" without turning. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-color: var(--sage);
+    opacity: 0.7;
+  }
+
+  .progress {
+    transition: none;
+  }
+}

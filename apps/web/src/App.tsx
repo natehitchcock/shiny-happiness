@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
+import { usePipeline, type Phase } from './pipeline'
 import type { Card } from './api'
 
 /** Human-readable label for a composition dimension. */
@@ -442,6 +443,56 @@ const Curve = ({ curve }: { curve: api.Analysis['curve'] }): React.JSX.Element =
   )
 }
 
+interface PendingCommand {
+  readonly type: 'accept' | 'exclude'
+  readonly oracleId: string
+}
+
+interface QueryResult {
+  readonly deck: api.Deck
+  readonly recs: api.Recommendations
+  readonly analysis: api.Analysis
+  readonly hydrated: api.Hydrated
+}
+
+/**
+ * The progress bar in the masthead.
+ *
+ * Two halves that mean different things, which is why it is one bar and not a
+ * spinner: the left half is work the server is doing, the right half is time
+ * being handed back to the user before the list moves under them. The label
+ * says which half we are in, because a bar alone cannot.
+ */
+const ProgressBar = ({
+  phase,
+  progress,
+  label,
+}: {
+  phase: Phase
+  progress: number
+  label: string
+}): React.JSX.Element => (
+  <div
+    className="progress"
+    data-active={phase !== 'idle'}
+    role="status"
+    aria-live="polite"
+    aria-label={label}
+  >
+    <span className="progress-label">{label}</span>
+    <div className="progress-track">
+      <div
+        className="progress-fill"
+        data-phase={phase}
+        style={{ width: `${String(Math.round(progress * 100))}%` }}
+      />
+      {/* The halfway mark is meaningful — it is where the server's answer
+          arrives and the user's grace period begins — so it is drawn. */}
+      <span className="progress-half" aria-hidden="true" />
+    </div>
+  </div>
+)
+
 const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => {
   const [deck, setDeck] = useState(initial)
   const [groups, setGroups] = useState<api.Group[]>([])
@@ -452,74 +503,95 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
   const [query, setQuery] = useState('')
   const [queryError, setQueryError] = useState<string | null>(null)
   const [detail, setDetail] = useState<api.CardDetail | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const seq = useRef(0)
+  /**
+   * Clicks the server has not seen yet.
+   *
+   * The deck view is rendered from `deck` PLUS this, so a card lands the instant
+   * it is clicked — long before the buffer closes. It is also what drives the
+   * per-card spinner, so a card in flight cannot be clicked twice.
+   */
+  const [pending, setPending] = useState<readonly PendingCommand[]>([])
   const deckRef = useRef(deck)
+  const queryRef = useRef(query)
   deckRef.current = deck
+  queryRef.current = query
 
-  const refresh = useCallback(async (current: api.Deck, q: string): Promise<void> => {
-    const mine = ++seq.current
+  const load = useCallback(async (commands: readonly PendingCommand[]): Promise<QueryResult> => {
+    let current = deckRef.current
+
+    // Commands first, as ONE batch — four accepts are one round trip, and one
+    // atomic unit the server can reject or apply as a whole (doc 10 §10.3).
+    if (commands.length > 0) {
+      const result = await api.sendCommands(
+        current.id,
+        commands.map((c) =>
+          c.type === 'accept'
+            ? { type: 'accept', oracleId: c.oracleId, origin: 'recommended' }
+            : { type: 'exclude', oracleId: c.oracleId },
+        ),
+        current.version,
+      )
+      current = result.deck
+    }
+
     const [recs, ana] = await Promise.all([
-      api.getRecommendations(current.id, { limitPerGroup: 8, ...(q === '' ? {} : { query: q }) }),
+      api.getRecommendations(current.id, {
+        limitPerGroup: 8,
+        ...(queryRef.current === '' ? {} : { query: queryRef.current }),
+      }),
       api.getAnalysis(current.id),
     ])
-    // A slower earlier request must not overwrite a newer answer.
-    if (mine !== seq.current) return
-
-    setGroups(recs.groups)
-    setUnavailable(recs.unavailable)
-    setAnalysis(ana)
-    setQueryError(recs.query.errors[0]?.message ?? null)
-
-    const needed = [
+    const hydrated = await api.hydrate([
       ...current.commanders,
       ...current.entries.map((e) => e.oracleId),
       ...recs.groups.flatMap((g) => g.items.map((i) => i.oracleId)),
-    ]
-    const hydrated = await api.hydrate(needed)
-    if (mine !== seq.current) return
-    setCards(hydrated.cards)
-    setPrices(hydrated.prices)
+    ])
+    return { deck: current, recs, analysis: ana, hydrated }
   }, [])
 
-  const deckKey = `${deck.id}:${String(deck.version)}`
+  const pipeline = usePipeline<PendingCommand>({
+    run: (commands) => load(commands),
+    apply: (value) => {
+      const r = value as QueryResult | null
+      if (r === null) {
+        // The run failed; its error is already on the bar. Drop the optimistic
+        // overlay rather than leaving cards that were never saved.
+        setPending([])
+        return
+      }
+      setDeck(r.deck)
+      setGroups(r.recs.groups)
+      setUnavailable(r.recs.unavailable)
+      setAnalysis(r.analysis)
+      setQueryError(r.recs.query.errors[0]?.message ?? null)
+      setCards(r.hydrated.cards)
+      setPrices(r.hydrated.prices)
+      setPending([])
+    },
+  })
+
+  // Initial load, and whenever the filter changes. No settle on this path —
+  // there is nothing to keep adding to, so holding the result back would be lag.
+  const { refresh } = pipeline
   useEffect(() => {
-    void refresh(deckRef.current, query).catch((e: unknown) => {
-      setError(e instanceof Error ? e.message : 'Could not load suggestions')
-    })
-  }, [deckKey, query, refresh])
+    refresh()
+  }, [query, refresh])
 
   const act = (oracleId: string, type: 'accept' | 'exclude'): void => {
-    setBusy(true)
-    setError(null)
-    const command =
-      type === 'accept' ? { type, oracleId, origin: 'recommended' } : { type, oracleId }
-    void api
-      .sendCommands(deck.id, [command], deck.version)
-      .then((result) => {
-        setDeck(result.deck)
-        // A rejection is the server declining, and the user has to be told —
-        // swallowing it looks like the click did nothing.
-        const refused = result.rejected[0]
-        if (refused !== undefined) setError(`Refused: ${refused.reason.kind}`)
-        setBusy(false)
-      })
-      .catch((e: unknown) => {
-        setError(e instanceof Error ? e.message : 'Could not save that change')
-        setBusy(false)
-      })
+    // Applied to the view immediately. This is the whole point of the buffer:
+    // the click is instant and the recompute catches up.
+    setPending((current) => [...current, { type, oracleId }])
+    pipeline.schedule({ type, oracleId })
   }
 
   const setDeckOption = (body: Parameters<typeof api.patchDeck>[1]): void => {
-    setBusy(true)
     void api
       .patchDeck(deck.id, body)
       .then((d) => {
         setDeck(d)
-        setBusy(false)
+        pipeline.refresh()
       })
-      .catch(() => setBusy(false))
+      .catch(() => undefined)
   }
 
   const open = (oracleId: string): void => {
@@ -529,9 +601,27 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
       .catch(() => setDetail(null))
   }
 
-  const accepted = deck.entries.filter((e) => e.zone === 'accepted')
-  const excluded = deck.entries.filter((e) => e.zone === 'excluded')
-  const deckSize = accepted.length + deck.commanders.length
+  /** The deck as the user sees it: saved entries plus what is still in flight. */
+  const optimistic = useMemo(() => {
+    let entries = [...deck.entries]
+    for (const p of pending) {
+      if (p.type === 'accept') {
+        entries.push({ oracleId: p.oracleId, zone: 'accepted', locked: false })
+      } else {
+        const at = entries.findIndex((e) => e.oracleId === p.oracleId && e.zone === 'accepted')
+        if (at >= 0) entries.splice(at, 1)
+        entries = entries.filter((e) => e.oracleId !== p.oracleId)
+        entries.push({ oracleId: p.oracleId, zone: 'excluded', locked: false })
+      }
+    }
+    return { ...deck, entries }
+  }, [deck, pending])
+
+  const inFlight = useMemo(() => new Set(pending.map((p) => p.oracleId)), [pending])
+
+  const accepted = optimistic.entries.filter((e) => e.zone === 'accepted')
+  const excluded = optimistic.entries.filter((e) => e.zone === 'excluded')
+  const deckSize = accepted.length + optimistic.commanders.length
 
   /** Group the deck by card type, collapsing duplicates to a count. */
   const sections = useMemo(() => {
@@ -575,14 +665,13 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
           {deck.name.toUpperCase()} · {deck.colorIdentity.join('') || 'C'} · BRACKET{' '}
           {deck.targetBracket} · {deck.archetype.toUpperCase()}
         </span>
-        <span className="meta" style={{ marginLeft: 'auto' }}>
-          {deckSize} / 100 CARDS
-        </span>
+        <ProgressBar phase={pipeline.phase} progress={pipeline.progress} label={pipeline.label} />
+        <span className="meta deck-count">{deckSize} / 100 CARDS</span>
       </header>
 
-      {error !== null ? (
+      {pipeline.error !== null ? (
         <p className="banner problem" role="status">
-          {error}
+          {pipeline.error}
         </p>
       ) : null}
 
@@ -756,26 +845,38 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
                     manaCost={cards.get(item.oracleId)?.manaCost}
                     price={prices.get(item.oracleId)}
                   />
-                  <button
-                    className="act accept"
-                    onClick={() => act(item.oracleId, 'accept')}
-                    aria-label={`Add ${cards.get(item.oracleId)?.name ?? 'card'}`}
-                  >
-                    Add
-                  </button>
-                  <button
-                    className="act exclude"
-                    onClick={() => act(item.oracleId, 'exclude')}
-                    aria-label={`Never suggest ${cards.get(item.oracleId)?.name ?? 'card'}`}
-                  >
-                    Never
-                  </button>
+                  {inFlight.has(item.oracleId) ? (
+                    // Already in the deck as far as the user is concerned; the
+                    // spinner says the suggestions have not caught up yet, and
+                    // it stops the same card being clicked twice.
+                    <span
+                      className="spinner"
+                      role="status"
+                      aria-label={`${cards.get(item.oracleId)?.name ?? 'Card'} added, updating suggestions`}
+                    />
+                  ) : (
+                    <>
+                      <button
+                        className="act accept"
+                        onClick={() => act(item.oracleId, 'accept')}
+                        aria-label={`Add ${cards.get(item.oracleId)?.name ?? 'card'}`}
+                      >
+                        Add
+                      </button>
+                      <button
+                        className="act exclude"
+                        onClick={() => act(item.oracleId, 'exclude')}
+                        aria-label={`Never suggest ${cards.get(item.oracleId)?.name ?? 'card'}`}
+                      >
+                        Never
+                      </button>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
           ))}
           {groups.length === 0 ? <p className="note">Working…</p> : null}
-          {busy ? <p className="note">Saving…</p> : null}
         </section>
 
         <section className="region" aria-label="Analysis">

@@ -1,0 +1,231 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+
+/**
+ * The staged requery pipeline.
+ *
+ * Accepting a card has to feel instant while a recompute over ~30k candidates
+ * plainly is not, so the two are decoupled. The deck changes on click; the
+ * suggestions change on a schedule the user can see and outrun:
+ *
+ *   0%  ──▶ 25%   BUFFER   nothing has been sent yet. More clicks join this
+ *                          batch, so accepting four cards is one round trip
+ *                          rather than four (doc 10 §10.3 batches for exactly
+ *                          this reason).
+ *   25% ──▶ 50%   QUERY    commands are away and the recompute is running. The
+ *                          bar HOLDS at 50% if it gets there first — it must
+ *                          never suggest progress the server has not made.
+ *   50% ──▶ 100%  SETTLE   the answer is in hand and deliberately not applied
+ *                          for three seconds, so the list does not reshuffle
+ *                          under a user who is mid-click. Anything they add in
+ *                          this window restarts the cycle instead.
+ *
+ * The bar is therefore honest about two different things at once: the left half
+ * is work being done, the right half is time being given back.
+ */
+
+export type Phase = 'idle' | 'buffering' | 'querying' | 'settling'
+
+/** How long clicks are collected before anything is sent. */
+export const BUFFER_MS = 1_200
+/** How long the answer is held so more can be added before the list moves. */
+export const SETTLE_MS = 3_000
+/**
+ * Only used to animate 25%→50% before the server answers. A guess at a typical
+ * recompute; the bar clamps at 50% regardless, so guessing low is harmless and
+ * guessing high just means the bar arrives late.
+ */
+const ASSUMED_QUERY_MS = 700
+
+const BUFFER_END = 0.25
+const QUERY_END = 0.5
+
+export interface Pipeline<T> {
+  readonly phase: Phase
+  /** 0..1, for the bar's width. */
+  readonly progress: number
+  /** What is happening, in words, for the line above the bar. */
+  readonly label: string
+  /** Queue work, joining the current buffer if one is open. */
+  readonly schedule: (item: T) => void
+  /** Run the pipeline with no queued work — used for filter changes. */
+  readonly refresh: () => void
+  readonly error: string | null
+  readonly clearError: () => void
+}
+
+export interface PipelineOptions<T> {
+  /**
+   * Send the buffered items and fetch the new view. Whatever it resolves to is
+   * held until the settle finishes and then handed to `apply`.
+   */
+  readonly run: (items: readonly T[]) => Promise<unknown>
+  /** Commit the held result. Called once, at 100%. */
+  readonly apply: (result: unknown) => void
+  /** Words for the buffering phase, given how many items are queued. */
+  readonly describe?: (count: number) => string
+}
+
+const now = (): number => performance.now()
+
+export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
+  const [phase, setPhase] = useState<Phase>('idle')
+  const [progress, setProgress] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+  const [queued, setQueued] = useState(0)
+
+  // Refs, not state: the animation frame reads these every tick and must see
+  // the current values without re-subscribing.
+  const items = useRef<T[]>([])
+  const phaseRef = useRef<Phase>('idle')
+  const startedAt = useRef(0)
+  const settleFrom = useRef(0)
+  const result = useRef<unknown>(null)
+  const resolved = useRef(false)
+  const frame = useRef<number | null>(null)
+  /**
+   * Zero for a filter change. The settle exists to let a user keep adding
+   * before the list moves; a filter has nothing to keep adding to, and holding
+   * its result back three seconds would just read as lag.
+   */
+  const settleMs = useRef(SETTLE_MS)
+  const run = useRef(options.run)
+  const apply = useRef(options.apply)
+  run.current = options.run
+  apply.current = options.apply
+
+  const setPhaseBoth = (next: Phase): void => {
+    phaseRef.current = next
+    setPhase(next)
+  }
+
+  const stop = useCallback((): void => {
+    if (frame.current !== null) cancelAnimationFrame(frame.current)
+    frame.current = null
+  }, [])
+
+  const finish = useCallback((): void => {
+    stop()
+    setPhaseBoth('idle')
+    setProgress(0)
+    setQueued(0)
+    const held = result.current
+    result.current = null
+    resolved.current = false
+    if (held !== null) apply.current(held)
+  }, [stop])
+
+  const tick = useCallback((): void => {
+    const elapsed = now() - startedAt.current
+
+    if (phaseRef.current === 'buffering') {
+      const fraction = Math.min(1, elapsed / BUFFER_MS)
+      setProgress(fraction * BUFFER_END)
+      if (fraction >= 1) {
+        // Buffer closed. Send everything collected in one batch.
+        const batch = items.current
+        items.current = []
+        setPhaseBoth('querying')
+        startedAt.current = now()
+        resolved.current = false
+        void run
+          .current(batch)
+          .then((value) => {
+            result.current = value
+            resolved.current = true
+          })
+          .catch((e: unknown) => {
+            setError(e instanceof Error ? e.message : 'Could not refresh suggestions')
+            result.current = null
+            resolved.current = true
+          })
+      }
+    } else if (phaseRef.current === 'querying') {
+      const fraction = Math.min(1, elapsed / ASSUMED_QUERY_MS)
+      const value = BUFFER_END + fraction * (QUERY_END - BUFFER_END)
+      // Clamped at the halfway mark until the server actually answers: the bar
+      // may run out of animation but it may not run ahead of the truth.
+      setProgress(Math.min(value, QUERY_END))
+      if (resolved.current && fraction >= 1) {
+        setPhaseBoth('settling')
+        startedAt.current = now()
+        settleFrom.current = QUERY_END
+      } else if (resolved.current) {
+        // Answer arrived early — let the bar finish its run to 50% first so it
+        // does not jump, then settle.
+        if (value >= QUERY_END) {
+          setPhaseBoth('settling')
+          startedAt.current = now()
+          settleFrom.current = QUERY_END
+        }
+      }
+    } else if (phaseRef.current === 'settling') {
+      const fraction = settleMs.current === 0 ? 1 : Math.min(1, elapsed / settleMs.current)
+      setProgress(settleFrom.current + fraction * (1 - settleFrom.current))
+      if (fraction >= 1) {
+        finish()
+        return
+      }
+    }
+
+    frame.current = requestAnimationFrame(tick)
+  }, [finish])
+
+  const start = useCallback(
+    (withSettle: boolean): void => {
+      settleMs.current = withSettle ? SETTLE_MS : 0
+      stop()
+      setPhaseBoth('buffering')
+      startedAt.current = now()
+      setProgress(0)
+      result.current = null
+      resolved.current = false
+      frame.current = requestAnimationFrame(tick)
+    },
+    [stop, tick],
+  )
+
+  const schedule = useCallback(
+    (item: T): void => {
+      items.current = [...items.current, item]
+      setQueued(items.current.length)
+      setError(null)
+
+      // Inside the buffer this just joins the batch and the bar keeps running.
+      // Anywhere later the held answer is already stale, so the cycle restarts —
+      // which is what "any additional add after the halfway point re-kicks the
+      // query" means, and it is equally true mid-query.
+      if (phaseRef.current !== 'buffering') start(true)
+    },
+    [start],
+  )
+
+  const refresh = useCallback((): void => {
+    setQueued(0)
+    items.current = []
+    start(false)
+  }, [start])
+
+  useEffect(() => stop, [stop])
+
+  const label =
+    options.describe?.(queued) ??
+    (phase === 'buffering'
+      ? queued > 0
+        ? `Adding ${String(queued)} card${queued === 1 ? '' : 's'}…`
+        : 'Preparing…'
+      : phase === 'querying'
+        ? 'Recomputing suggestions…'
+        : phase === 'settling'
+          ? 'Ready — add more, or wait to refresh'
+          : '')
+
+  return {
+    phase,
+    progress,
+    label,
+    schedule,
+    refresh,
+    error,
+    clearError: () => setError(null),
+  }
+}
