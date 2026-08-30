@@ -195,6 +195,8 @@ export const recommendationsBody = {
     groups: { type: 'array', items: { type: 'string' }, maxItems: 40 },
     limitPerGroup: { type: 'integer', minimum: 1, maximum: 200 },
     query: { type: 'string', maxLength: 500 },
+    // Queries shown as per-row columns rather than applied as filters.
+    columns: { type: 'array', items: { type: 'string', maxLength: 500 }, maxItems: 6 },
     // Weights are a partial override of ScoringWeights; the domain fills the
     // rest from the archetype's defaults, so any subset is valid.
     weights: { type: 'object', additionalProperties: { type: 'number' } },

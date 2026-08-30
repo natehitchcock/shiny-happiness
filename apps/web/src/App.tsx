@@ -11,6 +11,36 @@ const dimensionName = (d: { role?: string; type?: string }): string => d.role ??
 const usd = (value: number | null | undefined): string =>
   value === null || value === undefined ? '—' : `$${value.toFixed(2)}`
 
+/** A cut reason, in words. The badge never shows a bare kind. */
+const cutText = (r: {
+  kind: string
+  dimension?: { role?: string; type?: string }
+  over?: number
+  manaValue?: number
+  limit?: number
+}): string => {
+  switch (r.kind) {
+    case 'role-over-target':
+      return `${String(r.over ?? 0)} over on ${dimensionName(r.dimension ?? {})}`
+    case 'curve-crowded':
+      return `crowded at ${String(r.manaValue ?? 0)}`
+    case 'no-combos':
+      return 'no combo line'
+    case 'no-synergy':
+      return 'no synergy'
+    case 'over-budget':
+      return `over $${String(r.limit ?? 0)}`
+    default:
+      return r.kind
+  }
+}
+
+/** Hover help for the composition filter, spelled out rather than implied. */
+const HIDE_SETTLED_HELP =
+  'A role disappears from this list once every card in it is locked — there is ' +
+  'nothing left to decide there. Tick this to also hide roles that already meet ' +
+  'their target but are not locked yet, so only the roles still missing cards remain.'
+
 const plural = (n: number, word: string): string => `${String(n)} ${word}${n === 1 ? '' : 's'}`
 
 /**
@@ -410,7 +440,7 @@ const Curve = ({ curve }: { curve: api.Analysis['curve'] }): React.JSX.Element =
               className="curve-col"
               key={d.bucket}
               title={`Mana value ${String(d.bucket)}${d.bucket === 7 ? '+' : ''}: ${String(d.actual)} cards, want ${String(d.min)}–${String(d.max)} — ${label}`}
-              aria-label={`Mana value ${String(d.bucket)}: ${String(d.actual)} cards, target range ${String(d.min)} to ${String(d.max)}, ${label}`}
+              aria-label={`Mana value ${String(d.bucket)}: ${String(d.actual)} cards (${String(curve.locked[d.bucket] ?? 0)} locked), target range ${String(d.min)} to ${String(d.max)}, ${label}`}
             >
               {/* The acceptable range, drawn as a band rather than a line —
                   anywhere inside it is fine, which is what a range means. */}
@@ -425,7 +455,17 @@ const Curve = ({ curve }: { curve: api.Analysis['curve'] }): React.JSX.Element =
                 className="curve-bar"
                 data-direction={direction}
                 style={{ height: `${String((d.actual / peak) * 100)}%` }}
-              />
+              >
+                {/* The committed portion. Gold is the colour of a decision
+                    everywhere in this app, so a locked card reads the same way
+                    in the curve as it does in the deck. */}
+                <div
+                  className="curve-locked"
+                  style={{
+                    height: `${String(Math.min(100, ((curve.locked[d.bucket] ?? 0) / Math.max(1, d.actual)) * 100))}%`,
+                  }}
+                />
+              </div>
             </div>
           )
         })}
@@ -445,8 +485,9 @@ const Curve = ({ curve }: { curve: api.Analysis['curve'] }): React.JSX.Element =
 }
 
 interface PendingCommand {
-  readonly type: 'accept' | 'exclude' | 'remove'
+  readonly type: 'accept' | 'exclude' | 'remove' | 'lock'
   readonly oracleId: string
+  readonly locked?: boolean
 }
 
 interface QueryResult {
@@ -677,9 +718,22 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
   const [pending, setPending] = useState<readonly PendingCommand[]>([])
   const [basics, setBasics] = useState<api.Card[]>([])
   const [importing, setImporting] = useState(false)
+  const [hideSettledRoles, setHideSettledRoles] = useState(false)
+  /**
+   * Queries promoted to columns.
+   *
+   * A column does NOT filter. It evaluates the query per row and shows a tick,
+   * so the ordering stays the general one — combo degree, synergy, curve — and
+   * the column is an extra fact about each card rather than a different list.
+   * That is the difference between "show me only X" and "which of these are X".
+   */
+  const [columns, setColumns] = useState<readonly string[]>([])
+  const [columnMatches, setColumnMatches] = useState<Map<string, Set<string>>>(new Map())
+  const [draftQuery, setDraftQuery] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
   const deckRef = useRef(deck)
   const queryRef = useRef(query)
+  const columnsRef = useRef<readonly string[]>([])
   deckRef.current = deck
   queryRef.current = query
 
@@ -694,7 +748,9 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
         commands.map((c) =>
           c.type === 'accept'
             ? { type: 'accept', oracleId: c.oracleId, origin: 'manual' }
-            : { type: c.type, oracleId: c.oracleId },
+            : c.type === 'lock'
+              ? { type: 'lock', oracleId: c.oracleId, locked: c.locked ?? true }
+              : { type: c.type, oracleId: c.oracleId },
         ),
         current.version,
       )
@@ -705,6 +761,7 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
       api.getRecommendations(current.id, {
         limitPerGroup: 8,
         ...(queryRef.current === '' ? {} : { query: queryRef.current }),
+        ...(columnsRef.current.length > 0 ? { columns: columnsRef.current } : {}),
       }),
       api.getAnalysis(current.id),
     ])
@@ -733,6 +790,7 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
       setQueryError(r.recs.query.errors[0]?.message ?? null)
       setCards(r.hydrated.cards)
       setPrices(r.hydrated.prices)
+      setColumnMatches(new Map(r.recs.columns.map((c) => [c.query, new Set(c.matched)])))
       setPending([])
     },
   })
@@ -779,6 +837,18 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
     const commands = Array.from({ length: Math.abs(delta) }, () => ({ type, oracleId }))
     setPending((queued) => [...queued, ...commands])
     for (const c of commands) pipeline.schedule(c)
+  }
+
+  /**
+   * Lock or unlock a card.
+   *
+   * Locking is the user overruling the cut hints for one card, so it goes
+   * through the same batched pipeline as everything else and the hint clears
+   * when the recompute lands.
+   */
+  const toggleLock = (oracleId: string, locked: boolean): void => {
+    setPending((queued) => [...queued, { type: 'lock', oracleId, locked }])
+    pipeline.schedule({ type: 'lock', oracleId, locked })
   }
 
   const setDeckOption = (body: Parameters<typeof api.patchDeck>[1]): void => {
@@ -854,6 +924,12 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
     for (const p of pending) {
       if (p.type === 'accept') {
         entries.push({ oracleId: p.oracleId, zone: 'accepted', locked: false })
+      } else if (p.type === 'lock') {
+        entries = entries.map((e) =>
+          e.oracleId === p.oracleId && e.zone === 'accepted'
+            ? { ...e, locked: p.locked ?? true }
+            : e,
+        )
       } else if (p.type === 'remove') {
         // One copy, and nothing recorded — the card stays suggestible.
         const at = entries.findIndex((e) => e.oracleId === p.oracleId && e.zone === 'accepted')
@@ -869,6 +945,19 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
   }, [deck, pending])
 
   const inFlight = useMemo(() => new Set(pending.map((p) => p.oracleId)), [pending])
+
+  /** Cut hints by card, so a deck row can show its own without a scan. */
+  const cutBy = useMemo(
+    () => new Map((analysis?.cuts ?? []).map((c) => [c.oracleId, c])),
+    [analysis],
+  )
+  const lockedIds = useMemo(
+    () =>
+      new Set(
+        optimistic.entries.filter((e) => e.zone === 'accepted' && e.locked).map((e) => e.oracleId),
+      ),
+    [optimistic],
+  )
   const basicIds = useMemo(() => new Set(basics.map((b) => b.oracleId)), [basics])
 
   const accepted = optimistic.entries.filter((e) => e.zone === 'accepted')
@@ -901,10 +990,27 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
     })).filter((section) => section.lines.length > 0)
   }, [deck.commanders, accepted, cards])
 
-  const deficits = useMemo(
-    () => (analysis?.deficits ?? []).filter((d) => d.delta < 0).slice(0, 8),
-    [analysis],
-  )
+  /**
+   * Which composition bars to show.
+   *
+   * A role drops out once it is FULLY LOCKED — every card counted toward it has
+   * been committed, so there is nothing left to decide there. The checkbox
+   * additionally hides roles that merely meet their target but are not locked,
+   * which is what you want late in a build when only the shortfalls matter.
+   */
+  const compositionRows = useMemo(() => {
+    const rows = (analysis?.targets ?? []).map((t) => {
+      const name = dimensionName(t.dimension)
+      const settled = t.locked >= t.actual && t.actual >= t.min
+      const filled = t.actual >= t.min
+      return { ...t, name, settled, filled }
+    })
+    return rows
+      .filter((r) => !r.settled)
+      .filter((r) => !(hideSettledRoles && r.filled))
+      .sort((a, b) => a.actual / Math.max(1, a.ideal) - b.actual / Math.max(1, b.ideal))
+      .slice(0, 12)
+  }, [analysis, hideSettledRoles])
 
   const budget = deck.budget
   const overCard =
@@ -981,19 +1087,52 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
                     aria-label={`Preview ${cards.get(line.oracleId)?.name ?? 'card'}`}
                   >
                     {cards.get(line.oracleId)?.name ?? 'Loading…'}
+                    {/* Only ever on an unlocked card: locking is how the user
+                        says "stop asking about this one". */}
+                    {cutBy.has(line.oracleId) ? (
+                      <span className="reasons">
+                        {cutBy
+                          .get(line.oracleId)!
+                          .reasons.slice(0, 2)
+                          .map((r, i) => (
+                            <span className="reason cut" key={i}>
+                              {cutText(r)}
+                            </span>
+                          ))}
+                      </span>
+                    ) : null}
                   </button>
                   <Costs
                     manaCost={cards.get(line.oracleId)?.manaCost}
                     price={prices.get(line.oracleId)}
                   />
                   {section.key === 'commander' ? null : (
-                    <button
-                      className="act exclude"
-                      onClick={() => act(line.oracleId, 'exclude')}
-                      aria-label={`Remove ${cards.get(line.oracleId)?.name ?? 'card'}`}
-                    >
-                      Remove
-                    </button>
+                    <>
+                      <button
+                        className="act lock"
+                        data-locked={lockedIds.has(line.oracleId)}
+                        onClick={() => toggleLock(line.oracleId, !lockedIds.has(line.oracleId))}
+                        aria-label={
+                          lockedIds.has(line.oracleId)
+                            ? `Unlock ${cards.get(line.oracleId)?.name ?? 'card'}`
+                            : `Lock ${cards.get(line.oracleId)?.name ?? 'card'}, hiding its cut hint`
+                        }
+                        title={
+                          lockedIds.has(line.oracleId)
+                            ? 'Locked — this card is staying, so it is never suggested as a cut'
+                            : 'Lock this card to keep it and hide its cut hint'
+                        }
+                      >
+                        {lockedIds.has(line.oracleId) ? '\u25C6' : '\u25C7'}
+                      </button>
+                      <button
+                        className="act exclude"
+                        onClick={() => act(line.oracleId, 'exclude')}
+                        aria-label={`Remove ${cards.get(line.oracleId)?.name ?? 'card'}`}
+                      >
+                        Remove
+                      </button>
+                    </>
                   )}
                 </div>
               ))}
@@ -1114,13 +1253,62 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
 
           <h2>Suggestions</h2>
           <div className="field">
-            <input
-              type="text"
-              value={query}
-              placeholder="Filter — try  t:creature  or  mv<=3  or  price<=5"
-              onChange={(e) => setQuery(e.target.value)}
-              aria-label="Filter suggestions"
-            />
+            <div className="filter-bar">
+              <input
+                type="text"
+                value={draftQuery}
+                placeholder="Filter — try  t:creature  or  mv<=3  or  price<=5"
+                onChange={(e) => setDraftQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') setQuery(draftQuery)
+                }}
+                aria-label="Filter suggestions"
+              />
+              {/* Explicit, because a query is expensive: typing no longer fires
+                  a recompute on its own. Enter does the same thing. */}
+              <button
+                className="act"
+                onClick={() => setQuery(draftQuery)}
+                aria-label="Run this filter"
+                title="Run this filter"
+              >
+                {'\u2315'}
+              </button>
+              <button
+                className="act"
+                disabled={draftQuery.trim() === '' || columns.includes(draftQuery.trim())}
+                onClick={() => {
+                  setColumns((c) => [...c, draftQuery.trim()])
+                  // Promoting a query to a column means "keep showing me
+                  // everything, just tell me which ones match", so the filter
+                  // itself is cleared.
+                  setDraftQuery('')
+                  setQuery('')
+                }}
+                aria-label="Show this query as a column instead of filtering by it"
+                title="Add as a column: keeps every suggestion and ranking, and ticks the ones that match"
+              >
+                + column
+              </button>
+            </div>
+
+            {columns.length > 0 ? (
+              <div className="columns">
+                {columns.map((c) => (
+                  <span className="column-chip" key={c}>
+                    <code>{c}</code>
+                    <button
+                      className="act"
+                      onClick={() => setColumns((all) => all.filter((x) => x !== c))}
+                      aria-label={`Remove the ${c} column`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+
             {queryError !== null ? <p className="problem">{queryError}</p> : null}
           </div>
 
@@ -1130,6 +1318,11 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
                 <h3>{g.label}</h3>
                 <span className="count">{g.total}</span>
                 <span className="rationale">{g.rationale}</span>
+                {columns.map((c) => (
+                  <span className="col-head" key={c} title={c}>
+                    {c}
+                  </span>
+                ))}
               </div>
               {g.items.map((item) => (
                 <div className="card-row" key={item.oracleId}>
@@ -1148,6 +1341,17 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
                       ))}
                     </span>
                   </button>
+                  {columns.map((c) => (
+                    <span
+                      className="col-cell"
+                      key={c}
+                      data-match={columnMatches.get(c)?.has(item.oracleId) === true}
+                      title={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
+                      aria-label={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
+                    >
+                      {columnMatches.get(c)?.has(item.oracleId) === true ? '\u2713' : '\u00B7'}
+                    </span>
+                  ))}
                   <Costs
                     manaCost={cards.get(item.oracleId)?.manaCost}
                     price={prices.get(item.oracleId)}
@@ -1195,27 +1399,49 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
             />
 
             <h2 style={{ marginTop: '1.25rem' }}>Composition</h2>
-            {deficits.map((d) => {
-              const name = dimensionName(d.dimension)
-              const target = analysis?.targets.find((t) => dimensionName(t.dimension) === name)
-              const have = (target?.ideal ?? 0) + d.delta
-              const pct = target?.ideal ? Math.min(100, (have / target.ideal) * 100) : 0
+            <label className="check" title={HIDE_SETTLED_HELP}>
+              <input
+                type="checkbox"
+                checked={hideSettledRoles}
+                onChange={(e) => setHideSettledRoles(e.target.checked)}
+              />
+              Only show roles that still need cards
+              <span className="help" aria-hidden="true">
+                ?
+              </span>
+            </label>
+
+            {compositionRows.map((r) => {
+              const pct = Math.min(100, (r.actual / Math.max(1, r.ideal)) * 100)
+              const lockedPct = Math.min(100, (r.locked / Math.max(1, r.ideal)) * 100)
               return (
-                <div className="meter" key={name}>
+                <div className="meter" key={r.name}>
                   <div className="meter-label">
-                    <span>{name}</span>
+                    <span>{r.name}</span>
                     <span className="delta">
-                      {have} / {target?.ideal ?? 0}
+                      {r.locked > 0 ? `${String(r.locked)}\u25C6 ` : ''}
+                      {r.actual} / {r.ideal}
                     </span>
                   </div>
-                  <div className="meter-track">
-                    <div className="meter-fill" data-short={true} style={{ width: `${pct}%` }} />
+                  <div
+                    className="meter-track"
+                    title={`${String(r.actual)} of a target ${String(r.ideal)} (range ${String(r.min)}–${String(r.max)}), ${String(r.locked)} locked`}
+                  >
+                    <div
+                      className="meter-fill"
+                      data-short={!r.filled}
+                      style={{ width: `${pct}%` }}
+                    />
+                    {/* The committed part, in the same gold the curve uses. */}
+                    <div className="meter-locked" style={{ width: `${lockedPct}%` }} />
                   </div>
                 </div>
               )
             })}
-            {deficits.length === 0 && analysis !== null ? (
-              <p className="note">No shortfalls.</p>
+            {compositionRows.length === 0 && analysis !== null ? (
+              <p className="note">
+                {hideSettledRoles ? 'Nothing short.' : 'Every role is locked in.'}
+              </p>
             ) : null}
 
             {analysis !== null ? (

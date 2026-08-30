@@ -1,0 +1,210 @@
+import { describe, expect, it } from 'vitest'
+import { buildComboIndex } from './combo-index.js'
+import { countComposition } from './composition-analysis.js'
+import { curveTarget } from './curve.js'
+import { lockedComposition, lockedCurve, suggestCuts, type CutInput } from './cut.js'
+import { comboId, deckId, oracleId, printingId } from './ids.js'
+import type { Card, CardType, Deck, DeckEntry } from './index.js'
+
+const card = (name: string, opts: Partial<Card> = {}): Card => ({
+  oracleId: oracleId(name),
+  name,
+  manaCost: '{1}{R}',
+  manaValue: opts.manaValue ?? 2,
+  colorIdentity: ['R'],
+  colors: ['R'],
+  typeLine: opts.typeLine ?? 'Creature — Goblin',
+  types: (opts.types ?? ['creature']) as readonly CardType[],
+  oracleText: '',
+  keywords: [],
+  legalities: { commander: 'legal' },
+  edhrecRank: null,
+  defaultPrinting: printingId(`${name}-p`),
+  roles: opts.roles ?? ['ramp'],
+  primaryRole: opts.primaryRole ?? 'ramp',
+  universesBeyond: false,
+  synergyProduces: opts.synergyProduces ?? [],
+  synergyWants: opts.synergyWants ?? [],
+})
+
+const entry = (name: string, over: Partial<DeckEntry> = {}): DeckEntry => ({
+  oracleId: oracleId(name),
+  zone: 'accepted',
+  origin: 'manual',
+  locked: false,
+  roleOverride: null,
+  tags: [],
+  addedAt: '2026-01-01T00:00:00Z',
+  ...over,
+})
+
+const deck = (entries: DeckEntry[]): Deck => ({
+  id: deckId('d'),
+  name: 't',
+  commanders: [oracleId('Cmdr')],
+  targetBracket: 3,
+  archetype: 'midrange',
+  archetypeSecondary: null,
+  colorIdentity: ['R'],
+  entries,
+  budget: null,
+  excludeUniversesBeyond: false,
+  status: 'active',
+  version: 1,
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
+  lastOpenedAt: '2026-01-01T00:00:00Z',
+})
+
+const inputFor = (d: Deck, cards: Card[], extra: Partial<CutInput> = {}): CutInput => {
+  const index = new Map(cards.map((c) => [c.oracleId, c]))
+  // The commander counts toward composition (doc 02 §2.3), so it is given a
+  // role the tests are not measuring — otherwise it silently skews every count.
+  index.set(oracleId('Cmdr'), card('Cmdr', { roles: ['wincon'], primaryRole: 'wincon' }))
+  return {
+    deck: d,
+    cards: index,
+    counts: countComposition(d, index, (c) => c.primaryRole),
+    // One ramp allowed; anything past that is over-supplied.
+    targets: [{ dimension: { kind: 'role', role: 'ramp' }, min: 0, ideal: 1, max: 1 }],
+    curveTarget: curveTarget('midrange'),
+    comboIndex: buildComboIndex([]),
+    deckSynergy: { produces: new Map(), wants: new Map() },
+    ...extra,
+  }
+}
+
+describe('suggestCuts', () => {
+  it('never suggests cutting a locked card, however weak it looks', () => {
+    // Locking is how the user says "this stays"; the whole point is to stop
+    // being asked about cards that are already decided.
+    const cards = [card('A'), card('B'), card('C')]
+    const d = deck([entry('A', { locked: true }), entry('B'), entry('C')])
+
+    const hints = suggestCuts(inputFor(d, cards))
+
+    expect(hints.map((h) => h.oracleId)).not.toContain(oracleId('A'))
+    expect(hints.length).toBeGreaterThan(0)
+  })
+
+  it('names an over-supplied role, measured against the range top not the ideal', () => {
+    const cards = [card('A'), card('B'), card('C')]
+    const d = deck([entry('A'), entry('B'), entry('C')])
+
+    const hints = suggestCuts(inputFor(d, cards))
+
+    const roleReason = hints[0]?.reasons.find((r) => r.kind === 'role-over-target')
+    expect(roleReason).toBeDefined()
+    // Three ramp against a max of one.
+    expect(roleReason).toMatchObject({ over: 2 })
+  })
+
+  it('does not flag a role that is merely at its ideal', () => {
+    const cards = [card('A')]
+    const d = deck([entry('A')])
+
+    const hints = suggestCuts(inputFor(d, cards))
+
+    expect(hints[0]?.reasons.some((r) => r.kind === 'role-over-target')).toBe(false)
+  })
+
+  it('holds a combo piece back — its absence is what counts against a card', () => {
+    const piece = card('Piece')
+    const other = card('Other')
+    const index = buildComboIndex([
+      {
+        id: comboId('c1'),
+        pieces: [oracleId('Piece'), oracleId('Cmdr')],
+        prerequisites: '',
+        steps: [],
+        produces: ['infinite-mana'],
+        colorIdentity: ['R'],
+      },
+    ])
+    const d = deck([entry('Piece'), entry('Other')])
+
+    const hints = suggestCuts(inputFor(d, [piece, other], { comboIndex: index }))
+
+    const pieceHint = hints.find((h) => h.oracleId === oracleId('Piece'))
+    const otherHint = hints.find((h) => h.oracleId === oracleId('Other'))
+    expect(pieceHint?.reasons.some((r) => r.kind === 'no-combos')).toBe(false)
+    expect(otherHint?.reasons.some((r) => r.kind === 'no-combos')).toBe(true)
+    // And it therefore ranks as less cuttable.
+    expect(pieceHint?.score ?? 1).toBeLessThan(otherHint?.score ?? 0)
+  })
+
+  it('flags a card over the per-card budget', () => {
+    const cards = [card('Pricey')]
+    const d = deck([entry('Pricey')])
+
+    const hints = suggestCuts(inputFor(d, cards, { priceOf: () => 40, maxCardUsd: 10 }))
+
+    expect(hints[0]?.reasons).toContainEqual({ kind: 'over-budget', priceUsd: 40, limit: 10 })
+  })
+
+  it('says nothing about price when no limit is set', () => {
+    const cards = [card('Pricey')]
+    const d = deck([entry('Pricey')])
+
+    const hints = suggestCuts(inputFor(d, cards, { priceOf: () => 4000 }))
+
+    expect(hints[0]?.reasons.some((r) => r.kind === 'over-budget')).toBe(false)
+  })
+
+  it('gives every hint at least one reason', () => {
+    const cards = [card('A'), card('B')]
+    const d = deck([entry('A'), entry('B')])
+
+    for (const hint of suggestCuts(inputFor(d, cards))) {
+      expect(hint.reasons.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('ranks the weakest first', () => {
+    const cards = [card('A'), card('B')]
+    const d = deck([entry('A'), entry('B')])
+
+    const hints = suggestCuts(
+      inputFor(d, cards, { priceOf: (id) => (id === oracleId('A') ? 99 : 1), maxCardUsd: 5 }),
+    )
+
+    expect(hints[0]?.oracleId).toBe(oracleId('A'))
+  })
+
+  it('ignores excluded entries — they are already out of the deck', () => {
+    const cards = [card('A')]
+    const d = deck([entry('A', { zone: 'excluded' })])
+
+    expect(suggestCuts(inputFor(d, cards))).toEqual([])
+  })
+})
+
+describe('lockedCurve', () => {
+  it('counts locked copies per bucket, duplicates included', () => {
+    const mountain = card('M', { manaValue: 0, roles: ['land'], primaryRole: 'land' })
+    const d = deck([entry('M', { locked: true }), entry('M', { locked: true }), entry('M')])
+
+    const locked = lockedCurve(d, new Map([[oracleId('M'), mountain]]), 8)
+
+    // Two of the three are locked, and they are not collapsed into one.
+    expect(locked[0]).toBe(2)
+  })
+
+  it('counts nothing for an unlocked deck', () => {
+    const c = card('A')
+    const d = deck([entry('A')])
+
+    expect(lockedCurve(d, new Map([[oracleId('A'), c]]), 8).every((n) => n === 0)).toBe(true)
+  })
+})
+
+describe('lockedComposition', () => {
+  it('counts locked cards per role', () => {
+    const c = card('A', { primaryRole: 'ramp' })
+    const d = deck([entry('A', { locked: true }), entry('A')])
+
+    const locked = lockedComposition(d, new Map([[oracleId('A'), c]]), (x) => x.primaryRole)
+
+    expect(locked.get('role:ramp')).toBe(1)
+  })
+})

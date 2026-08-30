@@ -11,8 +11,14 @@ import {
   findDeficits,
   curveDeltas,
   curveTarget,
+  deckSynergy,
+  lockedComposition,
+  lockedCurve,
+  primaryRole,
+  suggestCuts,
   validateDeck,
 } from '@roundtable/domain'
+import { dimensionKey } from '@roundtable/domain'
 import { loadDeckContext } from '../deck-context.js'
 import { notFound, sendProblem } from '../errors.js'
 import { deckIdParams } from '../schemas.js'
@@ -72,6 +78,33 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
       }
     }
 
+    const targetCurve = curveTarget(deck.archetype, deck.archetypeSecondary)
+
+    // What the deck already does, so a cut hint knows what it would break.
+    const synergy = deckSynergy(
+      deck.commanders,
+      deck.entries.filter((e) => e.zone === 'accepted').map((e) => e.oracleId),
+      (id) => {
+        const c = cards.get(id)
+        return c === undefined ? undefined : { produces: c.synergyProduces, wants: c.synergyWants }
+      },
+    )
+
+    const cuts = suggestCuts({
+      deck,
+      cards,
+      counts,
+      targets: context.targets,
+      curveTarget: targetCurve,
+      comboIndex,
+      deckSynergy: synergy,
+      priceOf: (id) => context.printingFacts.get(id)?.priceUsd ?? null,
+      maxCardUsd: deck.budget?.maxCardUsd ?? null,
+    })
+
+    const lockedByBucket = lockedCurve(deck, cards, counts.manaCurve.length)
+    const lockedByDimension = lockedComposition(deck, cards, (c) => primaryRole(c.roles))
+
     const assembled = deckCombos(comboIndex, accepted).map((comboId) => {
       const combo = comboIndex.byId.get(comboId)
       return { comboId, pieces: combo?.pieces ?? [], produces: combo?.produces ?? [] }
@@ -92,7 +125,13 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
         byType: fromMap<CardType>(counts.byType),
         byManaValue: counts.manaCurve,
       },
-      targets: context.targets,
+      targets: context.targets.map((t) => ({
+        ...t,
+        // Locked count per role, for the committed portion of each bar.
+        locked: lockedByDimension.get(dimensionKey(t.dimension)) ?? 0,
+        actual: counts.byDimension.get(dimensionKey(t.dimension)) ?? 0,
+      })),
+      cuts,
       deficits: deficits.map((d) => ({ dimension: d.dimension, delta: d.delta })),
       archetype: {
         declared: deck.archetype,
@@ -106,8 +145,11 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
         histogram: counts.manaCurve,
         // The target shape and the per-bucket gap, so the panel can draw both
         // and say which mana values need more or fewer cards (ADR-0011).
-        target: curveTarget(deck.archetype, deck.archetypeSecondary),
-        deltas: curveDeltas(counts.manaCurve, curveTarget(deck.archetype, deck.archetypeSecondary)),
+        target: targetCurve,
+        deltas: curveDeltas(counts.manaCurve, targetCurve),
+        // Cards the user has committed to at each mana value, so the curve can
+        // show what is settled and what is still moving.
+        locked: lockedByBucket,
       },
       colorBalance: {
         pips: pips as Record<Color, number>,

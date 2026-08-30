@@ -8,6 +8,7 @@ import {
   deckId,
   excludedSet,
   isOk,
+  matchesQuery,
   parseQuery,
   recommend,
   curveTarget,
@@ -28,6 +29,7 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
         groups?: CandidateGroupKey[]
         limitPerGroup?: number
         query?: string
+        columns?: string[]
         weights?: Partial<ScoringWeights>
       }
 
@@ -84,6 +86,51 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
         items: g.items,
       }))
 
+      /**
+       * Evaluate each column query per row.
+       *
+       * Columns do NOT filter and do NOT reorder: the groups and their ranking
+       * are exactly what they would have been, and this only answers "which of
+       * these match" for each one. That is the whole distinction from `query`.
+       *
+       * Evaluated against the returned recommendations rather than the raw pool,
+       * so deck-relative fields like `combo>=2` mean the same thing in a column
+       * as they do in a filter.
+       */
+      const poolByOracleId = new Map(context.pool.map((p) => [p.card.oracleId, p]))
+      const columnResults = (body.columns ?? []).map((source) => {
+        const parsedColumn = parseQuery(source)
+        const columnErrors = isOk(parsedColumn) ? parsedColumn.value.errors : parsedColumn.error
+        if (columnErrors.length > 0) {
+          return { query: source, matched: [], error: columnErrors[0]?.message ?? 'bad query' }
+        }
+        const ast = isOk(parsedColumn) ? parsedColumn.value.ast : null
+
+        const matched: string[] = []
+        for (const group of result.groups) {
+          for (const item of group.items) {
+            const pooled = poolByOracleId.get(item.oracleId)
+            if (pooled === undefined) continue
+            const candidate = {
+              card: pooled.card,
+              comboDegree: item.comboDegree,
+              nearCombosAt1: item.nearCombosAt1,
+              roles: pooled.roles,
+              bracketFlags: pooled.bracketFlags,
+              priceUsd: pooled.priceUsd,
+              rarity: pooled.rarity,
+              setCode: pooled.setCode,
+              power: pooled.power,
+              toughness: pooled.toughness,
+              reserved: pooled.reserved,
+              group: group.key,
+            }
+            if (matchesQuery(ast, candidate)) matched.push(item.oracleId)
+          }
+        }
+        return { query: source, matched }
+      })
+
       const withheldByGroup: Record<string, number> = {}
       for (const g of result.groups) withheldByGroup[g.key] = g.withheldByFilter
 
@@ -98,6 +145,7 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
           ...result.unavailable,
           ...context.missing.map((m) => ({ key: m.source, reason: m.reason })),
         ],
+        columns: columnResults,
         query: {
           matched: result.groups.reduce((n, g) => n + g.total, 0),
           total: context.pool.length,

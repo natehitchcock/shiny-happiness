@@ -179,13 +179,14 @@ export const sendCommands = (
 export interface Recommendations {
   datasetSnapshotId: string | null
   groups: Group[]
+  columns: { query: string; matched: string[]; error?: string }[]
   unavailable: Unavailable[]
   query: { matched: number; total: number; errors: { message: string; position: number }[] }
 }
 
 export const getRecommendations = (
   id: string,
-  body: { limitPerGroup?: number; query?: string },
+  body: { limitPerGroup?: number; query?: string; columns?: readonly string[] },
 ): Promise<Recommendations> =>
   request(`/decks/${id}/recommendations`, { method: 'POST', body: JSON.stringify(body) })
 
@@ -196,6 +197,20 @@ export interface Analysis {
     ideal: number
     min: number
     max: number
+    locked: number
+    actual: number
+  }[]
+  cuts: {
+    oracleId: string
+    score: number
+    reasons: {
+      kind: string
+      dimension?: { role?: string; type?: string }
+      over?: number
+      manaValue?: number
+      priceUsd?: number
+      limit?: number
+    }[]
   }[]
   deficits: { dimension: { role?: string; type?: string }; delta: number }[]
   archetype: { declared: string; assessed: string; confidence: number }
@@ -203,6 +218,7 @@ export interface Analysis {
     averageManaValue: number
     histogram: number[]
     target: { ideal: number; min: number; max: number }[]
+    locked: number[]
     deltas: {
       bucket: number
       actual: number

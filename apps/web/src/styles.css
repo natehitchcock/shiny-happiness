@@ -976,3 +976,144 @@ select {
     overflow: visible;
   }
 }
+
+/* ---------------------------------------------------------------- locked */
+
+/*
+ * Gold is the colour of a decision.
+ *
+ * A locked card, the committed part of a curve bucket, and the committed part
+ * of a role all wear the same brass, so "I have decided this" reads identically
+ * wherever it appears. It is the same brass as combo degree deliberately —
+ * both are things the user has earned rather than things the app guessed.
+ */
+.act.lock {
+  min-width: 1.7rem;
+  padding: 2px 0;
+  text-align: center;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.act.lock[data-locked='true'] {
+  color: var(--brass);
+  border-color: var(--brass-dim);
+}
+
+.curve-locked {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--brass);
+  border-radius: 0 0 2px 2px;
+  opacity: 0.9;
+}
+
+.curve-bar {
+  position: relative;
+}
+
+.meter-track {
+  position: relative;
+}
+
+.meter-locked {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--brass);
+  border-radius: 2px;
+}
+
+/* A cut hint is advice, not an error, so it is quieter than a problem and
+   warmer than a note — and it never appears on a locked card. */
+.reason.cut {
+  color: var(--rust);
+  border-color: var(--rust);
+  opacity: 0.85;
+}
+
+.help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  margin-left: 4px;
+  border: 1px solid var(--rule);
+  border-radius: 50%;
+  font-size: 0.6rem;
+  color: var(--parchment-dim);
+  cursor: help;
+}
+
+/* ---------------------------------------------------------------- columns */
+
+.filter-bar {
+  display: flex;
+  gap: var(--step);
+  align-items: stretch;
+}
+
+.filter-bar input[type='text'] {
+  flex: 1;
+}
+
+.filter-bar .act {
+  flex: 0 0 auto;
+  padding: 0 var(--step);
+  white-space: nowrap;
+}
+
+.columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--step);
+  margin-top: var(--step);
+}
+
+.column-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 1px 3px 1px var(--step);
+  font-size: 0.72rem;
+}
+
+.column-chip code {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--parchment);
+}
+
+/* A column is a fact about a row, not a ranking, so it sits quietly beside the
+   costs rather than competing with the reasons. */
+.col-cell {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  min-width: 1.6rem;
+  text-align: center;
+  color: var(--rule);
+  flex: 0 0 auto;
+}
+
+.col-cell[data-match='true'] {
+  color: var(--sage);
+}
+
+.col-head {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  min-width: 1.6rem;
+  text-align: center;
+  color: var(--parchment-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 5rem;
+  flex: 0 0 auto;
+}
