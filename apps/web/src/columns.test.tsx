@@ -569,3 +569,52 @@ describe('locking a card clears its cut hint at once', () => {
     expect(screen.queryByText('no synergy')).toBeNull()
   }, 20_000)
 })
+
+describe('rejecting a card', () => {
+  it('says "Rejecting", not "Adding"', async () => {
+    // The default label counted commands without reading them, so clicking
+    // Reject announced "Adding 1 card" — the opposite of what was clicked.
+    render(<Workspace deck={deck} />)
+    await waitFor(() => expect(screen.getAllByText('Reject').length).toBeGreaterThan(0), {
+      timeout: 5_000,
+    })
+
+    await act(async () => {
+      screen.getAllByText('Reject')[0]?.click()
+    })
+    await waitFor(() => expect(screen.getByText(/Rejecting 1 card/)).toBeDefined())
+  })
+
+  it('takes the card out of the suggestions on the click', async () => {
+    // P6: an excluded card is never suggested again. The groups come from the
+    // server and are only as fresh as the last recompute, so the card used to
+    // sit there for seconds while the app went on offering what was refused.
+    render(<Workspace deck={deck} />)
+    await waitFor(() => expect(screen.getByText('Krenko, Mob Boss')).toBeDefined(), {
+      timeout: 5_000,
+    })
+
+    const { container } = { container: document.body }
+    await act(async () => {
+      screen.getAllByText('Reject')[0]?.click()
+    })
+    // Scoped to the SUGGESTIONS. The card is still on screen — it has moved to
+    // the Rejected list, where it keeps a preview button — so an unscoped
+    // query finds it there and proves nothing.
+    expect(container.querySelectorAll('.group .card-row')).toHaveLength(0)
+    expect(
+      [...container.querySelectorAll('.group')].some((g) =>
+        (g.textContent ?? '').includes('Krenko, Mob Boss'),
+      ),
+    ).toBe(false)
+  })
+
+  it('still calls it a rejection, not a removal, in the label', async () => {
+    render(<Workspace deck={deck} />)
+    await waitFor(() => expect(screen.getAllByText('Reject').length).toBeGreaterThan(0), {
+      timeout: 5_000,
+    })
+    expect(screen.getAllByLabelText(/^Reject /).length).toBeGreaterThan(0)
+    expect(screen.queryAllByLabelText(/^Never suggest/)).toHaveLength(0)
+  })
+})

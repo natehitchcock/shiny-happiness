@@ -67,8 +67,13 @@ export interface PipelineOptions<T> {
   readonly run: (items: readonly T[]) => Promise<unknown>
   /** Commit the held result. Called once, at 100%. */
   readonly apply: (result: unknown) => void
-  /** Words for the buffering phase, given how many items are queued. */
-  readonly describe?: (count: number) => string
+  /**
+   * Words for the buffering phase, given the items queued.
+   *
+   * The items, not a count: "Adding 2 cards" is wrong when one of them is a
+   * rejection, and a count cannot tell the difference.
+   */
+  readonly describe?: (items: readonly T[]) => string
 }
 
 const now = (): number => performance.now()
@@ -77,7 +82,7 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
   const [phase, setPhase] = useState<Phase>('idle')
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [queued, setQueued] = useState(0)
+  const [queued, setQueued] = useState<readonly T[]>([])
 
   // Refs, not state: the animation frame reads these every tick and must see
   // the current values without re-subscribing.
@@ -124,7 +129,7 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
     stop()
     setPhaseBoth('idle')
     setProgress(0)
-    setQueued(0)
+    setQueued([])
     const held = result.current
     result.current = null
     resolved.current = false
@@ -226,7 +231,7 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
   const schedule = useCallback(
     (item: T): void => {
       items.current = [...items.current, item]
-      setQueued(items.current.length)
+      setQueued(items.current)
       setError(null)
 
       // Inside the buffer this just joins the batch and the bar keeps running.
@@ -256,7 +261,7 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
    * from when the answer lands, never from when the request left.
    */
   const refresh = useCallback((): void => {
-    setQueued(0)
+    setQueued([])
     items.current = []
     start(false, true)
   }, [start])
@@ -266,8 +271,8 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
   const label =
     options.describe?.(queued) ??
     (phase === 'buffering'
-      ? queued > 0
-        ? `Adding ${String(queued)} card${queued === 1 ? '' : 's'}…`
+      ? queued.length > 0
+        ? `Adding ${String(queued.length)} card${queued.length === 1 ? '' : 's'}…`
         : 'Preparing…'
       : phase === 'querying'
         ? 'Recomputing suggestions…'

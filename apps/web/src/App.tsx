@@ -880,12 +880,16 @@ const Preview = ({
         )}
         {/* Power/toughness for a creature, loyalty for a planeswalker. Printed
             as text because Magic prints `*` and `1+*`, and a card whose power
-            is `*` has a power — it is simply not a number. */}
-        {shown.power !== null && shown.toughness !== null ? (
+            is `*` has a power — it is simply not a number.
+
+            `??` and not `!== null`: a card hydrated before this field existed
+            has `undefined`, which is not null and so passed the old guard —
+            rendering an empty box with a lone slash in it. */}
+        {(shown.power ?? null) !== null && (shown.toughness ?? null) !== null ? (
           <span className="pt" aria-label={`power ${shown.power}, toughness ${shown.toughness}`}>
             {shown.power}/{shown.toughness}
           </span>
-        ) : shown.loyalty !== null ? (
+        ) : (shown.loyalty ?? null) !== null ? (
           <span className="pt" aria-label={`starting loyalty ${shown.loyalty}`}>
             {shown.loyalty}
           </span>
@@ -1620,6 +1624,27 @@ export const Workspace = ({
   }, [])
 
   const pipeline = usePipeline<PendingCommand>({
+    /**
+     * Say what is actually being done.
+     *
+     * The default said "Adding 1 card" for everything, including a rejection —
+     * which told the user the opposite of what they had just clicked. A count
+     * cannot tell those apart, so the label reads the commands.
+     */
+    describe: (queued) => {
+      if (queued.length === 0) return 'Preparing…'
+      const words: Record<PendingCommand['type'], string> = {
+        accept: 'Adding',
+        exclude: 'Rejecting',
+        remove: 'Removing',
+        restore: 'Restoring',
+        lock: 'Locking',
+      }
+      const kinds = new Set(queued.map((c) => c.type))
+      const verb = kinds.size === 1 ? words[queued[0]!.type] : 'Updating'
+      const n = queued.length
+      return `${verb} ${String(n)} card${n === 1 ? '' : 's'}…`
+    },
     run: (commands) => load(commands),
     apply: (value) => {
       const r = value as QueryResult | null
@@ -2316,9 +2341,9 @@ export const Workspace = ({
           {excluded.length > 0 ? (
             <div className="deck-section">
               <h3>
-                Excluded<span className="count">{excluded.length}</span>
+                Rejected<span className="count">{excluded.length}</span>
               </h3>
-              <p className="note">These are never suggested again.</p>
+              <p className="note">Not suggested again — until you put one back.</p>
               {excluded.map((e) => (
                 <div className="card-row" key={e.oracleId}>
                   <button
@@ -2556,114 +2581,133 @@ export const Workspace = ({
                     once instead, in the legend under the filter bar, which
                     aligns by measuring where the cells actually are. */}
               </div>
-              {g.items.map((item) => (
-                <div className="card-row" key={item.oracleId}>
-                  <Degree
-                    degree={item.comboDegree}
-                    near={item.nearCombosAt1}
-                    combos={item.combos}
-                    cards={cards}
-                    lockedIds={lockedIds}
-                    self={item.oracleId}
-                  />
-                  {/* The reasons sit BESIDE the name button, not inside it.
+              {g.items
+                /*
+                 * Drop anything the user has just decided on.
+                 *
+                 * The groups come from the server and are only as fresh as the
+                 * last recompute, so a rejected card sat in the list until the
+                 * requery landed — several seconds during which the app was
+                 * still offering something the user had just refused. Pillar P6
+                 * says an excluded card is never suggested again; that has to
+                 * be true on the click, not on the next round trip.
+                 */
+                .filter((item) => {
+                  const decided = optimistic.entries.find((e) => e.oracleId === item.oracleId)
+                  return decided === undefined || decided.zone !== 'excluded'
+                })
+                .map((item) => (
+                  <div className="card-row" key={item.oracleId}>
+                    <Degree
+                      degree={item.comboDegree}
+                      near={item.nearCombosAt1}
+                      combos={item.combos}
+                      cards={cards}
+                      lockedIds={lockedIds}
+                      self={item.oracleId}
+                    />
+                    {/* The reasons sit BESIDE the name button, not inside it.
                       One of them opens a panel of its own, and a button nested
                       in a button is invalid and unreachable by keyboard. */}
-                  {/* The whole cell opens the preview, not just the text.
+                    {/* The whole cell opens the preview, not just the text.
                       Splitting the name from its reasons left a dead strip
                       under the name where a click landed on nothing. The button
                       inside stays the accessible control; this is a mouse
                       convenience layered over it. */}
-                  <span
-                    className="name-cell"
-                    onClick={(e) => {
-                      // A reason chip that opens its own panel must not also
-                      // open the preview behind it.
-                      if ((e.target as HTMLElement).closest('.hint') === null) open(item.oracleId)
-                    }}
-                  >
-                    <button
-                      className="name as-link"
-                      onClick={() => open(item.oracleId)}
-                      aria-label={`Preview ${cards.get(item.oracleId)?.name ?? 'card'}`}
+                    <span
+                      className="name-cell"
+                      onClick={(e) => {
+                        // A reason chip that opens its own panel must not also
+                        // open the preview behind it.
+                        if ((e.target as HTMLElement).closest('.hint') === null) open(item.oracleId)
+                      }}
                     >
-                      {cards.get(item.oracleId)?.name ?? 'Loading…'}
-                    </button>
-                    <span className="reasons">
-                      {item.reasons.map((r, i) =>
-                        r.kind === 'completes-combos' && item.combos.length > 0 ? (
-                          <Hint
-                            key={i}
-                            className="reason-hint"
-                            label={`${reasonText(r, item)} — show which`}
-                            content={
-                              <>
-                                <strong>{reasonText(r, item)}</strong>
-                                <ComboList
-                                  combos={item.combos}
-                                  cards={cards}
-                                  lockedIds={lockedIds}
-                                  self={item.oracleId}
-                                />
-                              </>
-                            }
-                          >
-                            <span className="reason" data-kind={r.kind} data-openable="true">
+                      <button
+                        className="name as-link"
+                        onClick={() => open(item.oracleId)}
+                        aria-label={`Preview ${cards.get(item.oracleId)?.name ?? 'card'}`}
+                      >
+                        {cards.get(item.oracleId)?.name ?? 'Loading…'}
+                      </button>
+                      <span className="reasons">
+                        {item.reasons.map((r, i) =>
+                          r.kind === 'completes-combos' && item.combos.length > 0 ? (
+                            <Hint
+                              key={i}
+                              className="reason-hint"
+                              label={`${reasonText(r, item)} — show which`}
+                              content={
+                                <>
+                                  <strong>{reasonText(r, item)}</strong>
+                                  <ComboList
+                                    combos={item.combos}
+                                    cards={cards}
+                                    lockedIds={lockedIds}
+                                    self={item.oracleId}
+                                  />
+                                </>
+                              }
+                            >
+                              <span className="reason" data-kind={r.kind} data-openable="true">
+                                {reasonText(r, item)}
+                              </span>
+                            </Hint>
+                          ) : (
+                            <span className="reason" data-kind={r.kind} key={i}>
                               {reasonText(r, item)}
                             </span>
-                          </Hint>
-                        ) : (
-                          <span className="reason" data-kind={r.kind} key={i}>
-                            {reasonText(r, item)}
-                          </span>
-                        ),
-                      )}
+                          ),
+                        )}
+                      </span>
                     </span>
-                  </span>
-                  {columns.map((c) => (
-                    <span
-                      className="col-cell"
-                      key={c}
-                      data-match={columnMatches.get(c)?.has(item.oracleId) === true}
-                      title={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
-                      aria-label={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
-                    >
-                      {columnMatches.get(c)?.has(item.oracleId) === true ? '\u2713' : '\u00B7'}
-                    </span>
-                  ))}
-                  <Costs
-                    manaCost={cards.get(item.oracleId)?.manaCost}
-                    price={prices.get(item.oracleId)}
-                  />
-                  {inFlight.has(item.oracleId) ? (
-                    // Already in the deck as far as the user is concerned; the
-                    // spinner says the suggestions have not caught up yet, and
-                    // it stops the same card being clicked twice.
-                    <span
-                      className="spinner"
-                      role="status"
-                      aria-label={`${cards.get(item.oracleId)?.name ?? 'Card'} added, updating suggestions`}
+                    {columns.map((c) => (
+                      <span
+                        className="col-cell"
+                        key={c}
+                        data-match={columnMatches.get(c)?.has(item.oracleId) === true}
+                        title={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
+                        aria-label={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
+                      >
+                        {columnMatches.get(c)?.has(item.oracleId) === true ? '\u2713' : '\u00B7'}
+                      </span>
+                    ))}
+                    <Costs
+                      manaCost={cards.get(item.oracleId)?.manaCost}
+                      price={prices.get(item.oracleId)}
                     />
-                  ) : (
-                    <>
-                      <button
-                        className="act accept"
-                        onClick={() => act(item.oracleId, 'accept')}
-                        aria-label={`Add ${cards.get(item.oracleId)?.name ?? 'card'}`}
-                      >
-                        Add
-                      </button>
-                      <button
-                        className="act exclude"
-                        onClick={() => act(item.oracleId, 'exclude')}
-                        aria-label={`Never suggest ${cards.get(item.oracleId)?.name ?? 'card'}`}
-                      >
-                        Never
-                      </button>
-                    </>
-                  )}
-                </div>
-              ))}
+                    {inFlight.has(item.oracleId) ? (
+                      // Already in the deck as far as the user is concerned; the
+                      // spinner says the suggestions have not caught up yet, and
+                      // it stops the same card being clicked twice.
+                      <span
+                        className="spinner"
+                        role="status"
+                        aria-label={`${cards.get(item.oracleId)?.name ?? 'Card'} added, updating suggestions`}
+                      />
+                    ) : (
+                      <>
+                        <button
+                          className="act accept"
+                          onClick={() => act(item.oracleId, 'accept')}
+                          aria-label={`Add ${cards.get(item.oracleId)?.name ?? 'card'}`}
+                        >
+                          Add
+                        </button>
+                        {/* "Reject", not "Never". The action is the same and
+                          undoable from the Rejected list, and "Never" read as a
+                          harsher commitment than it actually is. */}
+                        <button
+                          className="act exclude"
+                          onClick={() => act(item.oracleId, 'exclude')}
+                          aria-label={`Reject ${cards.get(item.oracleId)?.name ?? 'card'}`}
+                          title="Stop suggesting this card. You can undo it from the Rejected list."
+                        >
+                          Reject
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
             </div>
           ))}
           {groups.length === 0 ? <p className="note">Working…</p> : null}
