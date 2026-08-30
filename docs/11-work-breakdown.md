@@ -18,8 +18,8 @@ The app is called **Lotus Wizard** in the interface. The name is tentative and
 **not cleared** — `LEGAL-01` owns that, and there is a real question to answer
 first: see doc 04 §4.6. Package scopes stay `@roundtable/*` until it is settled.
 
-**Done (20 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`, `API-01`, `API-02`,
-`DATA-01`, `DATA-02`, `ING-01`, `ING-02`, `FOUND-02`, and a vertical slice of `WEB-01`.
+**Done (21 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`, `API-01`, `API-02`,
+`DATA-01`, `DATA-02`, `ING-01`, `ING-02`, `FOUND-02`, `UI-01`, and a vertical slice of `WEB-01`.
 `DATA-03` is closed by decision and `ING-03` cut ([ADR-0008](adr/0008-drop-edhrec.md)).
 
 **Run it locally:**
@@ -51,7 +51,6 @@ API-02 performance test seeds a 20,000-card corpus and takes ~40 s.
 
 | Pick up | Why now |
 | --- | --- |
-| `UI-01` | The token layer landed with FOUND-02; the card primitives at four zoom levels are what `WEB-03`–`WEB-05` need next. |
 | `LEGAL-01` (name clearance only) | The name **Lotus Wizard** needs checking before it goes anywhere public — see doc 04 §4.6. Cheap to resolve, awkward to undo after it is on a domain. |
 | `FOUND-02` | ✅ **Done.** Design tokens as asserted data + `packages/ui` scaffold; the app imports them rather than keeping a copy | root | ✅ 13 contrast pairs asserted, each naming what it is for. Caught a live defect on the first run: rust was 2.80:1 on `ink-2`, the surface cut hints are drawn on. `tokens.css` is generated from the data and a test holds the two in step |
 | `WEB-01` proper | The slice is one deck in localStorage with no offline queue, no optimistic mutation and no reconcile. Everything in WEB-02..24 assumes those exist. |
@@ -169,7 +168,7 @@ against their interfaces; nothing depending on an unanswered question ships.
 
 | ID       | Task                                                                                                                                             | Depends                | DoD                                                                                                                                |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `UI-01`  | Card primitives at all four zoom representations (pip/tile/card/detail)                                                                          | FOUND-02               | Storybook entries; each meets its size and a11y requirements                                                                       |
+| `UI-01`  | ✅ **Done.** Card primitives at all four zoom representations (pip/tile/card/detail)                                                              | FOUND-02               | ✅ A gallery at `#gallery` rather than Storybook — see §11.10. Sizes and a11y asserted in `packages/ui/src/card/*.test.*`             |
 | `WEB-01` | App shell, routing, deck state store, optimistic mutation + reconcile                                                                            | UI-01, API-01          | Offline mutation queues and replays                                                                                                |
 | `WEB-02` | Two-region workspace + draggable divider + grouping (doc 06)                                                                                     | WEB-01                 | Divider snaps and persists; group collapse persists                                                                                |
 | `WEB-03` | Zoom system: 4 levels, shared across regions, anchoring, persistence (doc 07)                                                                    | WEB-02                 | All four control paths work; anchor preserved across a full L2→L0→L2 cycle                                                         |
@@ -241,3 +240,30 @@ The domain layer is done, so everything below is now unblocked in its own right.
 | --- | --- |
 | [16 — Archetype customiser](16-archetype-customiser.md) | Let a builder tune the role targets and curve their deck is judged against, instead of accepting the archetype preset. Sparse per-deck override so decks keep inheriting preset improvements; both target functions gain one optional parameter and nothing downstream changes. Three open questions at the end. |
 
+## 11.10 UI-01: a gallery instead of Storybook
+
+The DoD said "Storybook entries". It shipped as a page at `#gallery` and a test
+file per primitive, which is that DoD split into the two things it was asking
+for and each given to the tool that does it properly.
+
+Storybook asserts nothing. The half of the DoD that matters — "each meets its
+size and a11y requirements" — is a set of claims, and claims belong in tests:
+the L0 pip is held to doc 07's 6–10 px, the mobile widths are *recomputed* from
+doc 08's column counts rather than restated, every tile keeps a 44 px hit area
+however small a caller draws it, and both Enter and Space activate every
+interactive surface. Storybook would have watched all of that rot.
+
+What Storybook would still have given is somewhere a human can look at a
+primitive without building a deck first. That is a page, and it costs one file
+instead of forty packages. It renders the fixtures that break things rather
+than pretty ones: a card with no art, one with no price, a name too long for the
+strip, and a recommendation with an empty `reasons` list — which draws the P4
+violation in rust, on screen, where it cannot be ignored.
+
+Looking at that page immediately paid for itself. The combo badge was
+`position: absolute` unconditionally; at L2, where it sits in a flow row rather
+than over an image, it flew to the corner of the document — missing from the row
+and adding a page-wide horizontal scroll. A second pass found two classes with
+no CSS rule at all. Both now have tests, and one of them (`card.css.test.ts`)
+checks the whole class of defect: every `rt-` class the components render must
+have a rule, and no colour may be written as a literal hex instead of a token.

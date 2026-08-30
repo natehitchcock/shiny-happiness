@@ -7,3 +7,10 @@
  * TypeScript rather than retyping a hex.
  */
 export * from './tokens.js'
+
+/**
+ * UI-01 — the four card representations (doc 07 §7.1). `presentation.ts` holds
+ * the size budget and the colour encodings as data, for the same reason the
+ * tokens are data: so a test can assert them.
+ */
+export * from './card/index.js'

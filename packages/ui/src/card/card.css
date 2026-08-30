@@ -1,0 +1,328 @@
+/*
+ * Card primitives (UI-01). Import once at the app root, after tokens.css.
+ *
+ * Sizes that vary by level are set inline by the components, from
+ * `presentation.ts` — that file is the single source for the size budget and a
+ * duplicate here would be a second one that drifts. What lives in CSS is
+ * everything that does NOT vary by level: colour, type, spacing, states.
+ */
+
+.rt-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------- badges */
+
+/*
+ * Static by default, and pinned only inside the art frame that has a
+ * `position: relative` to pin it to. The first version was absolute
+ * unconditionally, which at L2 — where the badge sits in a flow row, not over
+ * an image — flung it to the top-right corner of the document.
+ */
+.rt-combo {
+  position: static;
+  min-width: 16px;
+  padding: 0 3px;
+  border-radius: var(--radius);
+  background: var(--brass);
+  color: var(--ink);
+  font: 600 11px/16px var(--mono);
+  text-align: center;
+}
+/* A near-combo is the same mark held back: outline rather than fill, so the
+   filled badge keeps meaning "this one lands now". */
+.rt-combo[data-near='true'] {
+  background: transparent;
+  color: var(--brass);
+  box-shadow: inset 0 0 0 1px var(--brass-dim);
+}
+
+.rt-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.rt-role-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--parchment-dim);
+  flex: none;
+}
+.rt-role-name {
+  color: var(--parchment-dim);
+  font: 400 11px/1.4 var(--ui);
+}
+
+.rt-mv {
+  font: 500 11px/1 var(--mono);
+  color: var(--parchment-dim);
+}
+
+.rt-identity {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.rt-price {
+  font: 500 11px/1 var(--mono);
+  color: var(--parchment-dim);
+}
+.rt-price[data-unknown='true'] {
+  opacity: 0.65;
+}
+
+.rt-flag {
+  padding: 0 4px;
+  border-radius: var(--radius);
+  background: var(--ink-3);
+  color: var(--rust);
+  font: 500 10px/16px var(--ui);
+}
+
+/* ---------------------------------------------------------------- L1 */
+
+.rt-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+  overflow: hidden;
+}
+.rt-tile:hover {
+  background: var(--ink-3);
+}
+.rt-tile:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+.rt-tile[data-selected='true'] {
+  border-color: var(--brass);
+}
+.rt-tile-art {
+  position: relative;
+  background: var(--ink-3);
+}
+.rt-tile-art .rt-combo {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+}
+.rt-tile-art .rt-role {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+}
+.rt-tile-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.rt-tile-noart {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(45deg, var(--ink-3) 0 6px, var(--ink-2) 6px 12px);
+}
+.rt-tile-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+}
+.rt-tile-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--parchment);
+  font: 400 11px/1.3 var(--ui);
+}
+
+/* ---------------------------------------------------------------- L2 */
+
+.rt-face {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rt-face-image {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--ink-2);
+  cursor: pointer;
+}
+.rt-face-image:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+.rt-face-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.rt-face-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  padding: 10px;
+  color: var(--parchment);
+  font: 400 12px/1.4 var(--ui);
+}
+.rt-face-name {
+  font: 600 14px/1.2 var(--display);
+}
+.rt-face-cost,
+.rt-face-type {
+  color: var(--parchment-dim);
+  font-size: 11px;
+}
+.rt-face-oracle {
+  overflow: hidden;
+}
+.rt-face-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.rt-face[data-selected='true'] .rt-face-image {
+  box-shadow: 0 0 0 2px var(--brass);
+}
+
+/* ---------------------------------------------------------------- L3 */
+
+.rt-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 12px;
+  color: var(--parchment);
+}
+.rt-detail-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.rt-detail-name {
+  margin: 0;
+  font: 600 18px/1.2 var(--display);
+}
+.rt-detail-cost {
+  font: 500 12px/1 var(--mono);
+  color: var(--parchment-dim);
+}
+/* The body scrolls; the header and the actions above it do not. "Accept stays
+   reachable without closing" (doc 06 §6.5) fails the moment the button can be
+   scrolled off. */
+.rt-detail-body {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rt-detail-image {
+  border-radius: 8px;
+  max-width: 100%;
+  height: auto;
+}
+.rt-detail-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rt-detail-role {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.rt-detail-type,
+.rt-detail-oracle {
+  margin: 0;
+  font: 400 12px/1.5 var(--ui);
+}
+.rt-detail-type {
+  color: var(--parchment-dim);
+}
+.rt-detail-h {
+  margin: 4px 0 0;
+  font: 600 11px/1.2 var(--ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+}
+.rt-detail-reasons,
+.rt-detail-flags,
+.rt-detail-combos {
+  margin: 0;
+  padding-left: 16px;
+  font: 400 12px/1.5 var(--ui);
+}
+.rt-detail-combos {
+  list-style: none;
+  padding-left: 0;
+}
+.rt-detail-combos li {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.rt-detail-combos li[data-assembled='true'] .rt-combo-state {
+  color: var(--brass);
+}
+.rt-combo-pieces {
+  color: var(--parchment);
+}
+.rt-combo-result,
+.rt-combo-state {
+  color: var(--parchment-dim);
+  font-size: 11px;
+}
+.rt-detail-noreasons {
+  margin: 0;
+  color: var(--rust);
+  font: 400 12px/1.5 var(--ui);
+}
+.rt-detail-nocombos {
+  margin: 0;
+  color: var(--parchment-dim);
+  font: 400 12px/1.5 var(--ui);
+}
+.rt-detail-correct {
+  margin-left: 8px;
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  color: var(--parchment-dim);
+  font: 400 11px/1.4 var(--ui);
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.rt-detail-correct:hover {
+  color: var(--parchment);
+  border-color: var(--brass-dim);
+}
