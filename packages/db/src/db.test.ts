@@ -119,6 +119,44 @@ describeDb('packages/db against real PostgreSQL', () => {
   })
 
   describe('schema constraints do the enforcing', () => {
+    /**
+     * `printings.oracle_id` references `cards`, so a printing cannot be written
+     * before the card it belongs to.
+     *
+     * The Scryfall ingest READS printings first — it must, because Universes
+     * Beyond provenance is a tally over every printing (ADR-0011) and no card
+     * row can be written until that tally is complete. It also WROTE them first
+     * for a long time, which works on any database that already holds a corpus
+     * and fails on an empty one. So it passed locally forever and failed the
+     * first time it was pointed at a fresh Neon database — the only run where
+     * the order could possibly matter.
+     */
+    it('refuses a printing whose oracle card has not been written yet', async () => {
+      await expect(
+        db.pool.query(
+          `INSERT INTO printings (printing_id, oracle_id, set_code, set_name,
+                                  collector_number, rarity, image_art_crop,
+                                  image_normal, price_usd, reserved)
+           VALUES ($1, $2, 'tst', 'Test Set', '1', 'common', 'a', 'b', NULL, false)`,
+          [randomUUID(), randomUUID()],
+        ),
+      ).rejects.toThrow(/foreign key constraint/i)
+    })
+
+    it('accepts a printing once its card exists', async () => {
+      const subject = card('Printed Card')
+      await upsertCards(db.pool, [subject])
+      await expect(
+        db.pool.query(
+          `INSERT INTO printings (printing_id, oracle_id, set_code, set_name,
+                                  collector_number, rarity, image_art_crop,
+                                  image_normal, price_usd, reserved)
+           VALUES ($1, $2, 'tst', 'Test Set', '1', 'common', 'a', 'b', NULL, false)`,
+          [randomUUID(), subject.oracleId],
+        ),
+      ).resolves.toBeDefined()
+    })
+
     it('refuses a combo with no pieces', async () => {
       await expect(
         db.pool.query("INSERT INTO combos (combo_id, pieces) VALUES ('empty', '{}')"),

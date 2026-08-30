@@ -1744,14 +1744,14 @@ export const Workspace = ({
 
             <label
               className="check"
-              title="Stop typing and the filter runs by itself after ten seconds. The ring around the magnifying glass shows how long is left; typing anything resets it."
+              title="Stop typing and the filter runs by itself after four seconds. The ring around the magnifying glass shows how long is left; typing anything resets it."
             >
               <input
                 type="checkbox"
                 checked={autoQuery}
                 onChange={(e) => setAutoQuery(e.target.checked)}
               />
-              Auto query after 10 seconds
+              Auto query after 4 seconds
             </label>
 
             <label className="option-field">
