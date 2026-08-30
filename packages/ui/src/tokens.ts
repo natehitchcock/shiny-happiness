@@ -58,6 +58,17 @@ export const COLORS: readonly ColorToken[] = [
       'previous #6E9B7C had chroma 0.067 and read as grey on ink.',
   },
   {
+    name: 'steel',
+    value: '#5f95cf',
+    role: 'status',
+    comment:
+      'In range / nothing to do. The mana-curve bar for a bucket inside its ' +
+      'target band was --ink-3, which is a SURFACE colour — the bar and the ' +
+      'panel behind it were the same navy and the bar could not be read. ' +
+      'Chosen with the palette validator: it clears the lightness band, the ' +
+      'chroma floor, 3:1 on ink, and 16.2 normal-vision against sage.',
+  },
+  {
     name: 'rust',
     value: '#c06248',
     role: 'status',
@@ -134,6 +145,8 @@ export const CONTRAST_RULES: readonly ContrastRule[] = [
   { foreground: 'rust', background: 'ink-2', min: 3, why: 'cut hints inside a deck row' },
   { foreground: 'rust', background: 'ink-3', min: 3, why: 'a cut hint on a hovered row' },
   { foreground: 'sage', background: 'ink-3', min: 3, why: 'a matched column on a hovered row' },
+  { foreground: 'steel', background: 'ink', min: 3, why: 'a curve bucket inside its target band' },
+  { foreground: 'steel', background: 'ink-2', min: 3, why: 'the same, on a raised panel' },
   { foreground: 'ink', background: 'brass', min: 4.5, why: 'text on the primary button' },
 ]
 
@@ -148,7 +161,8 @@ export const CONTRAST_RULES: readonly ContrastRule[] = [
  * they are used, and this list is the standing check on that claim:
  *
  *   - composition bars    carry `actual / ideal` as text, and a title attribute
- *   - curve buckets       carry an aria-label naming short / over and the range
+ *   - curve buckets       carry an aria-label naming short / over / in range,
+ *                         and the range itself, plus a key beneath the chart
  *   - cut hints           are words ("no synergy"), the colour is decoration
  *   - column cells        are a tick or a dot, a glyph not a hue
  *

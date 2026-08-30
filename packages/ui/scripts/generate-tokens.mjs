@@ -10,6 +10,10 @@
 import { writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// The COMPILED tokens, which is why `pnpm tokens` builds first. Reading dist
+// without building generates the stylesheet from whatever was compiled last —
+// it silently emitted a ten-colour file after an eleventh was added, and only
+// the drift test in tokens.test.ts noticed.
 import { COLORS, SPACE, TYPE } from '../dist/tokens.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
