@@ -1,37 +1,13 @@
+@import '@roundtable/ui/tokens.css';
+
 /*
- * Roundtable — visual language.
+ * Lotus Wizard — layout and components.
  *
- * The ground is a play mat, not a dashboard: deep ink blue rather than neutral
- * grey, because this is a table you sit at for an hour, and card faces read as
- * parchment against it. Brass is reserved for ONE thing — combo degree — since
- * that is the only fact here a spreadsheet could not tell you. Everything else
- * stays quiet so the brass means something when it appears.
+ * The COLOURS are not here. They live in `@roundtable/ui` (FOUND-02), where
+ * every pair the interface puts together is asserted for contrast; a copy kept
+ * beside this file would be a palette nothing checks. This file is what the
+ * tokens are used FOR.
  */
-
-:root {
-  --ink: #131a2a;
-  --ink-2: #1b2540;
-  --ink-3: #253052;
-  --rule: #2f3c63;
-  --parchment: #ede6d8;
-  --parchment-dim: #b9b2a4;
-  --brass: #c9a227;
-  --brass-dim: #6d5a1a;
-  /* Validated against the ink surface, not chosen by eye: the previous
-     #6E9B7C had chroma 0.067 and read as gray. Pair separation vs rust is
-     dE 8.5 deutan / 21.5 normal, contrast > 3:1. */
-  --sage: #4e9a69;
-  --rust: #a8503c;
-
-  --display: 'Spectral', Georgia, serif;
-  --ui: 'Karla', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, monospace;
-
-  --step: 0.5rem;
-  --radius: 3px;
-
-  color-scheme: dark;
-}
 
 * {
   box-sizing: border-box;

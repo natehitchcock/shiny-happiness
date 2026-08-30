@@ -133,9 +133,9 @@ export default tseslint.config(
 
   { files: ['**/*.test.ts'], rules: { 'no-console': 'off' } },
 
-  // A CLI's stdout is its product, not a stray debug statement. Only the entry
-  // points, so a stray console.log in a library still warns.
-  { files: ['apps/*/src/main.ts'], rules: { 'no-console': 'off' } },
+  // A CLI's stdout is its product, not a stray debug statement. Only entry
+  // points and build scripts, so a stray console.log in a library still warns.
+  { files: ['apps/*/src/main.ts', 'packages/*/scripts/*.mjs'], rules: { 'no-console': 'off' } },
 
   prettier,
 )

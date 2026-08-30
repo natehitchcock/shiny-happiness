@@ -10,10 +10,15 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./tokens.css": "./src/tokens.css"
   },
   "scripts": {
     "build": "tsc -b",
-    "clean": "tsc -b --clean"
+    "clean": "tsc -b --clean",
+    "tokens": "node scripts/generate-tokens.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0"
   }
 }

@@ -1,6 +1,9 @@
 /**
- * @roundtable/ui — design-system primitives and the four card representations.
+ * @roundtable/ui — design tokens and, from UI-01, the card primitives.
  *
- * Implemented by FOUND-02, UI-01. See docs/11-work-breakdown.md.
+ * FOUND-02 is the token layer: values as data so their contrast can be
+ * asserted, plus `tokens.css` declaring the same values as custom properties.
+ * Import the CSS once at the app root; read the data when a value is needed in
+ * TypeScript rather than retyping a hex.
  */
-export {}
+export * from './tokens.js'

@@ -1,0 +1,29 @@
+/*
+ * Design tokens as custom properties (FOUND-02).
+ *
+ * GENERATED from `tokens.ts` by `pnpm --filter @roundtable/ui tokens`. Edit the
+ * TypeScript, not this file: the values are asserted for contrast there, and a
+ * hand-edit here would ship a colour no test had looked at.
+ */
+
+:root {
+  --ink: #131a2a;
+  --ink-2: #1b2540;
+  --ink-3: #253052;
+  --rule: #2f3c63;
+  --parchment: #ede6d8;
+  --parchment-dim: #b9b2a4;
+  --brass: #c9a227;
+  --brass-dim: #6d5a1a;
+  --sage: #4e9a69;
+  --rust: #c06248;
+
+  --display: 'Spectral', Georgia, serif;
+  --ui: 'Karla', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --step: 0.5rem;
+  --radius: 3px;
+
+  color-scheme: dark;
+}
