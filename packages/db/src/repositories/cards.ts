@@ -136,6 +136,40 @@ export const findEligibleCards = async (
   return rows.map(toCard)
 }
 
+/**
+ * One keyset page of the card table, ordered by `(name, oracle_id)`.
+ *
+ * Keyset, not OFFSET (doc 10 §10.1): an offset re-scans everything it skips and
+ * shifts under concurrent ingest, so page 40 can repeat or drop a card. The
+ * caller pages until it has enough matches — `/cards/search` evaluates the query
+ * with the domain's own predicate rather than translating it to SQL, so SQL
+ * narrows and the domain decides.
+ */
+export const listCardsAfter = async (
+  pool: Pool,
+  options: {
+    readonly afterName?: string
+    readonly afterOracleId?: OracleId
+    readonly colorIdentity?: readonly Color[]
+    readonly limit?: number
+  } = {},
+): Promise<Card[]> => {
+  const { rows } = await pool.query<CardRow>(
+    `SELECT * FROM cards
+      WHERE ($1::text IS NULL OR (name, oracle_id) > ($1::text, $2::uuid))
+        AND ($3::char(1)[] IS NULL OR color_identity <@ $3::char(1)[])
+      ORDER BY name, oracle_id
+      LIMIT $4`,
+    [
+      options.afterName ?? null,
+      options.afterOracleId ?? null,
+      options.colorIdentity ?? null,
+      options.limit ?? 500,
+    ],
+  )
+  return rows.map(toCard)
+}
+
 export const searchCardsByName = async (pool: Pool, term: string, limit = 50): Promise<Card[]> => {
   // `%` and `_` are LIKE wildcards. Unescaped, a user typing "_" matches every
   // card in the table — a search box that quietly returns everything.

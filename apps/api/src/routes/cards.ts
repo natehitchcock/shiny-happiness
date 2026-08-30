@@ -1,0 +1,263 @@
+import type { FastifyInstance } from 'fastify'
+import type { Pool } from 'pg'
+import { combosContaining, getCard, getCards, listCardsAfter, printingsFor } from '@roundtable/db'
+import type { AnnotatedCandidate, Card, Color, QueryField, QueryNode } from '@roundtable/domain'
+import { COLORS, isOk, matchesQuery, oracleId, parseQuery } from '@roundtable/domain'
+import { badRequest, notFound, sendProblem } from '../errors.js'
+import { cardBatchBody, cardSearchQuery, oracleIdParams } from '../schemas.js'
+
+/**
+ * Fields `/cards/search` cannot answer, and why.
+ *
+ * `combo`, `near`, `flag` and `group` are computed against a deck's accepted set
+ * (doc 05 §5.8) and are meaningless without one — they belong to the candidate
+ * endpoint in API-02. `price`, `rarity` and `set` are printing-level, and
+ * `power`/`toughness` are not stored on the oracle row at all.
+ *
+ * Rejecting is deliberate. Accepting them and evaluating against absent data
+ * would return an empty page that looks like "no cards match" rather than "this
+ * endpoint cannot answer that", which is the silent-wrong-answer failure the
+ * whole codebase is written to avoid.
+ */
+const UNSUPPORTED_FIELDS: ReadonlyMap<QueryField, string> = new Map([
+  ['combo', 'needs a deck; use the candidates endpoint'],
+  ['near', 'needs a deck; use the candidates endpoint'],
+  ['flag', 'needs a deck; use the candidates endpoint'],
+  ['group', 'needs a deck; use the candidates endpoint'],
+  ['price', 'printing-level, not available on card search'],
+  ['rarity', 'printing-level, not available on card search'],
+  ['set', 'printing-level, not available on card search'],
+  ['power', 'not stored on the oracle row'],
+  ['toughness', 'not stored on the oracle row'],
+])
+
+/**
+ * `is:` predicates this endpoint cannot decide.
+ *
+ * These are values, not fields, so the field guard above never sees them: `is`
+ * is a supported field, and `evaluateIs` reads them from `AnnotatedCandidate`
+ * members that `asCandidate` has no data for. `is:reserved` needs the printing
+ * rows; `is:gamechanger` needs `brackets/rules.data.json`, which DATA-05 has not
+ * populated. Left unguarded, `is:reserved` returns nothing and — worse —
+ * `-is:gamechanger` returns every Game Changer as though it were clean.
+ */
+const UNSUPPORTED_IS: ReadonlyMap<string, string> = new Map([
+  ['reserved', 'printing-level, not available on card search'],
+  ['gamechanger', 'needs the bracket rules, which DATA-05 has not populated'],
+  ['reprint', 'printing-level, not decidable from oracle identity'],
+  ['firstprint', 'printing-level, not decidable from oracle identity'],
+])
+
+/** Every `is:` value in the tree, lowercased. */
+const isPredicatesUsed = (node: QueryNode | null, into: Set<string> = new Set()): Set<string> => {
+  if (node === null) return into
+  switch (node.kind) {
+    case 'term':
+      if (node.field === 'is') into.add(node.value.toLowerCase())
+      return into
+    case 'not':
+      return isPredicatesUsed(node.child, into)
+    case 'and':
+    case 'or':
+      for (const child of node.children) isPredicatesUsed(child, into)
+      return into
+  }
+}
+
+const fieldsUsed = (node: QueryNode | null, into: Set<QueryField> = new Set()): Set<QueryField> => {
+  if (node === null) return into
+  switch (node.kind) {
+    case 'term':
+      into.add(node.field)
+      return into
+    case 'not':
+      return fieldsUsed(node.child, into)
+    case 'and':
+    case 'or':
+      for (const child of node.children) fieldsUsed(child, into)
+      return into
+  }
+}
+
+/**
+ * A card lifted to the shape the domain predicate expects.
+ *
+ * The deck-relative fields are zeroed, which is safe only because a query
+ * mentioning any of them is rejected before it gets here.
+ */
+const asCandidate = (card: Card): AnnotatedCandidate => ({
+  card,
+  comboDegree: 0,
+  nearCombosAt1: 0,
+  roles: card.roles,
+  bracketFlags: [],
+  priceUsd: null,
+  rarity: null,
+  setCode: null,
+  power: null,
+  toughness: null,
+  reserved: false,
+  group: null,
+})
+
+interface Cursor {
+  readonly name: string
+  readonly oracleId: string
+}
+
+const encodeCursor = (card: Card): string =>
+  Buffer.from(JSON.stringify({ name: card.name, oracleId: card.oracleId })).toString('base64url')
+
+const decodeCursor = (raw: string): Cursor | null => {
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'))
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof (parsed as Cursor).name === 'string' &&
+      typeof (parsed as Cursor).oracleId === 'string'
+    ) {
+      return parsed as Cursor
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * `undefined` = no filter; `null` = supplied but meaningless.
+ *
+ * The distinction matters: an empty colour list is a VALID filter meaning
+ * "colourless only", so silently reducing a typo like `?colors=Z` to `[]`
+ * returns a plausible page of colourless cards instead of reporting the typo.
+ */
+const parseColors = (raw: string | undefined): readonly Color[] | undefined | null => {
+  if (raw === undefined || raw === '') return undefined
+  const wanted = raw.toUpperCase().split('')
+  const colors = wanted.filter((c): c is Color => (COLORS as readonly string[]).includes(c))
+  return colors.length === wanted.length ? colors : null
+}
+
+export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
+  app.get(
+    '/api/v1/cards/search',
+    { schema: { querystring: cardSearchQuery } },
+    async (req, rep) => {
+      const {
+        q,
+        colors,
+        limit = 50,
+        cursor,
+      } = req.query as {
+        q?: string
+        colors?: string
+        limit?: number
+        cursor?: string
+      }
+
+      // A query with errors is NOT applied at all (doc 10 §10.4). Half a filter is
+      // a wrong answer that looks right.
+      const parsed = parseQuery(q ?? '')
+      const parseErrors = isOk(parsed) ? parsed.value.errors : parsed.error
+      if (parseErrors.length > 0) {
+        const first = parseErrors[0]!
+        return sendProblem(
+          rep,
+          badRequest(first.message, {
+            position: first.position,
+            length: first.length,
+            suggestion: first.suggestion,
+          }),
+        )
+      }
+      const ast = isOk(parsed) ? parsed.value.ast : null
+
+      for (const field of fieldsUsed(ast)) {
+        const why = UNSUPPORTED_FIELDS.get(field)
+        if (why !== undefined) {
+          return sendProblem(
+            rep,
+            badRequest(`\`${field}\` is not supported here: ${why}`, { field }),
+          )
+        }
+      }
+
+      for (const predicate of isPredicatesUsed(ast)) {
+        const why = UNSUPPORTED_IS.get(predicate)
+        if (why !== undefined) {
+          return sendProblem(
+            rep,
+            badRequest(`\`is:${predicate}\` is not supported here: ${why}`, {
+              field: 'is',
+              predicate,
+            }),
+          )
+        }
+      }
+
+      let after = cursor === undefined ? null : decodeCursor(cursor)
+      if (cursor !== undefined && after === null) {
+        return sendProblem(rep, badRequest('cursor is not a cursor this endpoint issued'))
+      }
+
+      const colorIdentity = parseColors(colors)
+      if (colorIdentity === null) {
+        return sendProblem(rep, badRequest('colors must be a string of WUBRG letters', { colors }))
+      }
+
+      const items: Card[] = []
+      let exhausted = false
+
+      // Page through the table until the query has produced enough matches. SQL
+      // narrows on the indexed columns; the domain predicate decides, so `web` and
+      // `api` cannot disagree about what a query means (AGENTS.md R1).
+      while (items.length <= limit && !exhausted) {
+        const batch = await listCardsAfter(pool, {
+          ...(after !== null
+            ? { afterName: after.name, afterOracleId: oracleId(after.oracleId) }
+            : {}),
+          ...(colorIdentity !== undefined ? { colorIdentity } : {}),
+          limit: 500,
+        })
+        if (batch.length === 0) {
+          exhausted = true
+          break
+        }
+        for (const card of batch) {
+          if (matchesQuery(ast, asCandidate(card))) items.push(card)
+        }
+        const last = batch[batch.length - 1]!
+        after = { name: last.name, oracleId: last.oracleId }
+        if (batch.length < 500) exhausted = true
+      }
+
+      // One more than asked for tells us whether another page exists without a
+      // second count query.
+      const page = items.slice(0, limit)
+      const more = items.length > limit || !exhausted
+      const lastOfPage = page[page.length - 1]
+      return {
+        items: page,
+        nextCursor: more && lastOfPage !== undefined ? encodeCursor(lastOfPage) : null,
+      }
+    },
+  )
+
+  app.post('/api/v1/cards/batch', { schema: { body: cardBatchBody } }, async (req) => {
+    const { oracleIds } = req.body as { oracleIds: string[] }
+    return { items: await getCards(pool, oracleIds.map(oracleId)) }
+  })
+
+  app.get('/api/v1/cards/:oracleId', { schema: { params: oracleIdParams } }, async (req, rep) => {
+    const id = oracleId((req.params as { oracleId: string }).oracleId)
+    const card = await getCard(pool, id)
+    if (card === null) return sendProblem(rep, notFound(`No card with oracle id ${id}`))
+
+    const [printings, combos] = await Promise.all([
+      printingsFor(pool, id),
+      combosContaining(pool, [id]),
+    ])
+    return { ...card, printings, combos }
+  })
+}
