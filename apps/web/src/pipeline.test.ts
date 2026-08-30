@@ -222,3 +222,90 @@ describe('buffering', () => {
     })
   })
 })
+
+describe('a superseded run cannot land', () => {
+  /**
+   * The bug: three quick adds, and only the first left the suggestion list.
+   *
+   * Every add after the buffer closes restarts the cycle, which leaves the
+   * previous run still in flight. Nothing identified whose answer was whose, so
+   * a slow earlier run resolving during a later one was taken for the later
+   * one's answer and applied. That answer predates the newer commands, so the
+   * cards added after it were still being recommended — while the optimistic
+   * overlay had already been cleared, putting them back on screen.
+   */
+  const setupMany = (): {
+    hook: ReturnType<typeof renderHook>
+    applied: unknown[]
+    batches: string[][]
+    resolveRun: (index: number) => Promise<void>
+  } => {
+    const applied: unknown[] = []
+    const batches: string[][] = []
+    const releases: ((value: string) => void)[] = []
+    const hook = renderHook(() =>
+      usePipeline<string>({
+        run: (queued) => {
+          batches.push([...queued])
+          return new Promise((r) => releases.push(r as (value: string) => void))
+        },
+        apply: (value) => applied.push(value),
+      }),
+    )
+    return {
+      hook,
+      applied,
+      batches,
+      resolveRun: async (index) => {
+        await act(async () => {
+          releases[index]?.(`RESULT${String(index)}`)
+          await Promise.resolve()
+        })
+      },
+    }
+  }
+
+  it('ignores an earlier run that resolves during a later one', async () => {
+    const { hook, applied, batches, resolveRun } = setupMany()
+    const result = hook.result as { current: ReturnType<typeof usePipeline<string>> }
+
+    // First add goes out on its own.
+    act(() => result.current.schedule('a'))
+    advance(BUFFER_MS + 32)
+    expect(batches).toEqual([['a']])
+
+    // Second add arrives mid-query, so the cycle restarts and run 0 is orphaned.
+    act(() => result.current.schedule('b'))
+    advance(BUFFER_MS + 32)
+    expect(batches).toEqual([['a'], ['b']])
+
+    // The orphan answers first. Its view of the deck is missing 'b'.
+    await resolveRun(0)
+    advance(BAR_TO_HALFWAY + SETTLE_MS + 32)
+    expect(applied).toEqual([])
+    expect(result.current.phase).toBe('querying')
+
+    // Only the run that is actually current gets to move the list.
+    await resolveRun(1)
+    advance(BAR_TO_HALFWAY + SETTLE_MS + 32)
+    expect(applied).toEqual(['RESULT1'])
+  })
+
+  it('ignores a run orphaned by a filter refresh', async () => {
+    const { hook, applied, batches, resolveRun } = setupMany()
+    const result = hook.result as { current: ReturnType<typeof usePipeline<string>> }
+
+    act(() => result.current.schedule('a'))
+    advance(BUFFER_MS + 32)
+    act(() => result.current.refresh())
+    expect(batches).toEqual([['a'], []])
+
+    await resolveRun(0)
+    advance(BAR_TO_HALFWAY + SETTLE_MS + 32)
+    expect(applied).toEqual([])
+
+    await resolveRun(1)
+    advance(BAR_TO_HALFWAY + 32)
+    expect(applied).toEqual(['RESULT1'])
+  })
+})

@@ -97,7 +97,7 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
       // the card wants what other cards in the deck want — and it says so
       // rather than borrowing the language of an enable.
       return r.direction === 'payoff'
-        ? `pays off your ${tag}`
+        ? `benefits from your ${tag}`
         : r.direction === 'theme'
           ? `shares your ${tag} theme`
           : `enables your ${tag}`
@@ -613,12 +613,12 @@ const TagChip = ({
           <strong>{readable(tag)}</strong>
           <span className="hint-line">
             {direction === 'produces'
-              ? `This card causes it. It pairs with cards that pay off ${readable(tag)}.`
-              : `This card pays off ${readable(tag)}. It pairs with cards that cause it.`}
+              ? `This card causes it. It pairs with cards that benefit from ${readable(tag)}.`
+              : `This card benefits from ${readable(tag)}. It pairs with cards that cause it.`}
           </span>
           {partners.length === 0 ? null : (
             <span className="hint-line">
-              Feeds, and is fed by: {partners.map(readable).join(', ')}.
+              Benefits, and benefits from: {partners.map(readable).join(', ')}.
             </span>
           )}
           <span className="hint-line dim">
@@ -1459,6 +1459,39 @@ export const Workspace = ({
   /** Locks the server has not answered yet — these rows show a spinner. */
   const [locking, setLocking] = useState<ReadonlySet<string>>(new Set())
   /**
+   * How many faults a card needs before its cut hints are shown.
+   *
+   * Two by default, because one is usually not a signal. The roles are close to
+   * mutually exclusive in practice: a card that completes a combo often has no
+   * derived synergy, and a card with strong synergy is often in no combo. Each
+   * of those cards has exactly one flaw, and flagging them all buries the card
+   * that has three.
+   *
+   * Per browser, not per deck — it is a reading preference about how much noise
+   * to tolerate, not a property of the deck.
+   */
+  /**
+   * Groups the user has collapsed, and the extra rows an expand has fetched.
+   *
+   * Collapsing is purely visual and purely local — "I am done with this one for
+   * now" is not a fact about the deck and has no business going to the server.
+   * Expanding is the opposite: it asks for MORE rows in one group, which only
+   * the server can answer.
+   */
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const [extraItems, setExtraItems] = useState<ReadonlyMap<string, readonly api.Recommendation[]>>(
+    new Map(),
+  )
+  const [expanding, setExpanding] = useState<string | null>(null)
+
+  const [cutThreshold, setCutThreshold] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('lw.cutThreshold'))
+    return Number.isInteger(saved) && saved >= 1 && saved <= 4 ? saved : 2
+  })
+  useEffect(() => {
+    localStorage.setItem('lw.cutThreshold', String(cutThreshold))
+  }, [cutThreshold])
+  /**
    * Clicks the server has not seen yet.
    *
    * The deck view is rendered from `deck` PLUS this, so a card lands the instant
@@ -1971,9 +2004,11 @@ export const Workspace = ({
       new Map(
         (analysis?.cuts ?? [])
           .filter((c) => !lockedIds.has(c.oracleId))
+          // One fault is usually not a signal — see `cutThreshold`.
+          .filter((c) => c.reasons.length >= cutThreshold)
           .map((c) => [c.oracleId, c]),
       ),
-    [analysis, lockedIds],
+    [analysis, lockedIds, cutThreshold],
   )
 
   const basicIds = useMemo(() => new Set(basics.map((b) => b.oracleId)), [basics])
@@ -2022,13 +2057,90 @@ export const Workspace = ({
   }, [groups])
 
   /**
-   * Groups with nothing in them are not shown.
+   * Every group, with any rows an expand fetched folded in.
    *
-   * A filter that matches nothing used to render nine headings each reading
-   * "(0)" — which looks like a broken app rather than an empty result. The
-   * headings are only meaningful when they have rows under them.
+   * A group with nothing in it is KEPT and drawn collapsed rather than removed.
+   * A category the deck has satisfied is a result worth seeing — "you have
+   * enough removal" is the answer to a question the user is asking — and
+   * deleting its heading turns that answer into silence, so the group appears
+   * to have been lost rather than finished.
+   *
+   * The one case where empty headings really are noise is a filter that matches
+   * nothing, and that is handled separately by the empty-search panel below,
+   * which replaces the whole list rather than showing nine "(0)"s.
    */
-  const visibleGroups = useMemo(() => shownGroups.filter((g) => g.items.length > 0), [shownGroups])
+  const visibleGroups = useMemo(
+    () =>
+      shownGroups.map((g) => {
+        const extra = extraItems.get(g.key)
+        if (extra === undefined) return g
+        const seen = new Set(g.items.map((i) => i.oracleId))
+        return { ...g, items: [...g.items, ...extra.filter((i) => !seen.has(i.oracleId))] }
+      }),
+    [shownGroups, extraItems],
+  )
+
+  /** Whether anything is left to show under a heading, filters applied. */
+  const rowsIn = (g: api.Group): number =>
+    g.items.filter((item) => {
+      const decided = optimistic.entries.find((e) => e.oracleId === item.oracleId)
+      return decided === undefined || decided.zone !== 'excluded'
+    }).length
+
+  /** Collapsed by choice, or because the deck no longer needs this category. */
+  const isCollapsed = (g: api.Group): boolean => collapsed.has(g.key) || rowsIn(g) === 0
+
+  const toggleCollapsed = (key: string): void =>
+    setCollapsed((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+
+  /**
+   * Ask the server for more rows, in one group and only that group.
+   *
+   * The default eight per group is a budget shared across nine headings. When
+   * the user says "more of THIS", the budget is no longer the right shape, so
+   * the request narrows to the one key rather than raising the limit
+   * everywhere and quadrupling a recompute the user did not ask for.
+   */
+  const expandGroup = (key: string): void => {
+    setExpanding(key)
+    setCollapsed((current) => {
+      if (!current.has(key)) return current
+      const next = new Set(current)
+      next.delete(key)
+      return next
+    })
+    void api
+      .getRecommendations(deckRef.current.id, {
+        limitPerGroup: 32,
+        groups: [key === 'combo' ? 'combo-2' : key],
+        ...(queryRef.current === '' ? {} : { query: queryRef.current }),
+        ...(columnsRef.current.length > 0 ? { columns: columnsRef.current } : {}),
+      })
+      .then(async (more) => {
+        // 'combo' is a client-side merge of the three combo-N keys, so the
+        // answer comes back under its own keys and all of them are wanted.
+        const items =
+          key === 'combo'
+            ? more.groups.filter((g) => g.key.startsWith('combo-')).flatMap((g) => g.items)
+            : (more.groups.find((g) => g.key === key)?.items ?? [])
+        // These are cards nothing has hydrated, so their rows would read
+        // "Loading…" for good — no later recompute asks for them by name.
+        const hydrated = await api.hydrate(items.map((i) => i.oracleId))
+        setCards((current) => new Map([...current, ...hydrated.cards]))
+        setPrices((current) => new Map([...current, ...hydrated.prices]))
+        setExtraItems((current) => new Map(current).set(key, items))
+      })
+      .catch(() => undefined)
+      .finally(() => setExpanding(null))
+  }
+
+  /** Headings that still have rows — what "the list is empty" actually means. */
+  const groupsWithRows = visibleGroups.filter((g) => rowsIn(g) > 0)
 
   /**
    * When a search finds nothing, say whether the card exists at all.
@@ -2237,6 +2349,27 @@ export const Workspace = ({
       <div className="workspace">
         <section className="region" aria-label="Deck">
           <h2>Deck · {deckSize}</h2>
+
+          {/* How noisy the cut hints are allowed to be. Sits with the deck
+              because that is the list it changes. */}
+          <label className="cut-threshold">
+            <span>
+              Cut hints at{' '}
+              <strong>
+                {cutThreshold}+ {cutThreshold === 1 ? 'fault' : 'faults'}
+              </strong>
+            </span>
+            <input
+              type="range"
+              min={1}
+              max={4}
+              step={1}
+              value={cutThreshold}
+              onChange={(e) => setCutThreshold(Number(e.target.value))}
+              aria-label="How many faults a card needs before its cut hints are shown"
+              title="A card that completes a combo often has no derived synergy, and vice versa — so a single fault is usually not a signal."
+            />
+          </label>
           {sections.map((section) => (
             <div className="deck-section" key={section.key}>
               <h3>
@@ -2551,7 +2684,7 @@ export const Workspace = ({
             </div>
           ) : null}
 
-          {visibleGroups.length === 0 && query.trim() !== '' ? (
+          {groupsWithRows.length === 0 && query.trim() !== '' ? (
             <div className="empty-search">
               <p className="problem">Nothing in your suggestions matches “{query.trim()}”.</p>
               {nearby !== null && nearby.items.length > 0 ? (
@@ -2566,10 +2699,38 @@ export const Workspace = ({
           ) : null}
 
           {visibleGroups.map((g) => (
-            <div className="group" key={g.key}>
+            <div className={`group${isCollapsed(g) ? ' collapsed' : ''}`} key={g.key}>
               <div className="group-head">
+                <button
+                  type="button"
+                  className="group-toggle"
+                  onClick={() => toggleCollapsed(g.key)}
+                  aria-expanded={!isCollapsed(g)}
+                  aria-controls={`group-${g.key}`}
+                  // The glyph is the whole label, so the name has to be given
+                  // rather than read off the content: "−" tells a screen reader
+                  // nothing about which list it hides.
+                  aria-label={`${isCollapsed(g) ? 'Show' : 'Hide'} ${g.label.toLowerCase()}`}
+                  title={isCollapsed(g) ? 'Show these suggestions' : 'Hide these suggestions'}
+                >
+                  {isCollapsed(g) ? '+' : '−'}
+                </button>
                 <h3>{g.label}</h3>
                 <span className="count">{g.total}</span>
+                {/* A category the deck has satisfied is kept, not deleted — it
+                    says the need is met, which is the answer to the question
+                    the heading asks. */}
+                {rowsIn(g) === 0 ? <span className="satisfied">satisfied</span> : null}
+                <button
+                  type="button"
+                  className="group-more"
+                  onClick={() => expandGroup(g.key)}
+                  disabled={expanding !== null}
+                  aria-label={`Ask for more ${g.label.toLowerCase()}`}
+                  title={`Ask for more ${g.label.toLowerCase()}`}
+                >
+                  {expanding === g.key ? '…' : 'More'}
+                </button>
                 <span className="rationale">{g.rationale}</span>
                 {/* No column marker here on purpose.
                     A group head holds a title, a count and a rationale; a card
@@ -2581,140 +2742,145 @@ export const Workspace = ({
                     once instead, in the legend under the filter bar, which
                     aligns by measuring where the cells actually are. */}
               </div>
-              {g.items
-                /*
-                 * Drop anything the user has just decided on.
-                 *
-                 * The groups come from the server and are only as fresh as the
-                 * last recompute, so a rejected card sat in the list until the
-                 * requery landed — several seconds during which the app was
-                 * still offering something the user had just refused. Pillar P6
-                 * says an excluded card is never suggested again; that has to
-                 * be true on the click, not on the next round trip.
-                 */
-                .filter((item) => {
-                  const decided = optimistic.entries.find((e) => e.oracleId === item.oracleId)
-                  return decided === undefined || decided.zone !== 'excluded'
-                })
-                .map((item) => (
-                  <div className="card-row" key={item.oracleId}>
-                    <Degree
-                      degree={item.comboDegree}
-                      near={item.nearCombosAt1}
-                      combos={item.combos}
-                      cards={cards}
-                      lockedIds={lockedIds}
-                      self={item.oracleId}
-                    />
-                    {/* The reasons sit BESIDE the name button, not inside it.
+              {isCollapsed(g)
+                ? null
+                : g.items
+                    /*
+                     * Drop anything the user has just decided on.
+                     *
+                     * The groups come from the server and are only as fresh as the
+                     * last recompute, so a rejected card sat in the list until the
+                     * requery landed — several seconds during which the app was
+                     * still offering something the user had just refused. Pillar P6
+                     * says an excluded card is never suggested again; that has to
+                     * be true on the click, not on the next round trip.
+                     */
+                    .filter((item) => {
+                      const decided = optimistic.entries.find((e) => e.oracleId === item.oracleId)
+                      return decided === undefined || decided.zone !== 'excluded'
+                    })
+                    .map((item) => (
+                      <div className="card-row" key={item.oracleId}>
+                        <Degree
+                          degree={item.comboDegree}
+                          near={item.nearCombosAt1}
+                          combos={item.combos}
+                          cards={cards}
+                          lockedIds={lockedIds}
+                          self={item.oracleId}
+                        />
+                        {/* The reasons sit BESIDE the name button, not inside it.
                       One of them opens a panel of its own, and a button nested
                       in a button is invalid and unreachable by keyboard. */}
-                    {/* The whole cell opens the preview, not just the text.
+                        {/* The whole cell opens the preview, not just the text.
                       Splitting the name from its reasons left a dead strip
                       under the name where a click landed on nothing. The button
                       inside stays the accessible control; this is a mouse
                       convenience layered over it. */}
-                    <span
-                      className="name-cell"
-                      onClick={(e) => {
-                        // A reason chip that opens its own panel must not also
-                        // open the preview behind it.
-                        if ((e.target as HTMLElement).closest('.hint') === null) open(item.oracleId)
-                      }}
-                    >
-                      <button
-                        className="name as-link"
-                        onClick={() => open(item.oracleId)}
-                        aria-label={`Preview ${cards.get(item.oracleId)?.name ?? 'card'}`}
-                      >
-                        {cards.get(item.oracleId)?.name ?? 'Loading…'}
-                        {/* The type line, in the same dim grey the preview uses.
+                        <span
+                          className="name-cell"
+                          onClick={(e) => {
+                            // A reason chip that opens its own panel must not also
+                            // open the preview behind it.
+                            if ((e.target as HTMLElement).closest('.hint') === null)
+                              open(item.oracleId)
+                          }}
+                        >
+                          <button
+                            className="name as-link"
+                            onClick={() => open(item.oracleId)}
+                            aria-label={`Preview ${cards.get(item.oracleId)?.name ?? 'card'}`}
+                          >
+                            {cards.get(item.oracleId)?.name ?? 'Loading…'}
+                            {/* The type line, in the same dim grey the preview uses.
                             A name alone does not say whether a suggestion is a
                             creature or a land, which is the first thing anyone
                             checks before deciding on it. */}
-                        {cards.get(item.oracleId)?.typeLine === undefined ? null : (
-                          <span className="row-type">{cards.get(item.oracleId)?.typeLine}</span>
-                        )}
-                      </button>
-                      <span className="reasons">
-                        {item.reasons.map((r, i) =>
-                          r.kind === 'completes-combos' && item.combos.length > 0 ? (
-                            <Hint
-                              key={i}
-                              className="reason-hint"
-                              label={`${reasonText(r, item)} — show which`}
-                              content={
-                                <>
-                                  <strong>{reasonText(r, item)}</strong>
-                                  <ComboList
-                                    combos={item.combos}
-                                    cards={cards}
-                                    lockedIds={lockedIds}
-                                    self={item.oracleId}
-                                  />
-                                </>
-                              }
+                            {cards.get(item.oracleId)?.typeLine === undefined ? null : (
+                              <span className="row-type">{cards.get(item.oracleId)?.typeLine}</span>
+                            )}
+                          </button>
+                          <span className="reasons">
+                            {item.reasons.map((r, i) =>
+                              r.kind === 'completes-combos' && item.combos.length > 0 ? (
+                                <Hint
+                                  key={i}
+                                  className="reason-hint"
+                                  label={`${reasonText(r, item)} — show which`}
+                                  content={
+                                    <>
+                                      <strong>{reasonText(r, item)}</strong>
+                                      <ComboList
+                                        combos={item.combos}
+                                        cards={cards}
+                                        lockedIds={lockedIds}
+                                        self={item.oracleId}
+                                      />
+                                    </>
+                                  }
+                                >
+                                  <span className="reason" data-kind={r.kind} data-openable="true">
+                                    {reasonText(r, item)}
+                                  </span>
+                                </Hint>
+                              ) : (
+                                <span className="reason" data-kind={r.kind} key={i}>
+                                  {reasonText(r, item)}
+                                </span>
+                              ),
+                            )}
+                          </span>
+                        </span>
+                        {columns.map((c) => (
+                          <span
+                            className="col-cell"
+                            key={c}
+                            data-match={columnMatches.get(c)?.has(item.oracleId) === true}
+                            title={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
+                            aria-label={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
+                          >
+                            {columnMatches.get(c)?.has(item.oracleId) === true
+                              ? '\u2713'
+                              : '\u00B7'}
+                          </span>
+                        ))}
+                        <Costs
+                          manaCost={cards.get(item.oracleId)?.manaCost}
+                          price={prices.get(item.oracleId)}
+                        />
+                        {inFlight.has(item.oracleId) ? (
+                          // Already in the deck as far as the user is concerned; the
+                          // spinner says the suggestions have not caught up yet, and
+                          // it stops the same card being clicked twice.
+                          <span
+                            className="spinner"
+                            role="status"
+                            aria-label={`${cards.get(item.oracleId)?.name ?? 'Card'} added, updating suggestions`}
+                          />
+                        ) : (
+                          <>
+                            <button
+                              className="act accept"
+                              onClick={() => act(item.oracleId, 'accept')}
+                              aria-label={`Add ${cards.get(item.oracleId)?.name ?? 'card'}`}
                             >
-                              <span className="reason" data-kind={r.kind} data-openable="true">
-                                {reasonText(r, item)}
-                              </span>
-                            </Hint>
-                          ) : (
-                            <span className="reason" data-kind={r.kind} key={i}>
-                              {reasonText(r, item)}
-                            </span>
-                          ),
-                        )}
-                      </span>
-                    </span>
-                    {columns.map((c) => (
-                      <span
-                        className="col-cell"
-                        key={c}
-                        data-match={columnMatches.get(c)?.has(item.oracleId) === true}
-                        title={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
-                        aria-label={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
-                      >
-                        {columnMatches.get(c)?.has(item.oracleId) === true ? '\u2713' : '\u00B7'}
-                      </span>
-                    ))}
-                    <Costs
-                      manaCost={cards.get(item.oracleId)?.manaCost}
-                      price={prices.get(item.oracleId)}
-                    />
-                    {inFlight.has(item.oracleId) ? (
-                      // Already in the deck as far as the user is concerned; the
-                      // spinner says the suggestions have not caught up yet, and
-                      // it stops the same card being clicked twice.
-                      <span
-                        className="spinner"
-                        role="status"
-                        aria-label={`${cards.get(item.oracleId)?.name ?? 'Card'} added, updating suggestions`}
-                      />
-                    ) : (
-                      <>
-                        <button
-                          className="act accept"
-                          onClick={() => act(item.oracleId, 'accept')}
-                          aria-label={`Add ${cards.get(item.oracleId)?.name ?? 'card'}`}
-                        >
-                          Add
-                        </button>
-                        {/* "Reject", not "Never". The action is the same and
+                              Add
+                            </button>
+                            {/* "Reject", not "Never". The action is the same and
                           undoable from the Rejected list, and "Never" read as a
                           harsher commitment than it actually is. */}
-                        <button
-                          className="act exclude"
-                          onClick={() => act(item.oracleId, 'exclude')}
-                          aria-label={`Reject ${cards.get(item.oracleId)?.name ?? 'card'}`}
-                          title="Stop suggesting this card. You can undo it from the Rejected list."
-                        >
-                          Reject
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ))}
+                            <button
+                              className="act exclude"
+                              onClick={() => act(item.oracleId, 'exclude')}
+                              aria-label={`Reject ${cards.get(item.oracleId)?.name ?? 'card'}`}
+                              title="Stop suggesting this card. You can undo it from the Rejected list."
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    ))}
             </div>
           ))}
           {groups.length === 0 ? <p className="note">Working…</p> : null}

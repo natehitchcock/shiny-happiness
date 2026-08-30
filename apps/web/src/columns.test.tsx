@@ -540,7 +540,12 @@ describe('locking a card clears its cut hint at once', () => {
       ...(await mocked.getAnalysis.getMockImplementation()?.('')),
       counts: { total: 1, byRole: {} },
       targets: [],
-      cuts: [{ oracleId: 'o1', score: 0.5, reasons: [{ kind: 'no-synergy' }] }],
+      // Two faults, because the deck pane's threshold defaults to two — this
+      // test is about the lock dismissing a hint, not about how many faults
+      // earn one.
+      cuts: [
+        { oracleId: 'o1', score: 0.5, reasons: [{ kind: 'no-synergy' }, { kind: 'over-curve' }] },
+      ],
       deficits: [],
       archetype: { declared: 'midrange', assessed: 'midrange', confidence: 0.5 },
       curve: {

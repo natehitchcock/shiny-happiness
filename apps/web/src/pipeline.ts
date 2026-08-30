@@ -93,6 +93,23 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
   const result = useRef<unknown>(null)
   const resolved = useRef(false)
   /**
+   * Which run's answer we are waiting for.
+   *
+   * Every add after the buffer has closed restarts the cycle, and the run it
+   * interrupted stays in flight — nothing can cancel an HTTP request that is
+   * already away. Without a name on each answer, a slow earlier run resolving
+   * during a later one was taken for the later one's answer and applied. That
+   * answer predates the newer commands, so cards added after it came back into
+   * the suggestion list, while the optimistic overlay that had been hiding them
+   * was cleared at the same moment. Reported as "I queued three adds and only
+   * the first removed itself".
+   *
+   * A counter rather than an abort: the stale request's WRITES are wanted — the
+   * commands were sent and the server applied them — it is only its READ of the
+   * suggestions that is out of date.
+   */
+  const generation = useRef(0)
+  /**
    * An interval, deliberately NOT requestAnimationFrame.
    *
    * rAF is paused in a background tab, so a user who switched away mid-query
@@ -114,6 +131,31 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
   const apply = useRef(options.apply)
   run.current = options.run
   apply.current = options.apply
+
+  /**
+   * Send one batch and accept its answer only while it is still the current run.
+   *
+   * Held in a ref so `tick` and `start` can share it without either depending
+   * on the other — `start` calls `tick`'s interval and `tick` closes the buffer
+   * that `start` opened, so a plain callback between them is a cycle.
+   */
+  const launch = useRef((batch: readonly T[]): void => {
+    const mine = ++generation.current
+    resolved.current = false
+    void run
+      .current(batch)
+      .then((value) => {
+        if (generation.current !== mine) return
+        result.current = value
+        resolved.current = true
+      })
+      .catch((e: unknown) => {
+        if (generation.current !== mine) return
+        setError(e instanceof Error ? e.message : 'Could not refresh suggestions')
+        result.current = null
+        resolved.current = true
+      })
+  })
 
   const setPhaseBoth = (next: Phase): void => {
     phaseRef.current = next
@@ -151,18 +193,7 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
         items.current = []
         setPhaseBoth('querying')
         startedAt.current = now()
-        resolved.current = false
-        void run
-          .current(batch)
-          .then((value) => {
-            result.current = value
-            resolved.current = true
-          })
-          .catch((e: unknown) => {
-            setError(e instanceof Error ? e.message : 'Could not refresh suggestions')
-            result.current = null
-            resolved.current = true
-          })
+        launch.current(batch)
       }
     } else if (phaseRef.current === 'querying') {
       const fraction = Math.min(1, elapsed / ASSUMED_QUERY_MS)
@@ -203,21 +234,15 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
       setProgress(0)
       result.current = null
       resolved.current = false
+      // Whatever is in flight is now answering a question we are no longer
+      // asking. Bumping this here — not only in `launch` — covers the gap
+      // between restarting and the new buffer actually closing.
+      generation.current += 1
       startedAt.current = now()
 
       if (skipBuffer) {
         setPhaseBoth('querying')
-        void run
-          .current([])
-          .then((value) => {
-            result.current = value
-            resolved.current = true
-          })
-          .catch((e: unknown) => {
-            setError(e instanceof Error ? e.message : 'Could not refresh suggestions')
-            result.current = null
-            resolved.current = true
-          })
+        launch.current([])
       } else {
         setPhaseBoth('buffering')
       }

@@ -1177,6 +1177,25 @@ select {
 .empty-search .note {
   margin: 0 0 4px;
 }
+.cut-threshold {
+  display: flex;
+  align-items: center;
+  gap: var(--step);
+  margin: 0 0 var(--step);
+  color: var(--parchment-dim);
+  font-size: 0.7rem;
+}
+.cut-threshold strong {
+  color: var(--parchment);
+  font-weight: 500;
+}
+.cut-threshold input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  max-width: 8rem;
+  accent-color: var(--brass);
+}
+
 /* The type line beside a suggestion's name, matching the preview's grey. It
    truncates rather than wrapping — the name is what the row is for. */
 .row-type {
@@ -1381,7 +1400,7 @@ select {
   font: 500 0.7rem/1.6 var(--ui);
   border: 1px solid var(--rule);
 }
-/* Causes and pays-off are the whole model, so they do not look alike. Not
+/* Causing and benefiting-from are the whole model, so they do not look alike. Not
    colour alone: the row each sits on is labelled. */
 .tag[data-direction='produces'] {
   color: var(--steel);
@@ -1699,4 +1718,50 @@ select {
 }
 .gal .rt-detail {
   max-height: 520px;
+}
+
+/* Group heads gained two controls: a collapse toggle on the left and a "more"
+   request on the right. Both are small and quiet — the heading is still the
+   thing being read. */
+.group-toggle,
+.group-more {
+  flex: none;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--parchment-dim);
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+.group-toggle {
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  font-size: 0.85rem;
+}
+.group-more {
+  padding: 0.15rem 0.4rem;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.group-toggle:hover:not(:disabled),
+.group-more:hover:not(:disabled) {
+  color: var(--parchment);
+  border-color: var(--brass);
+}
+.group-more:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* Said rather than implied: the group is still here, its need is just met. */
+.group-head .satisfied {
+  color: var(--brass);
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.group.collapsed .group-head {
+  opacity: 0.65;
 }

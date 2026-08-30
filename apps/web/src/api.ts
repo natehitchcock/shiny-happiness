@@ -22,7 +22,7 @@ export interface Card {
   edhrecRank: number | null
   universesBeyond: boolean
   /**
-   * The events this card causes and pays off (ADR-0011).
+   * The events this card causes and benefits from (ADR-0011).
    *
    * Already on the wire — the detail route spreads the whole domain card — the
    * client type simply never declared them.
@@ -278,7 +278,13 @@ export interface Recommendations {
 
 export const getRecommendations = (
   id: string,
-  body: { limitPerGroup?: number; query?: string; columns?: readonly string[] },
+  body: {
+    limitPerGroup?: number
+    query?: string
+    columns?: readonly string[]
+    /** Restrict the answer to these group keys — used to fetch more of one. */
+    groups?: readonly string[]
+  },
 ): Promise<Recommendations> =>
   request(`/decks/${id}/recommendations`, { method: 'POST', body: JSON.stringify(body) })
 
