@@ -65,6 +65,8 @@ describeDb('API-02 performance', () => {
         roles: [isLand ? 'land' : role],
         primaryRole: isLand ? 'land' : role,
         universesBeyond: false,
+        synergyProduces: [],
+        synergyWants: [],
       })
     }
     // The commander must be mono-red so the eligible pool is a realistic slice.

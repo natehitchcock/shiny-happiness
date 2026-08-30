@@ -1,6 +1,7 @@
 import type { BracketFlag } from './bracket.js'
 import type { CompositionDimension } from './composition.js'
 import type { ComboId, OracleId } from './ids.js'
+import type { SynergyTag } from './synergy.js'
 import type { Role } from './role.js'
 
 /**
@@ -49,6 +50,14 @@ export type Reason =
       readonly delta?: number
     }
   | { readonly kind: 'top-by-type'; readonly type: string; readonly rank: number }
+  | {
+      readonly kind: 'keyword-synergy'
+      readonly tag: SynergyTag
+      /** `enables` = provides what the deck wants; `payoff` = the reverse. */
+      readonly direction: 'enables' | 'payoff'
+      /** The cards it pairs with, so the reason is interrogable (pillar P4). */
+      readonly withOracleIds: readonly OracleId[]
+    }
   | { readonly kind: 'bracket-warning'; readonly flag: BracketFlag; readonly detail: string }
 
 /**

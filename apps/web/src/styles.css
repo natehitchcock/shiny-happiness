@@ -260,6 +260,13 @@ button {
   border-color: var(--brass-dim);
 }
 
+/* Synergy is the second-most-earned fact on a row, so it gets the only other
+   hue — sage, the same one the curve uses for "this helps". */
+.reason[data-kind='keyword-synergy'] {
+  color: var(--sage);
+  border-color: var(--sage);
+}
+
 /* ---------------------------------------------------------------- meters */
 
 .meter {

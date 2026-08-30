@@ -32,6 +32,8 @@ const card = (
   roles: ['synergy'],
   primaryRole: opts.primaryRole ?? 'synergy',
   universesBeyond: false,
+  synergyProduces: [],
+  synergyWants: [],
 })
 
 const entry = (name: string, over: Partial<DeckEntry> = {}): DeckEntry => ({

@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline'
 import { Readable } from 'node:stream'
 import type { Card, CardType, Color, Printing } from '@roundtable/domain'
-import { deriveRoles, oracleId, printingId } from '@roundtable/domain'
+import { deriveRoles, deriveSynergy, oracleId, printingId } from '@roundtable/domain'
 import { textStreamOf } from './http.js'
 
 /**
@@ -254,6 +254,9 @@ export const toCard = (
   const legality = raw.legalities?.['commander'] ?? 'not_legal'
 
   const derived = deriveRoles({ oracleId: id, typeLine, oracleText })
+  // Derived here, stored by the ingest: doing it per request over 34k cards
+  // would not fit API-02's 200 ms budget (ADR-0011).
+  const synergy = deriveSynergy({ oracleId: id, typeLine, oracleText })
 
   return {
     oracleId: id,
@@ -281,6 +284,8 @@ export const toCard = (
     // across all of them and passes it in. Defaulting to false is the safe
     // direction: an unknown card stays visible rather than silently vanishing.
     universesBeyond: provenance.universesBeyond ?? false,
+    synergyProduces: synergy.produces,
+    synergyWants: synergy.wants,
   }
 }
 

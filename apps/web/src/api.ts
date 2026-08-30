@@ -37,8 +37,10 @@ export interface Reason {
   dimension?: { role?: string; type?: string }
   deficit?: number
   manaValue?: number
-  direction?: 'short' | 'over' | 'balanced'
+  direction?: 'short' | 'over' | 'balanced' | 'enables' | 'payoff'
   delta?: number
+  tag?: string
+  withOracleIds?: string[]
 }
 
 export interface Recommendation {

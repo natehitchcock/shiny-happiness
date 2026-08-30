@@ -38,6 +38,11 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
       }
       return `curve fit at ${mv}`
     }
+    case 'keyword-synergy': {
+      // Said as a mechanism, not a score: "why" is what P4 asks the reason for.
+      const tag = (r.tag ?? '').replace(/-/g, ' ')
+      return r.direction === 'payoff' ? `pays off your ${tag}` : `enables your ${tag}`
+    }
     case 'corpus-inclusion':
       return 'played in similar decks'
     case 'top-by-type':

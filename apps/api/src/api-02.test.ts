@@ -43,6 +43,8 @@ const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   roles: opts.roles ?? ['synergy'],
   primaryRole: opts.primaryRole ?? 'synergy',
   universesBeyond: false,
+  synergyProduces: [],
+  synergyWants: [],
 })
 
 describeDb('API-02 contract', () => {
@@ -62,6 +64,8 @@ describeDb('API-02 contract', () => {
         roles: ['ramp'],
         primaryRole: 'ramp',
         universesBeyond: false,
+        synergyProduces: [],
+        synergyWants: [],
         colorIdentity: [],
         colors: [],
       }),
@@ -70,6 +74,8 @@ describeDb('API-02 contract', () => {
         roles: ['land'],
         primaryRole: 'land',
         universesBeyond: false,
+        synergyProduces: [],
+        synergyWants: [],
         manaCost: null,
         manaValue: 0,
         types: ['land'],

@@ -25,6 +25,8 @@ const card = (name: string, role: Role, types: CardType[], manaValue: number): C
   roles: [role],
   primaryRole: role,
   universesBeyond: false,
+  synergyProduces: [],
+  synergyWants: [],
 })
 
 const entry = (name: string): DeckEntry => ({

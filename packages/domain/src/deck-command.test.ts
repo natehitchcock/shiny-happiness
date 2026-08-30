@@ -21,6 +21,8 @@ const card = (name: string, opts: Partial<Card> = {}): Card => ({
   roles: ['synergy'],
   primaryRole: 'synergy',
   universesBeyond: false,
+  synergyProduces: [],
+  synergyWants: [],
 })
 
 const entry = (name: string, over: Partial<DeckEntry> = {}): DeckEntry => ({

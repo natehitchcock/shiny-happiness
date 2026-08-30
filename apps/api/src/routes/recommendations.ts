@@ -11,6 +11,7 @@ import {
   parseQuery,
   recommend,
   curveTarget,
+  deckSynergy,
   weightsFor,
 } from '@roundtable/domain'
 import { loadDeckContext } from '../deck-context.js'
@@ -53,6 +54,17 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
         weights: weightsFor(deck.archetype, body.weights ?? {}),
         // The curve a deck of this archetype wants (ADR-0011).
         curveTarget: curveTarget(deck.archetype, deck.archetypeSecondary),
+        // What this deck already does and wants, commander weighted (ADR-0011).
+        deckSynergy: deckSynergy(
+          deck.commanders,
+          deck.entries.filter((e) => e.zone === 'accepted').map((e) => e.oracleId),
+          (id) => {
+            const card = context.cards.get(id)
+            return card === undefined
+              ? undefined
+              : { produces: card.synergyProduces, wants: card.synergyWants }
+          },
+        ),
         query: queryNode,
         // No corpus statistics exist (ADR-0008), so groups 6-7 report as
         // unavailable rather than being silently absent.

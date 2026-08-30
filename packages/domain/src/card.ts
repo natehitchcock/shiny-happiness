@@ -1,5 +1,6 @@
 import type { OracleId, PrintingId } from './ids.js'
 import type { Role } from './role.js'
+import type { SynergyTag } from './synergy.js'
 
 export type Color = 'W' | 'U' | 'B' | 'R' | 'G'
 
@@ -56,6 +57,10 @@ export interface Card {
    * one printing would mark Sol Ring as Universes Beyond.
    */
   readonly universesBeyond: boolean
+  /** Events this card causes (ADR-0011). Derived at ingest, like `roles`. */
+  readonly synergyProduces: readonly SynergyTag[]
+  /** Events this card pays off on. */
+  readonly synergyWants: readonly SynergyTag[]
 }
 
 export interface Printing {

@@ -45,6 +45,8 @@ const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   roles: ['synergy'],
   primaryRole: 'synergy',
   universesBeyond: false,
+  synergyProduces: [],
+  synergyWants: [],
 })
 
 describeDb('API-01 contract', () => {

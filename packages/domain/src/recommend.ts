@@ -5,6 +5,7 @@ import { annotateCombos, type ComboIndex } from './combo-index.js'
 import { dimensionKey, type CompositionDimension, type CompositionTarget } from './composition.js'
 import type { CompositionCounts, Deficit } from './composition-analysis.js'
 import { findDeficits, shortfalls } from './composition-analysis.js'
+import { synergyMatches, synergyScore, type DeckSynergy, type SynergyMatch } from './synergy.js'
 import {
   curveBucket,
   curveDeltas,
@@ -67,6 +68,11 @@ export interface RecommendInput {
   readonly maxBudgetUsd?: number | null
   /** From the deck's archetype. Defaults to midrange when absent. */
   readonly curveTarget?: CurveTarget
+  /**
+   * What the deck already does and wants (ADR-0011). Absent means synergy does
+   * not contribute — every card scores the same on it, so nothing is skewed.
+   */
+  readonly deckSynergy?: DeckSynergy
 }
 
 export interface CandidateGroup {
@@ -90,6 +96,7 @@ export interface RecommendResult {
   }
 }
 
+const MECHANICAL_SYNERGY_THRESHOLD = 0.45
 const SYNERGY_THRESHOLD = 0.15
 const STAPLE_INCLUSION = 0.25
 const TOP_BY_TYPE_LIMIT = 10
@@ -101,7 +108,9 @@ interface Scratch {
   readonly completed: readonly string[]
   readonly stats: CardStats | null
   readonly deficit: Deficit | null
-  readonly matchesFilter: boolean
+  matchesFilter: boolean
+  /** Mechanical synergy with the deck, strongest first (ADR-0011). */
+  readonly synergy: readonly SynergyMatch[]
   group: CandidateGroupKey | null
   score: number
   reasons: Reason[]
@@ -149,6 +158,7 @@ const dimensionLabel = (dimension: CompositionDimension): string =>
 export const recommend = (input: RecommendInput): RecommendResult => {
   const identity = new Set(input.colorIdentity)
   const curve = input.curveTarget ?? curveTarget('midrange')
+  const synergy: DeckSynergy = input.deckSynergy ?? { produces: new Map(), wants: new Map() }
   const limit = input.limitPerGroup ?? 60
   const deficits = shortfalls(findDeficits(input.counts, input.targets))
   const deficitByRole = new Map<Role, Deficit>()
@@ -170,6 +180,13 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       stats: input.stats?.get(pooled.card.oracleId) ?? null,
       deficit: deficitByRole.get(primary) ?? null,
       matchesFilter: true,
+      synergy: synergyMatches(
+        {
+          produces: pooled.card.synergyProduces,
+          wants: pooled.card.synergyWants,
+        },
+        synergy,
+      ),
       group: null,
       score: 0,
       reasons: [],
@@ -210,6 +227,10 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       s.group = `top-${s.pooled.card.types[0] ?? 'card'}`
     } else if (statsAvailable && (s.stats?.synergy ?? 0) >= SYNERGY_THRESHOLD)
       s.group = 'high-synergy'
+    // ADR-0008 left `high-synergy` permanently empty when EDHREC went away.
+    // Mechanical synergy refills it, and says WHY rather than just that.
+    else if (s.synergy.length > 0 && synergyScore(s.synergy) >= MECHANICAL_SYNERGY_THRESHOLD)
+      s.group = 'high-synergy'
     else if (statsAvailable && (s.stats?.inclusion ?? 0) >= STAPLE_INCLUSION) s.group = 'staple'
     else if (!statsAvailable) s.group = 'staple'
   }
@@ -232,6 +253,16 @@ export const recommend = (input: RecommendInput): RecommendResult => {
     }
     if (s.stats !== null) {
       reasons.push({ kind: 'corpus-inclusion', share: s.stats.inclusion, synergy: s.stats.synergy })
+    }
+    const topMatch = s.synergy[0]
+    if (topMatch !== undefined) {
+      reasons.push({
+        kind: 'keyword-synergy',
+        tag: topMatch.tag,
+        direction: topMatch.direction,
+        // The cards it pairs with, so the reason can be interrogated (P4).
+        withOracleIds: [],
+      })
     }
     if (s.deficit !== null) {
       reasons.push({
@@ -273,7 +304,8 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       w.synergy * ((s.stats?.synergy ?? 0) / maxSynergy) +
       w.inclusion * (s.stats?.inclusion ?? 0) +
       w.fill * (s.deficit === null ? 0 : Math.min(1, Math.abs(s.deficit.delta) / 5)) +
-      w.curve * curveFit(card.manaValue, input.counts.manaCurve, curve) -
+      w.curve * curveFit(card.manaValue, input.counts.manaCurve, curve) +
+      w.keywordSynergy * synergyScore(s.synergy) -
       w.bracketRisk * s.pooled.bracketFlags.length -
       w.budget * budgetOverrun
   }

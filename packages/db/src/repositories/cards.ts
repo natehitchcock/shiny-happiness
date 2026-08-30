@@ -18,6 +18,8 @@ interface CardRow {
   readonly roles: string[]
   readonly primary_role: string
   readonly universes_beyond: boolean
+  readonly synergy_produces: string[]
+  readonly synergy_wants: string[]
 }
 
 const toCard = (row: CardRow): Card => ({
@@ -37,6 +39,8 @@ const toCard = (row: CardRow): Card => ({
   roles: row.roles as Role[],
   primaryRole: row.primary_role as Role,
   universesBeyond: row.universes_beyond,
+  synergyProduces: row.synergy_produces as Card['synergyProduces'],
+  synergyWants: row.synergy_wants as Card['synergyWants'],
 })
 
 /**
@@ -72,22 +76,26 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
     roles: c.roles,
     primary_role: c.primaryRole,
     universes_beyond: c.universesBeyond,
+    synergy_produces: c.synergyProduces,
+    synergy_wants: c.synergyWants,
   }))
 
   const { rowCount } = await pool.query(
     `INSERT INTO cards (
        oracle_id, name, mana_cost, mana_value, color_identity, colors, type_line,
        types, oracle_text, keywords, legality_commander, edhrec_rank,
-       default_printing, roles, primary_role, universes_beyond)
+       default_printing, roles, primary_role, universes_beyond,
+       synergy_produces, synergy_wants)
      SELECT oracle_id, name, mana_cost, mana_value, color_identity, colors, type_line,
             types, oracle_text, keywords, legality_commander, edhrec_rank,
-            default_printing, roles, primary_role, universes_beyond
+            default_printing, roles, primary_role, universes_beyond,
+            synergy_produces, synergy_wants
        FROM jsonb_to_recordset($1::jsonb) AS x(
          oracle_id uuid, name text, mana_cost text, mana_value real,
          color_identity char(1)[], colors char(1)[], type_line text, types text[],
          oracle_text text, keywords text[], legality_commander text,
          edhrec_rank integer, default_printing uuid, roles text[], primary_role text,
-         universes_beyond boolean)
+         universes_beyond boolean, synergy_produces text[], synergy_wants text[])
      ON CONFLICT (oracle_id) DO UPDATE SET
        name = EXCLUDED.name, mana_cost = EXCLUDED.mana_cost,
        mana_value = EXCLUDED.mana_value, color_identity = EXCLUDED.color_identity,
@@ -96,7 +104,9 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
        keywords = EXCLUDED.keywords, legality_commander = EXCLUDED.legality_commander,
        edhrec_rank = EXCLUDED.edhrec_rank, default_printing = EXCLUDED.default_printing,
        roles = EXCLUDED.roles, primary_role = EXCLUDED.primary_role,
-       universes_beyond = EXCLUDED.universes_beyond`,
+       universes_beyond = EXCLUDED.universes_beyond,
+       synergy_produces = EXCLUDED.synergy_produces,
+       synergy_wants = EXCLUDED.synergy_wants`,
     [JSON.stringify(payload)],
   )
   return rowCount ?? 0
