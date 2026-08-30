@@ -148,6 +148,34 @@ button {
 }
 
 /*
+ * Two costs, two fixed columns.
+ *
+ * Both are right-aligned at a fixed width so they read straight down the list
+ * instead of jittering with each card's name length. Mana cost is the brighter
+ * of the two: it is what you pay every game, where the cash price is a
+ * once-and-approximate number.
+ */
+.card-row .mana {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--parchment);
+  opacity: 0.8;
+  text-align: right;
+  min-width: 4.6rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.card-row .cash {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--parchment-dim);
+  text-align: right;
+  min-width: 3.4rem;
+  flex: 0 0 auto;
+}
+
+/*
  * The signature. A combo degree is the one number here that is genuinely hard
  * won, so it gets the only brass on the page and the only ring.
  */
@@ -559,6 +587,9 @@ select {
   border-radius: 3px 3px 0 0;
   background: var(--ink-3);
   min-height: 2px;
+  position: relative;
+  z-index: 1;
+  opacity: 0.92;
 }
 
 .curve-bar[data-direction='short'] {
@@ -569,15 +600,17 @@ select {
   background: var(--rust);
 }
 
-/* The target sits ON the column as a hairline, so the comparison is read
-   without a second axis. */
-.curve-target {
+/* The acceptable RANGE sits on the column as a band, so "near enough" is
+   visible as an area rather than implied around a line. Read without a second
+   axis; the bar in front of it is the deck. */
+.curve-band {
   position: absolute;
   left: -1px;
   right: -1px;
-  height: 2px;
-  background: var(--parchment);
-  opacity: 0.55;
+  border-top: 1px solid rgba(237, 230, 216, 0.55);
+  border-bottom: 1px solid rgba(237, 230, 216, 0.25);
+  background: rgba(237, 230, 216, 0.08);
+  pointer-events: none;
 }
 
 .curve-axis {
@@ -622,4 +655,58 @@ select {
 
 .curve-key .over {
   color: var(--rust);
+}
+
+/* ---------------------------------------------------------------- options */
+
+/*
+ * Deck options sit above the filter, not in the analysis rail.
+ *
+ * They belong here because they do the same job the filter does — they decide
+ * what the list is allowed to contain. Analysis reports on the deck; these
+ * shape it, so they read as one control strip with the query box beneath.
+ */
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--step) calc(var(--step) * 2);
+  padding: var(--step) calc(var(--step) * 1.5);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--ink-2);
+  margin-bottom: var(--step);
+}
+
+.options .check {
+  margin: 0;
+}
+
+.option-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.option-field span {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+}
+
+/* Narrow: these are three-figure amounts, not free text. */
+.option-field input[type='text'] {
+  width: 6.5rem;
+  padding: 4px var(--step);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+
+.option-total {
+  margin: 0 0 0 auto;
+  font-size: 0.72rem;
+  color: var(--parchment-dim);
+  text-align: right;
 }

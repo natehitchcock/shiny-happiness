@@ -83,6 +83,30 @@ const Degree = ({ degree, near }: { degree: number; near: number }): React.JSX.E
   )
 }
 
+/**
+ * The two costs a card has: what it costs to cast, and what it costs to buy.
+ *
+ * Fixed-width columns so both read straight down the list rather than jittering
+ * with each card's name length. Mana cost keeps Scryfall's brace notation —
+ * rendering real pips needs the symbol artwork, which is ING-04's job.
+ */
+const Costs = ({
+  manaCost,
+  price,
+}: {
+  manaCost: string | null | undefined
+  price: number | null | undefined
+}): React.JSX.Element => (
+  <>
+    <span className="mana" title={manaCost ?? 'No mana cost'}>
+      {manaCost ?? ''}
+    </span>
+    <span className="cash" title="Cheapest printing — an estimate">
+      {usd(price)}
+    </span>
+  </>
+)
+
 const CardRow = ({
   card,
   item,
@@ -366,29 +390,34 @@ const Preview = ({
  * numbers in its `aria-label` and its tooltip.
  */
 const Curve = ({ curve }: { curve: api.Analysis['curve'] }): React.JSX.Element => {
-  const peak = Math.max(1, ...curve.histogram, ...curve.deltas.map((d) => d.ideal))
+  const peak = Math.max(1, ...curve.histogram, ...curve.deltas.map((d) => d.max))
 
   return (
     <>
       <div className="curve" role="img" aria-label="Mana curve against the archetype target">
         {curve.deltas.map((d) => {
-          const direction = d.delta > 1 ? 'short' : d.delta < -1 ? 'over' : 'balanced'
-          const label =
-            direction === 'short'
-              ? `${plural(d.delta, 'card')} short`
-              : direction === 'over'
-                ? `${plural(-d.delta, 'card')} too many`
-                : 'on target'
+          // The band decides, not the ideal: inside it the bucket is fine.
+          const direction = d.withinRange ? 'balanced' : d.delta > 0 ? 'short' : 'over'
+          const label = d.withinRange
+            ? `in range (${String(d.min)}–${String(d.max)})`
+            : direction === 'short'
+              ? `${plural(d.delta, 'card')} short of ${String(d.min)}`
+              : `${plural(-d.delta, 'card')} over ${String(d.max)}`
           return (
             <div
               className="curve-col"
               key={d.bucket}
-              title={`Mana value ${String(d.bucket)}${d.bucket === 7 ? '+' : ''}: ${String(d.actual)} of ${String(d.ideal)} — ${label}`}
-              aria-label={`Mana value ${String(d.bucket)}: ${String(d.actual)} cards, target ${String(d.ideal)}, ${label}`}
+              title={`Mana value ${String(d.bucket)}${d.bucket === 7 ? '+' : ''}: ${String(d.actual)} cards, want ${String(d.min)}–${String(d.max)} — ${label}`}
+              aria-label={`Mana value ${String(d.bucket)}: ${String(d.actual)} cards, target range ${String(d.min)} to ${String(d.max)}, ${label}`}
             >
+              {/* The acceptable range, drawn as a band rather than a line —
+                  anywhere inside it is fine, which is what a range means. */}
               <div
-                className="curve-target"
-                style={{ bottom: `${String((d.ideal / peak) * 100)}%` }}
+                className="curve-band"
+                style={{
+                  bottom: `${String((d.min / peak) * 100)}%`,
+                  height: `${String(((d.max - d.min) / peak) * 100)}%`,
+                }}
               />
               <div
                 className="curve-bar"
@@ -407,7 +436,7 @@ const Curve = ({ curve }: { curve: api.Analysis['curve'] }): React.JSX.Element =
       <p className="curve-key">
         <i className="short">short</i>
         <i className="over">too many</i>
-        <span>— line is the target</span>
+        <span>— band is the target range</span>
       </p>
     </>
   )
@@ -576,7 +605,10 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
                   >
                     {cards.get(line.oracleId)?.name ?? 'Loading…'}
                   </button>
-                  <span className="cost">{usd(prices.get(line.oracleId))}</span>
+                  <Costs
+                    manaCost={cards.get(line.oracleId)?.manaCost}
+                    price={prices.get(line.oracleId)}
+                  />
                   {section.key === 'commander' ? null : (
                     <button
                       className="act exclude"
@@ -610,6 +642,80 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
         </section>
 
         <section className="region" aria-label="Suggestions">
+          <h2>Deck options</h2>
+          <div className="options" aria-label="Deck options">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={deck.excludeUniversesBeyond}
+                onChange={(e) => setDeckOption({ excludeUniversesBeyond: e.target.checked })}
+              />
+              Exclude Universes Beyond
+            </label>
+
+            <label className="option-field">
+              <span>Max per card</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                defaultValue={budget?.maxCardUsd ?? ''}
+                placeholder="any"
+                onBlur={(e) => {
+                  const value = e.target.value.trim()
+                  setDeckOption({
+                    budget: {
+                      maxCardUsd: value === '' ? null : Number(value),
+                      maxTotalUsd: budget?.maxTotalUsd ?? null,
+                    },
+                  })
+                }}
+              />
+            </label>
+
+            <label className="option-field">
+              <span>Max deck total</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                defaultValue={budget?.maxTotalUsd ?? ''}
+                placeholder="any"
+                onBlur={(e) => {
+                  const value = e.target.value.trim()
+                  setDeckOption({
+                    budget: {
+                      maxCardUsd: budget?.maxCardUsd ?? null,
+                      maxTotalUsd: value === '' ? null : Number(value),
+                    },
+                  })
+                }}
+              />
+            </label>
+
+            {analysis !== null ? (
+              <p
+                className="option-total"
+                title="Scryfall prices are daily estimates and go stale within a day. Not a purchase price."
+              >
+                Deck total {usd(analysis.prices.deckTotalUsd)}{' '}
+                <span className="estimate">est.</span>
+                {analysis.prices.unpricedCards > 0
+                  ? ` · ${String(analysis.prices.unpricedCards)} unpriced`
+                  : ''}
+                {budget?.maxTotalUsd !== null &&
+                budget?.maxTotalUsd !== undefined &&
+                analysis.prices.deckTotalUsd > budget.maxTotalUsd
+                  ? ' · over budget'
+                  : ''}
+                {overCard > 0 ? ` · ${String(overCard)} over the per-card limit` : ''}
+              </p>
+            ) : null}
+          </div>
+
+          <p className="note estimate-note">
+            Prices are daily estimates from Scryfall and go stale within a day. Not a purchase
+            price.
+          </p>
+
           <h2>Suggestions</h2>
           <div className="field">
             <input
@@ -646,7 +752,10 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
                       ))}
                     </span>
                   </button>
-                  <span className="cost">{usd(prices.get(item.oracleId))}</span>
+                  <Costs
+                    manaCost={cards.get(item.oracleId)?.manaCost}
+                    price={prices.get(item.oracleId)}
+                  />
                   <button
                     className="act accept"
                     onClick={() => act(item.oracleId, 'accept')}
@@ -675,76 +784,6 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
             price={prices.get(detail?.oracleId ?? '')}
             onClose={() => setDetail(null)}
           />
-
-          <h2>Deck options</h2>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={deck.excludeUniversesBeyond}
-              onChange={(e) => setDeckOption({ excludeUniversesBeyond: e.target.checked })}
-            />
-            Exclude Universes Beyond cards
-          </label>
-
-          <div className="row" style={{ marginTop: '0.5rem' }}>
-            <div className="field" style={{ flex: 1 }}>
-              <label htmlFor="maxCard">Max per card</label>
-              <input
-                id="maxCard"
-                type="text"
-                inputMode="decimal"
-                defaultValue={budget?.maxCardUsd ?? ''}
-                placeholder="any"
-                onBlur={(e) => {
-                  const value = e.target.value.trim()
-                  setDeckOption({
-                    budget: {
-                      maxCardUsd: value === '' ? null : Number(value),
-                      maxTotalUsd: budget?.maxTotalUsd ?? null,
-                    },
-                  })
-                }}
-              />
-            </div>
-            <div className="field" style={{ flex: 1 }}>
-              <label htmlFor="maxTotal">Max deck total</label>
-              <input
-                id="maxTotal"
-                type="text"
-                inputMode="decimal"
-                defaultValue={budget?.maxTotalUsd ?? ''}
-                placeholder="any"
-                onBlur={(e) => {
-                  const value = e.target.value.trim()
-                  setDeckOption({
-                    budget: {
-                      maxCardUsd: budget?.maxCardUsd ?? null,
-                      maxTotalUsd: value === '' ? null : Number(value),
-                    },
-                  })
-                }}
-              />
-            </div>
-          </div>
-
-          {analysis !== null ? (
-            <p className="note">
-              Deck total {usd(analysis.prices.deckTotalUsd)} <span className="estimate">est.</span>
-              {analysis.prices.unpricedCards > 0
-                ? ` · ${String(analysis.prices.unpricedCards)} unpriced`
-                : ''}
-              {budget?.maxTotalUsd !== null &&
-              budget?.maxTotalUsd !== undefined &&
-              analysis.prices.deckTotalUsd > budget.maxTotalUsd
-                ? ' · over budget'
-                : ''}
-              {overCard > 0 ? ` · ${String(overCard)} over the per-card limit` : ''}
-            </p>
-          ) : null}
-          <p className="note estimate-note">
-            Prices are daily estimates from Scryfall and go stale within a day. Not a purchase
-            price.
-          </p>
 
           <h2 style={{ marginTop: '1.25rem' }}>Composition</h2>
           {deficits.map((d) => {

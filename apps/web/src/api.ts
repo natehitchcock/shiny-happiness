@@ -190,8 +190,16 @@ export interface Analysis {
   curve: {
     averageManaValue: number
     histogram: number[]
-    target: number[]
-    deltas: { bucket: number; actual: number; ideal: number; delta: number }[]
+    target: { ideal: number; min: number; max: number }[]
+    deltas: {
+      bucket: number
+      actual: number
+      ideal: number
+      min: number
+      max: number
+      delta: number
+      withinRange: boolean
+    }[]
   }
   legality: { legal: boolean; problems: { kind: string; oracleId?: string }[] }
   deckCombos: { comboId: string; pieces: string[]; produces: string[] }[]
