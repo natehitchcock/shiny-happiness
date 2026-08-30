@@ -26,6 +26,7 @@ const SOL = oracleId(randomUUID())
 const COUNTER = oracleId(randomUUID())
 const MOUNTAIN = oracleId(randomUUID())
 const ANTE = oracleId(randomUUID())
+const UB = oracleId(randomUUID())
 
 const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   oracleId: id,
@@ -43,6 +44,7 @@ const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   defaultPrinting: printingId(randomUUID()),
   roles: ['synergy'],
   primaryRole: 'synergy',
+  universesBeyond: false,
 })
 
 describeDb('API-01 contract', () => {
@@ -60,6 +62,7 @@ describeDb('API-01 contract', () => {
       card(COUNTER, 'Counterspell', { colorIdentity: ['U'], colors: ['U'] }),
       card(MOUNTAIN, 'Mountain', { typeLine: 'Basic Land — Mountain' }),
       card(ANTE, 'Contract from Below', { legalities: { commander: 'banned' } }),
+      { ...card(UB, 'Frodo, Test Hobbit'), universesBeyond: true },
     ])
     const combo: Combo = {
       id: comboId('c-1'),
@@ -111,6 +114,7 @@ describeDb('API-01 contract', () => {
         commanders: [KROV],
         targetBracket: 3,
         archetype: 'midrange',
+        excludeUniversesBeyond: false,
         status: 'active',
         version: 1,
         entries: [],
@@ -511,15 +515,6 @@ describeDb('API-01 contract', () => {
     })
   })
   describe('GET /api/v1/cards/search — predicates it cannot answer', () => {
-    it('refuses is:reserved rather than answering it from data it does not load', async () => {
-      const response = await app.inject({
-        method: 'GET',
-        url: '/api/v1/cards/search?q=' + encodeURIComponent('is:reserved'),
-      })
-
-      expect(response.statusCode).toBe(400)
-    })
-
     it('refuses the negated form too, which would otherwise return everything', async () => {
       // `-is:gamechanger` is how a bracket-conscious user filters. Answering it
       // from an empty bracketFlags list returns Game Changers as if they were
@@ -694,7 +689,87 @@ describeDb('API-01 contract', () => {
       ).json()
       expect(total.items).toHaveLength(1)
       // Every seeded card, exactly once.
-      expect(all.size).toBe(5)
+      expect(all.size).toBe(6)
+    })
+  })
+  describe('Universes Beyond filter (ADR-0011)', () => {
+    it('offers Universes Beyond cards by default', async () => {
+      const body = (await app.inject({ method: 'GET', url: '/api/v1/cards/search?q=frodo' })).json()
+
+      // The corpus keeps every card; only a deck's view of it narrows.
+      expect(body.items.map((c: Card) => c.oracleId)).toContain(UB)
+    })
+
+    it('hides them from search when asked', async () => {
+      const body = (
+        await app.inject({
+          method: 'GET',
+          url: '/api/v1/cards/search?q=frodo&excludeUniversesBeyond=true',
+        })
+      ).json()
+
+      expect(body.items.map((c: Card) => c.oracleId)).not.toContain(UB)
+    })
+
+    it('carries the setting on a deck it was created with', async () => {
+      const deck = (await createDeck({ excludeUniversesBeyond: true })).json()
+
+      expect(deck.excludeUniversesBeyond).toBe(true)
+    })
+
+    it('defaults the setting off, so the corpus stays whole until asked', async () => {
+      const deck = (await createDeck()).json()
+
+      expect(deck.excludeUniversesBeyond).toBe(false)
+    })
+
+    it('toggles the setting through PATCH', async () => {
+      const created = (await createDeck()).json()
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${created.id}`,
+        payload: { excludeUniversesBeyond: true },
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json().excludeUniversesBeyond).toBe(true)
+    })
+
+    it('reports provenance on the card itself', async () => {
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${UB}` })).json()
+
+      expect(body.universesBeyond).toBe(true)
+    })
+  })
+
+  describe('printing-level query fields (ADR-0011)', () => {
+    it('answers is:reserved now that printings are ingested', async () => {
+      // API-01 had to reject this outright; the printings ingest gave it data.
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/cards/search?q=' + encodeURIComponent('is:reserved'),
+      })
+
+      expect(response.statusCode).toBe(200)
+    })
+
+    it('answers a price query', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/cards/search?q=' + encodeURIComponent('price<=5'),
+      })
+
+      expect(response.statusCode).toBe(200)
+    })
+
+    it('still rejects power, which no printing carries', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/cards/search?q=' + encodeURIComponent('power>=4'),
+      })
+
+      expect(response.statusCode).toBe(400)
     })
   })
 })

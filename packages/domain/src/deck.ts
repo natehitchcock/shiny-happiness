@@ -58,6 +58,15 @@ export interface Deck {
   readonly colorIdentity: readonly Color[]
   readonly entries: readonly DeckEntry[]
   readonly budget: BudgetConstraint | null
+  /**
+   * Filter, not a flag (ADR-0011).
+   *
+   * The opposite of the bracket rule (doc 03 §3.2) and deliberately so: a
+   * bracket is a social line the user may knowingly cross, while "no Warhammer
+   * cards in my Magic deck" is a taste preference with no reason to keep
+   * offering. Per-deck, so it survives reopening.
+   */
+  readonly excludeUniversesBeyond: boolean
   readonly status: 'active' | 'archived'
   /** Monotonic; bumped server-side per accepted command batch (doc 12 §12.7). */
   readonly version: number

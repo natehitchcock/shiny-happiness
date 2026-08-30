@@ -24,6 +24,7 @@ const card = (name: string, role: Role, types: CardType[], manaValue: number): C
   defaultPrinting: printingId(`${name}-p`),
   roles: [role],
   primaryRole: role,
+  universesBeyond: false,
 })
 
 const entry = (name: string): DeckEntry => ({
@@ -46,6 +47,7 @@ const deckOf = (names: string[]): Deck => ({
   colorIdentity: ['R'],
   entries: names.map(entry),
   budget: null,
+  excludeUniversesBeyond: false,
   status: 'active',
   version: 1,
   createdAt: '',

@@ -3,6 +3,9 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
+  isUniversesBeyondCard,
+  tallyPrinting,
+  type ProvenanceTally,
   parseTypes,
   toCard,
   toPrinting,
@@ -229,5 +232,55 @@ describe('rate limits (ADR-0009 Q1)', () => {
 
   it('backs off hardest on the manifest endpoint', () => {
     expect(delayFor('/cards/manifest')).toBe(6_000)
+  })
+})
+
+describe('Universes Beyond provenance (ADR-0011)', () => {
+  const tally = (printings: { oracle_id?: string; promo_types?: string[] }[]) => {
+    const into = new Map<string, ProvenanceTally>()
+    for (const p of printings) tallyPrinting(into, { id: 'x', name: 'n', ...p })
+    return into
+  }
+
+  it('marks a card whose every printing is Universes Beyond', () => {
+    const t = tally([
+      { oracle_id: 'a', promo_types: ['universesbeyond'] },
+      { oracle_id: 'a', promo_types: ['universesbeyond', 'boosterfun'] },
+    ])
+
+    expect(isUniversesBeyondCard(t.get('a'))).toBe(true)
+  })
+
+  it('does NOT mark a card with even one ordinary printing', () => {
+    // This is the Sol Ring case. Scryfall's oracle export picked a Marvel
+    // Commander printing for it, so trusting a single printing would have
+    // dropped Sol Ring out of every deck.
+    const t = tally([
+      { oracle_id: 'sol', promo_types: ['surgefoil', 'universesbeyond'] },
+      { oracle_id: 'sol', promo_types: [] },
+    ])
+
+    expect(isUniversesBeyondCard(t.get('sol'))).toBe(false)
+  })
+
+  it('does not mark a card with no printings at all', () => {
+    // An empty tally must not read as "all of its printings are UB".
+    expect(isUniversesBeyondCard(undefined)).toBe(false)
+    expect(isUniversesBeyondCard({ total: 0, universesBeyond: 0 })).toBe(false)
+  })
+
+  it('ignores printings with no oracle id', () => {
+    const t = tally([{ promo_types: ['universesbeyond'] }])
+
+    expect(t.size).toBe(0)
+  })
+
+  it('defaults a mapped card to not-Universes-Beyond when provenance is unknown', () => {
+    // Safe direction: an unknown card stays visible rather than vanishing.
+    expect(toCard(byName('Sol Ring'))?.universesBeyond).toBe(false)
+  })
+
+  it('carries provenance the caller computed', () => {
+    expect(toCard(byName('Sol Ring'), { universesBeyond: true })?.universesBeyond).toBe(true)
   })
 })

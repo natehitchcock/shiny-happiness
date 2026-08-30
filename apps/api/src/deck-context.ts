@@ -1,5 +1,12 @@
 import type { Pool } from 'pg'
-import { allCombos, findEligibleCards, getCards, liveSnapshotId } from '@roundtable/db'
+import {
+  allCombos,
+  findEligibleCards,
+  getCards,
+  liveSnapshotId,
+  printingFactsForAll,
+  type PrintingFacts,
+} from '@roundtable/db'
 import type {
   Card,
   ComboIndex,
@@ -31,6 +38,7 @@ export interface DeckContext {
   readonly counts: CompositionCounts
   readonly targets: readonly CompositionTarget[]
   readonly snapshotId: string | null
+  readonly printingFacts: ReadonlyMap<OracleId, PrintingFacts>
   /**
    * Why a data source is missing, if it is. Reported to the client rather than
    * silently degrading (doc 05 §5.3): "no combos loaded" and "no combos apply"
@@ -42,30 +50,36 @@ export interface DeckContext {
 /**
  * A card lifted into the shape the scoring engine takes.
  *
- * Printing-level fields (`priceUsd`, `rarity`, `setCode`, `reserved`) are loaded
- * only for the accepted deck, not for the whole candidate pool — hydrating
- * printings for 30k candidates to price a hundred of them is the kind of thing
- * that only hurts at real data volume.
+ * Printing facts come from one aggregate query over the whole `printings` table
+ * rather than a lookup per card. Before ADR-0011 these were hardcoded null,
+ * which silently disabled budget scoring, `price:` and `is:reserved` — all three
+ * were implemented and all three were dead.
+ *
+ * `power` and `toughness` stay null: they are not stored on the oracle row, and
+ * `/cards/search` still rejects queries that use them (doc 10 §10.9).
  */
-const toPoolCard = (card: Card): PoolCard => ({
+const toPoolCard = (card: Card, facts: PrintingFacts | undefined): PoolCard => ({
   card,
   roles: card.roles,
   bracketFlags: [],
-  priceUsd: null,
-  rarity: null,
-  setCode: null,
+  priceUsd: facts?.priceUsd ?? null,
+  rarity: facts?.rarity ?? null,
+  setCode: facts?.setCode ?? null,
   power: null,
   toughness: null,
-  reserved: false,
+  reserved: facts?.reserved ?? false,
 })
 
 export const loadDeckContext = async (pool: Pool, deck: Deck): Promise<DeckContext> => {
   const missing: { source: string; reason: string }[] = []
 
-  const [eligible, combos, snapshotId] = await Promise.all([
-    findEligibleCards(pool, deck.colorIdentity),
+  const [eligible, combos, snapshotId, printingFacts] = await Promise.all([
+    findEligibleCards(pool, deck.colorIdentity, {
+      excludeUniversesBeyond: deck.excludeUniversesBeyond,
+    }),
     allCombos(pool),
     liveSnapshotId(pool),
+    printingFactsForAll(pool),
   ])
 
   if (combos.length === 0) {
@@ -102,11 +116,12 @@ export const loadDeckContext = async (pool: Pool, deck: Deck): Promise<DeckConte
   return {
     deck,
     cards,
-    pool: eligible.map(toPoolCard),
+    pool: eligible.map((c) => toPoolCard(c, printingFacts.get(c.oracleId))),
     comboIndex: index,
     counts,
     targets,
     snapshotId,
+    printingFacts,
     missing,
   }
 }

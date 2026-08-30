@@ -2,10 +2,13 @@ import { randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'
 import {
   bulkDataEntry,
+  isUniversesBeyondCard,
+  skipReason,
   streamBulkCards,
+  tallyPrinting,
   toCard,
   toPrinting,
-  skipReason,
+  type ProvenanceTally,
   type ScryfallCard,
   type ScryfallOptions,
 } from '@roundtable/clients'
@@ -19,10 +22,19 @@ import {
 import type { Card, Printing } from '@roundtable/domain'
 
 /**
- * ING-01 — Scryfall bulk ingest (doc 04 §4.1, ADR-0009).
+ * ING-01 — Scryfall bulk ingest (doc 04 §4.1, ADR-0009, ADR-0011).
  *
  * Bulk, not crawl: "If you need to rapidly look up card names, prices, or
  * resolve a large number of card images, you must use the bulk data files."
+ *
+ * TWO passes over two exports, because they answer different questions:
+ *
+ *   1. `default_cards` — every printing. Gives real prices, rarity, set codes
+ *      and the reserved-list flag, none of which exist at oracle level, and is
+ *      the only way to decide Universes Beyond provenance (ADR-0011): the flag
+ *      is per printing, and a card qualifies only if EVERY printing carries it.
+ *   2. `oracle_cards` — one row per card. The oracle-level truth the domain
+ *      models, written with the provenance pass 1 computed.
  */
 
 export interface IngestReport {
@@ -30,6 +42,9 @@ export interface IngestReport {
   readonly read: number
   readonly cards: number
   readonly printings: number
+  readonly printingsRead: number
+  /** Cards where every printing is a Universes Beyond printing. */
+  readonly universesBeyond: number
   /** Records with no `oracle_id` at all. */
   readonly skippedNoOracleId: number
   /** Art series, tokens, emblems, stickers, conspiracies — not deck cards. */
@@ -41,52 +56,71 @@ export interface IngestReport {
 
 export interface IngestOptions extends ScryfallOptions {
   readonly batchSize?: number
-  readonly bulkType?: string
-  /** Stop after N records. For smoke-testing a real ingest without the wait. */
+  /** Stop after N records per pass. For smoke-testing without the wait. */
   readonly limit?: number
-  readonly onProgress?: (read: number) => void
+  readonly onProgress?: (phase: 'printings' | 'cards', read: number) => void
 }
 
-/**
- * Run an ingest.
- *
- * Writes into the corpus and only then promotes the snapshot (doc 04 §4.7). A
- * run that dies half way therefore leaves the previous snapshot live rather than
- * the app serving a partially-written table.
- *
- * Idempotent: every write is an upsert keyed by `oracle_id` / `printing_id`, so
- * re-running produces the same rows.
- */
 export const ingestScryfall = async (
   pool: Pool,
   options: IngestOptions = {},
 ): Promise<IngestReport> => {
   const batchSize = options.batchSize ?? 1000
-  const entry = await bulkDataEntry(options.bulkType ?? 'oracle_cards', options)
-
   const snapshotId = randomUUID()
   await createSnapshot(pool, snapshotId, 'scryfall')
 
-  let read = 0
-  let cardCount = 0
+  // ---- pass 1: every printing ----
+  const printingsEntry = await bulkDataEntry('default_cards', options)
+  const provenance = new Map<string, ProvenanceTally>()
+  let printingsRead = 0
   let printingCount = 0
-  let skippedNoOracleId = 0
-  let skippedNonPlayable = 0
-  const failed: { id: string; reason: string }[] = []
-
-  let cards: Card[] = []
   let printings: Printing[] = []
 
-  const flush = async (): Promise<void> => {
-    if (cards.length > 0) {
-      cardCount += await upsertCards(pool, cards)
+  const flushPrintings = async (): Promise<void> => {
+    if (printings.length > 0) {
       printingCount += await upsertPrintings(pool, printings)
-      cards = []
       printings = []
     }
   }
 
-  for await (const raw of streamBulkCards(entry, options)) {
+  for await (const raw of streamBulkCards(printingsEntry, options)) {
+    printingsRead += 1
+    if (options.limit !== undefined && printingsRead > options.limit) break
+
+    // Provenance is tallied over EVERY printing, including the non-playable
+    // layouts — an art-series-only card is still Universes Beyond, and the
+    // tally must not be skewed by what the card pass happens to reject.
+    tallyPrinting(provenance, raw)
+
+    if (skipReason(raw) !== null) continue
+    const printing = toPrinting(raw)
+    if (printing !== null) printings.push(printing)
+
+    if (printings.length >= batchSize) {
+      await flushPrintings()
+      options.onProgress?.('printings', printingsRead)
+    }
+  }
+  await flushPrintings()
+
+  // ---- pass 2: one row per card ----
+  const cardsEntry = await bulkDataEntry('oracle_cards', options)
+  let read = 0
+  let cardCount = 0
+  let universesBeyond = 0
+  let skippedNoOracleId = 0
+  let skippedNonPlayable = 0
+  const failed: { id: string; reason: string }[] = []
+  let cards: Card[] = []
+
+  const flushCards = async (): Promise<void> => {
+    if (cards.length > 0) {
+      cardCount += await upsertCards(pool, cards)
+      cards = []
+    }
+  }
+
+  for await (const raw of streamBulkCards(cardsEntry, options)) {
     read += 1
     if (options.limit !== undefined && read > options.limit) break
 
@@ -100,9 +134,11 @@ export const ingestScryfall = async (
       continue
     }
 
+    const ub = isUniversesBeyondCard(provenance.get(raw.oracle_id ?? ''))
+
     let card: Card | null = null
     try {
-      card = toCard(raw as ScryfallCard)
+      card = toCard(raw as ScryfallCard, { universesBeyond: ub })
     } catch (error) {
       // A record that will not map is reported with its id. Silently dropping
       // ingest data is a rejected PR (AGENTS.md §8).
@@ -114,17 +150,15 @@ export const ingestScryfall = async (
       failed.push({ id: raw.id, reason: 'mapped to null unexpectedly' })
       continue
     }
+    if (ub) universesBeyond += 1
 
     cards.push(card)
-    const printing = toPrinting(raw)
-    if (printing !== null) printings.push(printing)
-
     if (cards.length >= batchSize) {
-      await flush()
-      options.onProgress?.(read)
+      await flushCards()
+      options.onProgress?.('cards', read)
     }
   }
-  await flush()
+  await flushCards()
 
   await setSnapshotCounts(pool, snapshotId, { cards: cardCount, combos: 0 })
   // Promoted last. Until this line runs, readers still see the old corpus.
@@ -135,9 +169,11 @@ export const ingestScryfall = async (
     read,
     cards: cardCount,
     printings: printingCount,
+    printingsRead,
+    universesBeyond,
     skippedNoOracleId,
     skippedNonPlayable,
     failed,
-    sourceUpdatedAt: entry.updatedAt,
+    sourceUpdatedAt: cardsEntry.updatedAt,
   }
 }

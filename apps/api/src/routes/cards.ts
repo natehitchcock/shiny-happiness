@@ -1,6 +1,14 @@
 import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
-import { combosContaining, getCard, getCards, listCardsAfter, printingsFor } from '@roundtable/db'
+import {
+  combosContaining,
+  getCard,
+  getCards,
+  listCardsAfter,
+  printingFactsForAll,
+  printingsFor,
+  type PrintingFacts,
+} from '@roundtable/db'
 import type { AnnotatedCandidate, Card, Color, QueryField, QueryNode } from '@roundtable/domain'
 import { COLORS, isOk, matchesQuery, oracleId, parseQuery } from '@roundtable/domain'
 import { badRequest, notFound, sendProblem } from '../errors.js'
@@ -11,8 +19,11 @@ import { cardBatchBody, cardSearchQuery, oracleIdParams } from '../schemas.js'
  *
  * `combo`, `near`, `flag` and `group` are computed against a deck's accepted set
  * (doc 05 §5.8) and are meaningless without one — they belong to the candidate
- * endpoint in API-02. `price`, `rarity` and `set` are printing-level, and
- * `power`/`toughness` are not stored on the oracle row at all.
+ * endpoint in API-02. `power` and `toughness` are not stored on the oracle row.
+ *
+ * `price`, `rarity`, `set` and `is:reserved` used to be here too. ADR-0011's
+ * printings ingest gave them real data, so they are answered now rather than
+ * rejected.
  *
  * Rejecting is deliberate. Accepting them and evaluating against absent data
  * would return an empty page that looks like "no cards match" rather than "this
@@ -24,9 +35,6 @@ const UNSUPPORTED_FIELDS: ReadonlyMap<QueryField, string> = new Map([
   ['near', 'needs a deck; use the candidates endpoint'],
   ['flag', 'needs a deck; use the candidates endpoint'],
   ['group', 'needs a deck; use the candidates endpoint'],
-  ['price', 'printing-level, not available on card search'],
-  ['rarity', 'printing-level, not available on card search'],
-  ['set', 'printing-level, not available on card search'],
   ['power', 'not stored on the oracle row'],
   ['toughness', 'not stored on the oracle row'],
 ])
@@ -42,7 +50,6 @@ const UNSUPPORTED_FIELDS: ReadonlyMap<QueryField, string> = new Map([
  * `-is:gamechanger` returns every Game Changer as though it were clean.
  */
 const UNSUPPORTED_IS: ReadonlyMap<string, string> = new Map([
-  ['reserved', 'printing-level, not available on card search'],
   ['gamechanger', 'needs the bracket rules, which DATA-05 has not populated'],
   ['reprint', 'printing-level, not decidable from oracle identity'],
   ['firstprint', 'printing-level, not decidable from oracle identity'],
@@ -83,20 +90,21 @@ const fieldsUsed = (node: QueryNode | null, into: Set<QueryField> = new Set()): 
  * A card lifted to the shape the domain predicate expects.
  *
  * The deck-relative fields are zeroed, which is safe only because a query
- * mentioning any of them is rejected before it gets here.
+ * mentioning any of them is rejected before it gets here. Printing facts are
+ * real (ADR-0011), so `price:`, `rarity:`, `set:` and `is:reserved` answer.
  */
-const asCandidate = (card: Card): AnnotatedCandidate => ({
+const asCandidate = (card: Card, facts: PrintingFacts | undefined): AnnotatedCandidate => ({
   card,
   comboDegree: 0,
   nearCombosAt1: 0,
   roles: card.roles,
   bracketFlags: [],
-  priceUsd: null,
-  rarity: null,
-  setCode: null,
+  priceUsd: facts?.priceUsd ?? null,
+  rarity: facts?.rarity ?? null,
+  setCode: facts?.setCode ?? null,
   power: null,
   toughness: null,
-  reserved: false,
+  reserved: facts?.reserved ?? false,
   group: null,
 })
 
@@ -149,11 +157,13 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
         colors,
         limit = 50,
         cursor,
+        excludeUniversesBeyond = false,
       } = req.query as {
         q?: string
         colors?: string
         limit?: number
         cursor?: string
+        excludeUniversesBeyond?: boolean
       }
 
       // A query with errors is NOT applied at all (doc 10 §10.4). Half a filter is
@@ -201,6 +211,7 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
         return sendProblem(rep, badRequest('cursor is not a cursor this endpoint issued'))
       }
 
+      const facts = await printingFactsForAll(pool)
       const colorIdentity = parseColors(colors)
       if (colorIdentity === null) {
         return sendProblem(rep, badRequest('colors must be a string of WUBRG letters', { colors }))
@@ -218,6 +229,7 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
             ? { afterName: after.name, afterOracleId: oracleId(after.oracleId) }
             : {}),
           ...(colorIdentity !== undefined ? { colorIdentity } : {}),
+          excludeUniversesBeyond,
           limit: 500,
         })
         if (batch.length === 0) {
@@ -225,7 +237,7 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
           break
         }
         for (const card of batch) {
-          if (matchesQuery(ast, asCandidate(card))) items.push(card)
+          if (matchesQuery(ast, asCandidate(card, facts.get(card.oracleId)))) items.push(card)
         }
         const last = batch[batch.length - 1]!
         after = { name: last.name, oracleId: last.oracleId }

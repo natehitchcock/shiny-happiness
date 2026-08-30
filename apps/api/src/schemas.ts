@@ -52,6 +52,9 @@ export const createDeckBody = {
     targetBracket: { type: 'integer', enum: [...BRACKET_VALUES] },
     archetype: { type: 'string', enum: [...ARCHETYPE_KEYS] },
     archetypeSecondary: { type: ['string', 'null'], enum: [...ARCHETYPE_KEYS, null] },
+    // A taste filter, not a legality rule (ADR-0011). Per deck, so it survives
+    // reopening; defaults off so the corpus stays whole until asked.
+    excludeUniversesBeyond: { type: 'boolean' },
   },
 } as const
 
@@ -73,6 +76,7 @@ export const patchDeckBody = {
       },
     },
     status: { type: 'string', enum: ['active', 'archived'] },
+    excludeUniversesBeyond: { type: 'boolean' },
   },
 } as const
 
@@ -99,6 +103,7 @@ export const cardSearchQuery = {
   properties: {
     q: { type: 'string', maxLength: 500 },
     colors: { type: 'string', maxLength: 10 },
+    excludeUniversesBeyond: { type: 'boolean' },
     limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
     cursor: { type: 'string', maxLength: 500 },
   },

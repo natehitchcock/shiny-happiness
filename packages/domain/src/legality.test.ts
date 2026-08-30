@@ -31,6 +31,7 @@ const card = (
   defaultPrinting: printingId(`${name}-p`),
   roles: ['synergy'],
   primaryRole: opts.primaryRole ?? 'synergy',
+  universesBeyond: false,
 })
 
 const entry = (name: string, over: Partial<DeckEntry> = {}): DeckEntry => ({
@@ -54,6 +55,7 @@ const makeDeck = (commanders: string[], names: string[], colorIdentity: Color[] 
   colorIdentity,
   entries: names.map((n) => entry(n)),
   budget: null,
+  excludeUniversesBeyond: false,
   status: 'active',
   version: 1,
   createdAt: '2026-01-01T00:00:00Z',

@@ -48,6 +48,14 @@ export interface Card {
   /** Derived, imperfect, and overridable (doc 02 §2.4). */
   readonly roles: readonly Role[]
   readonly primaryRole: Role
+  /**
+   * True only when EVERY printing is a Universes Beyond printing (ADR-0011).
+   *
+   * Printing-level `promo_types` is not enough on its own: Scryfall's oracle
+   * export picked a Marvel Commander printing for Sol Ring, and trusting that
+   * one printing would mark Sol Ring as Universes Beyond.
+   */
+  readonly universesBeyond: boolean
 }
 
 export interface Printing {

@@ -33,6 +33,7 @@ const card = (over: Partial<Card> = {}): Card => ({
   defaultPrinting: printingId('p'),
   roles: ['sac-outlet'],
   primaryRole: 'sac-outlet',
+  universesBeyond: false,
   ...over,
 })
 

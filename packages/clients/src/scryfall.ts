@@ -111,6 +111,7 @@ export interface ScryfallCard {
   readonly collector_number?: string
   readonly rarity?: string
   readonly reserved?: boolean
+  readonly promo_types?: string[]
   readonly game_changer?: boolean
   readonly digital?: boolean
   readonly layout?: string
@@ -235,7 +236,10 @@ const LEGALITIES = new Set(['legal', 'not_legal', 'banned', 'restricted'])
  * have none, and an oracle-keyed corpus cannot hold them. The caller counts them
  * rather than discarding them silently (doc 04 §4.2).
  */
-export const toCard = (raw: ScryfallCard): Card | null => {
+export const toCard = (
+  raw: ScryfallCard,
+  provenance: { readonly universesBeyond?: boolean } = {},
+): Card | null => {
   // `skipReason` covers the same ground, but the explicit check is what narrows
   // `oracle_id` from `string | undefined` for the compiler.
   if (raw.oracle_id === undefined || skipReason(raw) !== null) return null
@@ -273,8 +277,39 @@ export const toCard = (raw: ScryfallCard): Card | null => {
     defaultPrinting: printingId(raw.id),
     roles: derived.roles,
     primaryRole: derived.primary,
+    // Cannot be decided from one printing (ADR-0011); the ingest computes it
+    // across all of them and passes it in. Defaulting to false is the safe
+    // direction: an unknown card stays visible rather than silently vanishing.
+    universesBeyond: provenance.universesBeyond ?? false,
   }
 }
+
+/** True when this printing is a Universes Beyond printing. */
+export const isUniversesBeyondPrinting = (raw: ScryfallCard): boolean =>
+  (raw.promo_types ?? []).includes('universesbeyond')
+
+/**
+ * Fold every printing of every card into "is this card Universes Beyond".
+ *
+ * A card qualifies only when EVERY printing carries the flag. Sol Ring has
+ * ordinary printings and survives; `Bill the Pony` has only Universes Beyond
+ * printings and does not.
+ */
+export interface ProvenanceTally {
+  total: number
+  universesBeyond: number
+}
+
+export const tallyPrinting = (into: Map<string, ProvenanceTally>, raw: ScryfallCard): void => {
+  if (raw.oracle_id === undefined) return
+  const entry = into.get(raw.oracle_id) ?? { total: 0, universesBeyond: 0 }
+  entry.total += 1
+  if (isUniversesBeyondPrinting(raw)) entry.universesBeyond += 1
+  into.set(raw.oracle_id, entry)
+}
+
+export const isUniversesBeyondCard = (tally: ProvenanceTally | undefined): boolean =>
+  tally !== undefined && tally.total > 0 && tally.total === tally.universesBeyond
 
 /** The printing carried alongside an oracle record. Prices are estimates only. */
 export const toPrinting = (raw: ScryfallCard): Printing | null => {

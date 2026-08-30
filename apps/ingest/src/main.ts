@@ -19,9 +19,11 @@ const runCards = async (pool: Pool, limit: number | undefined): Promise<void> =>
   })
   process.stdout.write('\r')
   console.log(
-    `ingested ${report.cards} cards, ${report.printings} printings from ${report.read} records ` +
+    `ingested ${report.cards} cards and ${report.printings} printings ` +
+      `(${report.printingsRead} printing records, ${report.read} oracle records) ` +
       `in ${((Date.now() - started) / 1000).toFixed(1)}s`,
   )
+  console.log(`  ${report.universesBeyond} cards are Universes Beyond (every printing)`)
   console.log(`  source updated ${report.sourceUpdatedAt}, snapshot ${report.snapshotId}`)
   if (report.skippedNoOracleId > 0 || report.skippedNonPlayable > 0) {
     console.log(

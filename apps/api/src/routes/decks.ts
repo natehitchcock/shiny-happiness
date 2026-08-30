@@ -92,6 +92,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
       targetBracket: Bracket
       archetype: ArchetypeKey
       archetypeSecondary?: ArchetypeKey | null
+      excludeUniversesBeyond?: boolean
     }
     const commanders = body.commanders.map(oracleId)
 
@@ -115,6 +116,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
       // Derived from the commanders, never taken from the request: the client
       // does not get to declare a colour identity the cards disagree with.
       colorIdentity: deckColorIdentity(commanders, cards),
+      excludeUniversesBeyond: body.excludeUniversesBeyond ?? false,
     })
     return rep.status(201).send(deck)
   })
@@ -140,6 +142,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
         archetypeSecondary?: ArchetypeKey | null
         budget?: { maxTotalUsd?: number | null; maxCardUsd?: number | null } | null
         status?: Deck['status']
+        excludeUniversesBeyond?: boolean
       }
 
       // COALESCE keeps every unsupplied column as it was. Changing archetype moves
@@ -153,6 +156,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
          budget_max_total    = CASE WHEN $7::boolean THEN $8 ELSE budget_max_total END,
          budget_max_card     = CASE WHEN $7::boolean THEN $9 ELSE budget_max_card END,
          status              = COALESCE($10, status),
+         exclude_universes_beyond = COALESCE($11, exclude_universes_beyond),
          updated_at          = now()
        WHERE id = $1 AND deleted_at IS NULL`,
         [
@@ -166,6 +170,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
           body.budget?.maxTotalUsd ?? null,
           body.budget?.maxCardUsd ?? null,
           body.status ?? null,
+          body.excludeUniversesBeyond ?? null,
         ],
       )
       if ((rowCount ?? 0) === 0) return sendProblem(rep, notFound(`No deck with id ${id}`))

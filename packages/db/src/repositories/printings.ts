@@ -83,3 +83,50 @@ export const upsertPrintings = async (
   )
   return rowCount ?? 0
 }
+
+export interface PrintingFacts {
+  readonly priceUsd: number | null
+  readonly rarity: string | null
+  readonly setCode: string | null
+  readonly reserved: boolean
+}
+
+/**
+ * The printing-level facts the candidate pool needs, one row per card.
+ *
+ * The CHEAPEST printing is the one that matters for a budget: a card is
+ * affordable if any printing of it is, and judging Sol Ring by its most
+ * expensive printing would price it out of every deck. `reserved` is a property
+ * of the card rather than the printing, so it is OR-ed across all of them.
+ *
+ * One aggregate query rather than a lookup per card — hydrating printings for
+ * 30k candidates individually is the shape that only hurts at real volume.
+ */
+export const printingFactsForAll = async (pool: Pool): Promise<Map<OracleId, PrintingFacts>> => {
+  const { rows } = await pool.query<{
+    oracle_id: string
+    price_usd: string | null
+    rarity: string | null
+    set_code: string | null
+    reserved: boolean
+  }>(
+    `SELECT DISTINCT ON (oracle_id)
+            oracle_id,
+            min(price_usd) OVER (PARTITION BY oracle_id) AS price_usd,
+            bool_or(reserved) OVER (PARTITION BY oracle_id) AS reserved,
+            rarity, set_code
+       FROM printings
+      ORDER BY oracle_id, price_usd NULLS LAST`,
+  )
+  return new Map(
+    rows.map((r) => [
+      r.oracle_id as OracleId,
+      {
+        priceUsd: r.price_usd === null ? null : Number(r.price_usd),
+        rarity: r.rarity,
+        setCode: r.set_code,
+        reserved: r.reserved,
+      },
+    ]),
+  )
+}

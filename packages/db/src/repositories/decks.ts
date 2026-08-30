@@ -24,6 +24,7 @@ interface DeckRow {
   readonly budget_max_total: string | null
   readonly budget_max_card: string | null
   readonly status: string
+  readonly exclude_universes_beyond: boolean
   readonly version: number
   readonly created_at: Date
   readonly updated_at: Date
@@ -66,6 +67,7 @@ const toDeck = (row: DeckRow, entries: readonly DeckEntry[]): Deck => ({
           maxTotalUsd: row.budget_max_total === null ? null : Number(row.budget_max_total),
           maxCardUsd: row.budget_max_card === null ? null : Number(row.budget_max_card),
         },
+  excludeUniversesBeyond: row.exclude_universes_beyond,
   status: row.status as Deck['status'],
   version: row.version,
   createdAt: row.created_at.toISOString(),
@@ -105,13 +107,14 @@ export interface CreateDeckInput {
   readonly archetype: ArchetypeKey
   readonly archetypeSecondary?: ArchetypeKey | null
   readonly colorIdentity: readonly Color[]
+  readonly excludeUniversesBeyond?: boolean
 }
 
 export const createDeck = async (pool: Pool, input: CreateDeckInput): Promise<Deck> => {
   const { rows } = await pool.query<DeckRow>(
     `INSERT INTO decks (id, owner_id, name, commanders, target_bracket, archetype,
-                        archetype_secondary, color_identity)
-     VALUES ($1, $2, $3, $4::uuid[], $5, $6, $7, $8::char(1)[]) RETURNING *`,
+                        archetype_secondary, color_identity, exclude_universes_beyond)
+     VALUES ($1, $2, $3, $4::uuid[], $5, $6, $7, $8::char(1)[], $9) RETURNING *`,
     [
       input.id,
       input.ownerId,
@@ -121,6 +124,7 @@ export const createDeck = async (pool: Pool, input: CreateDeckInput): Promise<De
       input.archetype,
       input.archetypeSecondary ?? null,
       input.colorIdentity,
+      input.excludeUniversesBeyond ?? false,
     ],
   )
   return toDeck(rows[0]!, [])

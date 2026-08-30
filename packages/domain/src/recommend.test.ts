@@ -27,6 +27,7 @@ const card = (name: string, over: Partial<Card> = {}): Card => ({
   defaultPrinting: printingId(`${name}-p`),
   roles: ['synergy'],
   primaryRole: 'synergy',
+  universesBeyond: false,
   ...over,
 })
 
@@ -61,6 +62,7 @@ const emptyDeck: Deck = {
   colorIdentity: ['R'],
   entries: [],
   budget: null,
+  excludeUniversesBeyond: false,
   status: 'active',
   version: 1,
   createdAt: '',

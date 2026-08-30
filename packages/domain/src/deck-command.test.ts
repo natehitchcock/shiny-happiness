@@ -20,6 +20,7 @@ const card = (name: string, opts: Partial<Card> = {}): Card => ({
   defaultPrinting: printingId(`${name}-p`),
   roles: ['synergy'],
   primaryRole: 'synergy',
+  universesBeyond: false,
 })
 
 const entry = (name: string, over: Partial<DeckEntry> = {}): DeckEntry => ({
@@ -43,6 +44,7 @@ const deck = (entries: DeckEntry[] = [], colorIdentity: Color[] = ['R']): Deck =
   colorIdentity,
   entries,
   budget: null,
+  excludeUniversesBeyond: false,
   status: 'active',
   version: 4,
   createdAt: '2026-01-01T00:00:00Z',

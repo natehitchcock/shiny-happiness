@@ -42,6 +42,7 @@ const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   defaultPrinting: printingId(randomUUID()),
   roles: opts.roles ?? ['synergy'],
   primaryRole: opts.primaryRole ?? 'synergy',
+  universesBeyond: false,
 })
 
 describeDb('API-02 contract', () => {
@@ -60,6 +61,7 @@ describeDb('API-02 contract', () => {
         types: ['artifact'],
         roles: ['ramp'],
         primaryRole: 'ramp',
+        universesBeyond: false,
         colorIdentity: [],
         colors: [],
       }),
@@ -67,6 +69,7 @@ describeDb('API-02 contract', () => {
         typeLine: 'Basic Land — Mountain',
         roles: ['land'],
         primaryRole: 'land',
+        universesBeyond: false,
         manaCost: null,
         manaValue: 0,
         types: ['land'],

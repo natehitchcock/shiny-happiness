@@ -17,6 +17,7 @@ interface CardRow {
   readonly default_printing: string | null
   readonly roles: string[]
   readonly primary_role: string
+  readonly universes_beyond: boolean
 }
 
 const toCard = (row: CardRow): Card => ({
@@ -35,6 +36,7 @@ const toCard = (row: CardRow): Card => ({
   defaultPrinting: row.default_printing as PrintingId | null,
   roles: row.roles as Role[],
   primaryRole: row.primary_role as Role,
+  universesBeyond: row.universes_beyond,
 })
 
 /**
@@ -69,21 +71,23 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
     default_printing: c.defaultPrinting,
     roles: c.roles,
     primary_role: c.primaryRole,
+    universes_beyond: c.universesBeyond,
   }))
 
   const { rowCount } = await pool.query(
     `INSERT INTO cards (
        oracle_id, name, mana_cost, mana_value, color_identity, colors, type_line,
        types, oracle_text, keywords, legality_commander, edhrec_rank,
-       default_printing, roles, primary_role)
+       default_printing, roles, primary_role, universes_beyond)
      SELECT oracle_id, name, mana_cost, mana_value, color_identity, colors, type_line,
             types, oracle_text, keywords, legality_commander, edhrec_rank,
-            default_printing, roles, primary_role
+            default_printing, roles, primary_role, universes_beyond
        FROM jsonb_to_recordset($1::jsonb) AS x(
          oracle_id uuid, name text, mana_cost text, mana_value real,
          color_identity char(1)[], colors char(1)[], type_line text, types text[],
          oracle_text text, keywords text[], legality_commander text,
-         edhrec_rank integer, default_printing uuid, roles text[], primary_role text)
+         edhrec_rank integer, default_printing uuid, roles text[], primary_role text,
+         universes_beyond boolean)
      ON CONFLICT (oracle_id) DO UPDATE SET
        name = EXCLUDED.name, mana_cost = EXCLUDED.mana_cost,
        mana_value = EXCLUDED.mana_value, color_identity = EXCLUDED.color_identity,
@@ -91,7 +95,8 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
        types = EXCLUDED.types, oracle_text = EXCLUDED.oracle_text,
        keywords = EXCLUDED.keywords, legality_commander = EXCLUDED.legality_commander,
        edhrec_rank = EXCLUDED.edhrec_rank, default_printing = EXCLUDED.default_printing,
-       roles = EXCLUDED.roles, primary_role = EXCLUDED.primary_role`,
+       roles = EXCLUDED.roles, primary_role = EXCLUDED.primary_role,
+       universes_beyond = EXCLUDED.universes_beyond`,
     [JSON.stringify(payload)],
   )
   return rowCount ?? 0
@@ -122,16 +127,27 @@ export const getCards = async (pool: Pool, ids: readonly OracleId[]): Promise<Ca
 export const findEligibleCards = async (
   pool: Pool,
   colorIdentity: readonly Color[],
-  options: { readonly excludeBasicLands?: boolean; readonly limit?: number } = {},
+  options: {
+    readonly excludeBasicLands?: boolean
+    readonly limit?: number
+    /** Per-deck taste filter, not a legality rule (ADR-0011). */
+    readonly excludeUniversesBeyond?: boolean
+  } = {},
 ): Promise<Card[]> => {
   const { rows } = await pool.query<CardRow>(
     `SELECT * FROM cards
       WHERE legality_commander = 'legal'
         AND color_identity <@ $1::char(1)[]
         AND ($2::boolean = false OR type_line NOT ILIKE '%basic%land%')
+        AND ($4::boolean = false OR universes_beyond = false)
       ORDER BY edhrec_rank NULLS LAST, name
       LIMIT $3`,
-    [colorIdentity, options.excludeBasicLands ?? true, options.limit ?? 5000],
+    [
+      colorIdentity,
+      options.excludeBasicLands ?? true,
+      options.limit ?? 5000,
+      options.excludeUniversesBeyond ?? false,
+    ],
   )
   return rows.map(toCard)
 }
@@ -152,12 +168,14 @@ export const listCardsAfter = async (
     readonly afterOracleId?: OracleId
     readonly colorIdentity?: readonly Color[]
     readonly limit?: number
+    readonly excludeUniversesBeyond?: boolean
   } = {},
 ): Promise<Card[]> => {
   const { rows } = await pool.query<CardRow>(
     `SELECT * FROM cards
       WHERE ($1::text IS NULL OR (name, oracle_id) > ($1::text, $2::uuid))
         AND ($3::char(1)[] IS NULL OR color_identity <@ $3::char(1)[])
+        AND ($5::boolean = false OR universes_beyond = false)
       ORDER BY name, oracle_id
       LIMIT $4`,
     [
@@ -165,6 +183,7 @@ export const listCardsAfter = async (
       options.afterOracleId ?? null,
       options.colorIdentity ?? null,
       options.limit ?? 500,
+      options.excludeUniversesBeyond ?? false,
     ],
   )
   return rows.map(toCard)
