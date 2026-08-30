@@ -121,7 +121,68 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
  * card away; hollow means neither, and it is still shown so the absence reads
  * as a measured zero rather than missing data.
  */
-const Degree = ({ degree, near }: { degree: number; near: number }): React.JSX.Element => {
+/**
+ * Which combos, not just how many.
+ *
+ * A number told you a card completed three combos and gave you no way to find
+ * out which three — so the only way to check the app's headline claim was to go
+ * looking for it elsewhere. Both the badge and the "completes N combos" reason
+ * open the same list, because a reader will reach for whichever they are
+ * nearest.
+ *
+ * Named from the client's own hydrated cards: every piece of a COMPLETED combo
+ * is by definition already in the deck.
+ */
+const ComboList = ({
+  combos,
+  cards,
+  lockedIds,
+  self,
+}: {
+  combos: readonly api.Recommendation['combos'][number][]
+  cards: ReadonlyMap<string, api.Card>
+  lockedIds: ReadonlySet<string>
+  self: string
+}): React.JSX.Element => {
+  if (combos.length === 0) return <span className="hint-line">No combo detail available.</span>
+  return (
+    <>
+      {combos.slice(0, 6).map((c) => (
+        <span className="hint-line" key={c.id}>
+          <span className="combo-pieces">
+            {c.pieces
+              .filter((piece) => piece !== self)
+              .map((piece) => (
+                <span className="partner" data-locked={lockedIds.has(piece)} key={piece}>
+                  {cards.get(piece)?.name ?? 'a card in your deck'}
+                </span>
+              ))}
+          </span>
+          <span className="combo-produces">{c.produces.join(', ')}</span>
+        </span>
+      ))}
+      {combos.length > 6 ? (
+        <span className="hint-line dim">and {combos.length - 6} more.</span>
+      ) : null}
+    </>
+  )
+}
+
+const Degree = ({
+  degree,
+  near,
+  combos = [],
+  cards,
+  lockedIds,
+  self,
+}: {
+  degree: number
+  near: number
+  combos?: readonly api.Recommendation['combos'][number][]
+  cards?: ReadonlyMap<string, api.Card>
+  lockedIds?: ReadonlySet<string>
+  self?: string
+}): React.JSX.Element => {
   const value = degree > 0 ? degree : near
   const label =
     degree > 0
@@ -129,16 +190,41 @@ const Degree = ({ degree, near }: { degree: number; near: number }): React.JSX.E
       : near > 0
         ? `One card away from ${String(near)} combos`
         : 'No combos'
-  return (
-    <span
-      className="degree"
-      data-completes={degree > 0}
-      data-empty={value === 0}
-      title={label}
-      aria-label={label}
-    >
+
+  const badge = (
+    <span className="degree" data-completes={degree > 0} data-empty={value === 0}>
       {value === 0 ? '·' : value}
     </span>
+  )
+
+  // Nothing to open unless we actually hold the combos. A hint that says
+  // "no detail" on every row would be worse than the plain badge.
+  if (combos.length === 0 || cards === undefined) {
+    return (
+      <span className="degree-wrap" title={label} aria-label={label}>
+        {badge}
+      </span>
+    )
+  }
+
+  return (
+    <Hint
+      className="degree-hint"
+      label={label}
+      content={
+        <>
+          <strong>{label}</strong>
+          <ComboList
+            combos={combos}
+            cards={cards}
+            lockedIds={lockedIds ?? new Set()}
+            self={self ?? ''}
+          />
+        </>
+      }
+    >
+      {badge}
+    </Hint>
   )
 }
 
@@ -1683,6 +1769,40 @@ export const Workspace = ({
   )
   const basicIds = useMemo(() => new Set(basics.map((b) => b.oracleId)), [basics])
 
+  /**
+   * The three "Completes N combos" groups, shown as one.
+   *
+   * The split was a ranking device that leaked into the layout: three headers,
+   * three counts, and the same answer to the same question — "this card
+   * finishes something". The degree is already on every row as a brass badge,
+   * so merging loses nothing and the rows still sort hardest-won first.
+   *
+   * Done here rather than in `recommend`, which keeps its three keys. They are
+   * how the domain ORDERS candidates, and collapsing them there would throw
+   * away the ordering to change a heading.
+   *
+   * "One card away" stays separate — it is a different claim, about a combo the
+   * deck cannot make yet.
+   */
+  const shownGroups = useMemo(() => {
+    const combo = groups.filter((g) => g.key.startsWith('combo-'))
+    if (combo.length === 0) return groups
+    const merged: api.Group = {
+      ...combo[0]!,
+      key: 'combo',
+      label: 'Completes combos',
+      total: combo.reduce((n, g) => n + g.total, 0),
+      rationale: 'Adding one of these finishes a combo using only cards already in your deck.',
+      items: combo
+        .flatMap((g) => g.items)
+        .sort((a, b) => b.comboDegree - a.comboDegree || b.score - a.score),
+    }
+    const rest = groups.filter((g) => !g.key.startsWith('combo-'))
+    // Back where the strongest of the three sat, not appended to the end.
+    const at = groups.findIndex((g) => g.key.startsWith('combo-'))
+    return [...rest.slice(0, at), merged, ...rest.slice(at)]
+  }, [groups])
+
   /** Accepted cards by id, for the preview's "works with your deck" pass. */
   const acceptedIds = useMemo(
     () =>
@@ -2088,7 +2208,7 @@ export const Workspace = ({
             {queryError !== null ? <p className="problem">{queryError}</p> : null}
           </div>
 
-          {groups.map((g) => (
+          {shownGroups.map((g) => (
             <div className="group" key={g.key}>
               <div className="group-head">
                 <h3>{g.label}</h3>
@@ -2106,21 +2226,56 @@ export const Workspace = ({
               </div>
               {g.items.map((item) => (
                 <div className="card-row" key={item.oracleId}>
-                  <Degree degree={item.comboDegree} near={item.nearCombosAt1} />
-                  <button
-                    className="name as-link"
-                    onClick={() => open(item.oracleId)}
-                    aria-label={`Preview ${cards.get(item.oracleId)?.name ?? 'card'}`}
-                  >
-                    {cards.get(item.oracleId)?.name ?? 'Loading…'}
+                  <Degree
+                    degree={item.comboDegree}
+                    near={item.nearCombosAt1}
+                    combos={item.combos}
+                    cards={cards}
+                    lockedIds={lockedIds}
+                    self={item.oracleId}
+                  />
+                  {/* The reasons sit BESIDE the name button, not inside it.
+                      One of them opens a panel of its own, and a button nested
+                      in a button is invalid and unreachable by keyboard. */}
+                  <span className="name-cell">
+                    <button
+                      className="name as-link"
+                      onClick={() => open(item.oracleId)}
+                      aria-label={`Preview ${cards.get(item.oracleId)?.name ?? 'card'}`}
+                    >
+                      {cards.get(item.oracleId)?.name ?? 'Loading…'}
+                    </button>
                     <span className="reasons">
-                      {item.reasons.map((r, i) => (
-                        <span className="reason" data-kind={r.kind} key={i}>
-                          {reasonText(r, item)}
-                        </span>
-                      ))}
+                      {item.reasons.map((r, i) =>
+                        r.kind === 'completes-combos' && item.combos.length > 0 ? (
+                          <Hint
+                            key={i}
+                            className="reason-hint"
+                            label={`${reasonText(r, item)} — show which`}
+                            content={
+                              <>
+                                <strong>{reasonText(r, item)}</strong>
+                                <ComboList
+                                  combos={item.combos}
+                                  cards={cards}
+                                  lockedIds={lockedIds}
+                                  self={item.oracleId}
+                                />
+                              </>
+                            }
+                          >
+                            <span className="reason" data-kind={r.kind} data-openable="true">
+                              {reasonText(r, item)}
+                            </span>
+                          </Hint>
+                        ) : (
+                          <span className="reason" data-kind={r.kind} key={i}>
+                            {reasonText(r, item)}
+                          </span>
+                        ),
+                      )}
                     </span>
-                  </button>
+                  </span>
                   {columns.map((c) => (
                     <span
                       className="col-cell"

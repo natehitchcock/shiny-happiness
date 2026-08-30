@@ -1168,6 +1168,43 @@ select {
   margin: 0 0 var(--step);
 }
 
+/* --------------------------------------------- openable combo detail */
+
+/* The name and its reasons were one button; the reasons moved out so one of
+   them can open a panel. This keeps the pair filling the row as before. */
+.name-cell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.name-cell .name {
+  text-align: left;
+}
+.degree-wrap,
+.degree-hint {
+  flex: 0 0 auto;
+}
+/* A dotted underline is the standing convention for "there is more here" —
+   it reads as openable without looking like a button. */
+.reason[data-openable='true'] {
+  border-bottom: 1px dotted var(--brass-dim);
+  cursor: pointer;
+}
+.combo-pieces {
+  display: block;
+}
+.combo-pieces .partner + .partner::before {
+  content: ' + ';
+  color: var(--parchment-dim);
+}
+.combo-produces {
+  display: block;
+  color: var(--parchment-dim);
+  font-size: 0.68rem;
+}
+
 /* ------------------------------------------ works with your deck */
 
 .partners {

@@ -65,6 +65,14 @@ export interface Recommendation {
   comboDegree: number
   nearCombosAt1: number
   completedCombos: string[]
+  /**
+   * The completed combos, expanded.
+   *
+   * `completedCombos` counts; this reads. Pieces are oracle ids, and every
+   * piece of a COMPLETED combo is already in the deck, so the client names them
+   * from its own hydrated cards without another request.
+   */
+  combos: { id: string; pieces: string[]; produces: string[] }[]
   reasons: Reason[]
 }
 

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
 import { getDeck } from '@roundtable/db'
-import type { CandidateGroupKey, ScoringWeights } from '@roundtable/domain'
+import type { CandidateGroupKey, ComboId, ScoringWeights } from '@roundtable/domain'
 import {
   acceptedSet,
   comboDegree,
@@ -83,7 +83,27 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
         label: g.label,
         rationale: g.rationale,
         total: g.total,
-        items: g.items,
+        /*
+         * Each completed combo, expanded to its pieces.
+         *
+         * `completedCombos` is a list of combo IDs, which is exactly enough to
+         * count and nothing at all to read. The UI lets you open "completes 3
+         * combos" to see WHICH three, and a bare id cannot answer that.
+         *
+         * Pieces go out as oracle ids, not names: every piece of a COMPLETED
+         * combo is by definition a card already in the deck, so the client has
+         * it hydrated and can name it without another request. `produces` rides
+         * along because it is the point of the combo.
+         */
+        items: g.items.map((item) => ({
+          ...item,
+          combos: item.completedCombos.flatMap((id) => {
+            const combo = context.comboIndex.byId.get(id as ComboId)
+            return combo === undefined
+              ? []
+              : [{ id: combo.id, pieces: combo.pieces, produces: combo.produces }]
+          }),
+        })),
       }))
 
       /**
