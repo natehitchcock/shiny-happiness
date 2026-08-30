@@ -29,7 +29,7 @@ runtime are already set — do not fill them in by hand.
 
 | Variable | Value | Notes |
 | --- | --- | --- |
-| `DATABASE_URL` | the Neon **pooled** string | The Vercel↔Neon integration sets this for you. |
+| `DATABASE_URL` | the Neon **pooled** string (hostname contains `-pooler`) | Serverless opens a connection per instance, so the app must go through PgBouncer. |
 | `DATABASE_POOL_MAX` | `3` | **Not optional.** See below. |
 | `SCRYFALL_USER_AGENT` | `LotusWizard/0.1 (your-contact)` | Only used by ingest, which runs locally — but set it so a one-off run from the dashboard is compliant with ADR-0009 Q2. |
 
@@ -43,8 +43,19 @@ the request that did it — it fails for somebody else's.
 neither belongs in the Vercel build, which has a time limit and would re-run
 them on every deploy.
 
+**Migrations and ingest use the DIRECT string, not the pooled one.** Neon gives
+you both; `neon env pull` writes them as `DATABASE_URL` (pooled) and
+`DATABASE_URL_UNPOOLED` (direct, no `-pooler` in the hostname).
+
+This is not a nicety. The pooled endpoint is PgBouncer in *transaction* mode,
+which does not carry session state across statements, and our migration runner
+executes DDL inside `withTransaction`. When it breaks it never says "pooling" —
+it says `prepared statement "s0" already exists`, or a `SET` silently fails to
+persist so the next statement reports a relation that does not exist, or a write
+lands on a backend that inherited a read-only transaction (`SQLSTATE 25006`).
+
 ```bash
-export DATABASE_URL='postgres://…neon…'
+export DATABASE_URL="$DATABASE_URL_UNPOOLED"   # direct, for schema + bulk load
 
 pnpm build
 pnpm --filter @roundtable/db migrate up      # 0001 … 0004
