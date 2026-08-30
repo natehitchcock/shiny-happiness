@@ -5,6 +5,8 @@ import {
   COMMANDER_WEIGHT,
   deckSynergy,
   deriveSynergy,
+  interactsWith,
+  SYNERGY_TAGS,
   synergyMatches,
   synergyScore,
   type DeckSynergy,
@@ -268,5 +270,51 @@ describe('theme matches — looking at the rest of the deck', () => {
     // make every token deck claim every token maker synergises with every other.
     const theDeck = deck([{ produces: ['sacrifice-fodder'] }, { produces: ['sacrifice-fodder'] }])
     expect(synergyMatches({ produces: ['sacrifice-fodder'], wants: [] }, theDeck)).toEqual([])
+  })
+})
+
+describe('interactsWith', () => {
+  it('is symmetric for every tag', () => {
+    // The table is written as unordered pairs precisely so this cannot drift;
+    // this is the test that says so out loud.
+    for (const tag of SYNERGY_TAGS) {
+      for (const other of interactsWith(tag)) {
+        expect(interactsWith(other), `${other} should list ${tag}`).toContain(tag)
+      }
+    }
+  })
+
+  it('never lists a tag as interacting with itself', () => {
+    // Same-tag pairing is the produce/want relation and falls out of the model.
+    // Repeating it here would be a second, weaker statement of it.
+    for (const tag of SYNERGY_TAGS) {
+      expect(interactsWith(tag)).not.toContain(tag)
+    }
+  })
+
+  it('answers for every tag in the vocabulary, without throwing', () => {
+    for (const tag of SYNERGY_TAGS) {
+      expect(Array.isArray(interactsWith(tag))).toBe(true)
+    }
+  })
+
+  it('knows the aristocrats loop', () => {
+    // Bodies you do not mind losing, a way to lose them, the drain that pays.
+    expect(interactsWith('token')).toContain('sacrifice-fodder')
+    expect(interactsWith('creature-death')).toContain('lifeloss')
+    expect(interactsWith('sacrifice-fodder')).toContain('creature-death')
+  })
+
+  it('knows what fills a graveyard', () => {
+    expect(interactsWith('graveyard-creature')).toEqual(
+      expect.arrayContaining(['creature-death', 'discard']),
+    )
+  })
+
+  it('returns each partner once', () => {
+    for (const tag of SYNERGY_TAGS) {
+      const list = interactsWith(tag)
+      expect(new Set(list).size, tag).toBe(list.length)
+    }
   })
 })

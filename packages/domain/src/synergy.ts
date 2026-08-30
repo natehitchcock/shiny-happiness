@@ -57,6 +57,73 @@ export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'sacrifice-fodder',
 ]
 
+/**
+ * Which events feed which other events.
+ *
+ * The mechanical relation is same-tag and opposite-direction: a card that
+ * PRODUCES `creature-death` is for a card that WANTS it. That one needs no
+ * table — it falls out of the model.
+ *
+ * This is the other relation, and it is a judgement call in the same way the
+ * regexes above are: tokens are the classic sacrifice fodder, deaths fill a
+ * graveyard, discard fills it faster, treasures are artifacts entering the
+ * battlefield and fodder once spent. Knowing that a card is keyed to `token`
+ * tells you little on its own; knowing that `token` feeds `sacrifice-fodder`
+ * and `attack-trigger` tells you what to go looking for.
+ *
+ * Written as unordered PAIRS rather than an adjacency map, so symmetry is
+ * structural. "A interacts with B but B does not interact with A" is not a
+ * thing that can be expressed here, and therefore not a thing that can drift.
+ */
+const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
+  // Aristocrats: bodies you do not mind losing, a way to lose them, and the
+  // drain that pays for it.
+  ['token', 'sacrifice-fodder'],
+  ['token', 'creature-death'],
+  ['creature-death', 'sacrifice-fodder'],
+  ['creature-death', 'lifeloss'],
+  ['lifegain', 'lifeloss'],
+
+  // The graveyard as a resource, and the two things that fill it.
+  ['creature-death', 'graveyard-creature'],
+  ['discard', 'graveyard-creature'],
+  // Loot and rummage are one effect wearing two tags.
+  ['card-draw', 'discard'],
+
+  // Artifacts. A treasure is an artifact entering, and fodder once spent.
+  ['treasure', 'artifact-etb'],
+  ['treasure', 'sacrifice-fodder'],
+  ['artifact-etb', 'token'],
+
+  // Going wide, and the things that reward it.
+  ['token', 'attack-trigger'],
+  ['token', 'plus1-counter'],
+  ['attack-trigger', 'plus1-counter'],
+  ['attack-trigger', 'untap'],
+
+  // Lands. Untap effects are how a landfall deck gets more than one trigger.
+  ['landfall', 'untap'],
+  ['landfall', 'token'],
+]
+
+const INTERACTIONS = ((): ReadonlyMap<SynergyTag, readonly SynergyTag[]> => {
+  const map = new Map<SynergyTag, SynergyTag[]>(SYNERGY_TAGS.map((t) => [t, []]))
+  for (const [a, b] of INTERACTION_PAIRS) {
+    map.get(a)?.push(b)
+    map.get(b)?.push(a)
+  }
+  for (const [, list] of map) list.sort()
+  return map
+})()
+
+/**
+ * Other events this one feeds, or is fed by. Never includes the tag itself.
+ *
+ * Empty for a tag nothing has been paired with yet, which is a gap in the table
+ * rather than a claim that the event is inert.
+ */
+export const interactsWith = (tag: SynergyTag): readonly SynergyTag[] => INTERACTIONS.get(tag) ?? []
+
 interface Rule {
   readonly tag: SynergyTag
   readonly test: RegExp

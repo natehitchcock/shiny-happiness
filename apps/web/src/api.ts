@@ -17,6 +17,14 @@ export interface Card {
   primaryRole: string
   edhrecRank: number | null
   universesBeyond: boolean
+  /**
+   * The events this card causes and pays off (ADR-0011).
+   *
+   * Already on the wire — the detail route spreads the whole domain card — the
+   * client type simply never declared them.
+   */
+  synergyProduces: string[]
+  synergyWants: string[]
 }
 
 export interface CardDetail extends Card {

@@ -1143,6 +1143,97 @@ select {
   margin: 0 0 var(--step);
 }
 
+/* -------------------------------------------------- hints and semantics */
+
+/* The trigger keeps the look of whatever it wraps — it is a button so that the
+   keyboard and a screen reader can reach it, not because it should look like
+   one. */
+.hint {
+  position: relative;
+  display: inline-flex;
+}
+.hint-trigger {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: help;
+}
+.hint-trigger:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+.hint-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: max-content;
+  max-width: 20rem;
+  padding: var(--step);
+  background: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 50%);
+  color: var(--parchment);
+  font: 400 0.72rem/1.5 var(--ui);
+  text-align: left;
+  white-space: normal;
+  cursor: auto;
+}
+/* Pinned by a tap. Brass because it is now a thing the user decided, the same
+   way a locked card is. */
+.hint-pop[data-pinned='true'] {
+  border-color: var(--brass-dim);
+}
+.hint-line {
+  display: block;
+}
+.hint-line.dim {
+  color: var(--parchment-dim);
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 var(--step);
+}
+.tags-label {
+  color: var(--parchment-dim);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-right: 2px;
+}
+.tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font: 500 0.7rem/1.6 var(--ui);
+  border: 1px solid var(--rule);
+}
+/* Causes and pays-off are the whole model, so they do not look alike. Not
+   colour alone: the row each sits on is labelled. */
+.tag[data-direction='produces'] {
+  color: var(--steel);
+  border-color: var(--steel);
+}
+.tag[data-direction='wants'] {
+  color: var(--brass);
+  border-color: var(--brass-dim);
+}
+.tag-hint .hint-trigger {
+  cursor: pointer;
+}
+
 /* ------------------------------------------------------------ deck menu */
 
 /* The masthead's deck line, which was inert text, is now the handle. It stays

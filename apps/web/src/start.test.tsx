@@ -17,6 +17,16 @@ vi.mock('./api', () => ({
   createDeck: vi.fn(),
   getDeck: vi.fn(),
   listDecks: vi.fn(),
+  // A successful create mounts the Workspace, which reaches for these on the
+  // way up. Stubbed so the create path can be followed all the way through.
+  getRecommendations: vi.fn(),
+  getAnalysis: vi.fn(),
+  hydrate: vi.fn(),
+  basicLands: vi.fn(),
+  sendCommands: vi.fn(),
+  patchDeck: vi.fn(),
+  importPreview: vi.fn(),
+  getCardDetail: vi.fn(),
 }))
 
 const mocked = vi.mocked(api)
@@ -25,6 +35,16 @@ beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
   mocked.searchCards.mockResolvedValue({ items: [] })
+  mocked.getRecommendations.mockResolvedValue({
+    datasetSnapshotId: null,
+    groups: [],
+    columns: [],
+    unavailable: [],
+    query: { matched: 0, errors: [] },
+  } as unknown as api.Recommendations)
+  mocked.getAnalysis.mockRejectedValue(new Error('not needed for these tests'))
+  mocked.hydrate.mockResolvedValue({ cards: new Map(), prices: new Map() })
+  mocked.basicLands.mockResolvedValue({ items: [] })
 })
 
 afterEach(cleanup)
@@ -104,5 +124,66 @@ describe('picking a commander', () => {
 
     expect(screen.getByText('Start building').closest('button')?.disabled).toBe(false)
     expect(screen.queryByText('Pick a commander to continue.')).toBeNull()
+  })
+})
+
+describe('the Start button, once a commander is chosen', () => {
+  it('stays enabled and calls createDeck when clicked', async () => {
+    // Reported from the deployment: "even after selecting a commander I still
+    // can't use Start building". This is the client-side half of that claim,
+    // pinned down so the remaining suspects are all server-side.
+    mocked.searchCards.mockResolvedValue({ items: [card('Krenko, Mob Boss')] })
+    mocked.createDeck.mockResolvedValue({
+      id: 'd1',
+      name: 'Krenko, Mob Boss deck',
+      description: '',
+      commanders: ['o-Krenko, Mob Boss'],
+      colorIdentity: ['R'],
+      targetBracket: 3,
+      archetype: 'midrange',
+      version: 1,
+      excludeUniversesBeyond: false,
+      budget: null,
+      entries: [],
+    })
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
+    await type('Krenko')
+    await waitFor(() => expect(screen.getByText('Krenko, Mob Boss')).toBeDefined())
+    await act(async () => {
+      screen.getByText('Choose').click()
+    })
+
+    const button = screen.getByText('Start building').closest('button')!
+    expect(button.disabled).toBe(false)
+
+    await act(async () => {
+      button.click()
+    })
+    expect(mocked.createDeck).toHaveBeenCalledWith(
+      expect.objectContaining({ commanders: ['o-Krenko, Mob Boss'] }),
+    )
+  })
+
+  it('shows why it failed rather than appearing to do nothing', async () => {
+    // The other half: if createDeck rejects, the button re-enables and the
+    // reason is on screen. Silence here is indistinguishable from a dead button.
+    mocked.searchCards.mockResolvedValue({ items: [card('Krenko, Mob Boss')] })
+    mocked.createDeck.mockRejectedValue(new Error('Request failed (500)'))
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
+    await type('Krenko')
+    await waitFor(() => expect(screen.getByText('Krenko, Mob Boss')).toBeDefined())
+    await act(async () => {
+      screen.getByText('Choose').click()
+    })
+    await act(async () => {
+      screen.getByText('Start building').closest('button')!.click()
+    })
+
+    await waitFor(() => expect(screen.getByText(/Request failed \(500\)/)).toBeDefined())
+    expect(screen.getByText('Start building').closest('button')!.disabled).toBe(false)
   })
 })

@@ -2,8 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import * as api from './api'
 import { usePipeline, type Phase } from './pipeline'
 import { AUTO_QUERY_MS, useAutoQuery } from './autoquery'
-import { dimensionKeysOf, formatDecklist } from '@roundtable/domain'
+import { dimensionKeysOf, formatDecklist, interactsWith } from '@roundtable/domain'
+import type { SynergyTag } from '@roundtable/domain'
 import { DeckMenu } from './DeckMenu'
+import { Hint } from './Hint'
 import type { Card } from './api'
 
 /** Human-readable label for a composition dimension. */
@@ -439,6 +441,119 @@ interface DeckLine {
   copies: number
 }
 
+/**
+ * What this card is keyed to, and what that pairs with.
+ *
+ * The scoring already reasons in these events — `enables your sacrifice fodder`
+ * is a reason it gives — but they were only ever visible as the conclusion, one
+ * tag at a time. This is the whole set, on the card itself.
+ *
+ * `produces` and `wants` are kept apart because the difference is the entire
+ * model: a sacrifice outlet PRODUCES creature-death, a death trigger WANTS it,
+ * and a list that merged them would say both cards were "about" the same thing
+ * while hiding that one is the other's answer.
+ */
+const TAG_WORDS: Readonly<Record<string, string>> = {
+  'creature-death': 'a creature dying',
+  token: 'making tokens',
+  lifegain: 'gaining life',
+  lifeloss: 'opponents losing life',
+  'card-draw': 'drawing cards',
+  discard: 'discarding',
+  'graveyard-creature': 'creatures in the graveyard',
+  'artifact-etb': 'artifacts entering',
+  landfall: 'lands entering',
+  'plus1-counter': '+1/+1 counters',
+  'attack-trigger': 'attacking',
+  untap: 'untapping',
+  treasure: 'treasure',
+  'sacrifice-fodder': 'expendable bodies',
+}
+
+const readable = (tag: string): string => TAG_WORDS[tag] ?? tag.replace(/-/g, ' ')
+
+const TagChip = ({
+  tag,
+  direction,
+}: {
+  tag: string
+  direction: 'produces' | 'wants'
+}): React.JSX.Element => {
+  const partners = interactsWith(tag as SynergyTag)
+  const opposite = direction === 'produces' ? 'wants' : 'produces'
+  return (
+    <Hint
+      className="tag-hint"
+      content={
+        <>
+          <strong>{readable(tag)}</strong>
+          <span className="hint-line">
+            {direction === 'produces'
+              ? `This card causes it. It pairs with cards that pay off ${readable(tag)}.`
+              : `This card pays off ${readable(tag)}. It pairs with cards that cause it.`}
+          </span>
+          {partners.length === 0 ? null : (
+            <span className="hint-line">
+              Feeds, and is fed by: {partners.map(readable).join(', ')}.
+            </span>
+          )}
+          <span className="hint-line dim">
+            Derived from the rules text, so it is sometimes wrong — {opposite} is the other half of
+            the same question.
+          </span>
+        </>
+      }
+    >
+      <span className="tag" data-direction={direction}>
+        {tag.replace(/-/g, ' ')}
+      </span>
+    </Hint>
+  )
+}
+
+const Semantics = ({
+  produces,
+  wants,
+}: {
+  produces: readonly string[]
+  wants: readonly string[]
+}): React.JSX.Element => {
+  if (produces.length === 0 && wants.length === 0) {
+    // Half the corpus derives no tags at all (ADR-0013). Saying so beats an
+    // empty heading, which would read as "this card interacts with nothing".
+    return (
+      <>
+        <h4>Semantics</h4>
+        <p className="note">
+          None derived. Our rules-text reading misses about half of Magic, so this is a gap in what
+          we can see rather than a card that does nothing.
+        </p>
+      </>
+    )
+  }
+  return (
+    <>
+      <h4>Semantics</h4>
+      {produces.length > 0 ? (
+        <p className="tags">
+          <span className="tags-label">Causes</span>
+          {produces.map((t) => (
+            <TagChip key={t} tag={t} direction="produces" />
+          ))}
+        </p>
+      ) : null}
+      {wants.length > 0 ? (
+        <p className="tags">
+          <span className="tags-label">Pays off</span>
+          {wants.map((t) => (
+            <TagChip key={t} tag={t} direction="wants" />
+          ))}
+        </p>
+      ) : null}
+    </>
+  )
+}
+
 const Preview = ({
   detail,
   price,
@@ -477,6 +592,8 @@ const Preview = ({
           </p>
         </>
       ) : null}
+
+      <Semantics produces={detail.synergyProduces} wants={detail.synergyWants} />
     </aside>
   )
 }
