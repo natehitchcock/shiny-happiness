@@ -40,7 +40,14 @@ export type Reason =
       readonly dimension: CompositionDimension
       readonly deficit: number
     }
-  | { readonly kind: 'curve-fit'; readonly manaValue: number }
+  | {
+      readonly kind: 'curve-fit'
+      readonly manaValue: number
+      /** Optional, so this is not a contract break (AGENTS.md R2). */
+      readonly direction?: 'short' | 'over' | 'balanced'
+      /** Cards short at this mana value; negative means over-full. */
+      readonly delta?: number
+    }
   | { readonly kind: 'top-by-type'; readonly type: string; readonly rank: number }
   | { readonly kind: 'bracket-warning'; readonly flag: BracketFlag; readonly detail: string }
 

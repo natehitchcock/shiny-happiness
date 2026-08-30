@@ -10,6 +10,7 @@ import {
   isOk,
   parseQuery,
   recommend,
+  curveTarget,
   weightsFor,
 } from '@roundtable/domain'
 import { loadDeckContext } from '../deck-context.js'
@@ -50,6 +51,8 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
         targets: context.targets,
         counts: context.counts,
         weights: weightsFor(deck.archetype, body.weights ?? {}),
+        // The curve a deck of this archetype wants (ADR-0011).
+        curveTarget: curveTarget(deck.archetype, deck.archetypeSecondary),
         query: queryNode,
         // No corpus statistics exist (ADR-0008), so groups 6-7 report as
         // unavailable rather than being silently absent.

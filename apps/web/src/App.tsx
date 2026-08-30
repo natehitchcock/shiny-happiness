@@ -28,8 +28,16 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
       return `one card from ${plural(item.nearCombosAt1, 'combo')}`
     case 'fills-deficit':
       return `fills ${dimensionName(r.dimension ?? {})} gap`
-    case 'curve-fit':
-      return `curve fit at ${String(r.manaValue ?? 0)}`
+    case 'curve-fit': {
+      const mv = String(r.manaValue ?? 0)
+      if (r.direction === 'short' && (r.delta ?? 0) > 0) {
+        return `${plural(r.delta ?? 0, 'card')} short at ${mv}`
+      }
+      if (r.direction === 'over' && (r.delta ?? 0) < 0) {
+        return `${plural(-(r.delta ?? 0), 'card')} too many at ${mv}`
+      }
+      return `curve fit at ${mv}`
+    }
     case 'corpus-inclusion':
       return 'played in similar decks'
     case 'top-by-type':
@@ -343,6 +351,63 @@ const Preview = ({
   )
 }
 
+/**
+ * The mana curve, actual against the archetype's target.
+ *
+ * A bar per mana value with the target drawn ON the column as a hairline, so
+ * the comparison needs no second axis. Colour is diverging, not categorical:
+ * sage where the deck is short, rust where it is over-full, muted where it sits
+ * on target. Identity never rests on colour alone — every column states its
+ * numbers in its `aria-label` and its tooltip.
+ */
+const Curve = ({ curve }: { curve: api.Analysis['curve'] }): React.JSX.Element => {
+  const peak = Math.max(1, ...curve.histogram, ...curve.deltas.map((d) => d.ideal))
+
+  return (
+    <>
+      <div className="curve" role="img" aria-label="Mana curve against the archetype target">
+        {curve.deltas.map((d) => {
+          const direction = d.delta > 1 ? 'short' : d.delta < -1 ? 'over' : 'balanced'
+          const label =
+            direction === 'short'
+              ? `${plural(d.delta, 'card')} short`
+              : direction === 'over'
+                ? `${plural(-d.delta, 'card')} too many`
+                : 'on target'
+          return (
+            <div
+              className="curve-col"
+              key={d.bucket}
+              title={`Mana value ${String(d.bucket)}${d.bucket === 7 ? '+' : ''}: ${String(d.actual)} of ${String(d.ideal)} — ${label}`}
+              aria-label={`Mana value ${String(d.bucket)}: ${String(d.actual)} cards, target ${String(d.ideal)}, ${label}`}
+            >
+              <div
+                className="curve-target"
+                style={{ bottom: `${String((d.ideal / peak) * 100)}%` }}
+              />
+              <div
+                className="curve-bar"
+                data-direction={direction}
+                style={{ height: `${String((d.actual / peak) * 100)}%` }}
+              />
+            </div>
+          )
+        })}
+      </div>
+      <div className="curve-axis" aria-hidden="true">
+        {curve.deltas.map((d) => (
+          <span key={d.bucket}>{d.bucket === 7 ? '7+' : d.bucket}</span>
+        ))}
+      </div>
+      <p className="curve-key">
+        <i className="short">short</i>
+        <i className="over">too many</i>
+        <span>— line is the target</span>
+      </p>
+    </>
+  )
+}
+
 const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => {
   const [deck, setDeck] = useState(initial)
   const [groups, setGroups] = useState<api.Group[]>([])
@@ -470,7 +535,7 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
     <>
       <header className="masthead">
         <h1 className="wordmark">
-          Round<span>table</span>
+          Lotus <span>Wizard</span>
         </h1>
         <span className="meta">
           {deck.name.toUpperCase()} · {deck.colorIdentity.join('') || 'C'} · BRACKET{' '}
@@ -719,6 +784,12 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
                   ))}
                 </>
               ) : null}
+
+              <h2 style={{ marginTop: '1.25rem' }}>Mana curve</h2>
+              <Curve curve={analysis.curve} />
+              <p className="note">
+                Average mana value {analysis.curve.averageManaValue.toFixed(2)}
+              </p>
 
               <h2 style={{ marginTop: '1.25rem' }}>Legality</h2>
               {analysis.legality.problems.length === 0 ? (

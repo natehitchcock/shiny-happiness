@@ -9,6 +9,8 @@ import {
   deckCombos,
   deckId,
   findDeficits,
+  curveDeltas,
+  curveTarget,
   validateDeck,
 } from '@roundtable/domain'
 import { loadDeckContext } from '../deck-context.js'
@@ -99,7 +101,14 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
         confidence: assessment.confidence,
         drivers: assessment.drivers,
       },
-      curve: { averageManaValue: counts.averageManaValue, histogram: counts.manaCurve },
+      curve: {
+        averageManaValue: counts.averageManaValue,
+        histogram: counts.manaCurve,
+        // The target shape and the per-bucket gap, so the panel can draw both
+        // and say which mana values need more or fewer cards (ADR-0011).
+        target: curveTarget(deck.archetype, deck.archetypeSecondary),
+        deltas: curveDeltas(counts.manaCurve, curveTarget(deck.archetype, deck.archetypeSecondary)),
+      },
       colorBalance: {
         pips: pips as Record<Color, number>,
         sources: sources as Record<Color, number>,

@@ -5,6 +5,14 @@ import { annotateCombos, type ComboIndex } from './combo-index.js'
 import { dimensionKey, type CompositionDimension, type CompositionTarget } from './composition.js'
 import type { CompositionCounts, Deficit } from './composition-analysis.js'
 import { findDeficits, shortfalls } from './composition-analysis.js'
+import {
+  curveBucket,
+  curveDeltas,
+  curveDirection,
+  curveFit,
+  curveTarget,
+  type CurveTarget,
+} from './curve.js'
 import type { OracleId } from './ids.js'
 import { matchesQuery, type AnnotatedCandidate } from './query/evaluate.js'
 import type { QueryNode } from './query/ast.js'
@@ -57,6 +65,8 @@ export interface RecommendInput {
   readonly stats: ReadonlyMap<OracleId, CardStats> | null
   readonly limitPerGroup?: number
   readonly maxBudgetUsd?: number | null
+  /** From the deck's archetype. Defaults to midrange when absent. */
+  readonly curveTarget?: CurveTarget
 }
 
 export interface CandidateGroup {
@@ -129,17 +139,16 @@ const toAnnotated = (s: Scratch): AnnotatedCandidate => ({
 const dimensionLabel = (dimension: CompositionDimension): string =>
   dimension.kind === 'role' ? dimension.role : dimension.type
 
-/** Cards at mana values where the deck is thin score slightly better. */
-const curveFit = (manaValue: number, counts: CompositionCounts): number => {
-  const bucket = Math.min(7, Math.max(0, Math.floor(manaValue)))
-  const total = counts.manaCurve.reduce((a, b) => a + b, 0)
-  if (total === 0) return 0
-  const share = (counts.manaCurve[bucket] ?? 0) / total
-  return Math.max(0, 0.25 - share) * 4
-}
+/**
+ * The deck's target curve, from its archetype (ADR-0011).
+ *
+ * Replaces a flat 25%-per-bucket comparison that could only ever reward, never
+ * penalise — so an over-full mana value produced no signal to stop.
+ */
 
 export const recommend = (input: RecommendInput): RecommendResult => {
   const identity = new Set(input.colorIdentity)
+  const curve = input.curveTarget ?? curveTarget('midrange')
   const limit = input.limitPerGroup ?? 60
   const deficits = shortfalls(findDeficits(input.counts, input.targets))
   const deficitByRole = new Map<Role, Deficit>()
@@ -237,7 +246,16 @@ export const recommend = (input: RecommendInput): RecommendResult => {
     if (reasons.length === 0) {
       // Every recommendation must explain itself (P4). A card that reaches here
       // has nothing to say for itself beyond its curve, so that is the reason.
-      reasons.push({ kind: 'curve-fit', manaValue: card.manaValue })
+      // `delta` and `direction` let the UI say "you are 4 short at 2" instead of
+      // showing a bare score (pillar P4).
+      const fit = curveFit(card.manaValue, input.counts.manaCurve, curve)
+      const bucket = curveBucket(card.manaValue)
+      reasons.push({
+        kind: 'curve-fit',
+        manaValue: card.manaValue,
+        direction: curveDirection(fit),
+        delta: curveDeltas(input.counts.manaCurve, curve)[bucket]?.delta ?? 0,
+      })
     }
     s.reasons = reasons
 
@@ -255,7 +273,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       w.synergy * ((s.stats?.synergy ?? 0) / maxSynergy) +
       w.inclusion * (s.stats?.inclusion ?? 0) +
       w.fill * (s.deficit === null ? 0 : Math.min(1, Math.abs(s.deficit.delta) / 5)) +
-      w.curve * curveFit(card.manaValue, input.counts) -
+      w.curve * curveFit(card.manaValue, input.counts.manaCurve, curve) -
       w.bracketRisk * s.pooled.bracketFlags.length -
       w.budget * budgetOverrun
   }

@@ -37,6 +37,8 @@ export interface Reason {
   dimension?: { role?: string; type?: string }
   deficit?: number
   manaValue?: number
+  direction?: 'short' | 'over' | 'balanced'
+  delta?: number
 }
 
 export interface Recommendation {
@@ -183,7 +185,12 @@ export interface Analysis {
   }[]
   deficits: { dimension: { role?: string; type?: string }; delta: number }[]
   archetype: { declared: string; assessed: string; confidence: number }
-  curve: { averageManaValue: number }
+  curve: {
+    averageManaValue: number
+    histogram: number[]
+    target: number[]
+    deltas: { bucket: number; actual: number; ideal: number; delta: number }[]
+  }
   legality: { legal: boolean; problems: { kind: string; oracleId?: string }[] }
   deckCombos: { comboId: string; pieces: string[]; produces: string[] }[]
   prices: {
