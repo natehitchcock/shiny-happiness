@@ -570,3 +570,105 @@ describe('interactsWith', () => {
     }
   })
 })
+
+describe('enchantment-etb', () => {
+  const derive = (typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({
+      oracleId: oracleId('00000000-0000-4000-8000-000000000001'),
+      typeLine,
+      oracleText,
+    })
+
+  it('reads any enchantment as putting one onto the battlefield', () => {
+    // Definitional, and read off the TYPE LINE rather than the rules text —
+    // exactly how `artifact-etb` treats artifacts. An Aura with no relevant
+    // text is still an enchantment entering, which is the whole of what a
+    // constellation trigger asks for.
+    expect(
+      derive('Enchantment — Aura', 'Enchant creature. Enchanted creature gets +2/+0.').produces,
+    ).toContain('enchantment-etb')
+    expect(derive('Enchantment', 'Players cannot untap more than one land.').produces).toContain(
+      'enchantment-etb',
+    )
+  })
+
+  it('pays off for an enchantress', () => {
+    expect(
+      derive(
+        'Legendary Creature — Nymph',
+        'Whenever you cast an enchantment spell, you draw a card.',
+      ).wants,
+    ).toContain('enchantment-etb')
+  })
+
+  it('pays off for constellation', () => {
+    expect(
+      derive(
+        'Creature — Giant',
+        'Constellation — Whenever an enchantment enters, each opponent loses 1 life.',
+      ).wants,
+    ).toContain('enchantment-etb')
+  })
+
+  it('does not tag a creature that merely mentions an enchantment', () => {
+    // The false-positive guard. Enchantment REMOVAL is not an enchantment
+    // payoff — it is the opposite, and would pair a hate card with the deck it
+    // hates.
+    expect(
+      derive('Creature — Bird', 'When this creature enters, destroy target enchantment.').wants,
+    ).not.toContain('enchantment-etb')
+  })
+
+  it('does not read a Saga or an Aura as WANTING enchantments', () => {
+    // Being one is the produce side. Only a payoff wants them.
+    const rancor = derive('Enchantment — Aura', 'Enchant creature. Enchanted creature gets +2/+0.')
+    expect(rancor.wants).not.toContain('enchantment-etb')
+  })
+
+  it('leaves a vanilla creature alone', () => {
+    expect(derive('Creature — Bear', '')).toEqual({ produces: [], wants: [] })
+  })
+})
+
+describe('a creature that pays off its own death', () => {
+  const derive = (typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({
+      oracleId: oracleId('00000000-0000-4000-8000-000000000002'),
+      typeLine,
+      oracleText,
+    })
+
+  it('reads the one-shot "When this creature dies" form', () => {
+    // Magic writes "Whenever" for a repeatable trigger and "When" for a
+    // one-shot. The rules matched every death ENGINE and missed every creature
+    // that cashes in its own death — which is the other half of aristocrats.
+    expect(
+      derive('Creature — Goblin', 'When this creature dies, it deals 2 damage to any target.')
+        .wants,
+    ).toContain('creature-death')
+  })
+
+  it('reads the same trigger written with the card name', () => {
+    expect(
+      derive(
+        'Creature — Human',
+        'When Bucky Barnes dies, look at the top four cards of your library.',
+      ).wants,
+    ).toContain('creature-death')
+  })
+
+  it('does not fire across a sentence boundary', () => {
+    // The window is bounded by a full stop on purpose: without it, any card
+    // mentioning "when" anywhere and "dies" much later would pair up.
+    expect(
+      derive(
+        'Creature — Wizard',
+        'When this creature enters, draw a card. Target creature an opponent controls dies at end of turn.',
+      ).wants,
+    ).not.toContain('creature-death')
+  })
+
+  it('still leaves a vanilla creature alone', () => {
+    expect(derive('Creature — Bear', '')).toEqual({ produces: [], wants: [] })
+  })
+})

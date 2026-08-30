@@ -33,6 +33,7 @@ export type SynergyTag =
   | 'discard'
   | 'graveyard-creature'
   | 'artifact-etb'
+  | 'enchantment-etb'
   | 'landfall'
   | 'plus1-counter'
   | 'attack-trigger'
@@ -51,6 +52,7 @@ export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'discard',
   'graveyard-creature',
   'artifact-etb',
+  'enchantment-etb',
   'landfall',
   'plus1-counter',
   'attack-trigger',
@@ -98,6 +100,11 @@ const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
   ['treasure', 'artifact-etb'],
   ['treasure', 'sacrifice-fodder'],
   ['artifact-etb', 'token'],
+
+  // Enchantments. A constellation deck plays Auras and a token deck plays
+  // enchantments that make them; both put an enchantment onto the battlefield.
+  ['enchantment-etb', 'token'],
+  ['enchantment-etb', 'artifact-etb'],
 
   // Going wide, and the things that reward it.
   ['token', 'attack-trigger'],
@@ -176,6 +183,11 @@ const PRODUCES: readonly Rule[] = [
   // the whole of what an artifact payoff asks for. Naming the token types as
   // well catches the cards that make artifacts without being one.
   { tag: 'artifact-etb', test: /^[^\n]*\bArtifact\b/ },
+  // The same argument, one card type over. An enchantment entering IS what a
+  // constellation or enchantress trigger asks for. The corpus holds 3,847
+  // enchantments against ~200 payoffs — the same lopsided shape as the artifact
+  // pair above, which is the precedent this follows rather than a fresh claim.
+  { tag: 'enchantment-etb', test: /^[^\n]*\bEnchantment\b/ },
   {
     tag: 'artifact-etb',
     test: /\bcreate(s)? .{0,40}\b(artifact|Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment) token/i,
@@ -281,6 +293,15 @@ const WANTS: readonly Rule[] = [
   { tag: 'creature-death', test: /\bwhenever (a|another) .{0,40}creature .{0,20}dies\b/i },
   { tag: 'creature-death', test: /\bwhenever .{0,40}\bdies\b/i },
   { tag: 'creature-death', test: /\bwhenever you sacrifice\b/i },
+  // "When this creature dies…" — the one-shot form.
+  //
+  // Magic writes "Whenever" for a repeatable trigger and "When" for a one-shot,
+  // so the rules above matched every death engine and missed every creature
+  // that pays off its OWN death. That is precisely the card an aristocrats deck
+  // is built from: a sac outlet produces the death, and this is what cashes it.
+  // 190 untagged cards, sampled 14 by hand — 13 were real payoffs, the
+  // exception being Alabaster Dragon, whose death trigger is a drawback.
+  { tag: 'creature-death', test: /\bwhen\b[^.]{0,40}\bdies\b/i },
 
   // A sacrifice outlet wants fodder as much as fodder wants an outlet.
   { tag: 'sacrifice-fodder', test: /\bsacrifice (a|another|an) creature\b/i },
@@ -311,6 +332,10 @@ const WANTS: readonly Rule[] = [
   {
     tag: 'artifact-etb',
     test: /\bwhenever an artifact (you control )?enters\b|\bwhenever another artifact\b|\bmetalcraft\b|\baffinity for artifacts\b|\bimprovise\b|\bfor each artifact you control\b|\bartifacts you control (get|have)\b/i,
+  },
+  {
+    tag: 'enchantment-etb',
+    test: /\bconstellation\b|\bwhenever you cast an enchantment\b|\bwhenever an enchantment (you control )?enters\b|\bwhenever another enchantment\b|\bfor each enchantment you control\b|\benchantments you control (get|have)\b/i,
   },
   { tag: 'treasure', test: /\bwhenever .{0,30}Treasure .{0,20}sacrificed\b/i },
   { tag: 'landfall', test: /\bLandfall\b|\bwhenever a land .{0,20}enters\b/i },
