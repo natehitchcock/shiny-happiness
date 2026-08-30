@@ -215,10 +215,29 @@ export const deckSynergy = (
 
 export interface SynergyMatch {
   readonly tag: SynergyTag
-  /** `enables` = the card provides what the deck wants; `payoff` = the reverse. */
-  readonly direction: 'enables' | 'payoff'
+  /**
+   * `enables` = the card provides what the deck wants.
+   * `payoff`  = the reverse; the card pays off what the deck already provides.
+   * `theme`   = neither, but the card wants the same thing other cards want.
+   */
+  readonly direction: 'enables' | 'payoff' | 'theme'
   readonly weight: number
 }
+
+/**
+ * A shared want counts, at a fraction.
+ *
+ * Two cards that both pay off +1/+1 counters are in the deck for the same
+ * reason — that is a real relationship, and calling it "no synergy" because
+ * neither happens to PRODUCE the counters is a narrower question than the one
+ * the user is asking. It is genuinely weaker than an enable, though: a theme
+ * without an engine wins no games, so it is worth a fifth.
+ *
+ * A shared PRODUCE is deliberately not counted. Two sacrifice outlets are
+ * redundancy, not synergy, and counting it would make every token deck claim
+ * that every token maker synergises with every other one.
+ */
+export const THEME_WEIGHT = 0.2
 
 /**
  * How well a candidate fits what the deck is already doing.
@@ -227,9 +246,22 @@ export interface SynergyMatch {
  * commander's death trigger should say so, not report a weak land synergy it
  * also happens to have.
  */
+export interface SynergyMatchOptions {
+  /**
+   * Whether the candidate is itself one of the cards `deck` was built from.
+   *
+   * True when scoring a card already in the deck (a cut hint), false when
+   * scoring one that is not (a recommendation). It only affects `theme`: every
+   * accepted card contributes its own wants to `deck.wants`, so without this a
+   * card in the deck would always share a theme with itself.
+   */
+  readonly selfCounted?: boolean
+}
+
 export const synergyMatches = (
   candidate: SynergyProfile,
   deck: DeckSynergy,
+  options: SynergyMatchOptions = {},
 ): readonly SynergyMatch[] => {
   const matches: SynergyMatch[] = []
 
@@ -240,6 +272,16 @@ export const synergyMatches = (
   for (const tag of candidate.wants) {
     const weight = deck.produces.get(tag) ?? 0
     if (weight > 0) matches.push({ tag, direction: 'payoff', weight })
+  }
+
+  // Only where there was no stronger reading of the same tag: a card that
+  // already pays off the deck's engine should not also be credited for wanting
+  // what its neighbours want.
+  const strong = new Set(matches.map((m) => m.tag))
+  for (const tag of candidate.wants) {
+    if (strong.has(tag)) continue
+    const shared = (deck.wants.get(tag) ?? 0) - (options.selfCounted === true ? 1 : 0)
+    if (shared > 0) matches.push({ tag, direction: 'theme', weight: shared * THEME_WEIGHT })
   }
 
   return matches.sort((a, b) => b.weight - a.weight)

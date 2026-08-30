@@ -30,6 +30,8 @@ export type CutReason =
   | { readonly kind: 'curve-crowded'; readonly manaValue: number }
   | { readonly kind: 'no-combos' }
   | { readonly kind: 'no-synergy' }
+  /** We derived no synergy tags for this card, so we have no opinion. */
+  | { readonly kind: 'unknown-synergy' }
   | { readonly kind: 'over-budget'; readonly priceUsd: number; readonly limit: number }
 
 export interface CutHint {
@@ -57,6 +59,15 @@ const W_ROLE_OVER = 0.35
 const W_CURVE = 0.2
 const W_NO_COMBO = 0.25
 const W_NO_SYNERGY = 0.2
+/**
+ * A third of `W_NO_SYNERGY`.
+ *
+ * Not zero: a card we cannot say anything about is weaker evidence of a keeper
+ * than one we can. Not the full weight either — the gap is in our ingest, and
+ * charging the card for it would push out cards whose text our regexes simply
+ * do not read.
+ */
+const W_UNKNOWN_SYNERGY = W_NO_SYNERGY / 3
 const W_BUDGET = 0.4
 
 export const suggestCuts = (input: CutInput): readonly CutHint[] => {
@@ -121,13 +132,30 @@ export const suggestCuts = (input: CutInput): readonly CutHint[] => {
       score += W_NO_COMBO
     }
 
+    /*
+     * "No synergy" and "no synergy tags" are different claims.
+     *
+     * 16,684 of the 34,492 cards in the corpus derive no tags at all — the
+     * regexes in `synergy.ts` are heuristics over oracle text and they miss
+     * roughly half of Magic. Reporting all of those as "no synergy" was the
+     * app asserting something it had not checked, on about half the deck, and
+     * it made the honest findings impossible to pick out.
+     *
+     * `selfCounted` because this card IS in the deck the profile was built
+     * from; without it every card would share a theme with itself.
+     */
+    const hasTags = card.synergyProduces.length > 0 || card.synergyWants.length > 0
     const synergy = synergyScore(
       synergyMatches(
         { produces: card.synergyProduces, wants: card.synergyWants },
         input.deckSynergy,
+        { selfCounted: true },
       ),
     )
-    if (synergy === 0) {
+    if (!hasTags) {
+      reasons.push({ kind: 'unknown-synergy' })
+      score += W_UNKNOWN_SYNERGY
+    } else if (synergy === 0) {
       reasons.push({ kind: 'no-synergy' })
       score += W_NO_SYNERGY
     }

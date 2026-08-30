@@ -208,3 +208,41 @@ describe('lockedComposition', () => {
     expect(locked.get('role:ramp')).toBe(1)
   })
 })
+
+describe('"no synergy" versus "we did not derive any tags"', () => {
+  /** One unlocked card in a deck, with whatever synergy tags the test wants. */
+  const cutFor = (tags: Pick<Card, 'synergyProduces' | 'synergyWants'>) => {
+    const subject = card('Subject', tags)
+    const d = deck([entry('Subject')])
+    return suggestCuts(inputFor(d, [subject]))
+  }
+
+  it('says synergy is unknown for a card we derived no tags for', () => {
+    // 16,684 of the 34,492 cards in the corpus derive no tags at all — the
+    // regexes are heuristics over oracle text and miss roughly half of Magic.
+    // Calling every one of those "no synergy" was the app asserting something
+    // it had never checked, on about half the deck.
+    const hints = cutFor({ synergyProduces: [], synergyWants: [] })
+    const kinds = hints[0]?.reasons.map((r) => r.kind) ?? []
+    expect(kinds).toContain('unknown-synergy')
+    expect(kinds).not.toContain('no-synergy')
+  })
+
+  it('still says NO synergy when the card has tags and none of them land', () => {
+    // The honest finding has to survive; the point was to make it findable, not
+    // to stop making it.
+    const hints = cutFor({ synergyProduces: ['landfall'], synergyWants: [] })
+    const kinds = hints[0]?.reasons.map((r) => r.kind) ?? []
+    expect(kinds).toContain('no-synergy')
+    expect(kinds).not.toContain('unknown-synergy')
+  })
+
+  it('charges an unknown card less than one we can actually judge', () => {
+    // The gap is in our ingest. Charging the card the full weight for it would
+    // push out cards whose text our regexes simply do not read.
+    const unknown = cutFor({ synergyProduces: [], synergyWants: [] })[0]?.score ?? 0
+    const known = cutFor({ synergyProduces: ['landfall'], synergyWants: [] })[0]?.score ?? 0
+    expect(unknown).toBeLessThan(known)
+    expect(unknown).toBeGreaterThan(0)
+  })
+})

@@ -54,7 +54,7 @@ export type Reason =
       readonly kind: 'keyword-synergy'
       readonly tag: SynergyTag
       /** `enables` = provides what the deck wants; `payoff` = the reverse. */
-      readonly direction: 'enables' | 'payoff'
+      readonly direction: 'enables' | 'payoff' | 'theme'
       /** The cards it pairs with, so the reason is interrogable (pillar P4). */
       readonly withOracleIds: readonly OracleId[]
     }

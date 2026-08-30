@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { oracleId } from './ids.js'
+import type { OracleId } from './ids.js'
 import {
   COMMANDER_WEIGHT,
   deckSynergy,
   deriveSynergy,
   synergyMatches,
   synergyScore,
+  type DeckSynergy,
   type SynergyProfile,
+  type SynergyTag,
 } from './synergy.js'
 
 const card = (name: string, typeLine: string, oracleText: string) => ({
@@ -197,5 +200,73 @@ describe('synergyScore', () => {
   it('never reaches 1, however much matches', () => {
     // A linear score clamped with Math.min would sit exactly at 1 here.
     expect(synergyScore([{ tag: 'token', direction: 'enables', weight: 10_000 }])).toBeLessThan(1)
+  })
+})
+
+describe('theme matches — looking at the rest of the deck', () => {
+  const deck = (
+    entries: readonly { produces?: SynergyTag[]; wants?: SynergyTag[] }[],
+  ): DeckSynergy => {
+    const ids = entries.map((_, i) => `o${String(i)}` as OracleId)
+    const profiles = new Map(
+      ids.map((id, i) => [
+        id,
+        { produces: entries[i]?.produces ?? [], wants: entries[i]?.wants ?? [] },
+      ]),
+    )
+    return deckSynergy([], ids, (id) => profiles.get(id))
+  }
+
+  it('counts a want two other cards share, which the strict rule missed', () => {
+    // Three cards all paying off +1/+1 counters and nothing producing them used
+    // to report "no synergy" on every one of them. They are in the deck for the
+    // same reason, which is a relationship even without an engine.
+    const theDeck = deck([{ wants: ['plus1-counter'] }, { wants: ['plus1-counter'] }])
+    const matches = synergyMatches({ produces: [], wants: ['plus1-counter'] }, theDeck)
+    expect(matches).toHaveLength(1)
+    expect(matches[0]?.direction).toBe('theme')
+  })
+
+  it('weights a theme far below a real enable', () => {
+    // A theme without an engine wins no games, so it must never outrank the
+    // card that actually provides what the deck wants.
+    const theDeck = deck([{ wants: ['sacrifice-fodder'] }, { wants: ['sacrifice-fodder'] }])
+    const themed = synergyMatches({ produces: [], wants: ['sacrifice-fodder'] }, theDeck)
+    const enabling = synergyMatches({ produces: ['sacrifice-fodder'], wants: [] }, theDeck)
+    expect(synergyScore(enabling)).toBeGreaterThan(synergyScore(themed) * 3)
+  })
+
+  it('does not let a card share a theme with itself', () => {
+    // Every accepted card contributes its own wants to the deck profile, so a
+    // card in the deck of one would otherwise always "share" with itself.
+    const theDeck = deck([{ wants: ['plus1-counter'] }])
+    const matches = synergyMatches({ produces: [], wants: ['plus1-counter'] }, theDeck, {
+      selfCounted: true,
+    })
+    expect(matches).toEqual([])
+  })
+
+  it('still counts the theme for a card that is NOT in the deck yet', () => {
+    // A recommendation candidate contributes nothing to the deck profile, so
+    // subtracting a self-contribution there would undercount it.
+    const theDeck = deck([{ wants: ['plus1-counter'] }])
+    const matches = synergyMatches({ produces: [], wants: ['plus1-counter'] }, theDeck)
+    expect(matches).toHaveLength(1)
+    expect(matches[0]?.direction).toBe('theme')
+  })
+
+  it('prefers the stronger reading when a tag qualifies for both', () => {
+    // A card that pays off the deck's engine should not ALSO be credited for
+    // wanting what its neighbours want — that is the same fact counted twice.
+    const theDeck = deck([{ produces: ['plus1-counter'] }, { wants: ['plus1-counter'] }])
+    const matches = synergyMatches({ produces: [], wants: ['plus1-counter'] }, theDeck)
+    expect(matches.map((m) => m.direction)).toEqual(['payoff'])
+  })
+
+  it('does not treat two cards doing the same thing as synergy', () => {
+    // Two sacrifice outlets are redundancy. Counting a shared PRODUCE would
+    // make every token deck claim every token maker synergises with every other.
+    const theDeck = deck([{ produces: ['sacrifice-fodder'] }, { produces: ['sacrifice-fodder'] }])
+    expect(synergyMatches({ produces: ['sacrifice-fodder'], wants: [] }, theDeck)).toEqual([])
   })
 })
