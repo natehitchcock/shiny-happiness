@@ -89,36 +89,53 @@ data.
   they are a small volunteer project and have been receptive to tools that credit
   them.
 
-## 4.3 EDHREC — statistics and recommendations. **Use with care.**
+## 4.3 EDHREC — **not used.** Do not query it.
 
-EDHREC aggregates public decklists into per-commander statistics: inclusion rate,
-synergy score, top cards by type, and average deck composition. This is the source
-for the "top ten sorceries" style groups and, critically, for **deck composition
-targets** (§5.4) — the land/ramp/interaction counts.
+**Decision: the project does not query EDHREC.** See
+[ADR-0008](adr/0008-drop-edhrec.md) for the full reasoning and quoted terms.
 
-**Be clear-eyed about the situation:** EDHREC has no official, documented public
-API. The JSON endpoints that back their pages are undocumented, unversioned, and
-may be used without permission only to the extent their terms and `robots.txt`
-allow. They can change or disappear without notice.
+An earlier draft of this section said EDHREC "may be used without permission only
+to the extent their terms and `robots.txt` allow", which read as though the two
+agreed. They do not. `robots.txt` permits every path this project would have
+wanted; the Terms of Use prohibit the access pattern outright:
 
-**Rules:**
+> "you agree not to: … (vi) use software or automated agents or scripts to
+> produce multiple accounts on the Site, or to generate automated searches,
+> requests, or queries to the Site."
+> — `https://edhrec.com/terms`, retrieved 2026-08-29
 
-- Read `robots.txt` at ingest time and honour it programmatically, not just at
-  review time.
-- Cache hard. Per-commander statistics change slowly; a 24-hour TTL minimum, and
-  serve stale on error rather than re-fetching.
-- One request at a time, generous delay, descriptive User-Agent with a contact
-  address. Never parallelise across commanders.
-- Fetch **on demand per commander the user actually opens**, plus a warm cache for
-  popular commanders. Do not crawl the site.
-- The `StatsSource` interface must be satisfiable by a fallback that returns
-  "no statistics available" so the app degrades to combo-only recommendations
-  instead of breaking.
+They also grant only a "personal, noncommercial" licence and forbid building "a
+similar or competitive website" — which a deck-building tool surfacing inclusion
+rates plainly is.
 
-Task `DATA-03`: **contact EDHREC and ask for permission or a data arrangement
-before launch.** This is the correct move and costs one email. Until it is
-answered, EDHREC-derived features stay behind a config flag and are not deployed
-publicly.
+**No permission request was sent.** Permission is not the blocker: EDHREC
+aggregates decklists from Archidekt, Moxfield and Scryfall, so a yes from EDHREC
+would not convey rights in the underlying decks.
+
+**The same applies to Archidekt, Moxfield and Deckstats.** Archidekt's terms are
+the identical boilerplate, word for word. Moxfield was already out of scope (§4.4)
+and returns `403`. Deckstats serves a Cloudflare challenge for `robots.txt`
+itself. The aggregated-decklist corpus sits behind one door with one lock.
+
+**What is used instead** (ADR-0008):
+
+- **Composition and archetype targets** are the seed vectors in
+  `packages/domain/src/archetype-targets.ts` — established deckbuilding
+  heuristics, now the source of truth rather than a placeholder.
+- **Core packages** are built from **MTGJSON** (MIT licensed; 192 official
+  Commander decklists) plus curation.
+- **Inclusion and synergy statistics** come from the project's **own corpus** of
+  user-imported decks, or not at all. `DOM-07` already parses decklists.
+- **`Card.edhrecRank` is retained.** It is a field of Scryfall's card data, read
+  under Scryfall's terms (§4.1). Reading it is not querying EDHREC, and it stays
+  the tie-break in scoring (doc 05 §5.6).
+
+**Anything Scryfall publishes is fine to use**, per their stated purpose of
+"creating additional Magic software" (§4.1).
+
+Any future proposal to add an aggregated-decklist source needs a new ADR covering
+its terms — and must quote them, not summarise them. That is the mistake this
+section previously made.
 
 ## 4.4 Moxfield — out of scope
 
@@ -129,7 +146,7 @@ serve is covered elsewhere:
 - _"Get my existing deck in"_ → user-pasted decklist text or file upload (§4.4.1).
   Works for Moxfield, Archidekt, TappedOut and MTGO exports alike, touches no
   third-party server, and is strictly more useful.
-- _"Bracket × colour card statistics"_ → EDHREC aggregates (§4.3) plus our own
+- _"Bracket × colour card statistics"_ → the project's own imported-deck corpus
   corpus (§4.5).
 
 `DeckImporter` keeps a URL-import seam so the door stays open, and
@@ -171,7 +188,8 @@ Non-negotiable before any public deployment (task `LEGAL-01`):
 - Comply with the current **Wizards of the Coast Fan Content Policy**: unofficial
   fan content, no claim of affiliation, required disclaimer, restrictions on
   monetisation.
-- Attribute Scryfall, Commander Spellbook and EDHREC visibly, with links.
+- Attribute Scryfall and Commander Spellbook visibly, with links. (EDHREC is not
+  used and so is not attributed — see §4.3.)
 - Do not use WotC or Scryfall trademarks in the product name or logo. (Another
   reason `Roundtable` is a placeholder — check it too.)
 - Serve card images only in the context of the tool; do not expose a bare image
@@ -184,7 +202,7 @@ Non-negotiable before any public deployment (task `LEGAL-01`):
 | `ingest:cards`        | Scryfall bulk `oracle_cards`    | Daily           | Serve previous snapshot     |
 | `ingest:combos`       | Commander Spellbook export      | Daily           | Serve previous snapshot     |
 | `ingest:brackets`     | WotC bracket/Game Changers list | Weekly + manual | Serve checked-in file       |
-| `warm:stats`          | EDHREC, top ~500 commanders     | Weekly, slow    | Feature degrades, app works |
+| `warm:stats`          | Own corpus, top ~500 commanders | Weekly, slow    | Feature degrades, app works |
 | `build:core-packages` | Internal, from stats corpus     | On stats change | Serve previous version      |
 
 Ingestion is **snapshot-and-swap**, never in-place mutation: build the new dataset

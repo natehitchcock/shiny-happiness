@@ -43,7 +43,7 @@ a tab breaks it. On a phone the regions stack rather than disappear.
 ### P4 — Every suggestion explains itself
 
 No opaque scores. A card surfaces because it completes a named combo, or fills a
-counted role deficit, or ranks in a named EDHREC statistic. The reason is visible
+counted role deficit, or ranks in a named corpus statistic. The reason is visible
 on the card at zoom L2 and enumerated at L3. A recommendation the user cannot
 interrogate is a recommendation they cannot trust.
 

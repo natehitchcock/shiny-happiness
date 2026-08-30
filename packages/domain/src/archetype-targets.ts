@@ -13,10 +13,13 @@ import type { Role } from './role.js'
 /**
  * Archetype target vectors (doc 14 §14.2, DOM-09).
  *
- * SEED VALUES. Established deckbuilding heuristics, to be REPLACED by percentiles
- * derived from EDHREC averages and our own corpus once DATA-03 and ING-05 land.
- * They are a starting point, not a claim of optimality, and the UI presents them
- * as a range with an ideal marked rather than as a number to hit.
+ * Established deckbuilding heuristics. These are the SOURCE OF TRUTH, not a
+ * placeholder: EDHREC is not queried (ADR-0008), so there are no third-party
+ * averages to replace them with. They are refined from the project's own
+ * imported-deck corpus as it grows.
+ *
+ * They are not a claim of optimality, and the UI presents them as a range with an
+ * ideal marked rather than as a number to hit.
  */
 
 type Ideals = Partial<Record<Role, number>> & { readonly creature?: number }

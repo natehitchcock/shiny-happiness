@@ -26,7 +26,15 @@ export type CandidateGroupKey =
 export type Reason =
   | { readonly kind: 'completes-combos'; readonly combos: readonly ComboId[] }
   | { readonly kind: 'near-combo'; readonly combos: readonly ComboId[]; readonly distance: number }
-  | { readonly kind: 'edhrec-inclusion'; readonly share: number; readonly synergy: number | null }
+  /**
+   * How often the deck corpus plays this card with this commander.
+   *
+   * Named for the statistic, not its supplier: EDHREC is not queried (ADR-0008),
+   * and the corpus is the project's own imported decks. `null` synergy means the
+   * corpus is too small to say, which the UI must show as absence rather than as
+   * zero.
+   */
+  | { readonly kind: 'corpus-inclusion'; readonly share: number; readonly synergy: number | null }
   | {
       readonly kind: 'fills-deficit'
       readonly dimension: CompositionDimension
@@ -52,8 +60,10 @@ export interface Recommendation {
   readonly comboDegree: number
   readonly nearCombosAt1: number
   readonly completedCombos: readonly ComboId[]
-  readonly edhrecSynergy: number | null
-  readonly edhrecInclusion: number | null
+  /** Both null whenever no corpus statistics exist — the normal case at launch
+   * (ADR-0008). Recommendations stand on combos, roles and archetype instead. */
+  readonly synergyScore: number | null
+  readonly inclusionShare: number | null
   readonly fillsRoleDeficit: Role | null
   readonly bracketFlags: readonly BracketFlag[]
   readonly reasons: readonly [Reason, ...Reason[]]

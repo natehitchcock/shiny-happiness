@@ -30,7 +30,7 @@ Roughly 60–120 tiles visible on a desktop viewport.
 *"Show me these properly."*
 
 Full card image at readable size (~220 px wide), with an overlay badge row: combo
-degree, bracket flags, price, EDHREC inclusion. Oracle text is legible on desktop
+degree, bracket flags, price, corpus inclusion. Oracle text is legible on desktop
 and legible-with-effort on a phone. ~12–24 cards visible.
 
 The default entry level. New users land here because it is the least abstract.

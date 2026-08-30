@@ -262,7 +262,7 @@ describe('determinism and ordering', () => {
     expect(recommend(input)).toEqual(recommend(input))
   })
 
-  it('breaks ties by EDHREC rank, then by name', () => {
+  it('breaks ties by the Scryfall edhrecRank, then by name', () => {
     const ids = idsIn(recommend(input), 'staple')
     expect(ids).toEqual([oracleId('c'), oracleId('a'), oracleId('b')])
   })

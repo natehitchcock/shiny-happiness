@@ -7,33 +7,39 @@ scope (files it may touch), explicit dependencies, and a definition of done.
 
 ## 11.0 Current state — read this first
 
-Last updated: 2026-08-29, end of the first build session.
+Last updated: 2026-08-29, end of the second build session.
 
-**Done (12 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`. That is the monorepo
-and CI, the whole of `packages/domain`, and the Postgres layer.
+**Done (13 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`, `API-01`. That is the
+monorepo and CI, the whole of `packages/domain`, the Postgres layer, and the
+cards + decks HTTP surface including the batched command endpoint.
 
 **Verify it in one command** — from a clean clone, this must be green:
 
 ```bash
-pnpm install && pnpm check          # lint + typecheck + 301 tests
+pnpm install && pnpm check          # lint + typecheck + 366 tests
 ```
 
-`packages/db`'s 40 integration tests need a real Postgres and SKIP (loudly) without
-one:
+The integration tests need a real Postgres and SKIP (loudly) without one — 90 of
+the 366, being `packages/db`'s and `apps/api`'s suites.
 
 ```bash
 docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
 export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
-pnpm test                            # now 301, not 261
+pnpm test                            # 366 passed, not 276 passed / 90 skipped
 ```
+
+No Docker? Any PostgreSQL 16 the URL points at works. The second session used the
+EDB portable binaries (`initdb` into a user directory, `pg_ctl -o "-p 5433"`),
+which needs no administrator rights and no service.
 
 **Next, in order of value:**
 
 | Pick up | Why now |
 | --- | --- |
-| `API-01` | `packages/domain` has the whole computation and `packages/db` the persistence; the API is transport over both. The obvious next move. |
-| `DATA-01`, `DATA-02`, `DATA-03`, `DATA-05` | **Unblocked on a normal machine.** See below. |
+| `API-02` | Recommendations and analysis. `API-01` established the transport, error shape and test harness; this is the endpoint the product exists for. |
+| `DATA-01`, `DATA-02`, `DATA-05` | **Unblocked on a normal machine.** See below. Still the only thing blocking deployment. `DATA-03` is closed — see [ADR-0008](adr/0008-drop-edhrec.md). |
 | `FOUND-02` → `UI-01` | Independent of everything above; can run in parallel. |
+| `API-06` | Finishes what `API-01` left honest-but-incomplete: `409` currently returns the current deck with an empty `since`, because populating it needs an ordered per-deck command log that no table provides yet. |
 
 **`DATA-*` were blocked by the environment, not by the work.** The first build
 session ran in a sandbox whose egress reached package registries only, so
@@ -41,7 +47,7 @@ session ran in a sandbox whose egress reached package registries only, so
 terms of service were ever read. **On a machine with ordinary internet access
 these are simply doable** — they are an afternoon with a browser.
 [ADR-0006](adr/0006-data-source-terms-verification.md) lists the exact questions
-and what each one gates. Until they are answered:
+and what each one gates. Until `DATA-01`, `DATA-02` and `DATA-05` are answered:
 
 - `brackets/rules.data.json` stays unpopulated, and `loadBracketRules` correctly
   returns a `not-populated` error rather than asserting a bracket verdict.
@@ -50,6 +56,14 @@ and what each one gates. Until they are answered:
 The highest-risk single unknown is **Scryfall question 4** — whether card *data*
 and card *images* are licensed separately — because it gates the whole `ING-04`
 image pipeline and the consequences are outside the codebase.
+
+**`DATA-03` is answered and closed.** EDHREC's terms were read on 2026-08-29 and
+prohibit automated queries outright; Archidekt carries the identical boilerplate,
+Moxfield is out of scope and Deckstats is unreachable. **The project does not
+query any of them** ([ADR-0008](adr/0008-drop-edhrec.md)). `ING-03` is cut,
+`ING-05` is repointed at MTGJSON, and `API-09` honestly returns
+`source: 'default'` until the project's own imported-deck corpus is large enough.
+Anything Scryfall publishes — including `Card.edhrecRank` — remains fine to use.
 
 **Nothing else is blocked.** Every remaining task needs a database (running),
 a browser toolchain (installable), or just time.
@@ -64,7 +78,7 @@ a browser toolchain (installable), or just time.
            │           │                                ├─→ API-02 ─┬─→ API-05..09
            ├─→ DATA-01 ─→ ING-01 ─┐                     │           │
            ├─→ DATA-02 ─→ ING-02 ─┼─→ DB-01 ─→ API-01 ──┘           │
-           ├─→ DATA-03 ─→ ING-03 ─┴─→ ING-05                        │
+           │                        └─→ ING-05                        │
            ├─→ DATA-05 ─→ DOM-06                                    │
            │                                                        │
            └─→ UI-01 ─┬─→ WEB-01 ─┬─→ WEB-02 ─┬─→ WEB-03 ─→ WEB-04 ─┤
@@ -128,20 +142,20 @@ against their interfaces; nothing depending on an unanswered question ships.
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DATA-01` | Answer the seven Scryfall questions in [ADR-0006](adr/0006-data-source-terms-verification.md)                                                              | —                      | Each answered with **quoted wording and a retrieval date**; ADR-0006 superseded. Q4 (image licensing) gates `ING-04`                                             |
 | `DATA-02` | Answer the six Commander Spellbook questions in [ADR-0006](adr/0006-data-source-terms-verification.md)                                                     | —                      | Quoted wording + retrieval date. Q5 (card identifier) gates `ING-02`'s oracle-id mapping                                                                         |
-| `DATA-03` | Answer the five EDHREC questions in [ADR-0006](adr/0006-data-source-terms-verification.md) and **send the permission request**                             | —                      | Quoted `robots.txt` + date; request sent and recorded; feature flag stays off by default until answered                                                          |
+| `DATA-03` | ✅ **Closed by decision, not completed.** EDHREC's terms were read on 2026-08-29 and prohibit automated queries; the project does not query EDHREC ([ADR-0008](adr/0008-drop-edhrec.md)) | — | ✅ Terms and `robots.txt` quoted with retrieval dates in ADR-0008. No permission request sent — permission was not the blocker. `ING-03` cut |
 | `DATA-05` | Fetch the **current official** bracket rules + Game Changers list into `brackets/rules.data.json` ([ADR-0006](adr/0006-data-source-terms-verification.md)) | —                      | Checked in with source URL and retrieval date; list fetched, never recalled; no bracket constant hardcoded elsewhere                                             |
 | `ING-01`  | Scryfall bulk ingest: download, stream-parse, map to `Card`, snapshot-and-swap                                                                             | DATA-01, DB-01         | Full ingest completes; shared rate limiter enforced; re-run is idempotent                                                                                        |
 | `ING-02`  | Spellbook combo ingest + oracle-id mapping, **failing loudly on unmapped cards**                                                                           | DATA-02, DB-01         | Unmapped cards reported, not dropped                                                                                                                             |
-| `ING-03`  | EDHREC stats fetcher: on-demand + warm cache, robots.txt honoured at runtime, serve-stale-on-error                                                         | DATA-03, DB-01         | Degrades cleanly when disabled; single-flight verified by test                                                                                                   |
+| ~~`ING-03`~~ | ❌ **Cut.** EDHREC stats fetcher. No aggregated-decklist source has usable terms — Archidekt carries the identical prohibition, Moxfield is out of scope, Deckstats is unreachable ([ADR-0008](adr/0008-drop-edhrec.md)). Inclusion and synergy statistics come from the project's own imported-deck corpus or not at all | — | — |
 | `ING-04`  | Image caching pipeline to object store, three sizes (doc 07 §7.3)                                                                                          | ING-01                 | No client request ever hits a third-party image host                                                                                                             |
-| `ING-05`  | Core package generation (doc 05 §5.5), per bracket and — where the corpus supports it — per archetype                                                      | ING-03, DOM-04, DOM-09 | Reproducible from a fixed corpus; output diff is human-reviewable; falls back to the bracket's general package rather than emitting one built from too few decks |
+| `ING-05` | Core package generation (doc 05 §5.5), per bracket and — where the corpus supports it — per archetype. Corpus is **MTGJSON** (MIT licensed, 192 official Commander decklists) plus curation, never a scraped aggregate ([ADR-0008](adr/0008-drop-edhrec.md)) | DOM-04, DOM-09 | Reproducible from a fixed corpus; output diff is human-reviewable; falls back to the bracket's general package rather than emitting one built from too few decks |
 
 ## 11.5 Backend
 
 | ID       | Task                                                                                                                | Depends                | DoD                                                                                                                                                                                     |
 | -------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DB-01`  | ✅ **Done.** Postgres schema + migrations + repositories; GIN index on the combo index; migration CLI | DOM-01 | ✅ Migrations up/down clean and idempotent; 40 integration tests against a **real** PostgreSQL 16; `EXPLAIN` asserts the planner actually uses `combos_pieces_idx` |
-| `API-01` | Cards + decks endpoints, incl. the batched command endpoint with idempotency and partial-success reporting          | DB-01, DOM-01          | Contract tests against doc 10; `rejected` populated correctly                                                                                                                           |
+| `API-01` | ✅ **Done.** Cards + decks endpoints, incl. the batched command endpoint with idempotency and partial-success reporting | DB-01, DOM-01 | ✅ 48 contract tests against doc 10 on a real Postgres; `rejected` carries a typed reason per failed command. Command decisions live in `packages/domain` (`applyCommands`), so `web` and `api` cannot disagree — 22 unit tests, mutation-checked. See the divergences below |
 | `API-02` | Recommendations + analysis endpoints, incl. `unavailable` degradation                                               | API-01, DOM-05, DOM-06 | Full recompute < 200 ms p95 on a 100-card deck; degradation test with each source disabled                                                                                              |
 | `API-03` | Auth, per-user rate limiting, deck ownership                                                                        | API-01                 | No deck readable cross-user; 429 with `Retry-After`                                                                                                                                     |
 | `API-04` | Import preview/commit and export endpoints (doc 10 §10.7)                                                           | DOM-07                 | Preview applies nothing; `illegal` and `previouslyExcluded` populated; round-trip export JSON → import → identical deck incl. origins, exclusions, locks, tags, archetype and snapshots |
@@ -149,7 +163,7 @@ against their interfaces; nothing depending on an unanswered question ships.
 | `API-06` | Optimistic concurrency: `baseVersion`, `409` with `since`, workspace-state endpoint (doc 12 §12.6–12.7)             | API-01                 | Concurrent-edit test from two clients converges without data loss                                                                                                                       |
 | `API-07` | Snapshots: auto before bulk ops, manual, restore (doc 12 §12.8)                                                     | API-01                 | Restore is itself undoable; retention enforced                                                                                                                                          |
 | `API-08` | Query validate/suggest endpoints, corpus histograms for autocomplete counts (doc 10 §10.4)                          | API-02, DOM-08         | Suggest p95 < 40 ms; counts served from precomputed histograms                                                                                                                          |
-| `API-09` | Archetype endpoints incl. per-commander suggestion with `source`, and archetype on deck create/patch (doc 10 §10.6) | API-01, DOM-09, ING-03 | `source: 'default'` returned honestly when no statistics exist                                                                                                                          |
+| `API-09` | Archetype endpoints incl. per-commander suggestion with `source`, and archetype on deck create/patch (doc 10 §10.6) | API-01, DOM-09 | `source: 'default'` returned honestly when no statistics exist — which is **every** case until the project's own corpus is large enough ([ADR-0008](adr/0008-drop-edhrec.md)) |
 
 ## 11.6 Frontend
 
@@ -196,18 +210,18 @@ The domain layer is done, so everything below is now unblocked in its own right.
 
 **Needs a browser, not a compiler — and blocks deployment of all ingestion:**
 
-1. `DATA-01`, `DATA-02`, `DATA-03`, `DATA-05` — the terms questions in
-   [ADR-0006](adr/0006-data-source-terms-verification.md). `DATA-03`'s EDHREC
-   permission request should go out first; the reply time is outside our control.
-   Until `DATA-05` is answered, `brackets/rules.data.json` stays unpopulated and
-   the bracket loader correctly refuses to assert a verdict.
+1. `DATA-01`, `DATA-02`, `DATA-05` — the terms questions in
+   [ADR-0006](adr/0006-data-source-terms-verification.md). Until `DATA-05` is
+   answered, `brackets/rules.data.json` stays unpopulated and the bracket loader
+   correctly refuses to assert a verdict. `DATA-03` is **closed** and `ING-03`
+   **cut** — the project does not query EDHREC ([ADR-0008](adr/0008-drop-edhrec.md)).
 
 **Needs infrastructure:**
 
-2. `DB-01` — schema and migrations. Every type it must persist is settled.
+2. ~~`DB-01`~~ and ~~`API-01`~~ are done. `API-02` is the next one that matters:
+   recommendations and analysis, on the transport `API-01` established.
 3. `ING-01`, `ING-02` — Scryfall and Spellbook ingest, once `DATA-01`/`02` land.
-4. `API-01` onward — the HTTP surface. `packages/domain` already provides the
-   whole computation; the API is transport and persistence around it.
+4. `ING-05` — core packages from MTGJSON's official decklists plus curation.
 
 **Needs a frontend toolchain:**
 

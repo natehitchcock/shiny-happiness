@@ -101,7 +101,7 @@ information survives even when the animation does not.
 ## 6.5 Inspect (L3)
 
 Opening a card gives: full image, oracle text, every completed and near combo with
-its pieces and steps, EDHREC statistics, price, bracket flags, role assignment with
+its pieces and steps, corpus statistics, price, bracket flags, role assignment with
 a correction control, and the generated `reasons` list.
 
 Desktop: a right-side panel that does not cover either region. Mobile: a full

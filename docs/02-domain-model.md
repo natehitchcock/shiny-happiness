@@ -196,8 +196,8 @@ interface Recommendation {
   comboDegree: number
   nearCombosAt1: number
   completedCombos: ComboId[]   // for the explanation panel
-  edhrecSynergy: number | null
-  edhrecInclusion: number | null // 0..1, share of decks for this commander
+  synergyScore: number | null
+  inclusionShare: number | null // 0..1, share of corpus decks for this commander
   fillsRoleDeficit: Role | null
   bracketFlags: BracketFlag[]  // e.g. 'game-changer', 'two-card-infinite'
   reasons: Reason[]            // P4 — human-readable, ordered by weight

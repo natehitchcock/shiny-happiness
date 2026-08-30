@@ -21,7 +21,7 @@ import type { ScoringWeights } from './scoring.js'
  * is no global "top card" ranking anywhere in this product (pillar P5).
  *
  * Deterministic: the same deck and the same dataset produce the same output,
- * always. Ties break by EDHREC rank then by name, so ordering is total and the
+ * always. Ties break by Scryfall's `edhrecRank` then by name, so ordering is total and the
  * list never reshuffles between renders.
  */
 
@@ -222,7 +222,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       reasons.push({ kind: 'near-combo', combos: [], distance: 1 })
     }
     if (s.stats !== null) {
-      reasons.push({ kind: 'edhrec-inclusion', share: s.stats.inclusion, synergy: s.stats.synergy })
+      reasons.push({ kind: 'corpus-inclusion', share: s.stats.inclusion, synergy: s.stats.synergy })
     }
     if (s.deficit !== null) {
       reasons.push({
@@ -338,8 +338,8 @@ const toRecommendation = (s: Scratch): Recommendation => {
     comboDegree: s.degree,
     nearCombosAt1: s.nearAt1,
     completedCombos: s.completed as never,
-    edhrecSynergy: s.stats?.synergy ?? null,
-    edhrecInclusion: s.stats?.inclusion ?? null,
+    synergyScore: s.stats?.synergy ?? null,
+    inclusionShare: s.stats?.inclusion ?? null,
     fillsRoleDeficit:
       s.deficit !== null && s.deficit.dimension.kind === 'role' ? s.deficit.dimension.role : null,
     bracketFlags: s.pooled.bracketFlags,

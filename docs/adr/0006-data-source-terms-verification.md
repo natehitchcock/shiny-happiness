@@ -75,10 +75,16 @@ Sources: `edhrec.com/robots.txt`, their terms/about pages
 | 4   | Do they publish bracket-tagged aggregates, and at what URL shape?                  | `ING-05` core-package generation (doc 05 §5.5)                                                    |
 | 5   | Are per-commander deck-archetype distributions available?                          | `API-09` archetype suggestion (doc 14 §14.3) — without this it always returns `source: 'default'` |
 
-**Until questions 1–3 are answered, EDHREC-derived features stay behind a config
-flag that is off by default.** Doc 05 §5.3's degradation path already makes the app
-work without them, so this costs groups 6–7 and the archetype suggestion, not the
-product.
+**Resolved by [ADR-0008](0008-drop-edhrec.md): there are no EDHREC-derived
+features.** Questions 1–3 were answered on 2026-08-29 and the answer was a
+prohibition, so the feature was cut rather than flagged. Read literally, the
+original sentence below would have unblocked `ING-03` the moment the questions
+were *answered*, regardless of what the answers said — which is exactly backwards.
+
+> ~~**Until questions 1–3 are answered, EDHREC-derived features stay behind a config
+> flag that is off by default.** Doc 05 §5.3's degradation path already makes the app
+> work without them, so this costs groups 6–7 and the archetype suggestion, not the
+> product.~~
 
 ### DATA-05 · Brackets and Game Changers
 

@@ -11,7 +11,7 @@ a recommendation engine you cannot reproduce is one you cannot debug or test.
                             │
         ┌───────────────────┼───────────────────┐
         ▼                   ▼                   ▼
-   eligibility          combo index        stats (EDHREC
+   eligibility          combo index        stats (own corpus
    filter               (Spellbook)        + own corpus)
         │                   │                   │
         └───────────────────┼───────────────────┘
@@ -61,11 +61,12 @@ pool size.
 | 3 | `combo-1` | `comboDegree == 1` | |
 | 4 | `near-combo` | `comboDegree == 0 ∧ nearCombosAt1 ≥ 2` | "One card away, more than once" — surfaces *pairs* to add together |
 | 5 | `fills-<role>` | Deficit in that role ≥ 1, card's `primaryRole` matches | Directly actionable; one group per deficient role |
-| 6 | `top-<type>` | Top N by EDHREC inclusion for the commander, per card type | The "top ten sorceries" ask |
-| 7 | `high-synergy` | EDHREC synergy above threshold | Commander-specific, non-obvious cards |
+| 6 | `top-<type>` | Top N by corpus inclusion for the commander, per card type | The "top ten sorceries" ask |
+| 7 | `high-synergy` | Corpus synergy above threshold | Commander-specific, non-obvious cards |
 | 8 | `staple` | High global inclusion, colour-legal | The long tail; collapsed by default |
 
-Groups 1–4 need only Spellbook data. Groups 6–7 need EDHREC. **If the stats source
+Groups 1–4 need only Spellbook data. Groups 6–7 need corpus statistics, which do
+not exist until the project has imported enough decks (ADR-0008). **If the stats source
 is unavailable the app still works** — groups 6 and 7 are omitted with an inline
 notice, and 1–5, 8 carry the experience. This is the degradation path from §4.3.
 
@@ -102,7 +103,8 @@ reproduced here because the modifiers that follow apply on top of whichever row
 the archetype selects.
 
 **Seed values** (`midrange`) — heuristics from established Commander deckbuilding
-practice, to be *replaced* by percentiles derived from EDHREC averages and our own
+practice. There are no third-party averages to replace them with (ADR-0008); they
+are refined from our own
 corpus once `DATA-03` lands. A starting point, not a claim of optimality:
 
 | Role | min | ideal | max |
@@ -135,7 +137,8 @@ Core packages (doc 03) are generated offline, checked in, and versioned.
 
 For each `(bracket, colorIdentity)` pair:
 
-1. Take the deck corpus for that bracket and colour identity (EDHREC aggregates,
+1. Take the deck corpus for that bracket and colour identity (MTGJSON official
+   decklists plus our own imported decks,
    plus our own corpus weighted by volume).
 2. Compute inclusion rate per card among decks whose colour identity *contains*
    the target — a mono-red staple is core for every deck containing red.
@@ -156,8 +159,8 @@ users is a P6 violation.
 ```
 score(X) = w_combo   · log2(1 + comboDegree(X))
          + w_near    · log2(1 + nearCombosAt1(X))
-         + w_syn     · norm(edhrecSynergy(X))
-         + w_inc     · edhrecInclusion(X)
+         + w_syn     · norm(synergyScore(X))
+         + w_inc     · inclusionShare(X)
          + w_fill    · roleDeficitFit(X)
          + w_curve   · curveFit(X)
          − p_bracket · bracketRisk(X)
@@ -190,7 +193,7 @@ Every `Recommendation` carries ordered `reasons`. Rendered verbatim at L3:
 >   - *Kiki-Jiki + Zealous Conscripts* → infinite hasty creature copies
 >   - *Kiki-Jiki + Zealous Conscripts + Goblin Bombardment* → infinite damage
 >   - *Kiki-Jiki + Zealous Conscripts + Purphoros* → infinite damage
-> - **61%** of Krenko decks on EDHREC play it (synergy +0.44)
+> - **61%** of Krenko decks in the corpus play it (synergy +0.44)
 > - ⚠️ **Game Changer** — your target Bracket 3 allows 3, you already have 3
 
 Note what that example demonstrates: three combos sharing a piece still count as

@@ -95,7 +95,7 @@ Making someone choose blind from nine options before they have seen a single car
 is a bad first experience, and most commanders have an obvious answer.
 
 On commander selection, the app **ranks the archetypes for that commander** from
-EDHREC's deck distribution and our own corpus, and preselects the top one with its
+the project's own imported-deck corpus, and preselects the top one with its
 reason visible:
 
 > **Tokens** — 54% of Krenko decks build this way

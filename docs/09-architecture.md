@@ -14,7 +14,7 @@ roundtable/
 │   └── ingest/         Scheduled ingestion workers
 ├── packages/
 │   ├── domain/         ★ Pure types + logic. No IO. The contract.
-│   ├── clients/        Third-party adapters (Scryfall, Spellbook, EDHREC)
+│   ├── clients/        Third-party adapters (Scryfall, Spellbook)
 │   ├── db/             Schema, migrations, repositories
 │   └── ui/             Design-system primitives (no app logic)
 ├── docs/
@@ -57,7 +57,7 @@ blocking change for other agents. See [AGENTS.md](../AGENTS.md).
 | Styling | CSS Modules + design tokens | No runtime cost; tokens make theming and contrast auditable |
 | Backend | Fastify + TypeScript | Fast, schema-first, JSON Schema validation shared with types |
 | Database | PostgreSQL | Cards, combos, decks, stats. GIN indexes for the combo index |
-| Cache | Redis | Recommendation results, EDHREC responses, rate-limit state |
+| Cache | Redis | Recommendation results, rate-limit state |
 | Object store | S3-compatible | Cached card imagery (doc 04 §4.1) |
 | Tests | Vitest, Playwright | Unit/integration; Playwright for E2E incl. mobile viewports |
 
@@ -84,7 +84,7 @@ they disagree, the server wins and the client reconciles silently.
 ```
 Scryfall bulk ─┐
 Spellbook     ─┼─→ apps/ingest ─→ Postgres ─┐
-EDHREC        ─┘   (snapshot & swap)        │
+own corpus    ─┘   (snapshot & swap)        │
                                             ├─→ apps/api ─→ apps/web
 own corpus ─────→ stats aggregation ────────┘   (+ Redis)     (+ IndexedDB,
                                                                service worker)
@@ -95,7 +95,8 @@ own corpus ─────→ stats aggregation ────────┘   (+
 - **Determinism**: identical deck + dataset snapshot ⇒ identical recommendations.
   Dataset snapshot id is returned with every recommendation response so a bug
   report can be reproduced exactly.
-- **Degradation**: EDHREC unavailable ⇒ groups 6–7 vanish, everything else works
+- **Degradation**: no corpus statistics ⇒ groups 6–7 vanish, everything else works.
+  This is the normal case at launch, not a fault path (ADR-0008)
   (doc 05 §5.3). Spellbook unavailable ⇒ combo groups vanish, statistics remain.
   Neither is an error state; both are stated inline.
 - **No secrets in the client.** All third-party access is server-side, which also
