@@ -1134,6 +1134,15 @@ select {
   color: var(--sage);
 }
 
+/* The commander search results, and the states where there are none. */
+.start-results {
+  margin-bottom: 1rem;
+}
+.start-results .note,
+.start-results .problem {
+  margin: 0 0 var(--step);
+}
+
 /* ------------------------------------------------------------ deck menu */
 
 /* The masthead's deck line, which was inert text, is now the handle. It stays

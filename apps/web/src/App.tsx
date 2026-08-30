@@ -266,6 +266,16 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
   const [term, setTerm] = useState('')
   const [results, setResults] = useState<api.Card[]>([])
   const [chosen, setChosen] = useState<api.Card | null>(null)
+  /**
+   * What the search is doing, so the box is never silently empty.
+   *
+   * "Nothing on screen" was the same picture for four different situations:
+   * still typing, request in flight, no matches, and the API failing. That is
+   * how an empty database presents as a broken text box — there is nothing to
+   * read and nothing to try next.
+   */
+  const [search, setSearch] = useState<'idle' | 'searching' | 'done' | 'failed'>('idle')
+  const [searchError, setSearchError] = useState<string | null>(null)
   const [archetype, setArchetype] = useState('midrange')
   const [bracket, setBracket] = useState(3)
   const [noUB, setNoUB] = useState(false)
@@ -275,9 +285,12 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
   useEffect(() => {
     if (term.trim().length < 2) {
       setResults([])
+      setSearch('idle')
+      setSearchError(null)
       return
     }
     let cancelled = false
+    setSearch('searching')
     const timer = setTimeout(() => {
       void api
         // Only legendary creatures can lead a deck, so the search says so
@@ -286,10 +299,19 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
           excludeUniversesBeyond: noUB,
         })
         .then((r) => {
-          if (!cancelled) setResults(r.items)
+          if (cancelled) return
+          setResults(r.items)
+          setSearch('done')
+          setSearchError(null)
         })
-        .catch(() => {
-          if (!cancelled) setResults([])
+        .catch((e: unknown) => {
+          if (cancelled) return
+          // Surfaced, not swallowed. The old version discarded the error and
+          // rendered an empty list, so an unreachable or empty API looked
+          // exactly like a commander that does not exist.
+          setResults([])
+          setSearch('failed')
+          setSearchError(e instanceof Error ? e.message : 'Could not reach the card search')
         })
     }, 180)
     return () => {
@@ -340,8 +362,23 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
         />
       </div>
 
-      {chosen === null && results.length > 0 ? (
-        <div style={{ marginBottom: '1rem' }}>
+      {chosen === null ? (
+        <div className="start-results">
+          {search === 'searching' ? <p className="note">Searching…</p> : null}
+
+          {search === 'failed' ? (
+            <p className="problem">
+              {searchError} — the card search is not answering, so no commander can be picked yet.
+            </p>
+          ) : null}
+
+          {search === 'done' && results.length === 0 ? (
+            <p className="note">
+              No legendary creature matches “{term}”.
+              {noUB ? ' Universes Beyond cards are excluded — try unchecking that.' : ''}
+            </p>
+          ) : null}
+
           {results.slice(0, 8).map((c) => (
             <CardRow
               key={c.oracleId}
@@ -380,9 +417,17 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
         Exclude Universes Beyond cards
       </label>
 
-      <button className="primary" disabled={chosen === null || busy} onClick={create}>
+      <button
+        className="primary"
+        disabled={chosen === null || busy}
+        onClick={create}
+        // A disabled button with no explanation is a dead end. This one is
+        // disabled for exactly one reason, so it can say so.
+        title={chosen === null ? 'Pick a commander first' : 'Create this deck'}
+      >
         {busy ? 'Creating…' : 'Start building'}
       </button>
+      {chosen === null ? <p className="note">Pick a commander to continue.</p> : null}
       {error !== null ? <p className="problem">{error}</p> : null}
     </div>
   )
