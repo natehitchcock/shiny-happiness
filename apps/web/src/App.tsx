@@ -1516,6 +1516,36 @@ export const Workspace = ({
      */
     let current = serverDeckRef.current ?? deckRef.current
 
+    /*
+     * Retry a failed send before giving up on the user's clicks.
+     *
+     * Losing a batch means the cards the user added silently disappear, so a
+     * blip on the wire should not cost them work. Four attempts with the delay
+     * doubling to a one-second ceiling — long enough to ride out a cold start
+     * or a dropped connection, short enough that a genuine outage is reported
+     * rather than hidden behind a spinner.
+     *
+     * The run stays unresolved for the whole of it, which is what keeps the
+     * progress bar pinned at its halfway mark: the second half of the bar means
+     * "the answer is in hand", and during a retry it is not.
+     *
+     * Only transient failures. A 400 will not become a 200 by being repeated,
+     * and a 409 is handled separately — it needs a new version, not patience.
+     */
+    const BACKOFF_MS = [100, 200, 400, 800]
+    const send = async (deckId: string, body: ReturnType<typeof wire>[], version: number) => {
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return await api.sendCommands(deckId, body, version)
+        } catch (error) {
+          const status = error instanceof api.ApiError ? error.status : 0
+          const transient = status === 0 || status >= 500
+          if (!transient || attempt >= BACKOFF_MS.length) throw error
+          await new Promise((resolve) => setTimeout(resolve, BACKOFF_MS[attempt]))
+        }
+      }
+    }
+
     const wire = (c: PendingCommand): Parameters<typeof api.sendCommands>[1][number] =>
       c.type === 'accept'
         ? { type: 'accept', oracleId: c.oracleId, origin: 'manual' }
@@ -1528,7 +1558,7 @@ export const Workspace = ({
     if (commands.length > 0) {
       const body = commands.map(wire)
       try {
-        const result = await api.sendCommands(current.id, body, current.version)
+        const result = await send(current.id, body, current.version)
         current = result.deck
       } catch (error) {
         // A 409 means only that our version is behind — the clicks are still
@@ -1536,7 +1566,7 @@ export const Workspace = ({
         // work the user did and making them click it again.
         if (!(error instanceof api.ApiError) || error.status !== 409) throw error
         const fresh = await api.getDeck(current.id)
-        const result = await api.sendCommands(fresh.id, body, fresh.version)
+        const result = await send(fresh.id, body, fresh.version)
         current = result.deck
       }
       serverDeckRef.current = current
@@ -1673,6 +1703,18 @@ export const Workspace = ({
     void api
       .patchDeck(deck.id, body)
       .then((d) => {
+        /*
+         * The patched deck is now what the server holds, so `serverDeckRef` has
+         * to learn it too.
+         *
+         * Without this, ticking "Exclude Universes Beyond" appeared to work and
+         * then undid itself: the refresh that follows reads `serverDeckRef` for
+         * the deck it returns, that ref still held the deck from before the
+         * PATCH, and applying the result wrote the old flag straight back over
+         * the new one. Every write that changes the server's deck has to update
+         * this — the lock path does, and this one did not.
+         */
+        serverDeckRef.current = d
         setDeck(withPendingLocks(d))
         pipeline.refresh()
       })
@@ -1846,6 +1888,56 @@ export const Workspace = ({
     const at = groups.findIndex((g) => g.key.startsWith('combo-'))
     return [...rest.slice(0, at), merged, ...rest.slice(at)]
   }, [groups])
+
+  /**
+   * Groups with nothing in them are not shown.
+   *
+   * A filter that matches nothing used to render nine headings each reading
+   * "(0)" — which looks like a broken app rather than an empty result. The
+   * headings are only meaningful when they have rows under them.
+   */
+  const visibleGroups = useMemo(() => shownGroups.filter((g) => g.items.length > 0), [shownGroups])
+
+  /**
+   * When a search finds nothing, say whether the card exists at all.
+   *
+   * "No results" is two different answers wearing one face: the card is not in
+   * Magic, or the card is real and simply not a candidate for THIS deck —
+   * already in it, excluded, or outside the commander's colours. Those need
+   * different reactions from the user, and the app knows which is which.
+   *
+   * `searchCards` is a name search over the whole corpus, so it answers the
+   * first question directly. If the exact text finds nothing, progressively
+   * shorter prefixes are tried — that is what turns a typo into "did you mean
+   * Sekki, Seasons' Guide?" without needing fuzzy matching in the database.
+   */
+  const [nearby, setNearby] = useState<{ term: string; items: api.Card[] } | null>(null)
+
+  useEffect(() => {
+    const term = query.trim()
+    // A bare name, not a fielded query. `t:creature` is a filter and has no
+    // "matching cards" to list; a name does.
+    const isName = term !== '' && !/[:<>=]/.test(term)
+    if (!isName) {
+      setNearby(null)
+      return
+    }
+    let cancelled = false
+    // One call. `searchCards` falls back to trigram similarity itself when the
+    // literal search finds nothing, so a typo is the server's problem, not a
+    // ladder of guesses from the client.
+    void api
+      .searchCards(term, { limit: 5 })
+      .then((found) => {
+        if (!cancelled) setNearby({ term, items: found.items })
+      })
+      .catch(() => {
+        if (!cancelled) setNearby(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [query])
 
   /** Accepted cards by id, for the preview's "works with your deck" pass. */
   const acceptedIds = useMemo(
@@ -2252,7 +2344,48 @@ export const Workspace = ({
             {queryError !== null ? <p className="problem">{queryError}</p> : null}
           </div>
 
-          {shownGroups.map((g) => (
+          {/*
+            Name matches, always, directly under the box.
+            Searching a name is asking "is this card here", and that question
+            deserves an answer whether or not the card is also a suggestion —
+            the suggestion list is filtered by what the deck NEEDS, so a card can
+            be perfectly real and simply not offered.
+          */}
+          {nearby !== null && nearby.items.length > 0 ? (
+            <div className="name-matches">
+              <p className="note">
+                {nearby.items.some((c) => c.name.toLowerCase().includes(nearby.term.toLowerCase()))
+                  ? `Cards named like “${nearby.term}”`
+                  : `No card is named “${nearby.term}”. Did you mean:`}
+              </p>
+              <ul className="near-names">
+                {nearby.items.slice(0, 5).map((c) => (
+                  <li key={c.oracleId}>
+                    <button className="as-link" onClick={() => open(c.oracleId)}>
+                      {c.name}
+                    </button>
+                    <span className="near-type">{c.typeLine}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {visibleGroups.length === 0 && query.trim() !== '' ? (
+            <div className="empty-search">
+              <p className="problem">Nothing in your suggestions matches “{query.trim()}”.</p>
+              {nearby !== null && nearby.items.length > 0 ? (
+                <p className="note">
+                  The cards above are real — they are not candidates for this deck, being already in
+                  it, excluded, or outside your colour identity.
+                </p>
+              ) : nearby !== null ? (
+                <p className="note">No card with that name exists in the corpus either.</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {visibleGroups.map((g) => (
             <div className="group" key={g.key}>
               <div className="group-head">
                 <h3>{g.label}</h3>
@@ -2281,7 +2414,19 @@ export const Workspace = ({
                   {/* The reasons sit BESIDE the name button, not inside it.
                       One of them opens a panel of its own, and a button nested
                       in a button is invalid and unreachable by keyboard. */}
-                  <span className="name-cell">
+                  {/* The whole cell opens the preview, not just the text.
+                      Splitting the name from its reasons left a dead strip
+                      under the name where a click landed on nothing. The button
+                      inside stays the accessible control; this is a mouse
+                      convenience layered over it. */}
+                  <span
+                    className="name-cell"
+                    onClick={(e) => {
+                      // A reason chip that opens its own panel must not also
+                      // open the preview behind it.
+                      if ((e.target as HTMLElement).closest('.hint') === null) open(item.oracleId)
+                    }}
+                  >
                     <button
                       className="name as-link"
                       onClick={() => open(item.oracleId)}

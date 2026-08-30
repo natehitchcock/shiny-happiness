@@ -474,3 +474,29 @@ describe('adding cards while a settle is running', () => {
     expect(mocked.getDeck).toHaveBeenCalled()
   }, 20_000)
 })
+
+describe('deck options survive the query that follows them', () => {
+  it('does not undo a setting when the refresh lands', async () => {
+    // The regression: ticking "Exclude Universes Beyond" patched the deck, then
+    // the refresh that follows returned the deck as the client last knew it —
+    // from BEFORE the patch — and applying that wrote the old flag back.
+    const patched: api.Deck = { ...deck, excludeUniversesBeyond: true, version: 2 }
+    mocked.patchDeck.mockResolvedValue(patched)
+
+    render(<Workspace deck={deck} />)
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+
+    const box = screen.getByLabelText(/Exclude Universes Beyond/) as HTMLInputElement
+    expect(box.checked).toBe(false)
+    await act(async () => {
+      box.click()
+    })
+    await waitFor(() => expect(mocked.patchDeck).toHaveBeenCalled())
+
+    // Let the refresh it triggers run all the way through and be applied.
+    await new Promise((r) => setTimeout(r, 2_000))
+    expect((screen.getByLabelText(/Exclude Universes Beyond/) as HTMLInputElement).checked).toBe(
+      true,
+    )
+  }, 20_000)
+})

@@ -209,7 +209,33 @@ export const searchCardsByName = async (pool: Pool, term: string, limit = 50): P
       ORDER BY length(name), name LIMIT $2`,
     [escaped, limit],
   )
-  return rows.map(toCard)
+  if (rows.length > 0) return rows.map(toCard)
+
+  /*
+   * Nothing matched literally, so try for a near miss.
+   *
+   * A substring search cannot find "Ashnod's Altar" from "Ashnods" — the wrong
+   * character is in the middle, and no LIKE pattern reaches past it. Trigrams
+   * degrade gracefully instead: they compare three-character shingles, so one
+   * bad character costs a little score rather than the whole match.
+   *
+   * `word_similarity` and not `similarity`: the latter normalises over the
+   * whole string, and Magic names are long enough that "Sekii" scores lower
+   * against "Sekki, Seasons' Guide" than against a dozen unrelated four-letter
+   * cards. This compares the term against the closest run of words in the name.
+   *
+   * 0.5 is deliberately strict. It catches a dropped apostrophe, a doubled
+   * letter, a truncated word — and refuses to invent a suggestion for text that
+   * is not a card name at all, which is a real answer the caller needs.
+   */
+  const { rows: near } = await pool.query<CardRow>(
+    `SELECT * FROM cards
+      WHERE word_similarity(lower($1), lower(name)) >= 0.5
+      ORDER BY word_similarity(lower($1), lower(name)) DESC, length(name), name
+      LIMIT $2`,
+    [term, limit],
+  )
+  return near.map(toCard)
 }
 
 /**

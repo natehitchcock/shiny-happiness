@@ -1168,6 +1168,44 @@ select {
   margin: 0 0 var(--step);
 }
 
+/* ------------------------------------------------------ empty search */
+
+.empty-search {
+  padding: var(--step) 0 1rem;
+}
+.empty-search .problem,
+.empty-search .note {
+  margin: 0 0 4px;
+}
+.name-matches {
+  padding: var(--step) 0 4px;
+}
+.name-matches .note {
+  margin: 0 0 2px;
+}
+.near-names {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--parchment);
+  font-size: 0.78rem;
+  line-height: 1.7;
+}
+.near-names li {
+  display: flex;
+  gap: var(--step);
+  align-items: baseline;
+}
+.near-type {
+  color: var(--parchment-dim);
+  font-size: 0.68rem;
+}
+/* The name cell is a click target for the whole row's text block, so it must
+   fill the space it is given rather than only its glyphs. */
+.name-cell {
+  cursor: pointer;
+}
+
 /* --------------------------------------------- openable combo detail */
 
 /* The name and its reasons were one button; the reasons moved out so one of

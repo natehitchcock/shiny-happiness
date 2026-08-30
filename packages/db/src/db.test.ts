@@ -118,6 +118,47 @@ describeDb('packages/db against real PostgreSQL', () => {
     })
   })
 
+  describe('finding a card by a name that is nearly right', () => {
+    it('finds it by substring, as before', async () => {
+      await upsertCards(db.pool, [card("Ashnod's Altar")])
+      const found = await searchCardsByName(db.pool, 'Ashnod')
+      expect(found.map((c) => c.name)).toContain("Ashnod's Altar")
+    })
+
+    it('finds it through a typo no LIKE could reach', async () => {
+      // "Ashnods" — the wrong character is in the MIDDLE, so no substring
+      // pattern gets there. Trigrams degrade gracefully instead.
+      await upsertCards(db.pool, [card("Ashnod's Altar")])
+      const found = await searchCardsByName(db.pool, 'Ashnods')
+      expect(found.map((c) => c.name)).toContain("Ashnod's Altar")
+    })
+
+    it('finds a long name from a short mistyped word', async () => {
+      // The reason this uses `word_similarity` and not `similarity`: the latter
+      // normalises over the whole string, and this name is long enough that a
+      // dozen unrelated four-letter cards would outrank it.
+      await upsertCards(db.pool, [card("Sekki, Seasons' Guide")])
+      const found = await searchCardsByName(db.pool, 'Sekii')
+      expect(found.map((c) => c.name)).toContain("Sekki, Seasons' Guide")
+    })
+
+    it('invents nothing for text that is not a card name', async () => {
+      // The threshold has to refuse as well as accept, or every typo produces a
+      // confident wrong suggestion.
+      await upsertCards(db.pool, [card("Ashnod's Altar")])
+      expect(await searchCardsByName(db.pool, 'zzzznotacardatall')).toEqual([])
+    })
+
+    it('prefers the literal match when there is one', async () => {
+      // Fuzzy is a FALLBACK. A real substring hit must never be reordered by
+      // similarity, or searching "Altar" stops putting Altars first.
+      await upsertCards(db.pool, [card('Altar of Dementia'), card("Ashnod's Altar")])
+      const found = await searchCardsByName(db.pool, 'Altar')
+      expect(found.length).toBeGreaterThanOrEqual(2)
+      expect(found.every((c) => c.name.toLowerCase().includes('altar'))).toBe(true)
+    })
+  })
+
   describe('schema constraints do the enforcing', () => {
     /**
      * `printings.oracle_id` references `cards`, so a printing cannot be written

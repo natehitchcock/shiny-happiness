@@ -7,6 +7,7 @@ import {
   listCardsAfter,
   printingFactsForAll,
   printingsFor,
+  searchCardsByName,
   type PrintingFacts,
 } from '@roundtable/db'
 import type { AnnotatedCandidate, Card, Color, QueryField, QueryNode } from '@roundtable/domain'
@@ -242,6 +243,43 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
         const last = batch[batch.length - 1]!
         after = { name: last.name, oracleId: last.oracleId }
         if (batch.length < 500) exhausted = true
+      }
+
+      /*
+       * Nothing matched, and the query was just a name — try for a near miss.
+       *
+       * `searchCardsByName` falls back to trigram similarity, which finds
+       * "Ashnod's Altar" from "Ashnods" where no LIKE or query predicate can:
+       * the wrong character is in the middle of the word.
+       *
+       * Only for a bare name query, and only when the strict answer was empty.
+       * A query with fields in it — `t:creature mv<=3` — means something exact,
+       * and quietly widening THAT would be the silent-wrong-answer failure this
+       * endpoint refuses everywhere else. `nameFallback` says on the way out
+       * that this happened, so a caller can tell a match from a suggestion.
+       */
+      const bareName = ast !== null && ast.kind === 'term' && ast.field === 'name' && ast.op === ':'
+      if (items.length === 0 && bareName && cursor === undefined) {
+        const near = (await searchCardsByName(pool, String(ast.value), limit * 4))
+          /*
+           * The near miss widens the NAME and nothing else.
+           *
+           * `searchCardsByName` knows only about names, so the caller's other
+           * constraints have to be re-applied here — an existing test caught
+           * this by asking for a search with Universes Beyond excluded and
+           * getting a Universes Beyond card back through the fallback. Widening
+           * one axis must not quietly widen the rest.
+           */
+          .filter((c) => !(excludeUniversesBeyond && c.universesBeyond))
+          .filter(
+            (c) =>
+              colorIdentity === undefined ||
+              c.colorIdentity.every((color) => colorIdentity.includes(color)),
+          )
+          .slice(0, limit)
+        if (near.length > 0) {
+          return { items: near, nextCursor: null, nameFallback: true }
+        }
       }
 
       // One more than asked for tells us whether another page exists without a
