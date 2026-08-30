@@ -1054,11 +1054,55 @@ interface PendingCommand {
   readonly locked?: boolean
 }
 
+/**
+ * Fetch the extra rows for every group the user has expanded.
+ *
+ * One request for all of them, narrowed to those keys. `combo` is a client-side
+ * merge of the three `combo-N` keys the server actually emits (see
+ * `shownGroups`), so it is translated on the way out and re-merged on the way
+ * back — the merge is a heading decision and does not belong in the request.
+ */
+const expansionsFor = async (
+  deckId: string,
+  keys: ReadonlySet<string>,
+  query = '',
+  columns: readonly string[] = [],
+): Promise<ReadonlyMap<string, readonly api.Recommendation[]>> => {
+  if (keys.size === 0) return new Map()
+  const wanted = [...keys].flatMap((k) => (k === 'combo' ? ['combo-2', 'combo-3', 'combo-4'] : [k]))
+  const more = await api.getRecommendations(deckId, {
+    limitPerGroup: 32,
+    groups: wanted,
+    ...(query === '' ? {} : { query }),
+    ...(columns.length > 0 ? { columns } : {}),
+  })
+  const out = new Map<string, readonly api.Recommendation[]>()
+  for (const key of keys) {
+    out.set(
+      key,
+      key === 'combo'
+        ? more.groups.filter((g) => g.key.startsWith('combo-')).flatMap((g) => g.items)
+        : (more.groups.find((g) => g.key === key)?.items ?? []),
+    )
+  }
+  return out
+}
+
 interface QueryResult {
   readonly deck: api.Deck
   readonly recs: api.Recommendations
   readonly analysis: api.Analysis
   readonly hydrated: api.Hydrated
+  /**
+   * Extra rows for groups the user has expanded, keyed by group.
+   *
+   * Re-fetched with every recompute rather than kept from the expand click.
+   * An expansion held across a recompute is stale in the worst way: the rows
+   * were chosen for a deck that no longer exists, so a card the user had just
+   * added came straight back into the list — the same defect as the superseded
+   * run, arriving by a different route.
+   */
+  readonly extra: ReadonlyMap<string, readonly api.Recommendation[]>
 }
 
 /**
@@ -1541,6 +1585,8 @@ export const Workspace = ({
   const deckRef = useRef(deck)
   const queryRef = useRef(query)
   const columnsRef = useRef<readonly string[]>([])
+  /** Groups the user has asked for more of. Read by `load` on every recompute. */
+  const expandedRef = useRef<ReadonlySet<string>>(new Set())
   /**
    * The newest deck the server has acknowledged, applied to the UI or not.
    *
@@ -1648,12 +1694,23 @@ export const Workspace = ({
       }),
       api.getAnalysis(current.id),
     ])
+    // Expansions are re-asked against the deck the recompute just produced, so
+    // every row on screen describes the same deck. One extra request, and only
+    // when the user has actually expanded something.
+    const extra = await expansionsFor(
+      current.id,
+      expandedRef.current,
+      queryRef.current,
+      columnsRef.current,
+    )
+
     const hydrated = await api.hydrate([
       ...current.commanders,
       ...current.entries.map((e) => e.oracleId),
       ...recs.groups.flatMap((g) => g.items.map((i) => i.oracleId)),
+      ...[...extra.values()].flatMap((items) => items.map((i) => i.oracleId)),
     ])
-    return { deck: current, recs, analysis: ana, hydrated }
+    return { deck: current, recs, analysis: ana, hydrated, extra }
   }, [])
 
   const pipeline = usePipeline<PendingCommand>({
@@ -1710,6 +1767,7 @@ export const Workspace = ({
       setCards(r.hydrated.cards)
       setPrices(r.hydrated.prices)
       setColumnMatches(new Map(r.recs.columns.map((c) => [c.query, new Set(c.matched)])))
+      setExtraItems(r.extra)
       setPending([])
     },
   })
@@ -1718,6 +1776,10 @@ export const Workspace = ({
   // there is nothing to keep adding to, so holding the result back would be lag.
   const { refresh } = pipeline
   useEffect(() => {
+    // A new filter is a new question, so "more of that group" is spent — those
+    // rows were the answer to the old one.
+    expandedRef.current = new Set()
+    setExtraItems(new Map())
     refresh()
     // `columns` belongs here for the same reason `query` does: adding one
     // changes what the server must compute. Without it a new column showed no
@@ -2114,20 +2176,13 @@ export const Workspace = ({
       next.delete(key)
       return next
     })
-    void api
-      .getRecommendations(deckRef.current.id, {
-        limitPerGroup: 32,
-        groups: [key === 'combo' ? 'combo-2' : key],
-        ...(queryRef.current === '' ? {} : { query: queryRef.current }),
-        ...(columnsRef.current.length > 0 ? { columns: columnsRef.current } : {}),
-      })
-      .then(async (more) => {
-        // 'combo' is a client-side merge of the three combo-N keys, so the
-        // answer comes back under its own keys and all of them are wanted.
-        const items =
-          key === 'combo'
-            ? more.groups.filter((g) => g.key.startsWith('combo-')).flatMap((g) => g.items)
-            : (more.groups.find((g) => g.key === key)?.items ?? [])
+    // Recorded so every later recompute re-asks for it. Without this the rows
+    // would be frozen at the deck they were chosen for.
+    const keys = new Set([...expandedRef.current, key])
+    expandedRef.current = keys
+    void expansionsFor(deckRef.current.id, new Set([key]), queryRef.current, columnsRef.current)
+      .then(async (fetched) => {
+        const items = fetched.get(key) ?? []
         // These are cards nothing has hydrated, so their rows would read
         // "Loading…" for good — no later recompute asks for them by name.
         const hydrated = await api.hydrate(items.map((i) => i.oracleId))

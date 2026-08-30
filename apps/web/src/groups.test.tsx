@@ -203,6 +203,80 @@ describe('expanding a group', () => {
     expect(screen.getByText('Krenko, Mob Boss')).toBeTruthy()
   })
 
+  it('re-asks for the expansion on the next recompute, so its rows are never stale', async () => {
+    // The trap this avoids: rows fetched by an expand were chosen for the deck
+    // as it was at the click. Kept across a recompute, a card the user then
+    // added would come straight back into the suggestion list — the same defect
+    // as a superseded run, arriving by a different route.
+    render(<Workspace deck={deck} />)
+    await waitFor(() => expect(screen.getByText('Krenko, Mob Boss')).toBeTruthy())
+
+    mocked.getRecommendations.mockResolvedValue(
+      recsWith([group('fills-ramp', 'Fills ramp', ['o1', 'o2'])]),
+    )
+    await act(async () =>
+      screen
+        .getAllByRole('button', { name: /Ask for more fills ramp/ })
+        .at(0)
+        ?.click(),
+    )
+    await waitFor(() => expect(screen.getByText('Goblin Matron')).toBeTruthy())
+
+    // A recompute follows. Its answer no longer contains 'o2'.
+    mocked.getRecommendations.mockResolvedValue(
+      recsWith([group('fills-ramp', 'Fills ramp', ['o1'])]),
+    )
+    mocked.sendCommands.mockResolvedValue({
+      deck: { ...deck, version: 2, entries: [{ oracleId: 'o1', zone: 'accepted', locked: false }] },
+    } as unknown as Awaited<ReturnType<typeof api.sendCommands>>)
+    await act(async () => screen.getByLabelText('Add Krenko, Mob Boss').click())
+
+    // The Add button, not the name: the name also appears in the deck pane, so
+    // asserting on it would pass for the wrong reason. Only a suggestion row
+    // has an Add.
+    //
+    // Real time, not fake: the pipeline's buffer and settle are what is being
+    // waited on here, and faking them would test a different machine.
+    await waitFor(() => expect(screen.queryByLabelText('Add Goblin Matron')).toBeNull(), {
+      timeout: 8_000,
+    })
+    const call = mocked.getRecommendations.mock.calls.at(-1)?.[1]
+    expect(call?.groups).toEqual(['fills-ramp'])
+  }, 20_000)
+
+  it('drops the expansion when the filter changes', async () => {
+    render(<Workspace deck={deck} />)
+    await waitFor(() => expect(screen.getByText('Krenko, Mob Boss')).toBeTruthy())
+
+    mocked.getRecommendations.mockResolvedValue(
+      recsWith([group('fills-ramp', 'Fills ramp', ['o1', 'o2'])]),
+    )
+    await act(async () =>
+      screen
+        .getAllByRole('button', { name: /Ask for more fills ramp/ })
+        .at(0)
+        ?.click(),
+    )
+    await waitFor(() => expect(screen.getByLabelText('Add Goblin Matron')).toBeTruthy())
+
+    // A new filter is a new question. "More of that group" answered the old one.
+    mocked.getRecommendations.mockResolvedValue(
+      recsWith([group('fills-ramp', 'Fills ramp', ['o1'])]),
+    )
+    const box = screen.getByLabelText('Filter suggestions') as HTMLInputElement
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+    await act(async () => {
+      setter?.call(box, 'mv<=3')
+      box.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    await waitFor(() => expect(screen.queryByLabelText('Add Goblin Matron')).toBeNull(), {
+      timeout: 8_000,
+    })
+    // And the expansion is not re-asked for on the new question's behalf.
+    expect(mocked.getRecommendations.mock.calls.at(-1)?.[1]?.groups).toBeUndefined()
+  }, 20_000)
+
   it('expands a group the user had collapsed', async () => {
     render(<Workspace deck={deck} />)
     await waitFor(() => expect(screen.getByText('Krenko, Mob Boss')).toBeTruthy())
