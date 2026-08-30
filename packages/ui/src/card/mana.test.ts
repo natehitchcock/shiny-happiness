@@ -142,10 +142,13 @@ describe('parseManaCost — what it cannot read', () => {
   it('keeps an unrecognised token instead of dropping it', () => {
     // The rule: a cost the user cannot read is worse than shorthand, but a cost
     // that is SHORTER than the card's is worse than both — it looks correct.
-    const parsed = parseManaCost('{2}{Q}{R}')
+    // Was `{Q}` until untap became a real symbol — which is exactly why this
+    // test is written against a token that means nothing at all, rather than
+    // one that merely had no rule yet.
+    const parsed = parseManaCost('{2}{ZZZ9}{R}')
     expect(parsed.map((s) => s.kind)).toEqual(['generic', 'unknown', 'color'])
-    expect(parsed[1]?.raw).toBe('{Q}')
-    expect(manaCostLabel(parsed)).toBe('mana cost 2 generic, unreadable {Q}, red')
+    expect(parsed[1]?.raw).toBe('{ZZZ9}')
+    expect(manaCostLabel(parsed)).toBe('mana cost 2 generic, unreadable {ZZZ9}, red')
   })
 
   it('keeps text that is not a token at all', () => {
@@ -215,5 +218,27 @@ describe('the palette a symbol is painted with', () => {
     expect(symbolBackground(only('{3}'))).toBe(symbolFill(null))
     expect(symbolBackground(only('{C}'))).toBe(symbolFill(null))
     expect(symbolBackground(only('{S}'))).toBe(symbolFill(null))
+  })
+})
+
+describe('symbols that only ever appear in rules text', () => {
+  it('reads tap, untap and energy', () => {
+    // None of these can appear in a mana cost, which is why a parser written
+    // for costs called every one of them unreadable — and rules text is full
+    // of them: "{T}: Add {C}{C}."
+    expect(parseManaCost('{T}')[0]).toMatchObject({ kind: 'tap', marks: ['T'], label: 'tap' })
+    expect(parseManaCost('{Q}')[0]).toMatchObject({ kind: 'untap', marks: ['Q'], label: 'untap' })
+    expect(parseManaCost('{E}')[0]).toMatchObject({ kind: 'energy', marks: ['E'], label: 'energy' })
+  })
+
+  it('still refuses a token it genuinely cannot read', () => {
+    // The guard on the above: adding kinds must not turn the parser into one
+    // that guesses. An unknown token keeps its braces and says so.
+    expect(parseManaCost('{ZZZ9}')[0]).toMatchObject({ kind: 'unknown' })
+  })
+
+  it('gives tap a grey disc, not a colour', () => {
+    // It is not mana. Painting it as a colour would say it was.
+    expect(parseManaCost('{T}')[0]?.fills).toEqual([null])
   })
 })

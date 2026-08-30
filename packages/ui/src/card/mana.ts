@@ -39,6 +39,17 @@ export type ManaSymbolKind =
   | 'colorless'
   /** `{S}` — snow. */
   | 'snow'
+  /**
+   * `{T}` tap, `{Q}` untap, `{E}` energy.
+   *
+   * Not mana at all — they are activation costs and a counter, and they never
+   * appear in a mana cost. They appear constantly in RULES TEXT, which is the
+   * other place symbols are drawn, so a parser that only ever saw costs had no
+   * reason to know them and called every one "unreadable".
+   */
+  | 'tap'
+  | 'untap'
+  | 'energy'
   /** `{W/U}`, and `{C/W}`. Two ways to pay, split disc. */
   | 'hybrid'
   /** `{2/B}` — monocolour hybrid: a number OR one colour. */
@@ -124,6 +135,15 @@ const symbolFor = (raw: string, inner: string): ManaSymbol => {
   }
   if (body === 'S') {
     return { raw, kind: 'snow', fills: [null], marks: ['S'], label: 'snow' }
+  }
+  if (body === 'T') {
+    return { raw, kind: 'tap', fills: [null], marks: ['T'], label: 'tap' }
+  }
+  if (body === 'Q') {
+    return { raw, kind: 'untap', fills: [null], marks: ['Q'], label: 'untap' }
+  }
+  if (body === 'E') {
+    return { raw, kind: 'energy', fills: [null], marks: ['E'], label: 'energy' }
   }
   if (body === 'P') {
     return { raw, kind: 'phyrexian', fills: [null], marks: [PHYREXIAN_MARK], label: '2 life' }

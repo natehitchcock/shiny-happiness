@@ -3,7 +3,7 @@ import * as api from './api'
 import { usePipeline, type Phase } from './pipeline'
 import { AUTO_QUERY_MS, useAutoQuery } from './autoquery'
 import { dimensionKeysOf, formatDecklist, interactsWith } from '@roundtable/domain'
-import { ManaCost } from '@roundtable/ui'
+import { ManaCost, OracleText } from '@roundtable/ui'
 import type { SynergyTag } from '@roundtable/domain'
 import { DeckMenu } from './DeckMenu'
 import { Hint } from './Hint'
@@ -881,7 +881,9 @@ const Preview = ({
       </p>
       {/* Oracle text is the card. Newlines are meaningful — they separate
           abilities — so it is rendered pre-wrapped rather than collapsed. */}
-      <p className="oracle">{shown.oracleText === '' ? 'No rules text.' : shown.oracleText}</p>
+      <p className="oracle">
+        <OracleText text={shown.oracleText} />
+      </p>
       <p className="note">
         {usd(price)} <span className="estimate">est.</span>
         {/* The printing count is the one readable fact only the server has, so
@@ -1440,7 +1442,11 @@ export const Workspace = ({
    * deck state.
    */
   const [autoQuery, setAutoQuery] = useState<boolean>(
-    () => localStorage.getItem('lw.autoQuery') === 'on',
+    // On by default, and only off if the user turned it off. Absent is not the
+    // same as 'off': the first is "never expressed a view", the second is a
+    // decision, and defaulting the first to off meant most people never saw the
+    // feature at all.
+    () => localStorage.getItem('lw.autoQuery') !== 'off',
   )
   useEffect(() => {
     localStorage.setItem('lw.autoQuery', autoQuery ? 'on' : 'off')
@@ -1822,9 +1828,18 @@ export const Workspace = ({
       label: 'Completes combos',
       total: combo.reduce((n, g) => n + g.total, 0),
       rationale: 'Adding one of these finishes a combo using only cards already in your deck.',
+      /*
+       * Half the rows the three groups would have shown between them.
+       *
+       * Merging tripled the region: three groups of eight became a wall of
+       * twenty-four, all making the same claim, pushing every other group off
+       * the screen. Halved, the strongest combo cards still lead the list and
+       * the gaps below them are reachable without scrolling past them.
+       */
       items: combo
         .flatMap((g) => g.items)
-        .sort((a, b) => b.comboDegree - a.comboDegree || b.score - a.score),
+        .sort((a, b) => b.comboDegree - a.comboDegree || b.score - a.score)
+        .slice(0, Math.ceil(combo.reduce((n, g) => n + g.items.length, 0) / 2)),
     }
     const rest = groups.filter((g) => !g.key.startsWith('combo-'))
     // Back where the strongest of the three sat, not appended to the end.

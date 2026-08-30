@@ -51,9 +51,9 @@ describe('ManaCost — what is drawn', () => {
   it('prints a fragment it cannot read instead of dropping it', () => {
     // The regression this guards: a cost SHORTER than the card's, which looks
     // correct. Falling back to the shorthand is the acceptable failure.
-    const mana = draw('{2}{Q}{R}')
+    const mana = draw('{2}{ZZZ9}{R}')
     expect(mana.querySelectorAll('.rt-sym')).toHaveLength(2)
-    expect(mana.querySelector('.rt-sym-raw')?.textContent).toBe('{Q}')
+    expect(mana.querySelector('.rt-sym-raw')?.textContent).toBe('{ZZZ9}')
   })
 
   it('draws nothing for a land', () => {

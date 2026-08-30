@@ -36,13 +36,19 @@ export const ManaCost = ({ cost }: ManaCostProps): JSX.Element => {
     <span className="rt-mana" title={cost ?? undefined}>
       <span className="rt-sr">{manaCostLabel(symbols)}</span>
       {symbols.map((symbol, index) => (
-        <Symbol key={`${symbol.raw}-${String(index)}`} symbol={symbol} />
+        <ManaSymbolMark key={`${symbol.raw}-${String(index)}`} symbol={symbol} />
       ))}
     </span>
   )
 }
 
-const Symbol = ({ symbol }: { readonly symbol: ManaSymbol }): JSX.Element => {
+/**
+ * One drawn symbol, without any wrapper or label.
+ *
+ * Exported because rules text needs the same disc inline, but supplies its own
+ * accessible word per symbol rather than one sentence for a whole cost.
+ */
+export const ManaSymbolMark = ({ symbol }: { readonly symbol: ManaSymbol }): JSX.Element => {
   if (symbol.kind === 'unknown') {
     return (
       <span className="rt-sym-raw" aria-hidden="true">

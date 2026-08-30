@@ -400,3 +400,10 @@
   color: var(--parchment);
   font: 500 0.85em/1.4 var(--mono);
 }
+
+/* A symbol sitting in a sentence rather than in a cost line. Nudged down a
+   fraction so the disc sits on the text baseline instead of riding above it. */
+.rt-inline-sym {
+  display: inline-block;
+  vertical-align: -0.12em;
+}

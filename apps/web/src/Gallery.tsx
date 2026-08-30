@@ -96,7 +96,7 @@ const FIXTURES: readonly CardView[] = [
     // only checks it renders.
     oracleId: 'f5',
     name: 'Every Symbol At Once',
-    manaCost: '{X}{15}{2/B}{W/U}{G/P}{W/U/P}{C}{S}{Q}',
+    manaCost: '{X}{15}{2/B}{W/U}{G/P}{W/U/P}{C}{S}{T}{ZZZ9}',
     manaValue: 21,
     colorIdentity: ['W', 'U', 'B', 'G'],
     typeLine: 'Sorcery — Fixture',

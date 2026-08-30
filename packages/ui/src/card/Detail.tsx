@@ -15,6 +15,7 @@ import type { JSX } from 'react'
 import { CARD_ASPECT, levelSpec } from './presentation.js'
 import { ComboBadge, IdentityStrip, ManaValue, Price, RoleDot } from './Badges.js'
 import { ManaCost } from './ManaCost.js'
+import { OracleText } from './OracleText.js'
 import type { CardView } from './types.js'
 
 export interface ComboLine {
@@ -73,7 +74,9 @@ export const Detail = ({
           // Repeated from the image on purpose at this level, unlike L2: the
           // image is not selectable, translatable, or resizable by the reader,
           // and this is the level where someone is reading rather than scanning.
-          <p className="rt-detail-oracle">{card.oracleText}</p>
+          <p className="rt-detail-oracle">
+            <OracleText text={card.oracleText} />
+          </p>
         )}
 
         <div className="rt-detail-badges">
