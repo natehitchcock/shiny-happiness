@@ -1,39 +1,83 @@
 /**
  * The whole API as one Vercel serverless function.
  *
- * Vercel routes `/api/*` here (see `vercel.json`), and Fastify does its own
- * routing from there. One function rather than a file per endpoint because the
- * routes share a connection pool, a schema compiler and an error handler —
- * splitting them would mean building all three per endpoint per cold start.
+ * Vercel routes `/api/*` here — the catch-all filename does that natively, with
+ * no rewrite needed — and Fastify does its own routing from there. One function
+ * rather than a file per endpoint because the routes share a connection pool, a
+ * schema compiler and an error handler; splitting them would rebuild all three
+ * per endpoint per cold start.
  *
- * The pool and the server are module-scope on purpose: a warm invocation reuses
- * both, and building Fastify per request would put schema compilation on the
- * critical path of every call.
+ * **Nothing throws at module scope.** A module-level throw in a serverless
+ * function is reported by the platform as `FUNCTION_INVOCATION_FAILED` and
+ * nothing else — no message, no stack, and nothing the person deploying can act
+ * on without log access. The first version did exactly that on a missing
+ * `DATABASE_URL`, which is the single most likely thing to be wrong on a first
+ * deploy. Everything is therefore built lazily, inside the request, where a
+ * failure can be described.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { FastifyInstance } from 'fastify'
 import { configFromEnv, createPool } from '@roundtable/db'
 import { buildServer } from '@roundtable/api'
 
-const config = configFromEnv()
-if (config === null) throw new Error('DATABASE_URL is not set')
-
 /**
- * The pool size is `DATABASE_POOL_MAX`, and on Vercel it must be SMALL.
+ * Built once per warm instance, not per request.
  *
- * Every warm serverless instance holds its own pool, so the live connection
- * count is (instances × max). The default of 10 is right for one long-running
- * server and wrong here: Neon's free tier allows far fewer than Vercel will
- * happily scale to, and exhausting them does not fail for the request that did
- * it — it fails for somebody else's. `DEPLOYING.md` sets it to 3.
+ * A rejected promise is not cached: if the first request fails because the
+ * database was unreachable for a moment, the next one should try again rather
+ * than serving the same error for the lifetime of the instance.
  */
-const pool = createPool(config)
+let building: Promise<FastifyInstance> | null = null
 
-const ready = buildServer({ pool, logger: false }).then(async (app) => {
-  await app.ready()
-  return app
-})
+const getApp = async (): Promise<FastifyInstance> => {
+  building ??= (async () => {
+    const config = configFromEnv()
+    if (config === null) {
+      throw new Error(
+        'DATABASE_URL is not set on this deployment. Set it in Project Settings > ' +
+          'Environment Variables (see DEPLOYING.md), then redeploy.',
+      )
+    }
+    // The pool size is DATABASE_POOL_MAX and on Vercel it must be small: every
+    // warm instance holds its own, so live connections are (instances x max).
+    const pool = createPool(config)
+    const app = await buildServer({ pool, logger: false })
+    await app.ready()
+    return app
+  })().catch((error: unknown) => {
+    building = null
+    throw error
+  })
+  return building
+}
 
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const app = await ready
-  app.server.emit('request', req, res)
+  let app: FastifyInstance
+  try {
+    app = await getApp()
+  } catch (error) {
+    // RFC 9457, like every other error this API emits (doc 10 §10.1) — and
+    // carrying the actual reason, because the alternative is a bare platform
+    // 500 that says only that something went wrong.
+    const detail = error instanceof Error ? error.message : 'The API failed to start'
+    res.statusCode = 500
+    res.setHeader('content-type', 'application/problem+json')
+    res.end(
+      JSON.stringify({
+        type: 'about:blank',
+        title: 'API unavailable',
+        status: 500,
+        detail,
+      }),
+    )
+    return
+  }
+
+  // Resolve only once the response is finished. Returning early would let the
+  // platform freeze the instance mid-write.
+  await new Promise<void>((resolve) => {
+    res.on('close', resolve)
+    res.on('finish', resolve)
+    app.server.emit('request', req, res)
+  })
 }

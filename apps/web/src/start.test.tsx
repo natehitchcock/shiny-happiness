@@ -58,6 +58,14 @@ const type = async (text: string): Promise<void> => {
   })
 }
 
+/** Typing no longer searches on its own — the search is committed, like the filter. */
+const typeAndSearch = async (text: string): Promise<void> => {
+  await type(text)
+  await act(async () => {
+    screen.getByLabelText(/^Run this search/).click()
+  })
+}
+
 const card = (name: string): api.Card => ({
   oracleId: `o-${name}`,
   name,
@@ -76,7 +84,7 @@ describe('picking a commander', () => {
   it('says the search found nothing, rather than showing an empty screen', async () => {
     render(<App />)
     await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
-    await type('Krenko')
+    await typeAndSearch('Krenko')
 
     await waitFor(() => expect(screen.getByText(/No legendary creature matches/)).toBeDefined())
   })
@@ -87,7 +95,7 @@ describe('picking a commander', () => {
     mocked.searchCards.mockRejectedValue(new Error('Request failed (500)'))
     render(<App />)
     await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
-    await type('Krenko')
+    await typeAndSearch('Krenko')
 
     await waitFor(() => expect(screen.getByText(/not answering/)).toBeDefined())
     expect(screen.getByText(/Request failed \(500\)/)).toBeDefined()
@@ -99,7 +107,7 @@ describe('picking a commander', () => {
     await act(async () => {
       screen.getByLabelText(/Exclude Universes Beyond/).click()
     })
-    await type('Optimus')
+    await typeAndSearch('Optimus')
 
     await waitFor(() => expect(screen.getByText(/try unchecking that/)).toBeDefined())
   })
@@ -115,7 +123,7 @@ describe('picking a commander', () => {
     mocked.searchCards.mockResolvedValue({ items: [card('Krenko, Mob Boss')] })
     render(<App />)
     await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
-    await type('Krenko')
+    await typeAndSearch('Krenko')
 
     await waitFor(() => expect(screen.getByText('Krenko, Mob Boss')).toBeDefined())
     await act(async () => {
@@ -149,7 +157,7 @@ describe('the Start button, once a commander is chosen', () => {
 
     render(<App />)
     await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
-    await type('Krenko')
+    await typeAndSearch('Krenko')
     await waitFor(() => expect(screen.getByText('Krenko, Mob Boss')).toBeDefined())
     await act(async () => {
       screen.getByText('Choose').click()
@@ -174,7 +182,7 @@ describe('the Start button, once a commander is chosen', () => {
 
     render(<App />)
     await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
-    await type('Krenko')
+    await typeAndSearch('Krenko')
     await waitFor(() => expect(screen.getByText('Krenko, Mob Boss')).toBeDefined())
     await act(async () => {
       screen.getByText('Choose').click()
@@ -185,5 +193,63 @@ describe('the Start button, once a commander is chosen', () => {
 
     await waitFor(() => expect(screen.getByText(/Request failed \(500\)/)).toBeDefined())
     expect(screen.getByText('Start building').closest('button')!.disabled).toBe(false)
+  })
+})
+
+describe('the commander search runs on a countdown, like the filter', () => {
+  it('does not search while you are still typing', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
+    await type('Kre')
+    // The old version fired a request per keystroke behind a 180 ms debounce.
+    expect(mocked.searchCards).not.toHaveBeenCalled()
+  })
+
+  it('counts down, and the button says how long is left', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
+    await type('Krenko')
+    await waitFor(() => expect(screen.getByLabelText(/runs on its own in/)).toBeDefined())
+  })
+
+  it('searches when the button is clicked, without waiting out the countdown', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
+    await typeAndSearch('Krenko')
+    expect(mocked.searchCards).toHaveBeenCalledWith(
+      'Krenko type:legendary type:creature',
+      expect.anything(),
+    )
+  })
+
+  it('shows the spinner while the search is in flight, and hides the countdown', async () => {
+    let release: ((v: { items: api.Card[] }) => void) | null = null
+    mocked.searchCards.mockReturnValue(
+      new Promise((r) => {
+        release = r as (v: { items: api.Card[] }) => void
+      }),
+    )
+    render(<App />)
+    await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
+    await typeAndSearch('Krenko')
+
+    await waitFor(() => expect(screen.getByLabelText('Searching…')).toBeDefined())
+    // Busy wins over pending: a query in flight cannot also be counting down.
+    expect(screen.queryByLabelText(/runs on its own in/)).toBeNull()
+
+    await act(async () => {
+      release?.({ items: [] })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(screen.queryByLabelText('Searching…')).toBeNull())
+  })
+
+  it('says "Nothing found" in the problem colour when nothing matches', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
+    await typeAndSearch('Zzzzz')
+
+    const found = await screen.findByText(/Nothing found/)
+    expect(found.className).toContain('problem')
   })
 })

@@ -1134,6 +1134,16 @@ select {
   color: var(--sage);
 }
 
+/*
+ * `.start p` dims every paragraph on the start screen, and out-specifies
+ * `.problem` — one class plus a type against one class. So "Nothing found" and
+ * the API-failure line rendered in the same grey as the help text around them,
+ * which is exactly the wrong colour for the one line the reader has to notice.
+ */
+.start .problem {
+  color: var(--rust);
+}
+
 /* The commander search results, and the states where there are none. */
 .start-results {
   margin-bottom: 1rem;

@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@roundtable/api": "workspace:*",
-    "@roundtable/db": "workspace:*"
+    "@roundtable/db": "workspace:*",
+    "fastify": "^5.12.1"
   }
 }

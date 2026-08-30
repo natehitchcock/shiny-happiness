@@ -266,6 +266,16 @@ const ARCHETYPES = [
 
 const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JSX.Element => {
   const [term, setTerm] = useState('')
+  /**
+   * What was actually searched for, as opposed to what is typed.
+   *
+   * The two were the same thing when every keystroke fired a request. They are
+   * separate now because the search is committed — by the countdown, by the
+   * button, or by Enter — which is the same arrangement the suggestion filter
+   * uses, and for the same reason: a search is expensive and half a commander's
+   * name is not a question worth asking.
+   */
+  const [query, setQuery] = useState('')
   const [results, setResults] = useState<api.Card[]>([])
   const [chosen, setChosen] = useState<api.Card | null>(null)
   /**
@@ -284,8 +294,19 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  /**
+   * The same countdown the suggestion filter uses, on the same constant.
+   *
+   * Two characters is the floor — one letter matches most of Magic — and below
+   * it nothing is pending, so nothing counts down.
+   */
+  const auto = useAutoQuery(
+    { enabled: term.trim().length >= 2, draft: term, committed: query },
+    () => setQuery(term),
+  )
+
   useEffect(() => {
-    if (term.trim().length < 2) {
+    if (query.trim().length < 2) {
       setResults([])
       setSearch('idle')
       setSearchError(null)
@@ -293,34 +314,31 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
     }
     let cancelled = false
     setSearch('searching')
-    const timer = setTimeout(() => {
-      void api
-        // Only legendary creatures can lead a deck, so the search says so
-        // rather than offering every card and rejecting the choice later.
-        .searchCards(`${term} type:legendary type:creature`, {
-          excludeUniversesBeyond: noUB,
-        })
-        .then((r) => {
-          if (cancelled) return
-          setResults(r.items)
-          setSearch('done')
-          setSearchError(null)
-        })
-        .catch((e: unknown) => {
-          if (cancelled) return
-          // Surfaced, not swallowed. The old version discarded the error and
-          // rendered an empty list, so an unreachable or empty API looked
-          // exactly like a commander that does not exist.
-          setResults([])
-          setSearch('failed')
-          setSearchError(e instanceof Error ? e.message : 'Could not reach the card search')
-        })
-    }, 180)
+    void api
+      // Only legendary creatures can lead a deck, so the search says so
+      // rather than offering every card and rejecting the choice later.
+      .searchCards(`${query} type:legendary type:creature`, {
+        excludeUniversesBeyond: noUB,
+      })
+      .then((r) => {
+        if (cancelled) return
+        setResults(r.items)
+        setSearch('done')
+        setSearchError(null)
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        // Surfaced, not swallowed. The old version discarded the error and
+        // rendered an empty list, so an unreachable or empty API looked
+        // exactly like a commander that does not exist.
+        setResults([])
+        setSearch('failed')
+        setSearchError(e instanceof Error ? e.message : 'Could not reach the card search')
+      })
     return () => {
       cancelled = true
-      clearTimeout(timer)
     }
-  }, [term, noUB])
+  }, [query, noUB])
 
   const create = (): void => {
     if (chosen === null) return
@@ -352,22 +370,34 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
 
       <div className="field">
         <label htmlFor="commander">Commander</label>
-        <input
-          id="commander"
-          type="text"
-          value={chosen?.name ?? term}
-          placeholder="Search legendary creatures…"
-          onChange={(e) => {
-            setChosen(null)
-            setTerm(e.target.value)
-          }}
-        />
+        <div className="filter-bar">
+          <input
+            id="commander"
+            type="text"
+            value={chosen?.name ?? term}
+            placeholder="Search legendary creatures…"
+            onChange={(e) => {
+              setChosen(null)
+              setTerm(e.target.value)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') setQuery(term)
+            }}
+          />
+          <SearchButton
+            what="search"
+            onRun={() => setQuery(term)}
+            remaining={auto.remaining}
+            restartKey={term}
+            busy={search === 'searching'}
+          />
+        </div>
       </div>
 
       {chosen === null ? (
         <div className="start-results">
-          {search === 'searching' ? <p className="note">Searching…</p> : null}
-
+          {/* No "searching…" line here: the button IS the spinner, and saying
+              it in two places is one place too many. */}
           {search === 'failed' ? (
             <p className="problem">
               {searchError} — the card search is not answering, so no commander can be picked yet.
@@ -375,9 +405,13 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
           ) : null}
 
           {search === 'done' && results.length === 0 ? (
-            <p className="note">
-              No legendary creature matches “{term}”.
-              {noUB ? ' Universes Beyond cards are excluded — try unchecking that.' : ''}
+            <p className="problem">
+              Nothing found.
+              <span className="note">
+                {' '}
+                No legendary creature matches “{query}”.
+                {noUB ? ' Universes Beyond cards are excluded — try unchecking that.' : ''}
+              </span>
             </p>
           ) : null}
 
@@ -1007,22 +1041,41 @@ const ColumnLegend = ({
   )
 }
 
+/**
+ * A search button that can be counting down, or working.
+ *
+ * Shared by the suggestion filter and the commander search so the two are the
+ * same object rather than two things that look alike. The countdown ring is a
+ * CSS animation restarted by `key`; ten seconds redrawn from JavaScript would
+ * be six hundred renders to move one circle.
+ *
+ * Three states, and only one is ever on screen: idle (a magnifying glass),
+ * counting down (a ring filling around it), and busy (a spinner). Busy wins,
+ * because a query already in flight cannot also be pending.
+ */
 const SearchButton = ({
   onRun,
   remaining,
   restartKey,
+  busy = false,
+  what = 'filter',
 }: {
   readonly onRun: () => void
   readonly remaining: number | null
   readonly restartKey: string
+  readonly busy?: boolean
+  /** The noun in the label — "filter" or "search". */
+  readonly what?: string
 }): React.JSX.Element => {
-  const label =
-    remaining === null
-      ? 'Run this filter'
-      : `Run this filter — runs on its own in ${String(remaining)} second${remaining === 1 ? '' : 's'}`
+  const verb = what === 'filter' ? 'Run this filter' : `Run this ${what}`
+  const label = busy
+    ? `Searching…`
+    : remaining === null
+      ? verb
+      : `${verb} — runs on its own in ${String(remaining)} second${remaining === 1 ? '' : 's'}`
   return (
-    <button className="act search" onClick={onRun} aria-label={label} title={label}>
-      {remaining === null ? null : (
+    <button className="act search" onClick={onRun} disabled={busy} aria-label={label} title={label}>
+      {busy || remaining === null ? null : (
         <svg className="ring" viewBox="0 0 28 28" aria-hidden="true">
           <circle className="ring-track" cx="14" cy="14" r="12" />
           <circle
@@ -1035,11 +1088,19 @@ const SearchButton = ({
           />
         </svg>
       )}
-      <span aria-hidden="true">{'⌕'}</span>
+      {busy ? (
+        <span className="spinner" aria-hidden="true" />
+      ) : (
+        <span aria-hidden="true">{'⌕'}</span>
+      )}
       {/* Announced politely so a screen reader hears the countdown start
           without it interrupting whatever is being read. */}
       <span className="sr" role="status">
-        {remaining === null ? '' : `Filter runs on its own in ${String(remaining)} seconds`}
+        {busy
+          ? 'Searching'
+          : remaining === null
+            ? ''
+            : `Runs on its own in ${String(remaining)} seconds`}
       </span>
     </button>
   )

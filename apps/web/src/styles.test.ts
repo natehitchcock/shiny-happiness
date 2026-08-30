@@ -100,3 +100,21 @@ describe('the basic-land row', () => {
     expect(winner(name, 'min-width')?.value).toBe('0')
   })
 })
+
+describe('the start screen', () => {
+  const problem = (): Element => {
+    document.body.innerHTML = `
+      <div class="start">
+        <div class="start-results"><p class="problem">Nothing found.</p></div>
+      </div>`
+    return document.body.querySelector('.problem')!
+  }
+
+  it('shows a search failure in the alarm colour, not the help-text grey', () => {
+    // The same collision as the basic-land row, in a different place:
+    // `.start p` is one class plus a type and beat the bare `.problem` class,
+    // so the one line the reader has to notice rendered like the prose it sits
+    // among.
+    expect(winner(problem(), 'color')?.value).toBe('var(--rust)')
+  })
+})
