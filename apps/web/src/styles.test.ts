@@ -6,10 +6,24 @@ import { describe, expect, it } from 'vitest'
 
 // Comments are stripped first — this file's own comments quote CSS, braces and
 // all, and a naive rule scan would parse them as rules.
-const css = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), 'styles.css'),
-  'utf8',
-).replace(/\/\*[\s\S]*?\*\//g, '')
+const strip = (path: string): string => readFileSync(path, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+
+const here = dirname(fileURLToPath(import.meta.url))
+
+/**
+ * Both sheets, in the order the browser sees them.
+ *
+ * `styles.css` opens by importing `@roundtable/ui/card.css`, and an `@import`
+ * is evaluated before the rules that follow it — so a `card.css` rule is EARLIER
+ * in the cascade and loses every tie to this app's own rules. Reading only
+ * `styles.css`, which is what this file used to do, could not see a collision
+ * between the two sheets at all, and the mana symbols put a `.rt-*` class inside
+ * an app-owned column for the first time.
+ */
+const css =
+  strip(join(here, '..', '..', '..', 'packages', 'ui', 'src', 'card', 'card.css')) +
+  '\n' +
+  strip(join(here, 'styles.css'))
 
 /** CSS specificity as [ids, classes/attributes/pseudo-classes, elements]. */
 const specificity = (selector: string): [number, number, number] => [
@@ -116,5 +130,42 @@ describe('the start screen', () => {
     // so the one line the reader has to notice rendered like the prose it sits
     // among.
     expect(winner(problem(), 'color')?.value).toBe('var(--rust)')
+  })
+})
+
+describe('the mana column', () => {
+  const row = (): HTMLElement => {
+    document.body.innerHTML = `
+      <div class="card-row">
+        <span class="name">Lightning Bolt</span>
+        <span class="mana"><span class="rt-mana"><span class="rt-sr">mana cost red</span
+          ><span class="rt-sym"><span class="rt-sym-mark" data-half="only">R</span></span></span></span>
+        <span class="cash">$1.20</span>
+      </div>`
+    return document.body.querySelector('.card-row')!
+  }
+
+  it('keeps the discs at their own size, not the row text size', () => {
+    // `.card-row .mana` sets 0.72rem for what used to be monospace shorthand.
+    // The discs are sized in `em` off `.rt-mana`, so if the row's font-size ever
+    // won here every symbol in the deck list would shrink to ~8 px.
+    const size = winner(row().querySelector('.rt-mana')!, 'font-size')
+    expect(size?.selector).toBe('.rt-mana')
+    expect(size?.value).toBe('13px')
+  })
+
+  it('does not dim the column, which would undo the contrast the discs are chosen for', () => {
+    // The removed line: `.card-row .mana { opacity: 0.8 }`, which made sense for
+    // a line of grey monospace and took every disc below the 3:1 floor
+    // `mana.test.ts` asserts them at.
+    expect(winner(row().querySelector('.mana')!, 'opacity')).toBeNull()
+    expect(winner(row().querySelector('.rt-sym')!, 'opacity')).toBeNull()
+  })
+
+  it('pushes the column to its right edge without relying on text-align', () => {
+    // `text-align` has nothing to align once the content is boxes.
+    const column = row().querySelector('.mana')!
+    expect(winner(column, 'display')?.value).toBe('flex')
+    expect(winner(column, 'justify-content')?.value).toBe('flex-end')
   })
 })

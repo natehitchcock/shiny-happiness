@@ -89,6 +89,22 @@ const FIXTURES: readonly CardView[] = [
     primaryRole: 'removal',
     priceUsd: null,
   },
+  {
+    // Not a real card. Every mana symbol shape in one cost, including one the
+    // parser cannot read — the point of this page is to be able to LOOK at the
+    // awkward cases, and a hybrid that renders wrong is invisible in a test that
+    // only checks it renders.
+    oracleId: 'f5',
+    name: 'Every Symbol At Once',
+    manaCost: '{X}{15}{2/B}{W/U}{G/P}{W/U/P}{C}{S}{Q}',
+    manaValue: 21,
+    colorIdentity: ['W', 'U', 'B', 'G'],
+    typeLine: 'Sorcery — Fixture',
+    oracleText: 'Exists so the symbol renderer can be inspected by eye.',
+    primaryRole: 'removal',
+    priceUsd: 0,
+    reasons: ['Fixture only'],
+  },
 ]
 
 const ENCODINGS: readonly PipEncoding[] = ['colorIdentity', 'manaValue', 'role', 'comboDegree']

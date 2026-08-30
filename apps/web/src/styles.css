@@ -131,13 +131,18 @@ button {
  * instead of jittering with each card's name length. Mana cost is the brighter
  * of the two: it is what you pay every game, where the cash price is a
  * once-and-approximate number.
+ *
+ * The column holds mana SYMBOLS now (ADR-0015), which is why the `opacity: 0.8`
+ * that used to sit here is gone: it was a way to hold back a line of monospace
+ * text, and applied to the discs it took every one of them below the contrast
+ * floor `tokens.ts` asserts them at. The discs are pushed to the right end of
+ * the column with the flex alignment rather than with `text-align`, which has
+ * nothing to align once the content is boxes.
  */
 .card-row .mana {
-  font-family: var(--mono);
+  display: flex;
+  justify-content: flex-end;
   font-size: 0.72rem;
-  color: var(--parchment);
-  opacity: 0.8;
-  text-align: right;
   min-width: 4.6rem;
   flex: 0 0 auto;
   white-space: nowrap;
@@ -493,6 +498,16 @@ select {
   font-size: 0.78rem;
   color: var(--parchment-dim);
   margin: 2px 0;
+}
+
+/* The cost used to be separated from the type line by a literal leading space
+   inside the span. Symbols are boxes and a space would not survive them, so the
+   gap is a margin. Two classes, so it beats the bare `.cost` in a `.card-row`
+   if a preview ever renders inside one. */
+.type-line .cost {
+  display: inline-flex;
+  margin-left: var(--step);
+  vertical-align: middle;
 }
 
 /* Newlines separate abilities; collapsing them would run two abilities into

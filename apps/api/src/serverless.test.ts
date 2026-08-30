@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * The Vercel serverless entry point, invoked the way Vercel invokes it.
+ * The serverless handler, invoked the way the platform invokes it.
  *
  * This exists because the deployed function answered `FUNCTION_INVOCATION_FAILED`
  * and nothing else. That is all the platform can report for a module-scope
@@ -43,10 +43,10 @@ const loadHandler = async (): Promise<
   // Fresh module each time: the handler memoises the built server, which is the
   // behaviour under test in one case and interference in the others.
   vi.resetModules()
-  const mod = (await import('./[...path].js')) as {
-    default: (req: IncomingMessage, res: ServerResponse) => Promise<void>
+  const mod = (await import('./serverless.js')) as {
+    handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>
   }
-  return mod.default
+  return mod.handler
 }
 
 beforeEach(() => {
@@ -59,11 +59,7 @@ afterEach(() => {
 })
 
 describe('the serverless handler', () => {
-  it('imports cleanly from the repo root', async () => {
-    // `api/` is outside every workspace package, so `@roundtable/api` and
-    // `@roundtable/db` only resolve because the root package.json depends on
-    // them. That was missing at first and would have failed the deploy the same
-    // opaque way.
+  it('loads', async () => {
     await expect(loadHandler()).resolves.toBeTypeOf('function')
   })
 

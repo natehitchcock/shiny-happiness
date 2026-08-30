@@ -84,7 +84,9 @@ describe('CardFace — an unresolved printing', () => {
     render(<CardFace card={card({ imageUris: undefined })} />)
     expect(screen.queryByRole('img')).toBeNull()
     expect(screen.getByText('Dockside Extortionist')).toBeDefined()
-    expect(screen.getByText('{1}{R}')).toBeDefined()
+    // The cost is symbols now (ADR-0015), so the readable form of it is the
+    // screen-reader sentence rather than the brace shorthand.
+    expect(screen.getByText('mana cost 1 generic, red')).toBeDefined()
     expect(screen.getByText('Creature — Goblin Pirate')).toBeDefined()
   })
 

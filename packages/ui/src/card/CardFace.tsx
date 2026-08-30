@@ -14,6 +14,7 @@
 import type { JSX, KeyboardEvent } from 'react'
 import { CARD_ASPECT, HIT_TARGET_MIN, levelSpec } from './presentation.js'
 import { ComboBadge, IdentityStrip, ManaValue, Price } from './Badges.js'
+import { ManaCost } from './ManaCost.js'
 import type { CardView } from './types.js'
 
 export interface CardFaceProps {
@@ -62,7 +63,9 @@ export const CardFace = ({
           // card is still a card you may want to accept.
           <div className="rt-face-text">
             <span className="rt-face-name">{card.name}</span>
-            <span className="rt-face-cost">{card.manaCost ?? ''}</span>
+            <span className="rt-face-cost">
+              <ManaCost cost={card.manaCost} />
+            </span>
             <span className="rt-face-type">{card.typeLine ?? ''}</span>
             <span className="rt-face-oracle">{card.oracleText ?? ''}</span>
           </div>

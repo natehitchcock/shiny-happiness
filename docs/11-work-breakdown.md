@@ -14,6 +14,14 @@ deck workspace against 34,492 real cards, 110,577 printings and 108,046 real
 combos: pick a commander, take suggestions with their reasons, accept or exclude,
 watch the pool re-sort. That is the state to protect.
 
+**Mana costs render as symbols**, not as Scryfall's `{2}{R}` shorthand, in every
+place a cost appears. They are DRAWN from the project's own palette rather than
+fetched: ADR-0009 Q4 puts mana symbols under the same Wizards copyright as card
+images and leaves re-serving Scryfall's image files an open question gated on
+`ING-04`, so the option needing no third-party asset was taken instead. See
+[ADR-0015](adr/0015-drawn-mana-symbols.md). This does **not** unblock `ING-04` or
+answer its question.
+
 The app is called **Lotus Wizard** in the interface. The name is tentative and
 **not cleared** — `LEGAL-01` owns that, and there is a real question to answer
 first: see doc 04 §4.6. Package scopes stay `@roundtable/*` until it is settled.
@@ -146,7 +154,7 @@ against their interfaces; nothing depending on an unanswered question ships.
 | `ING-01` | ✅ **Done.** Scryfall bulk ingest: download, stream-parse, map to `Card`, snapshot-and-swap | DATA-01, DB-01 | ✅ 34,492 cards + printings from 38,627 records in <5 s against the real bulk file; re-run is idempotent. 4,135 non-playable records (art series, tokens, stickers, conspiracies) rejected — `CardType` is the definition of a deck card |
 | `ING-02` | ✅ **Done.** Spellbook combo ingest + oracle-id mapping, **failing loudly on unmapped cards** | DATA-02, DB-01 | ✅ 108,046 combos in 12.8 s with **zero unmapped**; pieces map on `oracleId` with no name matching. Only `OK` variants ingested; a combo naming an unknown card is reported, never stored |
 | ~~`ING-03`~~ | ❌ **Cut.** EDHREC stats fetcher. No aggregated-decklist source has usable terms — Archidekt carries the identical prohibition, Moxfield is out of scope, Deckstats is unreachable ([ADR-0008](adr/0008-drop-edhrec.md)). Inclusion and synergy statistics come from the project's own imported-deck corpus or not at all | — | — |
-| `ING-04`  | Image caching pipeline to object store, three sizes (doc 07 §7.3)                                                                                          | ING-01                 | No client request ever hits a third-party image host                                                                                                             |
+| `ING-04`  | Image caching pipeline to object store, three sizes (doc 07 §7.3). **Still gated** on the ADR-0009 Q4 conversation with Scryfall; [ADR-0015](adr/0015-drawn-mana-symbols.md) sidestepped it for mana symbols only, by drawing those rather than serving them | ING-01                 | No client request ever hits a third-party image host                                                                                                             |
 | `ING-05` | Core package generation (doc 05 §5.5), per bracket and — where the corpus supports it — per archetype. Corpus is **MTGJSON** (MIT licensed, 192 official Commander decklists) plus curation, never a scraped aggregate ([ADR-0008](adr/0008-drop-edhrec.md)) | DOM-04, DOM-09 | Reproducible from a fixed corpus; output diff is human-reviewable; falls back to the bracket's general package rather than emitting one built from too few decks |
 
 ## 11.5 Backend
@@ -168,7 +176,7 @@ against their interfaces; nothing depending on an unanswered question ships.
 
 | ID       | Task                                                                                                                                             | Depends                | DoD                                                                                                                                |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `UI-01`  | ✅ **Done.** Card primitives at all four zoom representations (pip/tile/card/detail)                                                              | FOUND-02               | ✅ A gallery at `#gallery` rather than Storybook — see §11.10. Sizes and a11y asserted in `packages/ui/src/card/*.test.*`             |
+| `UI-01`  | ✅ **Done.** Card primitives at all four zoom representations (pip/tile/card/detail), plus the drawn mana symbols ([ADR-0015](adr/0015-drawn-mana-symbols.md))                                                              | FOUND-02               | ✅ A gallery at `#gallery` rather than Storybook — see §11.10. Sizes and a11y asserted in `packages/ui/src/card/*.test.*`; the cost parser is pure and covers hybrid, monocolour hybrid, Phyrexian, snow and an unreadable fragment             |
 | `WEB-01` | App shell, routing, deck state store, optimistic mutation + reconcile                                                                            | UI-01, API-01          | Offline mutation queues and replays                                                                                                |
 | `WEB-02` | Two-region workspace + draggable divider + grouping (doc 06)                                                                                     | WEB-01                 | Divider snaps and persists; group collapse persists                                                                                |
 | `WEB-03` | Zoom system: 4 levels, shared across regions, anchoring, persistence (doc 07)                                                                    | WEB-02                 | All four control paths work; anchor preserved across a full L2→L0→L2 cycle                                                         |

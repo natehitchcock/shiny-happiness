@@ -14,6 +14,7 @@
 import type { JSX } from 'react'
 import { CARD_ASPECT, levelSpec } from './presentation.js'
 import { ComboBadge, IdentityStrip, ManaValue, Price, RoleDot } from './Badges.js'
+import { ManaCost } from './ManaCost.js'
 import type { CardView } from './types.js'
 
 export interface ComboLine {
@@ -49,7 +50,9 @@ export const Detail = ({
     <section className="rt-detail" aria-label={`${card.name}, details`} style={{ width: w }}>
       <header className="rt-detail-head">
         <h2 className="rt-detail-name">{card.name}</h2>
-        <span className="rt-detail-cost">{card.manaCost ?? ''}</span>
+        <span className="rt-detail-cost">
+          <ManaCost cost={card.manaCost} />
+        </span>
       </header>
 
       {actions}

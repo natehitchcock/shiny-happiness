@@ -1,11 +1,14 @@
 /**
- * The whole API as one Vercel serverless function.
+ * The whole API as one serverless function.
  *
- * Vercel routes `/api/*` here — the catch-all filename does that natively, with
- * no rewrite needed — and Fastify does its own routing from there. One function
- * rather than a file per endpoint because the routes share a connection pool, a
- * schema compiler and an error handler; splitting them would rebuild all three
- * per endpoint per cold start.
+ * One function rather than a file per endpoint because the routes share a
+ * connection pool, a schema compiler and an error handler; splitting them would
+ * rebuild all three per endpoint per cold start.
+ *
+ * The logic lives here, in the package, rather than in the platform's `api/`
+ * directory — so it is typechecked, linted and tested alongside the routes it
+ * serves, and so the deployment entry point is three lines that cannot hide a
+ * bug. `api/index.ts` is that entry point.
  *
  * **Nothing throws at module scope.** A module-level throw in a serverless
  * function is reported by the platform as `FUNCTION_INVOCATION_FAILED` and
@@ -18,7 +21,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { FastifyInstance } from 'fastify'
 import { configFromEnv, createPool } from '@roundtable/db'
-import { buildServer } from '@roundtable/api'
+import { buildServer } from './server.js'
 
 /**
  * Built once per warm instance, not per request.
@@ -51,7 +54,7 @@ const getApp = async (): Promise<FastifyInstance> => {
   return building
 }
 
-export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
   let app: FastifyInstance
   try {
     app = await getApp()

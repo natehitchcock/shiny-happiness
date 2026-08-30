@@ -8,5 +8,6 @@
  * `main.ts` is the runnable entry point; this module is the importable surface.
  */
 export { buildServer, type ServerOptions } from './server.js'
+export { handler } from './serverless.js'
 export { DEV_OWNER_ID } from './routes/decks.js'
 export type { Problem } from './errors.js'

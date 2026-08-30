@@ -3,6 +3,7 @@ import * as api from './api'
 import { usePipeline, type Phase } from './pipeline'
 import { AUTO_QUERY_MS, useAutoQuery } from './autoquery'
 import { dimensionKeysOf, formatDecklist, interactsWith } from '@roundtable/domain'
+import { ManaCost } from '@roundtable/ui'
 import type { SynergyTag } from '@roundtable/domain'
 import { DeckMenu } from './DeckMenu'
 import { Hint } from './Hint'
@@ -145,8 +146,9 @@ const Degree = ({ degree, near }: { degree: number; near: number }): React.JSX.E
  * The two costs a card has: what it costs to cast, and what it costs to buy.
  *
  * Fixed-width columns so both read straight down the list rather than jittering
- * with each card's name length. Mana cost keeps Scryfall's brace notation —
- * rendering real pips needs the symbol artwork, which is ING-04's job.
+ * with each card's name length. Mana cost is drawn as symbols by `ManaCost`
+ * (ADR-0015), which carries its own screen-reader text — the `title` that used
+ * to be the only label here would not have survived that change.
  */
 const Costs = ({
   manaCost,
@@ -156,8 +158,8 @@ const Costs = ({
   price: number | null | undefined
 }): React.JSX.Element => (
   <>
-    <span className="mana" title={manaCost ?? 'No mana cost'}>
-      {manaCost ?? ''}
+    <span className="mana">
+      <ManaCost cost={manaCost} />
     </span>
     <span className="cash" title="Cheapest printing — an estimate">
       {usd(price)}
@@ -192,7 +194,9 @@ const CardRow = ({
           </span>
         ) : null}
       </span>
-      <span className="cost">{card?.manaCost ?? ''}</span>
+      <span className="cost">
+        <ManaCost cost={card?.manaCost} />
+      </span>
       {actions.map((a) => (
         <button
           key={a.label}
@@ -608,7 +612,11 @@ const Preview = ({
       </div>
       <p className="type-line">
         {detail.typeLine}
-        {detail.manaCost !== null ? <span className="cost"> {detail.manaCost}</span> : null}
+        {detail.manaCost === null ? null : (
+          <span className="cost">
+            <ManaCost cost={detail.manaCost} />
+          </span>
+        )}
       </p>
       {/* Oracle text is the card. Newlines are meaningful — they separate
           abilities — so it is rendered pre-wrapped rather than collapsed. */}

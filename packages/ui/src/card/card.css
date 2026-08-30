@@ -326,3 +326,77 @@
   color: var(--parchment);
   border-color: var(--brass-dim);
 }
+
+/* --------------------------------------------------------- mana symbols */
+
+/*
+ * Drawn here, not fetched from anywhere. Wizards' mana symbols are Wizards'
+ * copyright and ADR-0009 leaves re-serving Scryfall's image files an open
+ * question; ADR-0015 takes the option that needs no third-party asset at all.
+ * A symbol is a disc, a fill, and a letter.
+ *
+ * The size is FIXED rather than inherited. A cost appears in a 0.72rem deck row
+ * and in a 12 px detail header, and a disc that shrank with its surroundings
+ * would put a 7 px digit in the row where costs are read most.
+ */
+.rt-mana {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.rt-sym {
+  position: relative;
+  display: inline-block;
+  width: 1.15em;
+  height: 1.15em;
+  border-radius: 50%;
+  flex: none;
+  /* An edge, so two adjacent discs of similar lightness stay two discs. */
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+/*
+ * Every symbol carries a mark. That is not decoration: it is the second signal
+ * that lets the palette be lightened for legibility (see TINT in mana.ts) and
+ * the reason a hybrid is tellable from a mono under deuteranopia.
+ */
+.rt-sym-mark {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 0.58em/1 var(--ui);
+}
+.rt-sym-mark[data-half='only'] {
+  inset: 0;
+  font-size: 0.72em;
+}
+.rt-sym-mark[data-half='a'] {
+  inset: 0 45% 45% 0;
+}
+.rt-sym-mark[data-half='b'] {
+  inset: 45% 0 0 45%;
+}
+/* {15} and {2/B}'s left half: two characters in a disc sized for one. */
+.rt-sym-mark[data-wide='true'] {
+  font-size: 0.52em;
+}
+.rt-sym-mark[data-half='only'][data-wide='true'] {
+  font-size: 0.6em;
+}
+
+/*
+ * A fragment the parser could not read, shown as its own text rather than
+ * dropped. Flagged in the alarm colour because it means this app has met a
+ * symbol it does not know, which is a thing to fix and not a thing to hide.
+ */
+.rt-sym-raw {
+  padding: 0 3px;
+  border: 1px dashed var(--rust);
+  border-radius: var(--radius);
+  color: var(--parchment);
+  font: 500 0.85em/1.4 var(--mono);
+}
