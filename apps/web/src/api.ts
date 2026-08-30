@@ -37,7 +37,7 @@ export interface Reason {
   dimension?: { role?: string; type?: string }
   deficit?: number
   manaValue?: number
-  direction?: 'short' | 'over' | 'balanced' | 'enables' | 'payoff'
+  direction?: 'short' | 'over' | 'balanced' | 'enables' | 'payoff' | 'theme'
   delta?: number
   tag?: string
   withOracleIds?: string[]

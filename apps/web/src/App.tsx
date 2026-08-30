@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
 import { usePipeline, type Phase } from './pipeline'
+import { AUTO_QUERY_MS, useAutoQuery } from './autoquery'
 import { formatDecklist } from '@roundtable/domain'
 import type { Card } from './api'
 
@@ -28,6 +29,10 @@ const cutText = (r: {
       return 'no combo line'
     case 'no-synergy':
       return 'no synergy'
+    case 'unknown-synergy':
+      // Deliberately not "no synergy": we derived no tags for this card, which
+      // is a statement about our reading of it, not about the card.
+      return 'synergy unknown'
     case 'over-budget':
       return `over $${String(r.limit ?? 0)}`
     default:
@@ -73,7 +78,14 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
     case 'keyword-synergy': {
       // Said as a mechanism, not a score: "why" is what P4 asks the reason for.
       const tag = (r.tag ?? '').replace(/-/g, ' ')
-      return r.direction === 'payoff' ? `pays off your ${tag}` : `enables your ${tag}`
+      // Three directions, three different claims. 'theme' is the weak one —
+      // the card wants what other cards in the deck want — and it says so
+      // rather than borrowing the language of an enable.
+      return r.direction === 'payoff'
+        ? `pays off your ${tag}`
+        : r.direction === 'theme'
+          ? `shares your ${tag} theme`
+          : `enables your ${tag}`
     }
     case 'corpus-inclusion':
       return 'played in similar decks'
@@ -476,6 +488,10 @@ const Curve = ({ curve }: { curve: api.Analysis['curve'] }): React.JSX.Element =
         ))}
       </div>
       <p className="curve-key">
+        {/* All three states named, not just the two problems. The colours sit
+            in the 6–8 CVD band (see tokens.ts), so the key is not a nicety —
+            it is the second signal that makes them tellable apart. */}
+        <i className="balanced">in range</i>
         <i className="short">short</i>
         <i className="over">too many</i>
         <span>— band is the target range</span>
@@ -698,7 +714,57 @@ const ImportDialog = ({
   )
 }
 
-const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => {
+/**
+ * The magnifying glass, with the auto-query countdown drawn around it.
+ *
+ * The ring is a CSS animation rather than a JavaScript-driven redraw: ten
+ * seconds at 60 fps is six hundred renders to move one circle, and the browser
+ * interpolates it for free. `key` restarts the animation whenever the draft
+ * changes, which is what makes "any adjustment resets the clock" visible.
+ *
+ * Colour is not the signal here, and neither is the ring on its own — the
+ * button's accessible name counts down in words, so someone who cannot see the
+ * ring still knows a query is coming and how long they have to stop it.
+ */
+const SearchButton = ({
+  onRun,
+  remaining,
+  restartKey,
+}: {
+  readonly onRun: () => void
+  readonly remaining: number | null
+  readonly restartKey: string
+}): React.JSX.Element => {
+  const label =
+    remaining === null
+      ? 'Run this filter'
+      : `Run this filter — runs on its own in ${String(remaining)} second${remaining === 1 ? '' : 's'}`
+  return (
+    <button className="act search" onClick={onRun} aria-label={label} title={label}>
+      {remaining === null ? null : (
+        <svg className="ring" viewBox="0 0 28 28" aria-hidden="true">
+          <circle className="ring-track" cx="14" cy="14" r="12" />
+          <circle
+            key={restartKey}
+            className="ring-fill"
+            cx="14"
+            cy="14"
+            r="12"
+            style={{ animationDuration: `${String(AUTO_QUERY_MS)}ms` }}
+          />
+        </svg>
+      )}
+      <span aria-hidden="true">{'⌕'}</span>
+      {/* Announced politely so a screen reader hears the countdown start
+          without it interrupting whatever is being read. */}
+      <span className="sr" role="status">
+        {remaining === null ? '' : `Filter runs on its own in ${String(remaining)} seconds`}
+      </span>
+    </button>
+  )
+}
+
+export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => {
   const [deck, setDeck] = useState(initial)
   const [groups, setGroups] = useState<api.Group[]>([])
   const [unavailable, setUnavailable] = useState<api.Unavailable[]>([])
@@ -730,12 +796,36 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
   const [columns, setColumns] = useState<readonly string[]>([])
   const [columnMatches, setColumnMatches] = useState<Map<string, Set<string>>>(new Map())
   const [draftQuery, setDraftQuery] = useState('')
+  /**
+   * Run the filter on its own if the box sits untouched.
+   *
+   * Kept in localStorage rather than on the deck. It changes nothing about what
+   * the deck IS or what gets recommended — it is a preference about this
+   * browser, and putting it on the deck record would mean a domain contract
+   * change and a round-trip for a checkbox. It sits under Deck options because
+   * that is where the other filter-shaping controls are, not because it is
+   * deck state.
+   */
+  const [autoQuery, setAutoQuery] = useState<boolean>(
+    () => localStorage.getItem('lw.autoQuery') === 'on',
+  )
+  useEffect(() => {
+    localStorage.setItem('lw.autoQuery', autoQuery ? 'on' : 'off')
+  }, [autoQuery])
+
+  const auto = useAutoQuery({ enabled: autoQuery, draft: draftQuery, committed: query }, () =>
+    setQuery(draftQuery),
+  )
   const [notice, setNotice] = useState<string | null>(null)
   const deckRef = useRef(deck)
   const queryRef = useRef(query)
   const columnsRef = useRef<readonly string[]>([])
   deckRef.current = deck
   queryRef.current = query
+  // This assignment was missing, and nothing caught it: columns were added to
+  // the UI, the request never carried them, and every cell rendered the "no"
+  // dot. Kept beside the other two so the set reads as one block.
+  columnsRef.current = columns
 
   const load = useCallback(async (commands: readonly PendingCommand[]): Promise<QueryResult> => {
     let current = deckRef.current
@@ -800,7 +890,10 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
   const { refresh } = pipeline
   useEffect(() => {
     refresh()
-  }, [query, refresh])
+    // `columns` belongs here for the same reason `query` does: adding one
+    // changes what the server must compute. Without it a new column showed no
+    // ticks until something else happened to trigger a recompute.
+  }, [query, columns, refresh])
 
   // Basics never change for a deck — its colour identity is fixed by its
   // commanders — so this is fetched once rather than with every recompute.
@@ -1188,6 +1281,18 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
               Exclude Universes Beyond
             </label>
 
+            <label
+              className="check"
+              title="Stop typing and the filter runs by itself after ten seconds. The ring around the magnifying glass shows how long is left; typing anything resets it."
+            >
+              <input
+                type="checkbox"
+                checked={autoQuery}
+                onChange={(e) => setAutoQuery(e.target.checked)}
+              />
+              Auto query after 10 seconds
+            </label>
+
             <label className="option-field">
               <span>Max per card</span>
               <input
@@ -1265,15 +1370,13 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
                 aria-label="Filter suggestions"
               />
               {/* Explicit, because a query is expensive: typing no longer fires
-                  a recompute on its own. Enter does the same thing. */}
-              <button
-                className="act"
-                onClick={() => setQuery(draftQuery)}
-                aria-label="Run this filter"
-                title="Run this filter"
-              >
-                {'\u2315'}
-              </button>
+                  a recompute on its own. Enter does the same thing, and so does
+                  the countdown when Deck options has it switched on. */}
+              <SearchButton
+                onRun={() => setQuery(draftQuery)}
+                remaining={auto.remaining}
+                restartKey={draftQuery}
+              />
               <button
                 className="act"
                 disabled={draftQuery.trim() === '' || columns.includes(draftQuery.trim())}
