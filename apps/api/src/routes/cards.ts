@@ -278,6 +278,23 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
       printingsFor(pool, id),
       combosContaining(pool, [id]),
     ])
-    return { ...card, printings, combos }
+
+    /*
+     * Combo pieces carry their names, not just their ids.
+     *
+     * The client cross-references pieces against the deck to show what a card
+     * combos WITH, and the interesting case is the piece that is NOT in the
+     * deck yet — which is therefore not in the client's hydrated card map and
+     * has no name there. Without this the preview would have to fetch again to
+     * render the one thing it is trying to say.
+     */
+    const pieceIds = [...new Set(combos.flatMap((c) => c.pieces))]
+    const names = new Map((await getCards(pool, pieceIds)).map((c) => [c.oracleId, c.name]))
+    const withNames = combos.map((combo) => ({
+      ...combo,
+      pieces: combo.pieces.map((oracle) => ({ oracleId: oracle, name: names.get(oracle) ?? null })),
+    }))
+
+    return { ...card, printings, combos: withNames }
   })
 }

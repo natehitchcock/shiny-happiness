@@ -592,14 +592,182 @@ const Semantics = ({
   )
 }
 
+/**
+ * Who this card actually works with, in the deck the user has.
+ *
+ * The preview already said "in 114 combos" and "causes: token", both of which
+ * are facts about the card in the abstract. Neither answers the question a
+ * person opens a preview to ask, which is "does this do anything for MY deck".
+ *
+ * Everything here is computed on the client. The deck, the hydrated cards and
+ * their synergy tags are all already in memory, and the combo pieces arrive
+ * named with the card detail — so opening a preview costs one request and the
+ * answer is drawn from what is already known, rather than a second round trip.
+ */
+interface Partner {
+  readonly oracleId: string
+  readonly name: string
+  readonly locked: boolean
+  /** Not in the deck — the piece you would have to add. */
+  readonly missing?: boolean
+  readonly why?: string
+}
+
+const PartnerName = ({ p }: { p: Partner }): React.JSX.Element => (
+  <span
+    className="partner"
+    data-locked={p.locked}
+    data-missing={p.missing === true}
+    title={
+      p.missing === true
+        ? `${p.name} is not in your deck yet`
+        : p.locked
+          ? `${p.name} — locked`
+          : p.name
+    }
+  >
+    {p.name}
+    {p.why === undefined ? null : <span className="partner-why"> {p.why}</span>}
+  </span>
+)
+
+const Works = ({
+  detail,
+  accepted,
+  lockedIds,
+  cards,
+}: {
+  detail: api.CardDetail
+  accepted: ReadonlySet<string>
+  lockedIds: ReadonlySet<string>
+  cards: ReadonlyMap<string, api.Card>
+}): React.JSX.Element | null => {
+  const self = detail.oracleId
+
+  const partner = (oracleId: string, name: string | null, why?: string): Partner => ({
+    oracleId,
+    name: name ?? cards.get(oracleId)?.name ?? 'Unknown card',
+    locked: lockedIds.has(oracleId),
+    missing: !accepted.has(oracleId),
+    ...(why === undefined ? {} : { why }),
+  })
+
+  // Combos this card completes with cards already accepted.
+  const assembled: Partner[] = []
+  // Combos needing exactly one more card — the near miss worth showing.
+  const oneAway: { readonly needs: Partner; readonly with: readonly Partner[] }[] = []
+
+  for (const combo of detail.combos) {
+    const others = combo.pieces.filter((p) => p.oracleId !== self)
+    if (others.length === 0) continue
+    const missing = others.filter((p) => !accepted.has(p.oracleId))
+    if (missing.length === 0) {
+      for (const p of others) assembled.push(partner(p.oracleId, p.name))
+    } else if (missing.length === 1 && oneAway.length < 6) {
+      const need = missing[0]!
+      oneAway.push({
+        needs: partner(need.oracleId, need.name),
+        with: others
+          .filter((p) => p.oracleId !== need.oracleId)
+          .map((p) => partner(p.oracleId, p.name)),
+      })
+    }
+  }
+
+  // Deck cards whose synergy tags pair with this card's, strongest first.
+  const produces = new Set(detail.synergyProduces)
+  const wants = new Set(detail.synergyWants)
+  const synergy: Partner[] = []
+  for (const oracleId of accepted) {
+    if (oracleId === self) continue
+    const other = cards.get(oracleId)
+    if (other === undefined) continue
+    const enables = other.synergyWants.filter((t) => produces.has(t))
+    const paysOff = other.synergyProduces.filter((t) => wants.has(t))
+    const tag = enables[0] ?? paysOff[0]
+    if (tag === undefined) continue
+    synergy.push(
+      partner(
+        oracleId,
+        other.name,
+        `— ${enables[0] !== undefined ? 'wants' : 'causes'} ${tag.replace(/-/g, ' ')}`,
+      ),
+    )
+  }
+
+  const dedupe = (list: readonly Partner[]): Partner[] => {
+    const seen = new Set<string>()
+    return list.filter((p) => (seen.has(p.oracleId) ? false : (seen.add(p.oracleId), true)))
+  }
+  const combosWith = dedupe(assembled).slice(0, 8)
+  // Locked first: those are cards the user has committed to, so a pairing with
+  // one is worth more than a pairing with a card they may still cut.
+  const synergyWith = dedupe(synergy)
+    .sort((a, b) => Number(b.locked) - Number(a.locked))
+    .slice(0, 8)
+
+  if (combosWith.length === 0 && oneAway.length === 0 && synergyWith.length === 0) return null
+
+  return (
+    <>
+      <h4>Works with your deck</h4>
+
+      {combosWith.length > 0 ? (
+        <p className="partners">
+          <span className="partners-label">Combos with</span>
+          {combosWith.map((p) => (
+            <PartnerName key={p.oracleId} p={p} />
+          ))}
+        </p>
+      ) : null}
+
+      {combosWith.length === 0 && oneAway.length > 0 ? (
+        <>
+          <p className="partners-note">
+            No combo assembled yet — these need one more card, shown in rust:
+          </p>
+          {oneAway.map((line) => (
+            <p className="partners" key={line.needs.oracleId}>
+              <PartnerName p={line.needs} />
+              {line.with.length === 0 ? null : (
+                <>
+                  <span className="partners-label">with</span>
+                  {line.with.map((p) => (
+                    <PartnerName key={p.oracleId} p={p} />
+                  ))}
+                </>
+              )}
+            </p>
+          ))}
+        </>
+      ) : null}
+
+      {synergyWith.length > 0 ? (
+        <p className="partners">
+          <span className="partners-label">Synergises with</span>
+          {synergyWith.map((p) => (
+            <PartnerName key={p.oracleId} p={p} />
+          ))}
+        </p>
+      ) : null}
+    </>
+  )
+}
+
 const Preview = ({
   detail,
   price,
   onClose,
+  accepted,
+  lockedIds,
+  cards,
 }: {
   detail: api.CardDetail | null
   price: number | null | undefined
   onClose: () => void
+  accepted: ReadonlySet<string>
+  lockedIds: ReadonlySet<string>
+  cards: ReadonlyMap<string, api.Card>
 }): React.JSX.Element | null => {
   if (detail === null) return null
   return (
@@ -634,6 +802,8 @@ const Preview = ({
           </p>
         </>
       ) : null}
+
+      <Works detail={detail} accepted={accepted} lockedIds={lockedIds} cards={cards} />
 
       <Semantics produces={detail.synergyProduces} wants={detail.synergyWants} />
     </aside>
@@ -1470,6 +1640,16 @@ export const Workspace = ({
   )
   const basicIds = useMemo(() => new Set(basics.map((b) => b.oracleId)), [basics])
 
+  /** Accepted cards by id, for the preview's "works with your deck" pass. */
+  const acceptedIds = useMemo(
+    () =>
+      new Set([
+        ...optimistic.commanders,
+        ...optimistic.entries.filter((e) => e.zone === 'accepted').map((e) => e.oracleId),
+      ]),
+    [optimistic],
+  )
+
   /**
    * The gold overlays, derived here rather than read from the analysis.
    *
@@ -1953,6 +2133,9 @@ export const Workspace = ({
               detail={detail}
               price={prices.get(detail?.oracleId ?? '')}
               onClose={() => setDetail(null)}
+              accepted={acceptedIds}
+              lockedIds={lockedIds}
+              cards={cards}
             />
 
             <h2 style={{ marginTop: '1.25rem' }}>Composition</h2>

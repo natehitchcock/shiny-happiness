@@ -1168,6 +1168,45 @@ select {
   margin: 0 0 var(--step);
 }
 
+/* ------------------------------------------ works with your deck */
+
+.partners {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  margin: 0 0 var(--step);
+  font-size: 0.75rem;
+}
+.partners-label {
+  color: var(--parchment-dim);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.partners-note {
+  margin: 0 0 4px;
+  color: var(--parchment-dim);
+  font-size: 0.72rem;
+}
+.partner {
+  color: var(--parchment);
+}
+/* A piece you do not own yet. Rust is the app's "this is the problem" colour
+   everywhere else, and here the missing card IS the problem. */
+.partner[data-missing='true'] {
+  color: var(--rust);
+}
+/* Gold means decided, the same as a locked deck row and a locked curve bucket.
+   Beats missing: a locked card cannot also be one you have not added. */
+.partner[data-locked='true'] {
+  color: var(--brass);
+}
+.partner-why {
+  color: var(--parchment-dim);
+  font-size: 0.68rem;
+}
+
 /* -------------------------------------------------- hints and semantics */
 
 /* The trigger keeps the look of whatever it wraps — it is a button so that the

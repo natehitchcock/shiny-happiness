@@ -35,7 +35,15 @@ export interface CardDetail extends Card {
     rarity: string
     priceUsd: number | null
   }[]
-  combos: { id: string; pieces: string[]; produces: string[] }[]
+  /**
+   * Pieces carry their names so the preview can name a combo piece that is not
+   * in the deck — which is the piece worth naming.
+   */
+  combos: {
+    id: string
+    pieces: { oracleId: string; name: string | null }[]
+    produces: string[]
+  }[]
 }
 
 export interface Reason {
