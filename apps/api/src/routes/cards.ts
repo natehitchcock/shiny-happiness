@@ -44,10 +44,10 @@ const UNSUPPORTED_FIELDS: ReadonlyMap<QueryField, string> = new Map([
  *
  * These are values, not fields, so the field guard above never sees them: `is`
  * is a supported field, and `evaluateIs` reads them from `AnnotatedCandidate`
- * members that `asCandidate` has no data for. `is:reserved` needs the printing
- * rows; `is:gamechanger` needs `brackets/rules.data.json`, which DATA-05 has not
- * populated. Left unguarded, `is:reserved` returns nothing and — worse —
- * `-is:gamechanger` returns every Game Changer as though it were clean.
+ * members that `asCandidate` has no data for. `is:gamechanger` needs
+ * `brackets/rules.data.json`, which DATA-05 has not populated; left unguarded it
+ * is the dangerous one, because `-is:gamechanger` would return every Game
+ * Changer as though it were clean.
  */
 const UNSUPPORTED_IS: ReadonlyMap<string, string> = new Map([
   ['gamechanger', 'needs the bracket rules, which DATA-05 has not populated'],
@@ -258,7 +258,15 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
 
   app.post('/api/v1/cards/batch', { schema: { body: cardBatchBody } }, async (req) => {
     const { oracleIds } = req.body as { oracleIds: string[] }
-    return { items: await getCards(pool, oracleIds.map(oracleId)) }
+    const ids = oracleIds.map(oracleId)
+    const [items, facts] = await Promise.all([getCards(pool, ids), printingFactsForAll(pool)])
+
+    // Prices ride ALONGSIDE the cards rather than on them. `Card` is oracle
+    // identity and deliberately carries no price (doc 02) — a price belongs to a
+    // printing and goes stale in a day (ADR-0009 Q7).
+    const prices: Record<string, number | null> = {}
+    for (const id of ids) prices[id] = facts.get(id)?.priceUsd ?? null
+    return { items, prices }
   })
 
   app.get('/api/v1/cards/:oracleId', { schema: { params: oracleIdParams } }, async (req, rep) => {

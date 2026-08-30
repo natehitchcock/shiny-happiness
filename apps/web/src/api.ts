@@ -11,9 +11,23 @@ export interface Card {
   manaCost: string | null
   manaValue: number
   typeLine: string
+  types: string[]
+  oracleText: string
   colorIdentity: string[]
   primaryRole: string
   edhrecRank: number | null
+  universesBeyond: boolean
+}
+
+export interface CardDetail extends Card {
+  printings: {
+    printingId: string
+    setCode: string
+    setName: string
+    rarity: string
+    priceUsd: number | null
+  }[]
+  combos: { id: string; pieces: string[]; produces: string[] }[]
 }
 
 export interface Reason {
@@ -50,6 +64,8 @@ export interface Deck {
   targetBracket: number
   archetype: string
   version: number
+  excludeUniversesBeyond: boolean
+  budget: { maxTotalUsd: number | null; maxCardUsd: number | null } | null
   entries: { oracleId: string; zone: 'accepted' | 'excluded'; locked: boolean }[]
 }
 
@@ -72,24 +88,54 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   return (await response.json()) as T
 }
 
-export const searchCards = (q: string, limit = 12): Promise<{ items: Card[] }> =>
-  request(`/cards/search?q=${encodeURIComponent(q)}&limit=${String(limit)}`)
+export const searchCards = (
+  q: string,
+  options: { limit?: number; excludeUniversesBeyond?: boolean } = {},
+): Promise<{ items: Card[] }> =>
+  request(
+    `/cards/search?q=${encodeURIComponent(q)}&limit=${String(options.limit ?? 12)}` +
+      (options.excludeUniversesBeyond === true ? '&excludeUniversesBeyond=true' : ''),
+  )
 
-export const hydrate = async (oracleIds: string[]): Promise<Map<string, Card>> => {
-  if (oracleIds.length === 0) return new Map()
-  const { items } = await request<{ items: Card[] }>('/cards/batch', {
-    method: 'POST',
-    body: JSON.stringify({ oracleIds: [...new Set(oracleIds)].slice(0, 500) }),
-  })
-  return new Map(items.map((c) => [c.oracleId, c]))
+export interface Hydrated {
+  cards: Map<string, Card>
+  /** Cheapest printing, in USD. An estimate — see `PriceNote`. */
+  prices: Map<string, number | null>
 }
+
+export const hydrate = async (oracleIds: string[]): Promise<Hydrated> => {
+  if (oracleIds.length === 0) return { cards: new Map(), prices: new Map() }
+  const body = await request<{ items: Card[]; prices: Record<string, number | null> }>(
+    '/cards/batch',
+    {
+      method: 'POST',
+      body: JSON.stringify({ oracleIds: [...new Set(oracleIds)].slice(0, 500) }),
+    },
+  )
+  return {
+    cards: new Map(body.items.map((c) => [c.oracleId, c])),
+    prices: new Map(Object.entries(body.prices)),
+  }
+}
+
+export const getCardDetail = (oracleId: string): Promise<CardDetail> =>
+  request(`/cards/${oracleId}`)
 
 export const createDeck = (body: {
   name: string
   commanders: string[]
   targetBracket: number
   archetype: string
+  excludeUniversesBeyond?: boolean
 }): Promise<Deck> => request('/decks', { method: 'POST', body: JSON.stringify(body) })
+
+export const patchDeck = (
+  id: string,
+  body: {
+    excludeUniversesBeyond?: boolean
+    budget?: { maxTotalUsd: number | null; maxCardUsd: number | null } | null
+  },
+): Promise<Deck> => request(`/decks/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 
 export const getDeck = (id: string): Promise<Deck> => request(`/decks/${id}`)
 
@@ -140,6 +186,12 @@ export interface Analysis {
   curve: { averageManaValue: number }
   legality: { legal: boolean; problems: { kind: string; oracleId?: string }[] }
   deckCombos: { comboId: string; pieces: string[]; produces: string[] }[]
+  prices: {
+    deckTotalUsd: number
+    pricedCards: number
+    unpricedCards: number
+    budget: { maxTotalUsd: number | null; maxCardUsd: number | null } | null
+  }
   unavailable: Unavailable[]
 }
 

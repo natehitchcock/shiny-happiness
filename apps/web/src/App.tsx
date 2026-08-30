@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
+import type { Card } from './api'
 
 /** Human-readable label for a composition dimension. */
 const dimensionName = (d: { role?: string; type?: string }): string => d.role ?? d.type ?? '—'
+
+/** Prices are estimates, and the interface has to say so (ADR-0009 Q7). */
+const usd = (value: number | null | undefined): string =>
+  value === null || value === undefined ? '—' : `$${value.toFixed(2)}`
 
 const plural = (n: number, word: string): string => `${String(n)} ${word}${n === 1 ? '' : 's'}`
 
@@ -107,6 +112,51 @@ const CardRow = ({
   )
 }
 
+/**
+ * Deck sections, in the order the rail shows them.
+ *
+ * `enchantment` and `other` are here although they were not asked for: the
+ * domain has eight card types, and without them every enchantment would vanish
+ * from the rail — a silent drop, which is the one thing this codebase will not
+ * do. `other` catches Battles and anything a future set invents.
+ */
+const DECK_SECTIONS = [
+  { key: 'commander', label: 'Commander' },
+  { key: 'planeswalker', label: 'Planeswalkers' },
+  { key: 'creature', label: 'Creatures' },
+  { key: 'sorcery', label: 'Sorceries' },
+  { key: 'instant', label: 'Instants' },
+  { key: 'enchantment', label: 'Enchantments' },
+  { key: 'artifact', label: 'Artifacts' },
+  { key: 'land', label: 'Lands' },
+  { key: 'other', label: 'Other' },
+] as const
+
+/**
+ * One home per card, most-specific first.
+ *
+ * An Artifact Creature is both; decklists file it under Creatures, so Creature
+ * wins. Land wins outright because a creature-land is counted as a land by
+ * everyone. Mirrors `ROLE_PRECEDENCE` in the domain, for the same reason.
+ */
+const SECTION_PRECEDENCE = [
+  'land',
+  'creature',
+  'planeswalker',
+  'artifact',
+  'enchantment',
+  'instant',
+  'sorcery',
+] as const
+
+const sectionOf = (card: Card | undefined): string => {
+  if (card === undefined) return 'other'
+  for (const type of SECTION_PRECEDENCE) {
+    if (card.types.includes(type)) return type
+  }
+  return 'other'
+}
+
 const ARCHETYPES = [
   'aggro',
   'midrange',
@@ -125,6 +175,7 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
   const [chosen, setChosen] = useState<api.Card | null>(null)
   const [archetype, setArchetype] = useState('midrange')
   const [bracket, setBracket] = useState(3)
+  const [noUB, setNoUB] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -138,7 +189,9 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
       void api
         // Only legendary creatures can lead a deck, so the search says so
         // rather than offering every card and rejecting the choice later.
-        .searchCards(`${term} type:legendary type:creature`)
+        .searchCards(`${term} type:legendary type:creature`, {
+          excludeUniversesBeyond: noUB,
+        })
         .then((r) => {
           if (!cancelled) setResults(r.items)
         })
@@ -150,7 +203,7 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
       cancelled = true
       clearTimeout(timer)
     }
-  }, [term])
+  }, [term, noUB])
 
   const create = (): void => {
     if (chosen === null) return
@@ -162,6 +215,7 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
         commanders: [chosen.oracleId],
         targetBracket: bracket,
         archetype,
+        excludeUniversesBeyond: noUB,
       })
       .then(onCreated)
       .catch((e: unknown) => {
@@ -228,11 +282,64 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
         </div>
       </div>
 
+      <label className="check">
+        <input type="checkbox" checked={noUB} onChange={(e) => setNoUB(e.target.checked)} />
+        Exclude Universes Beyond cards
+      </label>
+
       <button className="primary" disabled={chosen === null || busy} onClick={create}>
         {busy ? 'Creating…' : 'Start building'}
       </button>
       {error !== null ? <p className="problem">{error}</p> : null}
     </div>
+  )
+}
+
+/** Cards the deck holds, collapsed to one row per card with a count. */
+interface DeckLine {
+  oracleId: string
+  copies: number
+}
+
+const Preview = ({
+  detail,
+  price,
+  onClose,
+}: {
+  detail: api.CardDetail | null
+  price: number | null | undefined
+  onClose: () => void
+}): React.JSX.Element | null => {
+  if (detail === null) return null
+  return (
+    <aside className="preview" aria-label={`${detail.name} details`}>
+      <div className="preview-head">
+        <h3>{detail.name}</h3>
+        <button className="act" onClick={onClose} aria-label="Close preview">
+          Close
+        </button>
+      </div>
+      <p className="type-line">
+        {detail.typeLine}
+        {detail.manaCost !== null ? <span className="cost"> {detail.manaCost}</span> : null}
+      </p>
+      {/* Oracle text is the card. Newlines are meaningful — they separate
+          abilities — so it is rendered pre-wrapped rather than collapsed. */}
+      <p className="oracle">{detail.oracleText === '' ? 'No rules text.' : detail.oracleText}</p>
+      <p className="note">
+        {usd(price)} <span className="estimate">est.</span> · {detail.printings.length} printing
+        {detail.printings.length === 1 ? '' : 's'}
+        {detail.universesBeyond ? ' · Universes Beyond' : ''}
+      </p>
+      {detail.combos.length > 0 ? (
+        <>
+          <h4>In {plural(detail.combos.length, 'combo')}</h4>
+          <p className="note">
+            {[...new Set(detail.combos.flatMap((c) => c.produces))].slice(0, 6).join(', ')}
+          </p>
+        </>
+      ) : null}
+    </aside>
   )
 }
 
@@ -242,8 +349,11 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
   const [unavailable, setUnavailable] = useState<api.Unavailable[]>([])
   const [analysis, setAnalysis] = useState<api.Analysis | null>(null)
   const [cards, setCards] = useState<Map<string, api.Card>>(new Map())
+  const [prices, setPrices] = useState<Map<string, number | null>>(new Map())
   const [query, setQuery] = useState('')
   const [queryError, setQueryError] = useState<string | null>(null)
+  const [detail, setDetail] = useState<api.CardDetail | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const seq = useRef(0)
   const deckRef = useRef(deck)
@@ -268,37 +378,93 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
       ...current.entries.map((e) => e.oracleId),
       ...recs.groups.flatMap((g) => g.items.map((i) => i.oracleId)),
     ]
-    setCards(await api.hydrate(needed))
+    const hydrated = await api.hydrate(needed)
+    if (mine !== seq.current) return
+    setCards(hydrated.cards)
+    setPrices(hydrated.prices)
   }, [])
 
-  // Keyed on the deck id and version rather than the object: a refetch that
-  // returns an identical deck must not trigger another round.
   const deckKey = `${deck.id}:${String(deck.version)}`
   useEffect(() => {
-    void refresh(deckRef.current, query).catch(() => undefined)
+    void refresh(deckRef.current, query).catch((e: unknown) => {
+      setError(e instanceof Error ? e.message : 'Could not load suggestions')
+    })
   }, [deckKey, query, refresh])
 
   const act = (oracleId: string, type: 'accept' | 'exclude'): void => {
     setBusy(true)
+    setError(null)
     const command =
       type === 'accept' ? { type, oracleId, origin: 'recommended' } : { type, oracleId }
     void api
       .sendCommands(deck.id, [command], deck.version)
       .then((result) => {
         setDeck(result.deck)
+        // A rejection is the server declining, and the user has to be told —
+        // swallowing it looks like the click did nothing.
+        const refused = result.rejected[0]
+        if (refused !== undefined) setError(`Refused: ${refused.reason.kind}`)
+        setBusy(false)
+      })
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : 'Could not save that change')
+        setBusy(false)
+      })
+  }
+
+  const setDeckOption = (body: Parameters<typeof api.patchDeck>[1]): void => {
+    setBusy(true)
+    void api
+      .patchDeck(deck.id, body)
+      .then((d) => {
+        setDeck(d)
         setBusy(false)
       })
       .catch(() => setBusy(false))
+  }
+
+  const open = (oracleId: string): void => {
+    void api
+      .getCardDetail(oracleId)
+      .then(setDetail)
+      .catch(() => setDetail(null))
   }
 
   const accepted = deck.entries.filter((e) => e.zone === 'accepted')
   const excluded = deck.entries.filter((e) => e.zone === 'excluded')
   const deckSize = accepted.length + deck.commanders.length
 
+  /** Group the deck by card type, collapsing duplicates to a count. */
+  const sections = useMemo(() => {
+    const byKey = new Map<string, Map<string, number>>()
+    const put = (key: string, oracleId: string): void => {
+      const lines = byKey.get(key) ?? new Map<string, number>()
+      lines.set(oracleId, (lines.get(oracleId) ?? 0) + 1)
+      byKey.set(key, lines)
+    }
+    for (const id of deck.commanders) put('commander', id)
+    for (const e of accepted) put(sectionOf(cards.get(e.oracleId)), e.oracleId)
+
+    return DECK_SECTIONS.map((section) => ({
+      ...section,
+      lines: [...(byKey.get(section.key) ?? new Map<string, number>())]
+        .map(([oracleId, copies]): DeckLine => ({ oracleId, copies }))
+        .sort((a, b) =>
+          (cards.get(a.oracleId)?.name ?? '').localeCompare(cards.get(b.oracleId)?.name ?? ''),
+        ),
+    })).filter((section) => section.lines.length > 0)
+  }, [deck.commanders, accepted, cards])
+
   const deficits = useMemo(
     () => (analysis?.deficits ?? []).filter((d) => d.delta < 0).slice(0, 8),
     [analysis],
   )
+
+  const budget = deck.budget
+  const overCard =
+    budget?.maxCardUsd !== null && budget?.maxCardUsd !== undefined
+      ? accepted.filter((e) => (prices.get(e.oracleId) ?? 0) > budget.maxCardUsd!).length
+      : 0
 
   return (
     <>
@@ -315,33 +481,61 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
         </span>
       </header>
 
+      {error !== null ? (
+        <p className="banner problem" role="status">
+          {error}
+        </p>
+      ) : null}
+
       <div className="workspace">
         <section className="region" aria-label="Deck">
           <h2>Deck · {deckSize}</h2>
-          {deck.commanders.map((id) => (
-            <CardRow key={id} card={cards.get(id)} actions={[]} />
-          ))}
-          {accepted.map((e, i) => (
-            <CardRow
-              key={`${e.oracleId}-${String(i)}`}
-              card={cards.get(e.oracleId)}
-              actions={[
-                { label: 'Remove', kind: 'exclude', onClick: () => act(e.oracleId, 'exclude') },
-              ]}
-            />
+          {sections.map((section) => (
+            <div className="deck-section" key={section.key}>
+              <h3>
+                {section.label}
+                <span className="count">{section.lines.reduce((n, l) => n + l.copies, 0)}</span>
+              </h3>
+              {section.lines.map((line) => (
+                <div className="card-row" key={line.oracleId}>
+                  {line.copies > 1 ? <span className="copies">{line.copies}×</span> : null}
+                  <button
+                    className="name as-link"
+                    onClick={() => open(line.oracleId)}
+                    aria-label={`Preview ${cards.get(line.oracleId)?.name ?? 'card'}`}
+                  >
+                    {cards.get(line.oracleId)?.name ?? 'Loading…'}
+                  </button>
+                  <span className="cost">{usd(prices.get(line.oracleId))}</span>
+                  {section.key === 'commander' ? null : (
+                    <button
+                      className="act exclude"
+                      onClick={() => act(line.oracleId, 'exclude')}
+                      aria-label={`Remove ${cards.get(line.oracleId)?.name ?? 'card'}`}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           ))}
           {accepted.length === 0 ? (
-            <p className="note">Nothing accepted yet. Suggestions are on the right.</p>
+            <p className="note">Nothing accepted yet. Suggestions are in the middle.</p>
           ) : null}
 
           {excluded.length > 0 ? (
-            <>
-              <h2 style={{ marginTop: '1rem' }}>Excluded · {excluded.length}</h2>
+            <div className="deck-section">
+              <h3>
+                Excluded<span className="count">{excluded.length}</span>
+              </h3>
               <p className="note">These are never suggested again.</p>
               {excluded.map((e) => (
-                <CardRow key={e.oracleId} card={cards.get(e.oracleId)} actions={[]} />
+                <div className="card-row" key={e.oracleId}>
+                  <span className="name">{cards.get(e.oracleId)?.name ?? 'Loading…'}</span>
+                </div>
               ))}
-            </>
+            </div>
           ) : null}
         </section>
 
@@ -351,7 +545,7 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
             <input
               type="text"
               value={query}
-              placeholder="Filter — try  t:creature  or  mv<=3"
+              placeholder="Filter — try  t:creature  or  mv<=3  or  price<=5"
               onChange={(e) => setQuery(e.target.value)}
               aria-label="Filter suggestions"
             />
@@ -366,23 +560,38 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
                 <span className="rationale">{g.rationale}</span>
               </div>
               {g.items.map((item) => (
-                <CardRow
-                  key={item.oracleId}
-                  card={cards.get(item.oracleId)}
-                  item={item}
-                  actions={[
-                    {
-                      label: 'Add',
-                      kind: 'accept',
-                      onClick: () => act(item.oracleId, 'accept'),
-                    },
-                    {
-                      label: 'Never',
-                      kind: 'exclude',
-                      onClick: () => act(item.oracleId, 'exclude'),
-                    },
-                  ]}
-                />
+                <div className="card-row" key={item.oracleId}>
+                  <Degree degree={item.comboDegree} near={item.nearCombosAt1} />
+                  <button
+                    className="name as-link"
+                    onClick={() => open(item.oracleId)}
+                    aria-label={`Preview ${cards.get(item.oracleId)?.name ?? 'card'}`}
+                  >
+                    {cards.get(item.oracleId)?.name ?? 'Loading…'}
+                    <span className="reasons">
+                      {item.reasons.map((r, i) => (
+                        <span className="reason" data-kind={r.kind} key={i}>
+                          {reasonText(r, item)}
+                        </span>
+                      ))}
+                    </span>
+                  </button>
+                  <span className="cost">{usd(prices.get(item.oracleId))}</span>
+                  <button
+                    className="act accept"
+                    onClick={() => act(item.oracleId, 'accept')}
+                    aria-label={`Add ${cards.get(item.oracleId)?.name ?? 'card'}`}
+                  >
+                    Add
+                  </button>
+                  <button
+                    className="act exclude"
+                    onClick={() => act(item.oracleId, 'exclude')}
+                    aria-label={`Never suggest ${cards.get(item.oracleId)?.name ?? 'card'}`}
+                  >
+                    Never
+                  </button>
+                </div>
               ))}
             </div>
           ))}
@@ -391,7 +600,83 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
         </section>
 
         <section className="region" aria-label="Analysis">
-          <h2>Composition</h2>
+          <Preview
+            detail={detail}
+            price={prices.get(detail?.oracleId ?? '')}
+            onClose={() => setDetail(null)}
+          />
+
+          <h2>Deck options</h2>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={deck.excludeUniversesBeyond}
+              onChange={(e) => setDeckOption({ excludeUniversesBeyond: e.target.checked })}
+            />
+            Exclude Universes Beyond cards
+          </label>
+
+          <div className="row" style={{ marginTop: '0.5rem' }}>
+            <div className="field" style={{ flex: 1 }}>
+              <label htmlFor="maxCard">Max per card</label>
+              <input
+                id="maxCard"
+                type="text"
+                inputMode="decimal"
+                defaultValue={budget?.maxCardUsd ?? ''}
+                placeholder="any"
+                onBlur={(e) => {
+                  const value = e.target.value.trim()
+                  setDeckOption({
+                    budget: {
+                      maxCardUsd: value === '' ? null : Number(value),
+                      maxTotalUsd: budget?.maxTotalUsd ?? null,
+                    },
+                  })
+                }}
+              />
+            </div>
+            <div className="field" style={{ flex: 1 }}>
+              <label htmlFor="maxTotal">Max deck total</label>
+              <input
+                id="maxTotal"
+                type="text"
+                inputMode="decimal"
+                defaultValue={budget?.maxTotalUsd ?? ''}
+                placeholder="any"
+                onBlur={(e) => {
+                  const value = e.target.value.trim()
+                  setDeckOption({
+                    budget: {
+                      maxCardUsd: budget?.maxCardUsd ?? null,
+                      maxTotalUsd: value === '' ? null : Number(value),
+                    },
+                  })
+                }}
+              />
+            </div>
+          </div>
+
+          {analysis !== null ? (
+            <p className="note">
+              Deck total {usd(analysis.prices.deckTotalUsd)} <span className="estimate">est.</span>
+              {analysis.prices.unpricedCards > 0
+                ? ` · ${String(analysis.prices.unpricedCards)} unpriced`
+                : ''}
+              {budget?.maxTotalUsd !== null &&
+              budget?.maxTotalUsd !== undefined &&
+              analysis.prices.deckTotalUsd > budget.maxTotalUsd
+                ? ' · over budget'
+                : ''}
+              {overCard > 0 ? ` · ${String(overCard)} over the per-card limit` : ''}
+            </p>
+          ) : null}
+          <p className="note estimate-note">
+            Prices are daily estimates from Scryfall and go stale within a day. Not a purchase
+            price.
+          </p>
+
+          <h2 style={{ marginTop: '1.25rem' }}>Composition</h2>
           {deficits.map((d) => {
             const name = dimensionName(d.dimension)
             const target = analysis?.targets.find((t) => dimensionName(t.dimension) === name)

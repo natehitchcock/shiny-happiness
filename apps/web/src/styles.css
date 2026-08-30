@@ -389,3 +389,131 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------------------------------------------------------------- sections */
+
+.deck-section {
+  margin-bottom: calc(var(--step) * 1.5);
+}
+
+.deck-section h3 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--step);
+  font-family: var(--ui);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 3px;
+  margin: 0 0 4px;
+}
+
+.deck-section h3 .count {
+  margin-left: auto;
+  font-family: var(--mono);
+  letter-spacing: 0;
+}
+
+.copies {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--parchment-dim);
+  min-width: 1.8rem;
+}
+
+/* A card name is a control: it opens the preview. It must not look like a
+   button — the row is dense — but it must behave like one. */
+.as-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.as-link:hover {
+  color: var(--brass);
+}
+
+/* ---------------------------------------------------------------- preview */
+
+.preview {
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--brass);
+  border-radius: var(--radius);
+  padding: var(--step) calc(var(--step) * 1.5);
+  margin-bottom: calc(var(--step) * 2);
+  background: var(--ink-2);
+}
+
+.preview-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--step);
+}
+
+.preview-head h3 {
+  font-family: var(--display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+}
+
+.preview h4 {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+  margin: var(--step) 0 2px;
+}
+
+.type-line {
+  font-size: 0.78rem;
+  color: var(--parchment-dim);
+  margin: 2px 0;
+}
+
+/* Newlines separate abilities; collapsing them would run two abilities into
+   one sentence and change what the card says. */
+.oracle {
+  white-space: pre-wrap;
+  font-size: 0.82rem;
+  margin: var(--step) 0;
+}
+
+.estimate {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: var(--parchment-dim);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 0 3px;
+}
+
+.estimate-note {
+  font-size: 0.68rem;
+  opacity: 0.75;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  margin: var(--step) 0;
+}
+
+.banner {
+  margin: 0;
+  padding: 6px calc(var(--step) * 3);
+  border-bottom: 1px solid var(--rule);
+  background: var(--ink-2);
+}

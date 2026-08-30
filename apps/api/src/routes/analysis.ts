@@ -47,6 +47,29 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
       }
     }
 
+    // Summed over the CHEAPEST printing of each accepted card, commanders
+    // included. An estimate, never a purchase price (ADR-0009 Q7, ADR-0011).
+    let deckTotalUsd = 0
+    let pricedCards = 0
+    let unpricedCards = 0
+    for (const entry of deck.entries) {
+      if (entry.zone !== 'accepted') continue
+      const price = context.printingFacts.get(entry.oracleId)?.priceUsd ?? null
+      if (price === null) unpricedCards += 1
+      else {
+        deckTotalUsd += price
+        pricedCards += 1
+      }
+    }
+    for (const commander of deck.commanders) {
+      const price = context.printingFacts.get(commander)?.priceUsd ?? null
+      if (price === null) unpricedCards += 1
+      else {
+        deckTotalUsd += price
+        pricedCards += 1
+      }
+    }
+
     const assembled = deckCombos(comboIndex, accepted).map((comboId) => {
       const combo = comboIndex.byId.get(comboId)
       return { comboId, pieces: combo?.pieces ?? [], produces: combo?.produces ?? [] }
@@ -89,6 +112,16 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
         // unavailable instead of guessed.
         assessed: null,
         violations: [],
+      },
+      prices: {
+        // Rounded to cents; summing floats over 100 cards drifts otherwise.
+        deckTotalUsd: Math.round(deckTotalUsd * 100) / 100,
+        pricedCards,
+        // Named so the UI can say the total is incomplete rather than implying
+        // these cards are free.
+        unpricedCards,
+        budget: deck.budget,
+        estimatedAt: context.snapshotId,
       },
       deckCombos: assembled,
       legality: { legal: problems.length === 0, problems },
