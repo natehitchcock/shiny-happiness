@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { CurveTarget } from './curve.js'
 import {
   CURVE_BUCKETS,
   curveBucket,
@@ -13,7 +14,7 @@ const flat = (n: number): number[] => new Array<number>(CURVE_BUCKETS).fill(n)
 describe('curveTarget', () => {
   it('is a distribution that sums to one', () => {
     for (const archetype of ['aggro', 'control', 'combo', 'midrange'] as const) {
-      const sum = curveTarget(archetype).reduce((a, b) => a + b, 0)
+      const sum = curveTarget(archetype).reduce((a, b) => a + b.ideal, 0)
       expect(sum).toBeCloseTo(1, 6)
     }
   })
@@ -23,7 +24,7 @@ describe('curveTarget', () => {
     const control = curveTarget('control')
 
     // Weighted mean bucket: aggro should want cheaper cards.
-    const mean = (t: readonly number[]): number => t.reduce((a, s, i) => a + s * i, 0)
+    const mean = (t: CurveTarget): number => t.reduce((a, b, i) => a + b.ideal * i, 0)
     expect(mean(aggro)).toBeLessThan(mean(control))
   })
 
@@ -33,7 +34,7 @@ describe('curveTarget', () => {
     const control = curveTarget('control')
 
     // Every bucket lands between the two, and nearer the primary.
-    const meanOf = (t: readonly number[]): number => t.reduce((a, s, i) => a + s * i, 0)
+    const meanOf = (t: CurveTarget): number => t.reduce((a, b, i) => a + b.ideal * i, 0)
     expect(meanOf(blended)).toBeGreaterThan(meanOf(pure))
     expect(meanOf(blended)).toBeLessThan(meanOf(control))
     expect(Math.abs(meanOf(blended) - meanOf(pure))).toBeLessThan(
@@ -82,12 +83,12 @@ describe('curveFit — two-sided, which the old flat-25% heuristic was not', () 
     expect(curveFit(2, curve, target)).toBeLessThan(0)
   })
 
-  it('is near zero when the deck already matches its target', () => {
+  it('is exactly zero when the deck already sits inside the band', () => {
     const total = 100
-    const curve = curveTarget('midrange').map((share) => Math.round(share * total))
+    const curve = curveTarget('midrange').map((band) => Math.round(band.ideal * total))
 
     for (let mv = 0; mv < CURVE_BUCKETS; mv += 1) {
-      expect(Math.abs(curveFit(mv, curve, target))).toBeLessThan(0.35)
+      expect(curveFit(mv, curve, target)).toBe(0)
     }
   })
 
@@ -143,5 +144,66 @@ describe('curveDirection', () => {
     expect(curveDirection(0.5)).toBe('short')
     expect(curveDirection(-0.5)).toBe('over')
     expect(curveDirection(0)).toBe('balanced')
+  })
+})
+
+describe('curve ranges give wiggle room, and the room varies by archetype', () => {
+  it('says nothing about a bucket that is merely a little off', () => {
+    const target = curveTarget('midrange')
+    const total = 100
+    const curve = target.map((band) => Math.round(band.ideal * total))
+    // One card off at three drops. Inside the band, so the curve stays silent
+    // and other signals decide — without this every bucket is permanently a
+    // little bit wrong and the ordering churns after each accept.
+    curve[3] = (curve[3] ?? 0) + 1
+
+    expect(curveFit(3, curve, target)).toBe(0)
+    expect(curveDeltas(curve, target)[3]?.withinRange).toBe(true)
+    expect(curveDeltas(curve, target)[3]?.delta).toBe(0)
+  })
+
+  it('still pushes back once a bucket leaves its band', () => {
+    const target = curveTarget('midrange')
+    const curve = flat(6)
+    curve[2] = 60
+
+    expect(curveFit(2, curve, target)).toBeLessThan(0)
+    expect(curveDeltas(curve, target)[2]?.withinRange).toBe(false)
+  })
+
+  it('holds aggro to a tighter curve than control', () => {
+    // Aggro lives or dies on its early drops; control deliberately spreads.
+    const width = (t: CurveTarget, bucket: number): number =>
+      (t[bucket]?.max ?? 0) - (t[bucket]?.min ?? 0)
+
+    expect(width(curveTarget('aggro'), 2)).toBeLessThan(width(curveTarget('control'), 2))
+  })
+
+  it('gives a hybrid the looser of its two tolerances', () => {
+    // Being asked to satisfy two shapes at once, it should not also be held to
+    // the stricter of them.
+    const width = (t: CurveTarget, bucket: number): number =>
+      (t[bucket]?.max ?? 0) - (t[bucket]?.min ?? 0)
+
+    expect(width(curveTarget('aggro', 'control'), 3)).toBeGreaterThan(
+      width(curveTarget('aggro'), 3),
+    )
+  })
+
+  it('never gives a tiny-target bucket a band of nothing', () => {
+    // 7+ wants ~2%; a purely proportional band would be a hair wide and every
+    // deck would read as wrong there.
+    const band = curveTarget('aggro')[7]
+
+    expect((band?.max ?? 0) - (band?.min ?? 0)).toBeGreaterThan(0.02)
+  })
+
+  it('reports the band edges so the panel can draw them', () => {
+    const deltas = curveDeltas(flat(10), curveTarget('midrange'))
+
+    for (const d of deltas) {
+      expect(d.min).toBeLessThanOrEqual(d.ideal)
+      expect(d.max).toBeGreaterThanOrEqual(d.ideal)
+    }
   })
 })

@@ -19,11 +19,53 @@ import type { ArchetypeKey } from './archetype.js'
 /** Buckets 0–7, where 7 holds everything at mana value 7 and above. */
 export const CURVE_BUCKETS = 8
 
-export type CurveTarget = readonly number[]
+/**
+ * A target share per bucket, with the tolerance around it.
+ *
+ * A range rather than a point, mirroring `CompositionTarget` (doc 05 §5.4),
+ * which has carried `min`/`ideal`/`max` from the start. A curve is a shape a
+ * deck sits near, not a quota it hits — being one card off at three drops is
+ * not a defect worth scoring against, and treating it as one made the
+ * suggestions twitchy after every accept.
+ */
+export interface CurveBand {
+  readonly ideal: number
+  readonly min: number
+  readonly max: number
+}
 
-const NORMALISED = (weights: readonly number[]): CurveTarget => {
+export type CurveTarget = readonly CurveBand[]
+
+/**
+ * How much wiggle room each archetype gets, as a fraction of its own share.
+ *
+ * Not uniform, because the archetypes differ in how much the curve IS the deck.
+ * Aggro lives or dies on its early drops, so it is held tightly; ramp and
+ * control deliberately spread across the top end and a wide band there is
+ * correct rather than sloppy.
+ */
+const TOLERANCE: Record<ArchetypeKey, number> = {
+  aggro: 0.25,
+  combo: 0.3,
+  aristocrats: 0.3,
+  voltron: 0.3,
+  tokens: 0.35,
+  midrange: 0.35,
+  stax: 0.4,
+  control: 0.45,
+  ramp: 0.45,
+}
+
+/** Never narrower than this share, or a 2%-target bucket has a band of nothing. */
+const MIN_HALF_WIDTH = 0.015
+
+const banded = (weights: readonly number[], tolerance: number): CurveTarget => {
   const total = weights.reduce((a, b) => a + b, 0)
-  return weights.map((w) => w / total)
+  return weights.map((w) => {
+    const ideal = w / total
+    const halfWidth = Math.max(ideal * tolerance, MIN_HALF_WIDTH)
+    return { ideal, min: Math.max(0, ideal - halfWidth), max: ideal + halfWidth }
+  })
 }
 
 const SHAPES: Record<ArchetypeKey, readonly number[]> = {
@@ -50,10 +92,18 @@ export const curveTarget = (
   secondary: ArchetypeKey | null = null,
 ): CurveTarget => {
   const primary = SHAPES[archetype]
-  if (secondary === null || secondary === archetype) return NORMALISED(primary)
+  if (secondary === null || secondary === archetype) {
+    return banded(primary, TOLERANCE[archetype])
+  }
 
   const other = SHAPES[secondary]
-  return NORMALISED(primary.map((w, i) => w * 0.7 + (other[i] ?? 0) * 0.3))
+  // A hybrid gets the looser of the two tolerances: it is being asked to satisfy
+  // two shapes at once, so holding it to the stricter one punishes the blend.
+  const tolerance = Math.max(TOLERANCE[archetype], TOLERANCE[secondary])
+  return banded(
+    primary.map((w, i) => w * 0.7 + (other[i] ?? 0) * 0.3),
+    tolerance,
+  )
 }
 
 /** The bucket a mana value falls in. 7 holds everything above it. */
@@ -66,8 +116,15 @@ export interface CurveDelta {
   readonly actual: number
   /** Cards the target implies for a deck of this size. */
   readonly ideal: number
-  /** `ideal - actual`. Positive means short, negative means over-full. */
+  readonly min: number
+  readonly max: number
+  /**
+   * Distance to the nearest EDGE of the band, not to the ideal. Zero when the
+   * bucket is already inside its range — which is the point of the range.
+   * Positive means short, negative means over-full.
+   */
   readonly delta: number
+  readonly withinRange: boolean
 }
 
 /**
@@ -81,10 +138,15 @@ export const curveDeltas = (
   target: CurveTarget,
 ): readonly CurveDelta[] => {
   const total = manaCurve.reduce((a, b) => a + b, 0)
-  return target.map((share, bucket) => {
+  return target.map((band, bucket) => {
     const actual = manaCurve[bucket] ?? 0
-    const ideal = Math.round(share * total)
-    return { bucket, actual, ideal, delta: ideal - actual }
+    const ideal = Math.round(band.ideal * total)
+    const min = Math.floor(band.min * total)
+    const max = Math.ceil(band.max * total)
+
+    const withinRange = actual >= min && actual <= max
+    const delta = withinRange ? 0 : actual < min ? min - actual : max - actual
+    return { bucket, actual, ideal, min, max, delta, withinRange }
   })
 }
 
@@ -107,12 +169,19 @@ export const curveFit = (
 
   const bucket = curveBucket(manaValue)
   const share = (manaCurve[bucket] ?? 0) / total
-  const wanted = target[bucket] ?? 0
+  const band = target[bucket]
+  if (band === undefined) return 0
 
+  // Inside the band the deck is fine here, so the curve says nothing either way
+  // and other signals decide. This is the wiggle room: without it every bucket
+  // is permanently a little bit wrong and the ordering churns after each accept.
+  if (share >= band.min && share <= band.max) return 0
+
+  const distance = share < band.min ? band.min - share : band.max - share
   // Relative to the target share, so a bucket that wants 2% and has 6% reads as
   // badly over-full rather than as a rounding error.
-  const scale = Math.max(wanted, 0.04)
-  return Math.max(-1, Math.min(1, (wanted - share) / scale))
+  const scale = Math.max(band.ideal, 0.04)
+  return Math.max(-1, Math.min(1, distance / scale))
 }
 
 /** Words for a curve gap, for the reason the UI renders (pillar P4). */
