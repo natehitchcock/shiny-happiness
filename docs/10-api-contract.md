@@ -385,3 +385,32 @@ These are not divergences; they are cases §10.3 left open, decided during the
    domain predicate decides after SQL narrows. Fine at fixture scale, not at
    ~30k cards; `API-08` owns the precomputed histograms that fix it.
 
+### `API-02` divergences
+
+1. **`datasetSnapshotId` may be `null`.** §10.4 types it as a string. No ingest
+   has run, so no row in `dataset_snapshots` is live. `null` is the honest value;
+   inventing an id would defeat the reproducibility the field exists for
+   (doc 09 §9.6).
+2. **`unavailable` carries data-source keys as well as group keys.** §10.4 types
+   it as `Array<{ key: CandidateGroupKey, reason }>`. A missing *source* is not a
+   group, but it is exactly what the client needs to explain an empty result, so
+   `combos`, `statistics` and `dataset-snapshot` appear alongside group keys.
+   `statistics` is present on **every** response — there is no corpus yet and no
+   third-party one is coming (ADR-0008).
+3. **`GET /decks/:id/analysis` returns `bracket.assessed: null`** where §10.5
+   types it as `Bracket`, and adds its own `unavailable` array. Assessing a
+   bracket needs the official rules and the Game Changers list, which `DATA-05`
+   has not populated; asserting a verdict from an empty rules file is what
+   AGENTS.md §8 rejects outright.
+4. **Commander legality checks are skipped** in `analysis.legality`. Nothing
+   stores `canBeCommander` or `partnerRule`, so `validateDeck` would report every
+   commander as `invalid-commander`. Those problems are filtered out and the gap
+   is named in `unavailable` rather than surfaced as a false failure. Every other
+   legality check — colour identity, singleton, banned, card count — is live.
+5. **Printing-level fields are null in the candidate pool.** `priceUsd`,
+   `rarity`, `setCode` and `reserved` on `PoolCard` are not hydrated for
+   candidates, so budget filtering and `is:reserved` do not apply to
+   recommendations. Hydrating printings for the whole eligible pool to price the
+   handful that get shown is the wrong shape; it belongs with the histograms in
+   `API-08`.
+

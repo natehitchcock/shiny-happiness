@@ -9,23 +9,25 @@ scope (files it may touch), explicit dependencies, and a definition of done.
 
 Last updated: 2026-08-29, end of the second build session.
 
-**Done (13 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`, `API-01`. That is the
-monorepo and CI, the whole of `packages/domain`, the Postgres layer, and the
-cards + decks HTTP surface including the batched command endpoint.
+**Done (14 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`, `API-01`, `API-02`.
+That is the monorepo and CI, the whole of `packages/domain`, the Postgres layer,
+and the HTTP surface: cards, decks, batched commands, recommendations and
+analysis. `DATA-03` is closed by decision and `ING-03` cut ([ADR-0008](adr/0008-drop-edhrec.md)).
 
 **Verify it in one command** — from a clean clone, this must be green:
 
 ```bash
-pnpm install && pnpm check          # lint + typecheck + 366 tests
+pnpm install && pnpm check          # lint + typecheck + 380 tests
 ```
 
-The integration tests need a real Postgres and SKIP (loudly) without one — 90 of
-the 366, being `packages/db`'s and `apps/api`'s suites.
+The integration tests need a real Postgres and SKIP (loudly) without one — 104 of
+the 380, being `packages/db`'s and `apps/api`'s suites. The API-02 performance
+test seeds a 20,000-card corpus and takes ~40 s of the run.
 
 ```bash
 docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
 export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
-pnpm test                            # 366 passed, not 276 passed / 90 skipped
+pnpm test                            # 380 passed, not 276 passed / 104 skipped
 ```
 
 No Docker? Any PostgreSQL 16 the URL points at works. The second session used the
@@ -36,7 +38,7 @@ which needs no administrator rights and no service.
 
 | Pick up | Why now |
 | --- | --- |
-| `API-02` | Recommendations and analysis. `API-01` established the transport, error shape and test harness; this is the endpoint the product exists for. |
+| `API-02` | ✅ **Done.** Recommendations + analysis endpoints, incl. `unavailable` degradation, plus `GET /decks/:id/combo-index` | API-01, DOM-05, DOM-06 | ✅ Measured, not assumed: **p95 46.6 ms** against a 20,000-card corpus, 2,000 combos and a 100-card deck — budget is 200 ms. Degradation reported per missing source rather than as absent groups; a query that half-parses is never partially applied. 14 contract tests, mutation-checked. Divergences in doc 10 §10.9 |
 | `DATA-01`, `DATA-02`, `DATA-05` | **Unblocked on a normal machine.** See below. Still the only thing blocking deployment. `DATA-03` is closed — see [ADR-0008](adr/0008-drop-edhrec.md). |
 | `FOUND-02` → `UI-01` | Independent of everything above; can run in parallel. |
 | `API-06` | Finishes what `API-01` left honest-but-incomplete: `409` currently returns the current deck with an empty `since`, because populating it needs an ordered per-deck command log that no table provides yet. |
@@ -156,7 +158,7 @@ against their interfaces; nothing depending on an unanswered question ships.
 | -------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DB-01`  | ✅ **Done.** Postgres schema + migrations + repositories; GIN index on the combo index; migration CLI | DOM-01 | ✅ Migrations up/down clean and idempotent; 40 integration tests against a **real** PostgreSQL 16; `EXPLAIN` asserts the planner actually uses `combos_pieces_idx` |
 | `API-01` | ✅ **Done.** Cards + decks endpoints, incl. the batched command endpoint with idempotency and partial-success reporting | DB-01, DOM-01 | ✅ 48 contract tests against doc 10 on a real Postgres; `rejected` carries a typed reason per failed command. Command decisions live in `packages/domain` (`applyCommands`), so `web` and `api` cannot disagree — 22 unit tests, mutation-checked. See the divergences below |
-| `API-02` | Recommendations + analysis endpoints, incl. `unavailable` degradation                                               | API-01, DOM-05, DOM-06 | Full recompute < 200 ms p95 on a 100-card deck; degradation test with each source disabled                                                                                              |
+| `API-02` | ✅ **Done.** Recommendations + analysis endpoints, incl. `unavailable` degradation, plus `GET /decks/:id/combo-index` | API-01, DOM-05, DOM-06 | ✅ Measured, not assumed: **p95 46.6 ms** against a 20,000-card corpus, 2,000 combos and a 100-card deck — budget is 200 ms. Degradation reported per missing source rather than as absent groups; a query that half-parses is never partially applied. 14 contract tests, mutation-checked. Divergences in doc 10 §10.9 |
 | `API-03` | Auth, per-user rate limiting, deck ownership                                                                        | API-01                 | No deck readable cross-user; 429 with `Retry-After`                                                                                                                                     |
 | `API-04` | Import preview/commit and export endpoints (doc 10 §10.7)                                                           | DOM-07                 | Preview applies nothing; `illegal` and `previouslyExcluded` populated; round-trip export JSON → import → identical deck incl. origins, exclusions, locks, tags, archetype and snapshots |
 | `API-05` | Deck library: list/filter/sort, `recent`, duplicate, archive, soft delete (doc 12 §12.2–12.4)                       | API-01                 | `DeckSummary` projection never loads entries; duplicate copies exclusions and locks                                                                                                     |

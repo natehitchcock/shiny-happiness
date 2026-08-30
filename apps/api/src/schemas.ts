@@ -177,3 +177,20 @@ export const commandsBody = {
     baseVersion: { type: 'integer', minimum: 1 },
   },
 } as const
+
+/**
+ * Recommendation request (doc 10 §10.4). Every field is optional: an empty body
+ * means "all groups, default limit, no filter", which is the common call.
+ */
+export const recommendationsBody = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    groups: { type: 'array', items: { type: 'string' }, maxItems: 40 },
+    limitPerGroup: { type: 'integer', minimum: 1, maximum: 200 },
+    query: { type: 'string', maxLength: 500 },
+    // Weights are a partial override of ScoringWeights; the domain fills the
+    // rest from the archetype's defaults, so any subset is valid.
+    weights: { type: 'object', additionalProperties: { type: 'number' } },
+  },
+} as const

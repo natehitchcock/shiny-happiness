@@ -3,6 +3,8 @@ import type { Pool } from 'pg'
 import { PROBLEM_CONTENT_TYPE, badRequest } from './errors.js'
 import { registerCardRoutes } from './routes/cards.js'
 import { registerDeckRoutes } from './routes/decks.js'
+import { registerRecommendationRoutes } from './routes/recommendations.js'
+import { registerAnalysisRoutes } from './routes/analysis.js'
 
 export interface ServerOptions {
   readonly pool: Pool
@@ -71,6 +73,8 @@ export const buildServer = async (options: ServerOptions): Promise<FastifyInstan
 
   registerCardRoutes(app, options.pool)
   registerDeckRoutes(app, options.pool)
+  registerRecommendationRoutes(app, options.pool)
+  registerAnalysisRoutes(app, options.pool)
 
   return app
 }
