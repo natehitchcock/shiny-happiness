@@ -1453,6 +1453,14 @@ export const Workspace = ({
   const deckRef = useRef(deck)
   const queryRef = useRef(query)
   const columnsRef = useRef<readonly string[]>([])
+  /**
+   * The newest deck the server has acknowledged, applied to the UI or not.
+   *
+   * `deckRef` is what the user is looking at; this is what the server believes.
+   * They diverge for the length of a settle, and every write has to use this
+   * one or it will be arguing with a version that moved on.
+   */
+  const serverDeckRef = useRef<api.Deck | null>(null)
   /** The suggestions region, so the column legend can find the columns in it. */
   const suggestionsRef = useRef<HTMLElement>(null)
 
@@ -1489,23 +1497,43 @@ export const Workspace = ({
   columnsRef.current = columns
 
   const load = useCallback(async (commands: readonly PendingCommand[]): Promise<QueryResult> => {
-    let current = deckRef.current
+    /*
+     * The version the SERVER last confirmed — not the one on screen.
+     *
+     * During the settle a result is deliberately held back and not applied, so
+     * `deck` state still carries the version from before the batch while the
+     * server has already moved on. Adding another card in that window is
+     * exactly what the settle exists to allow, and it was sending the stale
+     * version and getting a 409 for it. The bug was a direct consequence of
+     * holding the result: the UI's version stopped being the truth the moment
+     * the settle was introduced.
+     */
+    let current = serverDeckRef.current ?? deckRef.current
+
+    const wire = (c: PendingCommand): Parameters<typeof api.sendCommands>[1][number] =>
+      c.type === 'accept'
+        ? { type: 'accept', oracleId: c.oracleId, origin: 'manual' }
+        : c.type === 'lock'
+          ? { type: 'lock', oracleId: c.oracleId, locked: c.locked ?? true }
+          : { type: c.type, oracleId: c.oracleId }
 
     // Commands first, as ONE batch — four accepts are one round trip, and one
     // atomic unit the server can reject or apply as a whole (doc 10 §10.3).
     if (commands.length > 0) {
-      const result = await api.sendCommands(
-        current.id,
-        commands.map((c) =>
-          c.type === 'accept'
-            ? { type: 'accept', oracleId: c.oracleId, origin: 'manual' }
-            : c.type === 'lock'
-              ? { type: 'lock', oracleId: c.oracleId, locked: c.locked ?? true }
-              : { type: c.type, oracleId: c.oracleId },
-        ),
-        current.version,
-      )
-      current = result.deck
+      const body = commands.map(wire)
+      try {
+        const result = await api.sendCommands(current.id, body, current.version)
+        current = result.deck
+      } catch (error) {
+        // A 409 means only that our version is behind — the clicks are still
+        // valid. Re-read the deck and send them once more, rather than dropping
+        // work the user did and making them click it again.
+        if (!(error instanceof api.ApiError) || error.status !== 409) throw error
+        const fresh = await api.getDeck(current.id)
+        const result = await api.sendCommands(fresh.id, body, fresh.version)
+        current = result.deck
+      }
+      serverDeckRef.current = current
     }
 
     const [recs, ana] = await Promise.all([
@@ -1610,7 +1638,7 @@ export const Workspace = ({
    * survive a reload; it just does not hold anything up.
    */
   const toggleLock = (oracleId: string, locked: boolean): void => {
-    const before = deckRef.current
+    const before = serverDeckRef.current ?? deckRef.current
     pendingLocks.current.set(oracleId, locked)
     setDeck((d) => ({
       ...d,
@@ -1622,6 +1650,7 @@ export const Workspace = ({
       .sendCommands(before.id, [{ type: 'lock', oracleId, locked }], before.version)
       .then((r) => {
         pendingLocks.current.delete(oracleId)
+        serverDeckRef.current = r.deck
         setDeck(r.deck)
       })
       .catch(() => {

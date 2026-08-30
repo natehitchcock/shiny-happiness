@@ -23,6 +23,18 @@ vi.mock('./api', () => ({
   importPreview: vi.fn(),
   getCardDetail: vi.fn(),
   searchCards: vi.fn(),
+  // Re-read after a 409, to find the version we should have used.
+  getDeck: vi.fn(),
+  // The real class, not a stub: the retry path distinguishes a 409 from any
+  // other failure with `instanceof`, so a fake would defeat the test.
+  ApiError: class ApiError extends Error {
+    status: number
+    constructor(message: string, status: number) {
+      super(message)
+      this.name = 'ApiError'
+      this.status = status
+    }
+  },
 }))
 
 const mocked = vi.mocked(api)
@@ -371,4 +383,94 @@ describe('locking a card', () => {
 
     expect(screen.getAllByLabelText(/^Unlock /).length).toBeGreaterThan(0)
   }, 15_000)
+})
+
+describe('adding cards while a settle is running', () => {
+  // The deck holds a DIFFERENT card from the suggestion, so the suggestion row
+  // still offers Add. A card already accepted is not offered again (P6).
+  const withEntries: api.Deck = {
+    ...deck,
+    entries: [{ oracleId: 'other', zone: 'accepted', locked: false }],
+  }
+
+  it('sends the version the SERVER confirmed, not the one on screen', async () => {
+    // The reported bug: a batch applies and the server moves to v2, but the
+    // settle holds the result back so the UI still says v1. Adding another card
+    // in that window — which is exactly what the settle exists to allow — sent
+    // v1 and got a 409.
+    const versions: number[] = []
+    let n = 1
+    mocked.sendCommands.mockImplementation((_id: string, _cmds: unknown, baseVersion: number) => {
+      versions.push(baseVersion)
+      n += 1
+      return Promise.resolve({
+        deck: { ...withEntries, version: n },
+        results: [],
+      }) as ReturnType<typeof api.sendCommands>
+    })
+
+    // TWO suggestions: after the first Add its row becomes a spinner, so the
+    // second click has to land on a different card.
+    const two = recs([])
+    ;(two.groups[0] as { items: unknown[] }).items = [
+      { oracleId: 'o1', comboDegree: 2, nearCombosAt1: 0, score: 1, reasons: [], combos: [] },
+      { oracleId: 'o2', comboDegree: 1, nearCombosAt1: 0, score: 1, reasons: [], combos: [] },
+    ]
+    mocked.getRecommendations.mockResolvedValue(two)
+
+    render(<Workspace deck={{ ...withEntries, version: 1 }} />)
+    // Wait for the first load to be APPLIED, not merely requested — the
+    // pipeline holds a result until the bar reaches its halfway mark.
+    await waitFor(() => expect(screen.getAllByText('Add').length).toBeGreaterThan(1), {
+      timeout: 5_000,
+    })
+
+    // Two accepts, separated so the second lands after the first has been sent
+    // but before its result is applied.
+    await act(async () => {
+      screen.getAllByText('Add')[0]?.click()
+    })
+    await new Promise((r) => setTimeout(r, 1_500))
+    await act(async () => {
+      screen.getAllByText('Add')[0]?.click()
+    })
+    await new Promise((r) => setTimeout(r, 1_500))
+
+    await waitFor(() => expect(versions.length).toBeGreaterThanOrEqual(2))
+    // The second send must not repeat the first's base version.
+    expect(versions[1]).toBeGreaterThan(versions[0]!)
+  }, 20_000)
+
+  it('recovers from a 409 instead of dropping the clicks', async () => {
+    // If a conflict does happen, the commands are still valid — only our view
+    // of the version was stale. Re-read and resend rather than making the user
+    // click it all again.
+    let attempts = 0
+    mocked.sendCommands.mockImplementation(() => {
+      attempts += 1
+      if (attempts === 1) {
+        return Promise.reject(
+          new api.ApiError('Deck was modified by another request', 409),
+        ) as ReturnType<typeof api.sendCommands>
+      }
+      return Promise.resolve({
+        deck: { ...withEntries, version: 9 },
+        results: [],
+      }) as ReturnType<typeof api.sendCommands>
+    })
+    mocked.getDeck.mockResolvedValue({ ...withEntries, version: 8 })
+
+    render(<Workspace deck={{ ...withEntries, version: 1 }} />)
+    await waitFor(() => expect(screen.getAllByText('Add').length).toBeGreaterThan(0), {
+      timeout: 5_000,
+    })
+    await act(async () => {
+      screen.getAllByText('Add')[0]?.click()
+    })
+    await new Promise((r) => setTimeout(r, 2_500))
+
+    await waitFor(() => expect(attempts).toBe(2))
+    // It re-read the deck to find the version it should have used.
+    expect(mocked.getDeck).toHaveBeenCalled()
+  }, 20_000)
 })

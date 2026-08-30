@@ -123,6 +123,22 @@ export const deviceId = ((): string => {
   return fresh
 })()
 
+/**
+ * An HTTP failure that still knows which one it was.
+ *
+ * A 409 is not an error in the usual sense — it means "your view of the deck is
+ * behind", which is recoverable and must be handled differently from a 500.
+ * Flattening every failure to a message string made that impossible to tell.
+ */
+export class ApiError extends Error {
+  readonly status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`/api/v1${path}`, {
     ...init,
@@ -136,7 +152,10 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
     // Errors are RFC 9457 problem+json (doc 10 §10.1); surface `detail`, which
     // is the part written for a person.
     const problem = (await response.json().catch(() => null)) as { detail?: string } | null
-    throw new Error(problem?.detail ?? `Request failed (${String(response.status)})`)
+    throw new ApiError(
+      problem?.detail ?? `Request failed (${String(response.status)})`,
+      response.status,
+    )
   }
   return (await response.json()) as T
 }
