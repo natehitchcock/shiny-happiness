@@ -18,8 +18,8 @@ The app is called **Lotus Wizard** in the interface. The name is tentative and
 **not cleared** — `LEGAL-01` owns that, and there is a real question to answer
 first: see doc 04 §4.6. Package scopes stay `@roundtable/*` until it is settled.
 
-**Done (19 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`, `API-01`, `API-02`,
-`DATA-01`, `DATA-02`, `ING-01`, `ING-02`, and a vertical slice of `WEB-01`.
+**Done (20 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`, `API-01`, `API-02`,
+`DATA-01`, `DATA-02`, `ING-01`, `ING-02`, `FOUND-02`, and a vertical slice of `WEB-01`.
 `DATA-03` is closed by decision and `ING-03` cut ([ADR-0008](adr/0008-drop-edhrec.md)).
 
 **Run it locally:**
@@ -51,8 +51,9 @@ API-02 performance test seeds a 20,000-card corpus and takes ~40 s.
 
 | Pick up | Why now |
 | --- | --- |
+| `UI-01` | The token layer landed with FOUND-02; the card primitives at four zoom levels are what `WEB-03`–`WEB-05` need next. |
 | `LEGAL-01` (name clearance only) | The name **Lotus Wizard** needs checking before it goes anywhere public — see doc 04 §4.6. Cheap to resolve, awkward to undo after it is on a domain. |
-| `FOUND-02` → `UI-01` | The web slice carries its own local tokens. Until these land there is no shared `packages/ui`, and every new screen re-invents the card primitives. |
+| `FOUND-02` | ✅ **Done.** Design tokens as asserted data + `packages/ui` scaffold; the app imports them rather than keeping a copy | root | ✅ 13 contrast pairs asserted, each naming what it is for. Caught a live defect on the first run: rust was 2.80:1 on `ink-2`, the surface cut hints are drawn on. `tokens.css` is generated from the data and a test holds the two in step |
 | `WEB-01` proper | The slice is one deck in localStorage with no offline queue, no optimistic mutation and no reconcile. Everything in WEB-02..24 assumes those exist. |
 | `API-03` | Auth and deck ownership. Every deck belongs to one fixed `DEV_OWNER_ID`, so nothing is readable cross-user because there is no cross-user. This gates any deployment. |
 | `DATA-05` | The last unanswered terms question. Until the bracket rules are populated, `analysis.bracket.assessed` is honestly null and core packages cannot be built. Scryfall now exposes a `game_changer` boolean on card records, which may answer half of it. |
@@ -119,7 +120,7 @@ against their interfaces; nothing depending on an unanswered question ships.
 | ID         | Task                                                                                                                                                                                                 | Scope                       | DoD                                                                                                           |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `FOUND-01` | ✅ **Done.** Monorepo skeleton: pnpm workspaces, Turborepo, TS strict, ESLint/Prettier, Vitest, CI. Lint rules enforce R1 (domain purity) and R3 (no third-party `fetch` outside `packages/clients`) | root, all package manifests | ✅ `pnpm install && pnpm check` green from a clean clone; purity rules verified to actually reject violations |
-| `FOUND-02` | Design tokens + theming (light/dark, contrast-audited), `packages/ui` scaffold                                                                                                                       | `packages/ui`               | Tokens documented; contrast ≥ 4.5:1 verified by a test                                                        |
+| `FOUND-02` | ✅ **Done.** Design tokens as asserted data + `packages/ui` scaffold; the app imports them rather than keeping a copy | root | ✅ 13 contrast pairs asserted, each naming what it is for. Caught a live defect on the first run: rust was 2.80:1 on `ink-2`, the surface cut hints are drawn on. `tokens.css` is generated from the data and a test holds the two in step |
 
 ## 11.3 Domain — pure, no IO, parallelisable
 
@@ -233,3 +234,10 @@ The domain layer is done, so everything below is now unblocked in its own right.
 7. Grow `DOM-04`'s curated role-override table and build the 300-card labelled
    fixture set its DoD asks for. That needs real Scryfall data, so it follows
    `ING-01` — the engine and its pattern tests are already in place.
+
+## 11.9 Scoped, not built
+
+| Doc | What it is |
+| --- | --- |
+| [16 — Archetype customiser](16-archetype-customiser.md) | Let a builder tune the role targets and curve their deck is judged against, instead of accepting the archetype preset. Sparse per-deck override so decks keep inheriting preset improvements; both target functions gain one optional parameter and nothing downstream changes. Three open questions at the end. |
+
