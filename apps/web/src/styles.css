@@ -242,9 +242,31 @@ button {
 
 .group-head .rationale {
   flex: 1;
+  /* Without this the sentence cannot shrink past its longest word, and the
+     head — which now carries two buttons as well — pushes the column wide. */
+  min-width: 0;
   text-align: right;
   font-size: 0.72rem;
   color: var(--parchment-dim);
+}
+
+/*
+ * On one column the head runs out of room, so the sentence takes its own line.
+ *
+ * `order` rather than a DOM change: the rationale belongs beside the heading it
+ * explains for a reader and for a screen reader, and moving it in the markup to
+ * suit a 375 px screen would change the reading order on every screen.
+ */
+@media (max-width: 900px) {
+  .group-head {
+    flex-wrap: wrap;
+  }
+
+  .group-head .rationale {
+    order: 1;
+    flex-basis: 100%;
+    text-align: left;
+  }
 }
 
 .reasons {
@@ -1726,6 +1748,9 @@ select {
 .group-toggle,
 .group-more {
   flex: none;
+  /* The head is baseline-aligned for its text. A square button has no baseline
+     worth aligning to and sat low against the heading. */
+  align-self: center;
   border: 1px solid var(--rule);
   background: transparent;
   color: var(--parchment-dim);
@@ -1735,8 +1760,10 @@ select {
   line-height: 1;
 }
 .group-toggle {
-  width: 1.25rem;
-  height: 1.25rem;
+  /* Sized to the Add button beside it (23 px), not smaller — it was otherwise
+     the smallest target on the page. */
+  width: 1.45rem;
+  height: 1.45rem;
   padding: 0;
   font-size: 0.85rem;
 }

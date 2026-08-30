@@ -2776,6 +2776,7 @@ export const Workspace = ({
                     says the need is met, which is the answer to the question
                     the heading asks. */}
                 {rowsIn(g) === 0 ? <span className="satisfied">satisfied</span> : null}
+                <span className="rationale">{g.rationale}</span>
                 <button
                   type="button"
                   className="group-more"
@@ -2786,7 +2787,6 @@ export const Workspace = ({
                 >
                   {expanding === g.key ? '…' : 'More'}
                 </button>
-                <span className="rationale">{g.rationale}</span>
                 {/* No column marker here on purpose.
                     A group head holds a title, a count and a rationale; a card
                     row holds costs and two buttons after its columns. The two
