@@ -8,6 +8,7 @@ import {
   findBasicLands,
   getCards,
   getDeck,
+  listDeckSummaries,
 } from '@roundtable/db'
 import type {
   ArchetypeKey,
@@ -37,13 +38,32 @@ import {
 } from '../schemas.js'
 
 /**
- * Deck ownership is API-03's job.
+ * A deck belongs to a DEVICE, not to a person (ADR-0014).
  *
- * Until it lands every deck belongs to one fixed development owner. This is a
- * seam, not a stub of API-03: the owner is read from one place, so adding auth
- * means changing this resolver rather than hunting for `owner_id` in queries.
+ * The browser generates a uuid once, keeps it in localStorage and sends it as
+ * `X-Device-Id`. There is no account, no password and nothing to sign in to,
+ * which is the whole point: the fastest path to a usable tool is not asking
+ * anyone to register.
+ *
+ * What it is not: security. Anyone who knows a device id can read that device's
+ * decks. That is acceptable because a deck list is not a secret, and the id is
+ * a random v4 uuid that never appears in a URL. It is NOT acceptable for
+ * anything else, so nothing else should ever be scoped by it.
+ *
+ * A missing header falls back to the old fixed id rather than erroring, so the
+ * decks built before this existed are still reachable.
  */
 export const DEV_OWNER_ID = '00000000-0000-0000-0000-000000000001'
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export const ownerOf = (req: { headers: Record<string, unknown> }): string => {
+  const header = req.headers['x-device-id']
+  const value = Array.isArray(header) ? header[0] : header
+  // Validated, not trusted: it goes straight into a uuid column, and an
+  // unparseable one would be a 500 from the driver rather than a 400 from here.
+  return typeof value === 'string' && UUID.test(value) ? value.toLowerCase() : DEV_OWNER_ID
+}
 
 const cardMap = async (pool: Pool, ids: readonly OracleId[]): Promise<Map<OracleId, Card>> =>
   new Map((await getCards(pool, ids)).map((c) => [c.oracleId, c]))
@@ -109,6 +129,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
   app.post('/api/v1/decks', { schema: { body: createDeckBody } }, async (req, rep) => {
     const body = req.body as {
       name: string
+      description?: string
       commanders: string[]
       targetBracket: Bracket
       archetype: ArchetypeKey
@@ -128,8 +149,9 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
 
     const deck = await createDeck(pool, {
       id: deckId(randomUUID()),
-      ownerId: DEV_OWNER_ID,
+      ownerId: ownerOf(req),
       name: body.name,
+      description: body.description ?? '',
       commanders,
       targetBracket: body.targetBracket,
       archetype: body.archetype,
@@ -207,6 +229,17 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
     },
   )
 
+  /**
+   * Every deck on this device, newest-opened first.
+   *
+   * Summaries, never full decks: the switcher needs a name, a commander and a
+   * card count, and loading twelve decks' worth of entries to draw a menu is
+   * the mistake `DeckSummaryRow` exists to prevent (doc 12 §12.2).
+   */
+  app.get('/api/v1/decks', async (req) => ({
+    items: await listDeckSummaries(pool, ownerOf(req), { limit: 50 }),
+  }))
+
   app.get('/api/v1/decks/:id', { schema: { params: deckIdParams } }, async (req, rep) => {
     const id = (req.params as { id: string }).id
     const deck = await getDeck(pool, deckId(id))
@@ -223,6 +256,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
       const id = (req.params as { id: string }).id
       const body = req.body as {
         name?: string
+        description?: string
         targetBracket?: Bracket
         archetype?: ArchetypeKey
         archetypeSecondary?: ArchetypeKey | null
@@ -236,6 +270,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
       const { rowCount } = await pool.query(
         `UPDATE decks SET
          name                = COALESCE($2, name),
+         description         = COALESCE($12, description),
          target_bracket      = COALESCE($3, target_bracket),
          archetype           = COALESCE($4, archetype),
          archetype_secondary = CASE WHEN $5::boolean THEN $6 ELSE archetype_secondary END,
@@ -257,6 +292,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
           body.budget?.maxCardUsd ?? null,
           body.status ?? null,
           body.excludeUniversesBeyond ?? null,
+          body.description ?? null,
         ],
       )
       if ((rowCount ?? 0) === 0) return sendProblem(rep, notFound(`No deck with id ${id}`))

@@ -54,7 +54,7 @@ API-02 performance test seeds a 20,000-card corpus and takes ~40 s.
 | `LEGAL-01` (name clearance only) | The name **Lotus Wizard** needs checking before it goes anywhere public — see doc 04 §4.6. Cheap to resolve, awkward to undo after it is on a domain. |
 | `FOUND-02` | ✅ **Done.** Design tokens as asserted data + `packages/ui` scaffold; the app imports them rather than keeping a copy | root | ✅ 13 contrast pairs asserted, each naming what it is for. Caught a live defect on the first run: rust was 2.80:1 on `ink-2`, the surface cut hints are drawn on. `tokens.css` is generated from the data and a test holds the two in step |
 | `WEB-01` proper | The slice is one deck in localStorage with no offline queue, no optimistic mutation and no reconcile. Everything in WEB-02..24 assumes those exist. |
-| `API-03` | Auth and deck ownership. Every deck belongs to one fixed `DEV_OWNER_ID`, so nothing is readable cross-user because there is no cross-user. This gates any deployment. |
+| `LEGAL-01` (name clearance) | **Lotus Wizard** needs checking before it goes on a domain. Now urgent rather than cheap-and-later: the Vercel config is written. |
 | `DATA-05` | The last unanswered terms question. Until the bracket rules are populated, `analysis.bracket.assessed` is honestly null and core packages cannot be built. Scryfall now exposes a `game_changer` boolean on card records, which may answer half of it. |
 | `API-06` | `409` returns the current deck with an empty `since`; the client can refetch but not replay. |
 
@@ -267,3 +267,11 @@ and adding a page-wide horizontal scroll. A second pass found two classes with
 no CSS rule at all. Both now have tests, and one of them (`card.css.test.ts`)
 checks the whole class of defect: every `rt-` class the components render must
 have a rule, and no colour may be written as a literal hex instead of a token.
+
+## 11.11 API-03 is no longer on the critical path
+
+ADR-0014 replaced deck ownership with a device id: the browser generates a uuid
+into `localStorage` and sends it as `X-Device-Id`, and there is nothing to sign
+in to. `API-03` becomes optional work — "sign in to sync across devices" —
+layered on top rather than underneath, and the task it was blocking (deployment)
+is unblocked. See `DEPLOYING.md`.

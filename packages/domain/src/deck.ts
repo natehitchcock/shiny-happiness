@@ -48,6 +48,13 @@ export interface BudgetConstraint {
 export interface Deck {
   readonly id: DeckId
   readonly name: string
+  /**
+   * Free text the builder writes about the deck. Never parsed.
+   *
+   * Empty, not null, so nothing downstream has to decide what a missing
+   * description means — there is only "they have not written one yet".
+   */
+  readonly description: string
   /** One, or two under a `PartnerRule`. */
   readonly commanders: readonly OracleId[]
   readonly targetBracket: Bracket

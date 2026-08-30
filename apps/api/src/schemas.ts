@@ -46,6 +46,7 @@ export const createDeckBody = {
   additionalProperties: false,
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 200 },
+    description: { type: 'string', maxLength: 4000 },
     // One, or two under a partner rule (doc 03 §3.1). The database enforces the
     // same bound, but a 400 here beats a 500 from a CHECK constraint.
     commanders: { type: 'array', items: uuid, minItems: 1, maxItems: 2 },
@@ -64,6 +65,7 @@ export const patchDeckBody = {
   minProperties: 1,
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 200 },
+    description: { type: 'string', maxLength: 4000 },
     targetBracket: { type: 'integer', enum: [...BRACKET_VALUES] },
     archetype: { type: 'string', enum: [...ARCHETYPE_KEYS] },
     archetypeSecondary: { type: ['string', 'null'], enum: [...ARCHETYPE_KEYS, null] },

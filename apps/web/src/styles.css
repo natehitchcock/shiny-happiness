@@ -1134,6 +1134,149 @@ select {
   color: var(--sage);
 }
 
+/* ------------------------------------------------------------ deck menu */
+
+/* The masthead's deck line, which was inert text, is now the handle. It stays
+   looking like text until you hover it — a button up here would compete with
+   Import and Export for the same attention, and this is not that kind of
+   action. */
+.deck-menu {
+  position: relative;
+}
+
+.deck-handle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 2px 6px;
+  cursor: pointer;
+  color: inherit;
+}
+.deck-handle:hover {
+  border-color: var(--rule);
+  background: var(--ink-2);
+}
+.deck-handle:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+.deck-caret {
+  color: var(--parchment-dim);
+  font-size: 0.6rem;
+}
+
+.deck-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: 22rem;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: var(--step);
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+}
+
+.deck-current {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: var(--step);
+  border-bottom: 1px solid var(--rule);
+}
+.deck-current strong {
+  font: 600 0.95rem/1.2 var(--display);
+}
+.deck-sub {
+  color: var(--parchment-dim);
+  font-size: 0.72rem;
+}
+.deck-desc {
+  margin: 2px 0 4px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.deck-current .act {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.deck-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--step) 0;
+}
+.deck-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 5px var(--step);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--parchment);
+  text-align: left;
+  cursor: pointer;
+}
+.deck-item:hover {
+  background: var(--ink-3);
+  border-color: var(--rule);
+}
+.deck-item:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: -2px;
+}
+.deck-item-name {
+  font-size: 0.82rem;
+}
+.deck-new {
+  width: 100%;
+}
+
+.deck-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step);
+}
+.deck-edit label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.72rem;
+  color: var(--parchment-dim);
+}
+.deck-edit textarea {
+  width: 100%;
+  padding: 7px var(--step);
+  background: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  color: var(--parchment);
+  font: 400 0.8rem/1.5 var(--ui);
+  resize: vertical;
+}
+.deck-edit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* The boot state, so a reload does not flash the Start screen before the saved
+   deck arrives — which reads as having lost it. */
+.boot {
+  padding: 2rem;
+  color: var(--parchment-dim);
+  font-size: 0.8rem;
+}
+
 /* ------------------------------------------------ auto-query countdown */
 
 /* The ring sits behind the glyph, sized to the button rather than to a fixed

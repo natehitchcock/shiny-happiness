@@ -50,6 +50,7 @@ const entry = (name: string, over: Partial<DeckEntry> = {}): DeckEntry => ({
 const makeDeck = (commanders: string[], names: string[], colorIdentity: Color[] = ['R']): Deck => ({
   id: deckId('d1'),
   name: 'test',
+  description: '',
   commanders: commanders.map(oracleId),
   targetBracket: 3,
   archetype: 'midrange',

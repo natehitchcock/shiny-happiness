@@ -57,6 +57,7 @@ const combo = (id: string, pieces: string[]): Combo => ({
 const emptyDeck: Deck = {
   id: deckId('d'),
   name: 'd',
+  description: '',
   commanders: [oracleId('Krenko')],
   targetBracket: 3,
   archetype: 'midrange',

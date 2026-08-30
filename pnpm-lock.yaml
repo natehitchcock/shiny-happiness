@@ -7,6 +7,13 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@roundtable/api':
+        specifier: workspace:*
+        version: link:apps/api
+      '@roundtable/db':
+        specifier: workspace:*
+        version: link:packages/db
     devDependencies:
       '@types/node':
         specifier: ^26.4.0

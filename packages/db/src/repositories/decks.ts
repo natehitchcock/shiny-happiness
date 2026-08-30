@@ -16,6 +16,7 @@ import { withTransaction } from '../client.js'
 interface DeckRow {
   readonly id: string
   readonly name: string
+  readonly description: string
   readonly commanders: string[]
   readonly target_bracket: number
   readonly archetype: string
@@ -54,6 +55,9 @@ const toEntry = (row: EntryRow): DeckEntry => ({
 const toDeck = (row: DeckRow, entries: readonly DeckEntry[]): Deck => ({
   id: row.id as DeckId,
   name: row.name,
+  // Defaulted for rows written before the column existed; the column is NOT
+  // NULL so this only covers a hand-built row in a test.
+  description: row.description ?? '',
   commanders: row.commanders as OracleId[],
   targetBracket: row.target_bracket as Bracket,
   archetype: row.archetype as ArchetypeKey,
@@ -100,8 +104,10 @@ export const getDeck = async (pool: Pool, id: DeckId): Promise<Deck | null> =>
 
 export interface CreateDeckInput {
   readonly id: DeckId
+  /** A device id from localStorage, not a user account (ADR-0014). */
   readonly ownerId: string
   readonly name: string
+  readonly description?: string
   readonly commanders: readonly OracleId[]
   readonly targetBracket: Bracket
   readonly archetype: ArchetypeKey
@@ -112,13 +118,14 @@ export interface CreateDeckInput {
 
 export const createDeck = async (pool: Pool, input: CreateDeckInput): Promise<Deck> => {
   const { rows } = await pool.query<DeckRow>(
-    `INSERT INTO decks (id, owner_id, name, commanders, target_bracket, archetype,
+    `INSERT INTO decks (id, owner_id, name, description, commanders, target_bracket, archetype,
                         archetype_secondary, color_identity, exclude_universes_beyond)
-     VALUES ($1, $2, $3, $4::uuid[], $5, $6, $7, $8::char(1)[], $9) RETURNING *`,
+     VALUES ($1, $2, $3, $4, $5::uuid[], $6, $7, $8, $9::char(1)[], $10) RETURNING *`,
     [
       input.id,
       input.ownerId,
       input.name,
+      input.description ?? '',
       input.commanders,
       input.targetBracket,
       input.archetype,
@@ -253,6 +260,7 @@ export const applyBatch = async <T>(
 export interface DeckSummaryRow {
   readonly id: DeckId
   readonly name: string
+  readonly description: string
   readonly commanders: readonly OracleId[]
   readonly targetBracket: Bracket
   readonly archetype: ArchetypeKey
@@ -277,6 +285,7 @@ export const listDeckSummaries = async (
   const { rows } = await pool.query<{
     id: string
     name: string
+    description: string
     commanders: string[]
     target_bracket: number
     archetype: string
@@ -286,7 +295,8 @@ export const listDeckSummaries = async (
     updated_at: Date
     last_opened_at: Date
   }>(
-    `SELECT d.id, d.name, d.commanders, d.target_bracket, d.archetype, d.color_identity,
+    `SELECT d.id, d.name, d.description, d.commanders, d.target_bracket, d.archetype,
+            d.color_identity,
             d.status, d.updated_at, d.last_opened_at,
             COALESCE(e.accepted, 0) + cardinality(d.commanders) AS card_count
        FROM decks d
@@ -303,6 +313,7 @@ export const listDeckSummaries = async (
   return rows.map((row) => ({
     id: row.id as DeckId,
     name: row.name,
+    description: row.description,
     commanders: row.commanders as OracleId[],
     targetBracket: row.target_bracket as Bracket,
     archetype: row.archetype as ArchetypeKey,

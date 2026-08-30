@@ -63,6 +63,7 @@ export interface Group {
 export interface Deck {
   id: string
   name: string
+  description: string
   commanders: string[]
   colorIdentity: string[]
   targetBracket: number
@@ -78,10 +79,34 @@ export interface Unavailable {
   reason: string
 }
 
+/**
+ * This browser's id, generated once and kept in localStorage (ADR-0014).
+ *
+ * It is what a deck belongs to. There is no account and nothing to sign in to —
+ * the fastest path to a usable tool is not asking anyone to register — and this
+ * is the whole of that mechanism.
+ *
+ * It is NOT a credential. Anyone holding it can read this device's decks, which
+ * is acceptable for a deck list and would not be for anything else. Clearing
+ * site data loses it, and with it every deck on this device; export is the
+ * backup, which is why it sits in the masthead rather than in a menu.
+ */
+export const deviceId = ((): string => {
+  const stored = localStorage.getItem('lw.deviceId')
+  if (stored !== null && stored !== '') return stored
+  const fresh = crypto.randomUUID()
+  localStorage.setItem('lw.deviceId', fresh)
+  return fresh
+})()
+
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`/api/v1${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    headers: {
+      'content-type': 'application/json',
+      'x-device-id': deviceId,
+      ...(init?.headers ?? {}),
+    },
   })
   if (!response.ok) {
     // Errors are RFC 9457 problem+json (doc 10 §10.1); surface `detail`, which
@@ -139,6 +164,7 @@ export const getCardDetail = (oracleId: string): Promise<CardDetail> =>
 
 export const createDeck = (body: {
   name: string
+  description?: string
   commanders: string[]
   targetBracket: number
   archetype: string
@@ -148,12 +174,31 @@ export const createDeck = (body: {
 export const patchDeck = (
   id: string,
   body: {
+    name?: string
+    description?: string
     excludeUniversesBeyond?: boolean
     budget?: { maxTotalUsd: number | null; maxCardUsd: number | null } | null
   },
 ): Promise<Deck> => request(`/decks/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 
 export const getDeck = (id: string): Promise<Deck> => request(`/decks/${id}`)
+
+/** A deck as the switcher shows it — never its entries (doc 12 §12.2). */
+export interface DeckSummary {
+  id: string
+  name: string
+  description: string
+  commanders: string[]
+  targetBracket: number
+  archetype: string
+  colorIdentity: string[]
+  cardCount: number
+  status: string
+  updatedAt: string
+  lastOpenedAt: string
+}
+
+export const listDecks = (): Promise<{ items: DeckSummary[] }> => request('/decks')
 
 export interface CommandResult {
   deck: Deck

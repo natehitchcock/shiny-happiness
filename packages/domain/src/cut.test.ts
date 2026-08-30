@@ -41,6 +41,7 @@ const entry = (name: string, over: Partial<DeckEntry> = {}): DeckEntry => ({
 const deck = (entries: DeckEntry[]): Deck => ({
   id: deckId('d'),
   name: 't',
+  description: '',
   commanders: [oracleId('Cmdr')],
   targetBracket: 3,
   archetype: 'midrange',

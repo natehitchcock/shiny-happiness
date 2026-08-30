@@ -3,6 +3,7 @@ import * as api from './api'
 import { usePipeline, type Phase } from './pipeline'
 import { AUTO_QUERY_MS, useAutoQuery } from './autoquery'
 import { dimensionKeysOf, formatDecklist } from '@roundtable/domain'
+import { DeckMenu } from './DeckMenu'
 import type { Card } from './api'
 
 /** Human-readable label for a composition dimension. */
@@ -882,7 +883,17 @@ const SearchButton = ({
   )
 }
 
-export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => {
+export const Workspace = ({
+  deck: initial,
+  onSwitch,
+  onNew,
+}: {
+  deck: api.Deck
+  /** Open another deck on this device. */
+  onSwitch?: (id: string) => void
+  /** Back to the start screen to build a new one. */
+  onNew?: () => void
+}): React.JSX.Element => {
   const [deck, setDeck] = useState(initial)
   const [groups, setGroups] = useState<api.Group[]>([])
   const [unavailable, setUnavailable] = useState<api.Unavailable[]>([])
@@ -1333,10 +1344,13 @@ export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Elem
         <h1 className="wordmark">
           Lotus <span>Wizard</span>
         </h1>
-        <span className="meta">
-          {deck.name.toUpperCase()} · {deck.colorIdentity.join('') || 'C'} · BRACKET{' '}
-          {deck.targetBracket} · {deck.archetype.toUpperCase()}
-        </span>
+        <DeckMenu
+          deck={deck}
+          cardCount={deckSize}
+          onSwitch={(id) => onSwitch?.(id)}
+          onNew={() => onNew?.()}
+          onRename={(body) => setDeckOption(body)}
+        />
         <ProgressBar phase={pipeline.phase} progress={pipeline.progress} label={pipeline.label} />
         <span className="meta deck-count">{deckSize} / 100 CARDS</span>
         <button className="act" onClick={() => setImporting(true)}>
@@ -1830,27 +1844,47 @@ export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Elem
 
 export const App = (): React.JSX.Element => {
   const [deck, setDeck] = useState<api.Deck | null>(null)
+  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    // Survive a reload without needing the deck library (API-05).
-    const saved = localStorage.getItem('roundtable.deck')
-    if (saved !== null) {
-      void api
-        .getDeck(saved)
-        .then(setDeck)
-        .catch(() => localStorage.removeItem('roundtable.deck'))
-    }
+  const open = useCallback((d: api.Deck): void => {
+    localStorage.setItem('roundtable.deck', d.id)
+    setDeck(d)
   }, [])
 
-  if (deck === null) {
-    return (
-      <Start
-        onCreated={(d) => {
-          localStorage.setItem('roundtable.deck', d.id)
-          setDeck(d)
-        }}
-      />
-    )
-  }
-  return <Workspace deck={deck} key={deck.id} />
+  useEffect(() => {
+    // Which deck was last open. The DECKS themselves live on the server, keyed
+    // by this browser's device id (ADR-0014) — this is only the bookmark.
+    const saved = localStorage.getItem('roundtable.deck')
+    if (saved === null) {
+      setLoading(false)
+      return
+    }
+    void api
+      .getDeck(saved)
+      .then(setDeck)
+      .catch(() => localStorage.removeItem('roundtable.deck'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  // Without this the Start screen flashes for a moment on every reload, before
+  // the saved deck arrives — which reads as having lost it.
+  if (loading) return <p className="boot">Loading…</p>
+
+  if (deck === null) return <Start onCreated={open} />
+
+  return (
+    <Workspace
+      deck={deck}
+      key={deck.id}
+      onSwitch={(id) => {
+        void api.getDeck(id).then(open).catch(noop)
+      }}
+      onNew={() => {
+        localStorage.removeItem('roundtable.deck')
+        setDeck(null)
+      }}
+    />
+  )
 }
+
+const noop = (): void => undefined

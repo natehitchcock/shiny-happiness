@@ -42,6 +42,7 @@ const entry = (name: string): DeckEntry => ({
 const deckOf = (names: string[]): Deck => ({
   id: deckId('d'),
   name: 'd',
+  description: '',
   commanders: [oracleId('cmdr')],
   targetBracket: 3,
   archetype: 'midrange',
