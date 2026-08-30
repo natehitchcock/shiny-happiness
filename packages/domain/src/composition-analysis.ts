@@ -64,6 +64,8 @@ export const countComposition = (
   const byDimension = new Map<string, number>()
   for (const [role, count] of byRole) byDimension.set(dimensionKey(roleDimension(role)), count)
   for (const [type, count] of byType) byDimension.set(dimensionKey(typeDimension(type)), count)
+  // `dimensionKeysOf` is the same rule stated once; asserting the agreement
+  // here would be circular, so `composition.test.ts` holds the two together.
 
   return {
     total,

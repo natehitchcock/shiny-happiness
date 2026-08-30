@@ -1,11 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
 import { usePipeline, type Phase } from './pipeline'
 import { AUTO_QUERY_MS, useAutoQuery } from './autoquery'
-import { formatDecklist } from '@roundtable/domain'
+import { dimensionKeysOf, formatDecklist } from '@roundtable/domain'
 import type { Card } from './api'
 
 /** Human-readable label for a composition dimension. */
+/**
+ * The wire form of a dimension, as a key.
+ *
+ * `dimensionKey` in the domain takes a branded `CompositionDimension`; the
+ * analysis response carries the same two shapes as plain optional strings, so
+ * this reads them without a cast through the brand. The FORMAT is the domain's
+ * and must stay in step with it — `role:x` / `type:x`.
+ */
+const dimensionKeyOf = (d: { role?: string; type?: string }): string =>
+  d.role === undefined ? `type:${d.type ?? ''}` : `role:${d.role}`
+
 const dimensionName = (d: { role?: string; type?: string }): string => d.role ?? d.type ?? '—'
 
 /** Prices are estimates, and the interface has to say so (ADR-0009 Q7). */
@@ -433,7 +444,19 @@ const Preview = ({
  * on target. Identity never rests on colour alone — every column states its
  * numbers in its `aria-label` and its tooltip.
  */
-const Curve = ({ curve }: { curve: api.Analysis['curve'] }): React.JSX.Element => {
+const Curve = ({
+  curve,
+  locked,
+}: {
+  curve: api.Analysis['curve']
+  /**
+   * Locked cards per bucket, from the client rather than from `curve.locked`.
+   *
+   * The server's copy is a snapshot from the last recompute, and locking no
+   * longer triggers one — so the gold has to come from the deck on screen.
+   */
+  locked: readonly number[]
+}): React.JSX.Element => {
   const peak = Math.max(1, ...curve.histogram, ...curve.deltas.map((d) => d.max))
 
   return (
@@ -452,7 +475,7 @@ const Curve = ({ curve }: { curve: api.Analysis['curve'] }): React.JSX.Element =
               className="curve-col"
               key={d.bucket}
               title={`Mana value ${String(d.bucket)}${d.bucket === 7 ? '+' : ''}: ${String(d.actual)} cards, want ${String(d.min)}–${String(d.max)} — ${label}`}
-              aria-label={`Mana value ${String(d.bucket)}: ${String(d.actual)} cards (${String(curve.locked[d.bucket] ?? 0)} locked), target range ${String(d.min)} to ${String(d.max)}, ${label}`}
+              aria-label={`Mana value ${String(d.bucket)}: ${String(d.actual)} cards (${String(locked[d.bucket] ?? 0)} locked), target range ${String(d.min)} to ${String(d.max)}, ${label}`}
             >
               {/* The acceptable range, drawn as a band rather than a line —
                   anywhere inside it is fine, which is what a range means. */}
@@ -474,7 +497,7 @@ const Curve = ({ curve }: { curve: api.Analysis['curve'] }): React.JSX.Element =
                 <div
                   className="curve-locked"
                   style={{
-                    height: `${String(Math.min(100, ((curve.locked[d.bucket] ?? 0) / Math.max(1, d.actual)) * 100))}%`,
+                    height: `${String(Math.min(100, ((locked[d.bucket] ?? 0) / Math.max(1, d.actual)) * 100))}%`,
                   }}
                 />
               </div>
@@ -726,6 +749,101 @@ const ImportDialog = ({
  * button's accessible name counts down in words, so someone who cannot see the
  * ring still knows a query is coming and how long they have to stop it.
  */
+/**
+ * The column queries, under the filter bar, each sitting over its own column.
+ *
+ * A chip that just says `mv<=3` in a row of chips makes you count ticks to work
+ * out which column it names. Aligning it removes that step: the label is
+ * directly above the column it describes.
+ *
+ * Measured from the DOM rather than reconstructed in CSS. The columns sit in a
+ * flex row after a flexible name and before the costs and the buttons, so their
+ * position depends on text that only the browser knows the width of. Mirroring
+ * that with a second set of spacers would be a copy that silently drifts the
+ * first time a button's label changes; asking where the column actually IS
+ * cannot drift.
+ *
+ * Each chip gets its own line, right-aligned to its column's centre, because
+ * columns are 1.6rem apart and the queries are not.
+ */
+const ColumnLegend = ({
+  columns,
+  onRemove,
+  measureRoot,
+}: {
+  columns: readonly string[]
+  onRemove: (query: string) => void
+  measureRoot: React.RefObject<HTMLElement | null>
+}): React.JSX.Element | null => {
+  const barRef = useRef<HTMLDivElement>(null)
+  /** Distance from the bar's right edge to each column's centre, in px. */
+  const [insets, setInsets] = useState<readonly number[] | null>(null)
+
+  useLayoutEffect(() => {
+    if (columns.length === 0) {
+      setInsets(null)
+      return
+    }
+    const measure = (): void => {
+      const bar = barRef.current
+      const root = measureRoot.current
+      if (bar === null || root === null) return
+      const cells = [...root.querySelectorAll('.card-row .col-cell')].slice(0, columns.length)
+      // Before the first result lands there is nothing to align to. Falling
+      // back to the plain row is better than pinning chips to a guess.
+      if (cells.length !== columns.length) {
+        setInsets(null)
+        return
+      }
+      const barRight = bar.getBoundingClientRect().right
+      setInsets(
+        cells.map((cell) => {
+          const box = cell.getBoundingClientRect()
+          return barRight - (box.left + box.width / 2)
+        }),
+      )
+    }
+    measure()
+
+    // The columns move whenever the pane is resized or the rows reflow, and
+    // neither fires a React render.
+    const observer = new ResizeObserver(measure)
+    if (barRef.current !== null) observer.observe(barRef.current)
+    if (measureRoot.current !== null) observer.observe(measureRoot.current)
+    return () => observer.disconnect()
+  }, [columns, measureRoot])
+
+  if (columns.length === 0) return null
+  const aligned = insets !== null
+
+  return (
+    <div
+      className="columns"
+      ref={barRef}
+      data-aligned={aligned}
+      style={aligned ? { height: `${String(columns.length * 1.4)}rem` } : undefined}
+      aria-label="Columns"
+    >
+      {columns.map((c, i) => (
+        <span
+          className="column-chip"
+          key={c}
+          style={
+            aligned
+              ? { right: `${String(insets[i] ?? 0)}px`, top: `${String(i * 1.4)}rem` }
+              : undefined
+          }
+        >
+          <code>{c}</code>
+          <button className="act" onClick={() => onRemove(c)} aria-label={`Remove the ${c} column`}>
+            ×
+          </button>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 const SearchButton = ({
   onRun,
   remaining,
@@ -820,6 +938,34 @@ export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Elem
   const deckRef = useRef(deck)
   const queryRef = useRef(query)
   const columnsRef = useRef<readonly string[]>([])
+  /** The suggestions region, so the column legend can find the columns in it. */
+  const suggestionsRef = useRef<HTMLElement>(null)
+
+  /**
+   * Locks the user has set that no server response has confirmed yet.
+   *
+   * A requery reads the deck when it STARTS and writes it back when it lands,
+   * seconds later. Anything set in between was overwritten — lock a card during
+   * a recompute and the icon sprang back open when the answer arrived. Accepts
+   * never had this problem because they go through the pipeline's own buffer;
+   * locks deliberately do not any more, so they need their own overlay.
+   *
+   * A ref, not state: it is read while applying a server response, and having
+   * that read schedule another render would be a loop.
+   */
+  const pendingLocks = useRef(new Map<string, boolean>())
+
+  /** Re-assert unconfirmed locks over any deck the server hands back. */
+  const withPendingLocks = useCallback((d: api.Deck): api.Deck => {
+    if (pendingLocks.current.size === 0) return d
+    return {
+      ...d,
+      entries: d.entries.map((e) => {
+        const locked = pendingLocks.current.get(e.oracleId)
+        return locked === undefined || e.zone !== 'accepted' ? e : { ...e, locked }
+      }),
+    }
+  }, [])
   deckRef.current = deck
   queryRef.current = query
   // This assignment was missing, and nothing caught it: columns were added to
@@ -873,7 +1019,9 @@ export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Elem
         setPending([])
         return
       }
-      setDeck(r.deck)
+      // Through the overlay: a lock set while this run was in flight is newer
+      // than the deck it is about to write, and must survive it.
+      setDeck(withPendingLocks(r.deck))
       setGroups(r.recs.groups)
       setUnavailable(r.recs.unavailable)
       setAnalysis(r.analysis)
@@ -933,22 +1081,49 @@ export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Elem
   }
 
   /**
-   * Lock or unlock a card.
+   * Lock or unlock a card — applied at once, and NOT through the pipeline.
    *
-   * Locking is the user overruling the cut hints for one card, so it goes
-   * through the same batched pipeline as everything else and the hint clears
-   * when the recompute lands.
+   * Locking changes nothing the suggestions are computed from. It does not add
+   * or remove a card, so the pool, the composition counts, the curve and every
+   * score are identical either side of it. Running the staged requery for a
+   * lock spent a round trip and up to four seconds of settle to arrive at the
+   * list already on screen.
+   *
+   * What it DOES change — the gold overlays, and whether this card shows a cut
+   * hint — is derived on the client from the deck itself, so it lands on the
+   * click. The command still goes to the server, because the lock has to
+   * survive a reload; it just does not hold anything up.
    */
   const toggleLock = (oracleId: string, locked: boolean): void => {
-    setPending((queued) => [...queued, { type: 'lock', oracleId, locked }])
-    pipeline.schedule({ type: 'lock', oracleId, locked })
+    const before = deckRef.current
+    pendingLocks.current.set(oracleId, locked)
+    setDeck((d) => ({
+      ...d,
+      entries: d.entries.map((e) =>
+        e.oracleId === oracleId && e.zone === 'accepted' ? { ...e, locked } : e,
+      ),
+    }))
+    void api
+      .sendCommands(before.id, [{ type: 'lock', oracleId, locked }], before.version)
+      .then((r) => {
+        pendingLocks.current.delete(oracleId)
+        setDeck(r.deck)
+      })
+      .catch(() => {
+        pendingLocks.current.delete(oracleId)
+        // Put it back rather than leaving the screen claiming something the
+        // server did not accept — a stale version is the likely cause, and a
+        // silently-wrong lock is worse than a lock that visibly did not take.
+        setDeck(before)
+        setNotice('That lock did not save. Try again.')
+      })
   }
 
   const setDeckOption = (body: Parameters<typeof api.patchDeck>[1]): void => {
     void api
       .patchDeck(deck.id, body)
       .then((d) => {
-        setDeck(d)
+        setDeck(withPendingLocks(d))
         pipeline.refresh()
       })
       .catch(() => undefined)
@@ -1053,6 +1228,44 @@ export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Elem
   )
   const basicIds = useMemo(() => new Set(basics.map((b) => b.oracleId)), [basics])
 
+  /**
+   * The gold overlays, derived here rather than read from the analysis.
+   *
+   * The server sends `locked` counts too, but they only change when a recompute
+   * lands — so locking a card left the gold untouched for seconds, or until the
+   * next accept. These come from the deck the user is looking at, so they move
+   * on the click.
+   *
+   * `dimensionKeysOf` is imported from the domain rather than reimplemented:
+   * the keys have to match the ones the server put on its targets, and an
+   * overlay counted by a second rule can exceed the bar under it.
+   */
+  const lockedByDimension = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const entry of optimistic.entries) {
+      if (entry.zone !== 'accepted' || !entry.locked) continue
+      if (optimistic.commanders.includes(entry.oracleId)) continue
+      const card = cards.get(entry.oracleId)
+      if (card === undefined) continue
+      for (const key of dimensionKeysOf(card)) counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    return counts
+  }, [optimistic, cards])
+
+  /** The same, for the curve. Lands have no bucket, exactly as on the server. */
+  const lockedByBucket = useMemo(() => {
+    const buckets = new Array<number>(8).fill(0)
+    for (const entry of optimistic.entries) {
+      if (entry.zone !== 'accepted' || !entry.locked) continue
+      if (optimistic.commanders.includes(entry.oracleId)) continue
+      const card = cards.get(entry.oracleId)
+      if (card === undefined || card.types.includes('land')) continue
+      const bucket = Math.min(7, Math.max(0, Math.floor(card.manaValue)))
+      buckets[bucket] = (buckets[bucket] ?? 0) + 1
+    }
+    return buckets
+  }, [optimistic, cards])
+
   const accepted = optimistic.entries.filter((e) => e.zone === 'accepted')
   const excluded = optimistic.entries.filter((e) => e.zone === 'excluded')
   const deckSize = accepted.length + optimistic.commanders.length
@@ -1094,16 +1307,19 @@ export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Elem
   const compositionRows = useMemo(() => {
     const rows = (analysis?.targets ?? []).map((t) => {
       const name = dimensionName(t.dimension)
-      const settled = t.locked >= t.actual && t.actual >= t.min
+      // The client's count, not the server's — the server's is a snapshot from
+      // the last recompute, and a lock has to show up before the next one.
+      const locked = lockedByDimension.get(dimensionKeyOf(t.dimension)) ?? t.locked
+      const settled = locked >= t.actual && t.actual >= t.min
       const filled = t.actual >= t.min
-      return { ...t, name, settled, filled }
+      return { ...t, locked, name, settled, filled }
     })
     return rows
       .filter((r) => !r.settled)
       .filter((r) => !(hideSettledRoles && r.filled))
       .sort((a, b) => a.actual / Math.max(1, a.ideal) - b.actual / Math.max(1, b.ideal))
       .slice(0, 12)
-  }, [analysis, hideSettledRoles])
+  }, [analysis, hideSettledRoles, lockedByDimension])
 
   const budget = deck.budget
   const overCard =
@@ -1269,7 +1485,7 @@ export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Elem
           ) : null}
         </section>
 
-        <section className="region" aria-label="Suggestions">
+        <section className="region" aria-label="Suggestions" ref={suggestionsRef}>
           <h2>Deck options</h2>
           <div className="options" aria-label="Deck options">
             <label className="check">
@@ -1395,22 +1611,11 @@ export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Elem
               </button>
             </div>
 
-            {columns.length > 0 ? (
-              <div className="columns">
-                {columns.map((c) => (
-                  <span className="column-chip" key={c}>
-                    <code>{c}</code>
-                    <button
-                      className="act"
-                      onClick={() => setColumns((all) => all.filter((x) => x !== c))}
-                      aria-label={`Remove the ${c} column`}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : null}
+            <ColumnLegend
+              columns={columns}
+              onRemove={(c) => setColumns((all) => all.filter((x) => x !== c))}
+              measureRoot={suggestionsRef}
+            />
 
             {queryError !== null ? <p className="problem">{queryError}</p> : null}
           </div>
@@ -1421,11 +1626,15 @@ export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Elem
                 <h3>{g.label}</h3>
                 <span className="count">{g.total}</span>
                 <span className="rationale">{g.rationale}</span>
-                {columns.map((c) => (
-                  <span className="col-head" key={c} title={c}>
-                    {c}
-                  </span>
-                ))}
+                {/* No column marker here on purpose.
+                    A group head holds a title, a count and a rationale; a card
+                    row holds costs and two buttons after its columns. The two
+                    rows therefore end at different places, and the marker sat
+                    251 px right of the cells it claimed to head — measured, not
+                    guessed. Matching it would mean mirroring every trailing
+                    width, which is a copy that drifts. The columns are named
+                    once instead, in the legend under the filter bar, which
+                    aligns by measuring where the cells actually are. */}
               </div>
               {g.items.map((item) => (
                 <div className="card-row" key={item.oracleId}>
@@ -1596,7 +1805,7 @@ export const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Elem
           {analysis !== null ? (
             <div className="analysis-pinned">
               <h2>Mana curve</h2>
-              <Curve curve={analysis.curve} />
+              <Curve curve={analysis.curve} locked={lockedByBucket} />
               <p className="note">
                 Average mana value {analysis.curve.averageManaValue.toFixed(2)}
               </p>

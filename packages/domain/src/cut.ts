@@ -1,6 +1,11 @@
 import type { Card } from './card.js'
 import type { ComboIndex } from './combo-index.js'
-import { dimensionKey, type CompositionDimension, type CompositionTarget } from './composition.js'
+import {
+  dimensionKey,
+  dimensionKeysOf,
+  type CompositionDimension,
+  type CompositionTarget,
+} from './composition.js'
 import type { CompositionCounts } from './composition-analysis.js'
 import { curveBucket, curveFit, type CurveTarget } from './curve.js'
 import type { Deck } from './deck.js'
@@ -205,18 +210,36 @@ export const lockedCurve = (
 }
 
 /** Locked cards per composition dimension, keyed by `dimensionKey`. */
+/**
+ * How much of each composition target is already committed.
+ *
+ * Counted by `dimensionKeysOf`, the same rule the bar itself uses. The first
+ * version emitted `role:` keys only, so the `type:creature` meter could never
+ * show gold however many creatures were locked — an overlay counted by a
+ * different rule than the bar beneath it can exceed that bar or miss a
+ * dimension it has, which makes it not an overlay at all.
+ *
+ * Commanders are excluded. They are permanently in the deck, so counting them
+ * would be defensible, but the gold means "you decided this" and a commander is
+ * not a decision the lock button made.
+ */
 export const lockedComposition = (
   deck: Deck,
   cards: ReadonlyMap<OracleId, Card>,
-  roleFor: (card: Card) => string,
+  roleFor?: (card: Card) => string,
 ): ReadonlyMap<string, number> => {
   const locked = new Map<string, number>()
   for (const entry of deck.entries) {
     if (entry.zone !== 'accepted' || !entry.locked) continue
+    if (deck.commanders.includes(entry.oracleId)) continue
     const card = cards.get(entry.oracleId)
     if (card === undefined) continue
-    const key = dimensionKey({ kind: 'role', role: roleFor(card) as never })
-    locked.set(key, (locked.get(key) ?? 0) + 1)
+    for (const key of dimensionKeysOf({
+      primaryRole: roleFor?.(card) ?? card.primaryRole,
+      types: card.types,
+    })) {
+      locked.set(key, (locked.get(key) ?? 0) + 1)
+    }
   }
   return locked
 }

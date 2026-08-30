@@ -246,3 +246,63 @@ describe('"no synergy" versus "we did not derive any tags"', () => {
     expect(unknown).toBeGreaterThan(0)
   })
 })
+
+describe('lockedComposition counts by the same rule as the bar', () => {
+  it('credits a locked card to its TYPE dimension, not only its role', () => {
+    // The bug: it emitted `role:` keys only, so the `type:creature` meter could
+    // never show gold however many creatures were locked. An overlay counted by
+    // a different rule than the bar under it is not an overlay.
+    const creature = card('Locked Creature', {
+      types: ['creature'] as CardType[],
+      primaryRole: 'wincon',
+    })
+    const d = deck([entry('Locked Creature', { locked: true })])
+    const locked = lockedComposition(d, new Map([[creature.oracleId, creature]]))
+    expect(locked.get('type:creature')).toBe(1)
+    expect(locked.get('role:wincon')).toBe(1)
+  })
+
+  it('agrees with countComposition on the same cards', () => {
+    // The guarantee that makes the overlay an overlay: lock everything, and the
+    // gold must equal the bar on every dimension.
+    const cards = [
+      card('A', { types: ['creature'] as CardType[], primaryRole: 'wincon' }),
+      card('B', { types: ['artifact'] as CardType[], primaryRole: 'ramp' }),
+      card('C', { types: ['creature', 'artifact'] as CardType[], primaryRole: 'ramp' }),
+    ]
+    const d = deck(cards.map((c) => entry(c.name, { locked: true })))
+    const byId = new Map(cards.map((c) => [c.oracleId, c]))
+    const locked = lockedComposition(d, byId)
+    const counts = countComposition(d, byId)
+    for (const [key, count] of counts.byDimension) {
+      expect(locked.get(key) ?? 0, key).toBe(count)
+    }
+  })
+
+  it('never exceeds the bar when only some cards are locked', () => {
+    const cards = [
+      card('A', { types: ['creature'] as CardType[], primaryRole: 'wincon' }),
+      card('B', { types: ['creature'] as CardType[], primaryRole: 'wincon' }),
+    ]
+    const d = deck([entry('A', { locked: true }), entry('B')])
+    const byId = new Map(cards.map((c) => [c.oracleId, c]))
+    const locked = lockedComposition(d, byId)
+    const counts = countComposition(d, byId)
+    for (const [key, count] of locked) {
+      expect(count, key).toBeLessThanOrEqual(counts.byDimension.get(key) ?? 0)
+    }
+    expect(locked.get('type:creature')).toBe(1)
+    expect(counts.byDimension.get('type:creature')).toBe(2)
+  })
+
+  it('does not count a commander as something the user locked', () => {
+    // Gold means "you decided this". A commander is permanent, but it is not a
+    // decision the lock button made.
+    const cmd = card('The Commander', { types: ['creature'] as CardType[] })
+    const d = {
+      ...deck([entry('The Commander', { locked: true })]),
+      commanders: [cmd.oracleId],
+    }
+    expect(lockedComposition(d, new Map([[cmd.oracleId, cmd]])).size).toBe(0)
+  })
+})

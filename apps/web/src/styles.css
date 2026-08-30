@@ -1064,11 +1064,43 @@ select {
   white-space: nowrap;
 }
 
+/*
+ * Two layouts, one component.
+ *
+ * `data-aligned="true"` is the real one: each chip is absolutely positioned so
+ * its right edge lands on the centre of the column it names, one chip per line
+ * because columns are 1.6rem apart and queries are not. The plain flex row is
+ * the fallback for before the first result arrives, when there are no columns
+ * on screen to measure and pinning to a guess would be worse than not pinning.
+ */
 .columns {
   display: flex;
   flex-wrap: wrap;
   gap: var(--step);
   margin-top: var(--step);
+}
+
+.columns[data-aligned='true'] {
+  display: block;
+  position: relative;
+}
+
+.columns[data-aligned='true'] .column-chip {
+  position: absolute;
+  /* `right` is set inline, from the measured column centre. */
+  white-space: nowrap;
+}
+
+/* A tick under the chip's right edge, which sits on the column's centre — the
+   alignment is the signal, and this is what makes it legible as one. */
+.columns[data-aligned='true'] .column-chip::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: 100%;
+  width: 1px;
+  height: 5px;
+  background: var(--rule);
 }
 
 .column-chip {
@@ -1100,19 +1132,6 @@ select {
 
 .col-cell[data-match='true'] {
   color: var(--sage);
-}
-
-.col-head {
-  font-family: var(--mono);
-  font-size: 0.6rem;
-  min-width: 1.6rem;
-  text-align: center;
-  color: var(--parchment-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 5rem;
-  flex: 0 0 auto;
 }
 
 /* ------------------------------------------------ auto-query countdown */
