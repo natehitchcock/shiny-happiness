@@ -1,8 +1,8 @@
-import { createGunzip } from 'node:zlib'
-import { Readable } from 'node:stream'
 import { createInterface } from 'node:readline'
+import { Readable } from 'node:stream'
 import type { Card, CardType, Color, Printing } from '@roundtable/domain'
 import { deriveRoles, oracleId, printingId } from '@roundtable/domain'
+import { textStreamOf } from './http.js'
 
 /**
  * Scryfall adapter (doc 04 §4.1, ADR-0009).
@@ -136,8 +136,10 @@ export async function* streamBulkCards(
     throw new Error(`Scryfall bulk download responded ${response.status}`)
   }
 
-  const source = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0])
-  const lines = createInterface({ input: source.pipe(createGunzip()), crlfDelay: Infinity })
+  const lines = createInterface({
+    input: Readable.from(textStreamOf(response)),
+    crlfDelay: Infinity,
+  })
 
   for await (const line of lines) {
     const trimmed = line.trim()

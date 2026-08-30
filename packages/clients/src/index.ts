@@ -5,3 +5,6 @@
  * will not be — see ADR-0008.
  */
 export * from './scryfall.js'
+export * from './spellbook.js'
+export * from './json-array-stream.js'
+export * from './http.js'
