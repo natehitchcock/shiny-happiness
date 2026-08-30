@@ -58,7 +58,7 @@ lands on a backend that inherited a read-only transaction (`SQLSTATE 25006`).
 export DATABASE_URL="$DATABASE_URL_UNPOOLED"   # direct, for schema + bulk load
 
 pnpm build
-pnpm --filter @roundtable/db migrate up      # 0001 … 0004
+pnpm --filter @roundtable/db migrate up      # `migrate status` first, to see what is pending
 
 # ~35k cards, ~110k printings. Tens of minutes over the network.
 pnpm --filter @roundtable/ingest start cards
@@ -109,6 +109,18 @@ nothing can get them back. Export is the only backup.
 migration racing several cold-starting functions is a bad way to find out that
 two of them ran it. Run `migrate up` yourself, before the deploy that needs it.
 
+This has already gone wrong once. Production sat four migrations behind for
+weeks, and the symptom was not an error — it was creatures with no printed
+power or toughness, because `0006` adds the columns and nothing had added them.
+A schema that is merely OLD serves nulls, and nulls render as absent rather than
+as broken. **Run `migrate status` against production whenever something is
+missing rather than wrong**; it is a five-second check that names the cause
+directly.
+
+**A migration that adds a column does not fill it.** `0006` is the example:
+after `migrate up`, every card has `power = NULL` until the cards ingest runs
+again. Adding a column to `cards` therefore means step 4 as well as step 3.
+
 ## Diagnosing a broken deployment
 
 `FUNCTION_INVOCATION_FAILED` is what the platform reports when the function
@@ -128,6 +140,14 @@ curl -H "x-vercel-protection-bypass: <secret>"      "https://<deployment>/api/v1
   exist for the function to import.
 - **`{"items":[]}`** — everything works; the database is simply empty. Run the
   ingest (step 4).
+
+**A field that is missing rather than wrong** — every creature's power blank,
+every fuzzy name search finding nothing — is almost always a migration that was
+never applied, not a bug in the code that reads it:
+
+```bash
+DATABASE_URL="$DATABASE_URL_UNPOOLED" pnpm --filter @roundtable/db migrate status
+```
 
 `api/handler.test.ts` runs the same handler locally, so "the imports resolve and
 the env-missing path answers" is checked on every `pnpm test` rather than only
