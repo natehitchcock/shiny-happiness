@@ -19,6 +19,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  *                          under a user who is mid-click. Anything they add in
  *                          this window restarts the cycle instead.
  *
+ * The settle is three seconds measured from when the ANSWER LANDS, never from
+ * when the query started. A slow recompute does not eat into it: if the server
+ * takes eight seconds, the user still gets their three. Spending a shared
+ * budget would mean the slowest queries — the ones after which the list moves
+ * most — are exactly the ones that give no warning before it does.
+ *
  * The bar is therefore honest about two different things at once: the left half
  * is work being done, the right half is time being given back.
  */
@@ -97,6 +103,8 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
    * its result back three seconds would just read as lag.
    */
   const settleMs = useRef(SETTLE_MS)
+  /** Whether a result has ever been applied — see `refresh`. */
+  const applied = useRef(false)
   const run = useRef(options.run)
   const apply = useRef(options.apply)
   run.current = options.run
@@ -120,7 +128,10 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
     const held = result.current
     result.current = null
     resolved.current = false
-    if (held !== null) apply.current(held)
+    if (held !== null) {
+      applied.current = true
+      apply.current(held)
+    }
   }, [stop])
 
   const tick = useCallback((): void => {
@@ -154,18 +165,14 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
       // Clamped at the halfway mark until the server actually answers: the bar
       // may run out of animation but it may not run ahead of the truth.
       setProgress(Math.min(value, QUERY_END))
+      // Settle starts here, and `startedAt` is reset here, which is what makes
+      // the three seconds count from the answer rather than from the request.
+      // The second condition is what holds a fast answer back until the bar has
+      // actually reached 50%, so it does not jump.
       if (resolved.current && fraction >= 1) {
         setPhaseBoth('settling')
         startedAt.current = now()
         settleFrom.current = QUERY_END
-      } else if (resolved.current) {
-        // Answer arrived early — let the bar finish its run to 50% first so it
-        // does not jump, then settle.
-        if (value >= QUERY_END) {
-          setPhaseBoth('settling')
-          startedAt.current = now()
-          settleFrom.current = QUERY_END
-        }
       }
     } else if (phaseRef.current === 'settling') {
       const fraction = settleMs.current === 0 ? 1 : Math.min(1, elapsed / settleMs.current)
@@ -234,7 +241,14 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
   const refresh = useCallback((): void => {
     setQueued(0)
     items.current = []
-    start(false, true)
+    // A settle on every refresh EXCEPT the first.
+    //
+    // The first is the initial load: there is nothing on screen yet, so there
+    // is nothing to reshuffle under anyone, and holding the first paint back
+    // three seconds is just lag. Every refresh after it replaces a list the
+    // user is already reading — a filter run, or the auto-query firing — and
+    // those get the same warning an accept does.
+    start(applied.current, true)
   }, [start])
 
   useEffect(() => stop, [stop])
