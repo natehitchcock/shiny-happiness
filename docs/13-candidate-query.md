@@ -70,6 +70,9 @@ A **bareword** with no field matches the card name, substring, case-insensitive.
 | `near` | | numeric | Near-combos at distance 1 (doc 02 §2.3) |
 | `flag` | | `:` | Bracket flag — `flag:game-changer` |
 | `group` | | `:` | Candidate group key — `group:fills-ramp` |
+| `produces` | `causes` | `:` | A mechanical synergy tag the card CAUSES — `produces:artifact-etb` |
+| `wants` | `benefits` | `:` | A tag the card BENEFITS FROM — `wants:creature-death` |
+| `tag` | `synergy` | `:` | Either side — `tag:treasure` |
 
 `is:` predicates: `permanent`, `spell`, `creature`, `land`, `vanilla`, `modal`,
 `dfc`, `split`, `adventure`, `reserved`, `gamechanger`, `reprint`, `firstprint`.
@@ -84,7 +87,16 @@ t:goblin (kw:haste or o:"can't be blocked")
 role:ramp mv<=2 price<=5             budget early ramp
 o:~ t:enchantment                    enchantments that reference themselves
 near>=2 -t:land                      pairs worth adding together
+tag:artifact-etb mv<=3               cheap cards on either side of artifact ETBs
+wants:creature-death -produces:creature-death   drains with nothing to feed them
 ```
+
+`produces`, `wants` and `tag` accept the spelling shown on the chip as well as
+the internal one: `tag:"artifact etb"` and `tag:artifact-etb` are the same query.
+Typing what you just read off the interface has to work, or the field is only
+usable by someone who has read the source. An unknown tag is an error listing
+all seventeen, because the set is short and closed and guessing which near-miss
+was meant would be worse than showing the lot.
 
 ### Deliberately not supported in v1
 

@@ -3,7 +3,7 @@ import type { BracketFlag } from '../bracket.js'
 import type { OracleId } from '../ids.js'
 import type { Role } from '../role.js'
 import { assertNever } from '../assert-never.js'
-import type { ComparisonOp, QueryNode } from './ast.js'
+import { normaliseTag, type ComparisonOp, type QueryNode } from './ast.js'
 
 /**
  * Evaluating a query against an annotated candidate (doc 13 §13.3).
@@ -170,6 +170,24 @@ const evaluateTerm = (
       const expected = RARITY_ORDER[value.toLowerCase()]
       if (actual === undefined || expected === undefined) return false
       return compareNumbers(actual, op, expected)
+    }
+    /*
+     * The mechanical synergy tags, which are on the card already.
+     *
+     * `produces` and `wants` are the two halves the UI draws as steel and brass
+     * chips; `tag` asks the question without caring which side, which is what
+     * someone typing the name of an effect usually means.
+     */
+    case 'produces':
+      return candidate.card.synergyProduces.some((t) => t === normaliseTag(value))
+    case 'wants':
+      return candidate.card.synergyWants.some((t) => t === normaliseTag(value))
+    case 'tag': {
+      const tag = normaliseTag(value)
+      return (
+        candidate.card.synergyProduces.some((t) => t === tag) ||
+        candidate.card.synergyWants.some((t) => t === tag)
+      )
     }
     case 'is':
       return evaluateIs(candidate, value)

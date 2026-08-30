@@ -621,6 +621,17 @@ const TagChip = ({
               Benefits, and benefits from: {partners.map(readable).join(', ')}.
             </span>
           )}
+          {/* The tag is a filter field as well as a label, and nothing else on
+              screen says so. Both spellings are given because both work, and
+              because `tag:` — either side — is usually what someone reading a
+              chip actually wants. */}
+          <span className="hint-line">
+            Filter by it:{' '}
+            <code>
+              {direction}:{tag}
+            </code>
+            , or <code>tag:{tag}</code> for cards on either side.
+          </span>
           <span className="hint-line dim">
             Derived from the rules text, so it is sometimes wrong — {opposite} is the other half of
             the same question.
@@ -668,7 +679,7 @@ const Semantics = ({
       ) : null}
       {wants.length > 0 ? (
         <p className="tags">
-          <span className="tags-label">Pays off</span>
+          <span className="tags-label">Benefits from</span>
           {wants.map((t) => (
             <TagChip key={t} tag={t} direction="wants" />
           ))}
@@ -768,15 +779,17 @@ const Works = ({
     if (oracleId === self) continue
     const other = cards.get(oracleId)
     if (other === undefined) continue
-    const enables = other.synergyWants.filter((t) => produces.has(t))
-    const paysOff = other.synergyProduces.filter((t) => wants.has(t))
-    const tag = enables[0] ?? paysOff[0]
+    const benefits = other.synergyWants.filter((t) => produces.has(t))
+    const causes = other.synergyProduces.filter((t) => wants.has(t))
+    const tag = benefits[0] ?? causes[0]
     if (tag === undefined) continue
+    // Said of the OTHER card, in the same two words the Semantics headings use.
+    // "wants creature death" was the odd one out and the vaguest of the three.
     synergy.push(
       partner(
         oracleId,
         other.name,
-        `— ${enables[0] !== undefined ? 'wants' : 'causes'} ${tag.replace(/-/g, ' ')}`,
+        `— ${benefits[0] !== undefined ? 'benefits from' : 'causes'} ${tag.replace(/-/g, ' ')}`,
       ),
     )
   }
@@ -2670,7 +2683,7 @@ export const Workspace = ({
               <input
                 type="text"
                 value={draftQuery}
-                placeholder="Filter — try  t:creature  or  mv<=3  or  price<=5"
+                placeholder="Filter — try  t:creature  or  mv<=3  or  tag:treasure"
                 onChange={(e) => setDraftQuery(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') setQuery(draftQuery)

@@ -307,3 +307,72 @@ describe('evaluation', () => {
     expect(matchesQuery(ast('is:reprint'), bombardment)).toBe(false)
   })
 })
+
+describe('filtering by synergy tag', () => {
+  // The tags are shown as chips on every row and were the one thing on screen
+  // the filter could not reach: "give me the artifact-ETB payoffs" had to be
+  // approximated with `o:` over rules text, which is exactly the guessing the
+  // tags exist to replace.
+  const etbPayoff = candidate({
+    card: card({ name: 'Etherium Sculptor', synergyWants: ['artifact-etb'] }),
+  })
+  const etbCause = candidate({
+    card: card({ name: 'Myr Battlesphere', synergyProduces: ['artifact-etb'] }),
+  })
+  const neither = candidate({ card: card({ name: 'Mountain' }) })
+
+  it('separates the card that causes an event from the card that benefits', () => {
+    expect(matchesQuery(ast('produces:artifact-etb'), etbCause)).toBe(true)
+    expect(matchesQuery(ast('produces:artifact-etb'), etbPayoff)).toBe(false)
+    expect(matchesQuery(ast('wants:artifact-etb'), etbPayoff)).toBe(true)
+    expect(matchesQuery(ast('wants:artifact-etb'), etbCause)).toBe(false)
+  })
+
+  it('tag: asks the question without caring which side', () => {
+    expect(matchesQuery(ast('tag:artifact-etb'), etbCause)).toBe(true)
+    expect(matchesQuery(ast('tag:artifact-etb'), etbPayoff)).toBe(true)
+    expect(matchesQuery(ast('tag:artifact-etb'), neither)).toBe(false)
+  })
+
+  it('accepts the spelling shown on the chip, spaces and all', () => {
+    // The chip reads "artifact etb". Typing what you just read must work, or
+    // the feature is only usable by someone who has read the source.
+    //
+    // The NEGATIVE assertions are the ones that bite. A term that fails
+    // validation is dropped from the AST, and an empty AST matches everything —
+    // so "does this match the card that has the tag" passes either way, and
+    // only "does it reject the card that does not" can tell them apart.
+    expect(errorsOf('tag:"artifact etb"')).toEqual([])
+    expect(matchesQuery(ast('tag:"artifact etb"'), etbCause)).toBe(true)
+    expect(matchesQuery(ast('tag:"artifact etb"'), neither)).toBe(false)
+
+    expect(errorsOf('tag:ARTIFACT-ETB')).toEqual([])
+    expect(matchesQuery(ast('tag:ARTIFACT-ETB'), etbCause)).toBe(true)
+    expect(matchesQuery(ast('tag:ARTIFACT-ETB'), neither)).toBe(false)
+  })
+
+  it('reads causes: and benefits: as the words the interface uses', () => {
+    expect(matchesQuery(ast('causes:artifact-etb'), etbCause)).toBe(true)
+    expect(matchesQuery(ast('causes:artifact-etb'), etbPayoff)).toBe(false)
+    expect(matchesQuery(ast('benefits:artifact-etb'), etbPayoff)).toBe(true)
+    expect(matchesQuery(ast('benefits:artifact-etb'), etbCause)).toBe(false)
+  })
+
+  it('composes with everything else', () => {
+    expect(matchesQuery(ast('tag:artifact-etb mv<=2'), etbPayoff)).toBe(true)
+    expect(matchesQuery(ast('tag:artifact-etb mv>=5'), etbPayoff)).toBe(false)
+    expect(matchesQuery(ast('-tag:artifact-etb'), neither)).toBe(true)
+  })
+
+  it('rejects a tag that does not exist, and lists the ones that do', () => {
+    const errors = errorsOf('tag:artifcat-etb')
+    expect(errors).toHaveLength(1)
+    expect(errors[0]?.message).toContain('unknown synergy tag')
+    expect(errors[0]?.suggestion).toContain('artifact-etb')
+  })
+
+  it('round-trips through the formatter', () => {
+    expect(formatQuery(ast('causes:artifact-etb'))).toBe('produces:artifact-etb')
+    expect(formatQuery(ast('tag:artifact-etb'))).toBe('tag:artifact-etb')
+  })
+})

@@ -5,6 +5,8 @@ import {
   IS_PREDICATES,
   NUMERIC_FIELDS,
   ROLE_VALUES,
+  SYNERGY_TAG_VALUES,
+  normaliseTag,
   type ComparisonOp,
   type QueryField,
   type QueryNode,
@@ -210,6 +212,18 @@ const validateValue = (
   }
   if (field === 'role' && !ROLE_VALUES.has(value.toLowerCase())) {
     return { message: `unknown role "${value}"`, suggestion: null }
+  }
+  if (
+    (field === 'produces' || field === 'wants' || field === 'tag') &&
+    !SYNERGY_TAG_VALUES.has(normaliseTag(value))
+  ) {
+    // The list is short and closed, so the whole of it is the suggestion. A
+    // near-miss on a name the user read off a chip is the likely mistake, and
+    // guessing which one would be worse than showing all seventeen.
+    return {
+      message: `unknown synergy tag "${value}"`,
+      suggestion: `known: ${[...SYNERGY_TAG_VALUES].join(', ')}`,
+    }
   }
   if ((field === 'color' || field === 'identity') && !/^[wubrgc]+$/i.test(value)) {
     if (!['colorless', 'colourless', 'multicolor', 'multicolour'].includes(value.toLowerCase())) {

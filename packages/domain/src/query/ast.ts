@@ -1,4 +1,5 @@
 import type { Role } from '../role.js'
+import { SYNERGY_TAGS } from '../synergy.js'
 
 /**
  * The candidate query language (doc 13, DOM-08).
@@ -32,6 +33,14 @@ export type QueryField =
   | 'near'
   | 'flag'
   | 'group'
+  /**
+   * The mechanical synergy tags (ADR-0011), which the UI already shows as chips
+   * on every row. `produces` is what the card CAUSES, `wants` is what it
+   * benefits from, and `tag` matches either side.
+   */
+  | 'produces'
+  | 'wants'
+  | 'tag'
 
 export type QueryNode =
   | { readonly kind: 'and'; readonly children: readonly QueryNode[] }
@@ -84,6 +93,12 @@ export const FIELD_ALIASES: ReadonlyMap<string, QueryField> = new Map([
   ['near', 'near'],
   ['flag', 'flag'],
   ['group', 'group'],
+  ['produces', 'produces'],
+  ['causes', 'produces'],
+  ['wants', 'wants'],
+  ['benefits', 'wants'],
+  ['tag', 'tag'],
+  ['synergy', 'tag'],
 ])
 
 /** Canonical spelling used by `formatQuery`, so formatting round-trips. */
@@ -106,6 +121,9 @@ export const CANONICAL_FIELD: Readonly<Record<QueryField, string>> = {
   near: 'near',
   flag: 'flag',
   group: 'group',
+  produces: 'produces',
+  wants: 'wants',
+  tag: 'tag',
 }
 
 export const NUMERIC_FIELDS: ReadonlySet<QueryField> = new Set<QueryField>([
@@ -132,6 +150,22 @@ export const IS_PREDICATES: ReadonlySet<string> = new Set([
   'reprint',
   'firstprint',
 ])
+
+/**
+ * A tag as the user is likely to type it.
+ *
+ * The tags are kebab-case internally (`artifact-etb`) but the UI renders them
+ * with spaces (`artifact etb`), which is the spelling a user copies off the
+ * chip they just read. Both are accepted, and so is `tag:"artifact etb"` with
+ * the quotes the space would otherwise need.
+ */
+export const normaliseTag = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+
+export const SYNERGY_TAG_VALUES: ReadonlySet<string> = new Set(SYNERGY_TAGS)
 
 export const ROLE_VALUES: ReadonlySet<string> = new Set<Role>([
   'land',
