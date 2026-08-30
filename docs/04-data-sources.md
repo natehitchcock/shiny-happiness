@@ -190,6 +190,13 @@ Non-negotiable before any public deployment (task `LEGAL-01`):
   monetisation.
 - Attribute Scryfall and Commander Spellbook visibly, with links. (EDHREC is not
   used and so is not attributed — see §4.3.)
+- **The working name "Lotus Wizard" is not cleared, and should be checked before
+  any public use.** Both halves lean on Wizards of the Coast's own marks: "Lotus"
+  reads as Black Lotus, and "Wizards" is the publisher's name. The Fan Content
+  Policy permits fan projects but not names that imply endorsement or affiliation,
+  and a name is the cheapest thing to change now and the most expensive to change
+  after a domain, a logo and a user base exist. This is a flag, not a verdict —
+  `LEGAL-01` is where it gets an answer.
 - Do not use WotC or Scryfall trademarks in the product name or logo. (Another
   reason `Roundtable` is a placeholder — check it too.)
 - Serve card images only in the context of the tool; do not expose a bare image

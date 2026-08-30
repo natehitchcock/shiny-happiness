@@ -7,12 +7,16 @@ scope (files it may touch), explicit dependencies, and a definition of done.
 
 ## 11.0 Current state — read this first
 
-Last updated: 2026-08-30, end of the third build session.
+Last updated: 2026-08-30, end of the fourth build session.
 
 **It runs.** `pnpm --filter @roundtable/web dev` with the API up gives a working
-deck workspace against 34,492 real cards and 108,046 real combos: pick a
-commander, take suggestions with their reasons, accept or exclude, watch the pool
-re-sort. That is the state to protect.
+deck workspace against 34,492 real cards, 110,577 printings and 108,046 real
+combos: pick a commander, take suggestions with their reasons, accept or exclude,
+watch the pool re-sort. That is the state to protect.
+
+The app is called **Lotus Wizard** in the interface. The name is tentative and
+**not cleared** — `LEGAL-01` owns that, and there is a real question to answer
+first: see doc 04 §4.6. Package scopes stay `@roundtable/*` until it is settled.
 
 **Done (19 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`, `API-01`, `API-02`,
 `DATA-01`, `DATA-02`, `ING-01`, `ING-02`, and a vertical slice of `WEB-01`.
@@ -47,6 +51,7 @@ API-02 performance test seeds a 20,000-card corpus and takes ~40 s.
 
 | Pick up | Why now |
 | --- | --- |
+| `LEGAL-01` (name clearance only) | The name **Lotus Wizard** needs checking before it goes anywhere public — see doc 04 §4.6. Cheap to resolve, awkward to undo after it is on a domain. |
 | `FOUND-02` → `UI-01` | The web slice carries its own local tokens. Until these land there is no shared `packages/ui`, and every new screen re-invents the card primitives. |
 | `WEB-01` proper | The slice is one deck in localStorage with no offline queue, no optimistic mutation and no reconcile. Everything in WEB-02..24 assumes those exist. |
 | `API-03` | Auth and deck ownership. Every deck belongs to one fixed `DEV_OWNER_ID`, so nothing is readable cross-user because there is no cross-user. This gates any deployment. |
