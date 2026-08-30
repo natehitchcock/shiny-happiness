@@ -7,68 +7,60 @@ scope (files it may touch), explicit dependencies, and a definition of done.
 
 ## 11.0 Current state — read this first
 
-Last updated: 2026-08-29, end of the second build session.
+Last updated: 2026-08-30, end of the third build session.
 
-**Done (14 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`, `API-01`, `API-02`.
-That is the monorepo and CI, the whole of `packages/domain`, the Postgres layer,
-and the HTTP surface: cards, decks, batched commands, recommendations and
-analysis. `DATA-03` is closed by decision and `ING-03` cut ([ADR-0008](adr/0008-drop-edhrec.md)).
+**It runs.** `pnpm --filter @roundtable/web dev` with the API up gives a working
+deck workspace against 34,492 real cards and 108,046 real combos: pick a
+commander, take suggestions with their reasons, accept or exclude, watch the pool
+re-sort. That is the state to protect.
 
-**Verify it in one command** — from a clean clone, this must be green:
+**Done (19 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`, `API-01`, `API-02`,
+`DATA-01`, `DATA-02`, `ING-01`, `ING-02`, and a vertical slice of `WEB-01`.
+`DATA-03` is closed by decision and `ING-03` cut ([ADR-0008](adr/0008-drop-edhrec.md)).
 
-```bash
-pnpm install && pnpm check          # lint + typecheck + 380 tests
-```
-
-The integration tests need a real Postgres and SKIP (loudly) without one — 104 of
-the 380, being `packages/db`'s and `apps/api`'s suites. The API-02 performance
-test seeds a 20,000-card corpus and takes ~40 s of the run.
+**Run it locally:**
 
 ```bash
+pnpm install
 docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
 export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
-pnpm test                            # 380 passed, not 276 passed / 104 skipped
+node packages/db/dist/cli.js up          # migrations
+node apps/ingest/dist/main.js            # ~35k cards, ~108k combos, under a minute
+node apps/api/dist/main.js &             # API on :3000
+pnpm --filter @roundtable/web dev        # workspace on :5173
 ```
 
-No Docker? Any PostgreSQL 16 the URL points at works. The second session used the
-EDB portable binaries (`initdb` into a user directory, `pg_ctl -o "-p 5433"`),
-which needs no administrator rights and no service.
+No Docker? Any PostgreSQL 16 works. The third session used the EDB portable
+binaries (`initdb` into a user directory, `pg_ctl -o "-p 5433"`) — no
+administrator rights, no service.
+
+**Verify:**
+
+```bash
+pnpm check          # lint + typecheck + 434 tests
+```
+
+The integration tests need a real Postgres and SKIP (loudly) without one. The
+API-02 performance test seeds a 20,000-card corpus and takes ~40 s.
 
 **Next, in order of value:**
 
 | Pick up | Why now |
 | --- | --- |
-| `API-02` | ✅ **Done.** Recommendations + analysis endpoints, incl. `unavailable` degradation, plus `GET /decks/:id/combo-index` | API-01, DOM-05, DOM-06 | ✅ Measured, not assumed: **p95 46.6 ms** against a 20,000-card corpus, 2,000 combos and a 100-card deck — budget is 200 ms. Degradation reported per missing source rather than as absent groups; a query that half-parses is never partially applied. 14 contract tests, mutation-checked. Divergences in doc 10 §10.9 |
-| `DATA-01`, `DATA-02`, `DATA-05` | **Unblocked on a normal machine.** See below. Still the only thing blocking deployment. `DATA-03` is closed — see [ADR-0008](adr/0008-drop-edhrec.md). |
-| `FOUND-02` → `UI-01` | Independent of everything above; can run in parallel. |
-| `API-06` | Finishes what `API-01` left honest-but-incomplete: `409` currently returns the current deck with an empty `since`, because populating it needs an ordered per-deck command log that no table provides yet. |
+| `FOUND-02` → `UI-01` | The web slice carries its own local tokens. Until these land there is no shared `packages/ui`, and every new screen re-invents the card primitives. |
+| `WEB-01` proper | The slice is one deck in localStorage with no offline queue, no optimistic mutation and no reconcile. Everything in WEB-02..24 assumes those exist. |
+| `API-03` | Auth and deck ownership. Every deck belongs to one fixed `DEV_OWNER_ID`, so nothing is readable cross-user because there is no cross-user. This gates any deployment. |
+| `DATA-05` | The last unanswered terms question. Until the bracket rules are populated, `analysis.bracket.assessed` is honestly null and core packages cannot be built. Scryfall now exposes a `game_changer` boolean on card records, which may answer half of it. |
+| `API-06` | `409` returns the current deck with an empty `since`; the client can refetch but not replay. |
 
-**`DATA-*` were blocked by the environment, not by the work.** The first build
-session ran in a sandbox whose egress reached package registries only, so
-`scryfall.com`, `commanderspellbook.com` and `edhrec.com` were unreachable and no
-terms of service were ever read. **On a machine with ordinary internet access
-these are simply doable** — they are an afternoon with a browser.
-[ADR-0006](adr/0006-data-source-terms-verification.md) lists the exact questions
-and what each one gates. Until `DATA-01`, `DATA-02` and `DATA-05` are answered:
+**`DATA-05` is the only third-party question left.** `DATA-01` and `DATA-02` are
+answered ([ADR-0009](adr/0009-scryfall-terms.md), [ADR-0010](adr/0010-spellbook-terms.md)):
+Scryfall grants use explicitly, Spellbook publishes no prohibition. `DATA-03` is
+closed — EDHREC's terms forbid automated queries, and Archidekt carries the
+identical clause, so the project queries neither ([ADR-0008](adr/0008-drop-edhrec.md)).
 
-- `brackets/rules.data.json` stays unpopulated, and `loadBracketRules` correctly
-  returns a `not-populated` error rather than asserting a bracket verdict.
-- Nothing that ingests third-party data may be deployed publicly.
-
-The highest-risk single unknown is **Scryfall question 4** — whether card *data*
-and card *images* are licensed separately — because it gates the whole `ING-04`
-image pipeline and the consequences are outside the codebase.
-
-**`DATA-03` is answered and closed.** EDHREC's terms were read on 2026-08-29 and
-prohibit automated queries outright; Archidekt carries the identical boilerplate,
-Moxfield is out of scope and Deckstats is unreachable. **The project does not
-query any of them** ([ADR-0008](adr/0008-drop-edhrec.md)). `ING-03` is cut,
-`ING-05` is repointed at MTGJSON, and `API-09` honestly returns
-`source: 'default'` until the project's own imported-deck corpus is large enough.
-Anything Scryfall publishes — including `Card.edhrecRank` — remains fine to use.
-
-**Nothing else is blocked.** Every remaining task needs a database (running),
-a browser toolchain (installable), or just time.
+**Nothing else is blocked.** Every remaining task needs a browser toolchain
+(installed) or just time.
 
 ## 11.1 Dependency graph
 
@@ -142,12 +134,12 @@ against their interfaces; nothing depending on an unanswered question ships.
 
 | ID        | Task                                                                                                                                                       | Depends                | DoD                                                                                                                                                              |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATA-01` | Answer the seven Scryfall questions in [ADR-0006](adr/0006-data-source-terms-verification.md)                                                              | —                      | Each answered with **quoted wording and a retrieval date**; ADR-0006 superseded. Q4 (image licensing) gates `ING-04`                                             |
-| `DATA-02` | Answer the six Commander Spellbook questions in [ADR-0006](adr/0006-data-source-terms-verification.md)                                                     | —                      | Quoted wording + retrieval date. Q5 (card identifier) gates `ING-02`'s oracle-id mapping                                                                         |
+| `DATA-01` | ✅ **Done.** All seven Scryfall questions answered with quoted wording and retrieval dates ([ADR-0009](adr/0009-scryfall-terms.md)) | — | ✅ Rate limits are **per endpoint** (search is 2/s, not 10/s — doc 04 §4.1 was wrong); bulk data is mandatory, not optional; prices are estimates and must be labelled so. Q4 narrowed: `ING-04` still needs the image-serving question confirmed |
+| `DATA-02` | ✅ **Done.** Spellbook questions answered ([ADR-0010](adr/0010-spellbook-terms.md)) | — | ✅ `robots.txt` quoted with date; no terms page exists, so no prohibition — a weaker position than Scryfall's explicit grant, recorded as such. Q5 resolved: `uses[].card.oracleId` is Scryfall's oracle id, so no name matching |
 | `DATA-03` | ✅ **Closed by decision, not completed.** EDHREC's terms were read on 2026-08-29 and prohibit automated queries; the project does not query EDHREC ([ADR-0008](adr/0008-drop-edhrec.md)) | — | ✅ Terms and `robots.txt` quoted with retrieval dates in ADR-0008. No permission request sent — permission was not the blocker. `ING-03` cut |
 | `DATA-05` | Fetch the **current official** bracket rules + Game Changers list into `brackets/rules.data.json` ([ADR-0006](adr/0006-data-source-terms-verification.md)) | —                      | Checked in with source URL and retrieval date; list fetched, never recalled; no bracket constant hardcoded elsewhere                                             |
-| `ING-01`  | Scryfall bulk ingest: download, stream-parse, map to `Card`, snapshot-and-swap                                                                             | DATA-01, DB-01         | Full ingest completes; shared rate limiter enforced; re-run is idempotent                                                                                        |
-| `ING-02`  | Spellbook combo ingest + oracle-id mapping, **failing loudly on unmapped cards**                                                                           | DATA-02, DB-01         | Unmapped cards reported, not dropped                                                                                                                             |
+| `ING-01` | ✅ **Done.** Scryfall bulk ingest: download, stream-parse, map to `Card`, snapshot-and-swap | DATA-01, DB-01 | ✅ 34,492 cards + printings from 38,627 records in <5 s against the real bulk file; re-run is idempotent. 4,135 non-playable records (art series, tokens, stickers, conspiracies) rejected — `CardType` is the definition of a deck card |
+| `ING-02` | ✅ **Done.** Spellbook combo ingest + oracle-id mapping, **failing loudly on unmapped cards** | DATA-02, DB-01 | ✅ 108,046 combos in 12.8 s with **zero unmapped**; pieces map on `oracleId` with no name matching. Only `OK` variants ingested; a combo naming an unknown card is reported, never stored |
 | ~~`ING-03`~~ | ❌ **Cut.** EDHREC stats fetcher. No aggregated-decklist source has usable terms — Archidekt carries the identical prohibition, Moxfield is out of scope, Deckstats is unreachable ([ADR-0008](adr/0008-drop-edhrec.md)). Inclusion and synergy statistics come from the project's own imported-deck corpus or not at all | — | — |
 | `ING-04`  | Image caching pipeline to object store, three sizes (doc 07 §7.3)                                                                                          | ING-01                 | No client request ever hits a third-party image host                                                                                                             |
 | `ING-05` | Core package generation (doc 05 §5.5), per bracket and — where the corpus supports it — per archetype. Corpus is **MTGJSON** (MIT licensed, 192 official Commander decklists) plus curation, never a scraped aggregate ([ADR-0008](adr/0008-drop-edhrec.md)) | DOM-04, DOM-09 | Reproducible from a fixed corpus; output diff is human-reviewable; falls back to the bracket's general package rather than emitting one built from too few decks |
