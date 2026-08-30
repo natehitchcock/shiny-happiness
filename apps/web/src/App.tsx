@@ -755,6 +755,7 @@ const Works = ({
 }
 
 const Preview = ({
+  card,
   detail,
   price,
   onClose,
@@ -762,6 +763,9 @@ const Preview = ({
   lockedIds,
   cards,
 }: {
+  /** The hydrated card, already in memory. Everything readable comes from here. */
+  card: api.Card | undefined
+  /** Printings and combos. Arrives second; the panel does not wait for it. */
   detail: api.CardDetail | null
   price: number | null | undefined
   onClose: () => void
@@ -769,32 +773,39 @@ const Preview = ({
   lockedIds: ReadonlySet<string>
   cards: ReadonlyMap<string, api.Card>
 }): React.JSX.Element | null => {
-  if (detail === null) return null
+  // `detail` is the fallback, not the source: a card reached from somewhere that
+  // never hydrated it still previews once its detail lands.
+  const shown = card ?? detail
+  if (shown === null || shown === undefined) return null
   return (
-    <aside className="preview" aria-label={`${detail.name} details`}>
+    <aside className="preview" aria-label={`${shown.name} details`}>
       <div className="preview-head">
-        <h3>{detail.name}</h3>
+        <h3>{shown.name}</h3>
         <button className="act" onClick={onClose} aria-label="Close preview">
           Close
         </button>
       </div>
       <p className="type-line">
-        {detail.typeLine}
-        {detail.manaCost === null ? null : (
+        {shown.typeLine}
+        {shown.manaCost === null ? null : (
           <span className="cost">
-            <ManaCost cost={detail.manaCost} />
+            <ManaCost cost={shown.manaCost} />
           </span>
         )}
       </p>
       {/* Oracle text is the card. Newlines are meaningful — they separate
           abilities — so it is rendered pre-wrapped rather than collapsed. */}
-      <p className="oracle">{detail.oracleText === '' ? 'No rules text.' : detail.oracleText}</p>
+      <p className="oracle">{shown.oracleText === '' ? 'No rules text.' : shown.oracleText}</p>
       <p className="note">
-        {usd(price)} <span className="estimate">est.</span> · {detail.printings.length} printing
-        {detail.printings.length === 1 ? '' : 's'}
-        {detail.universesBeyond ? ' · Universes Beyond' : ''}
+        {usd(price)} <span className="estimate">est.</span>
+        {/* The printing count is the one readable fact only the server has, so
+            it appears when it appears rather than holding the panel back. */}
+        {detail === null
+          ? ''
+          : ` · ${String(detail.printings.length)} printing${detail.printings.length === 1 ? '' : 's'}`}
+        {shown.universesBeyond ? ' · Universes Beyond' : ''}
       </p>
-      {detail.combos.length > 0 ? (
+      {detail !== null && detail.combos.length > 0 ? (
         <>
           <h4>In {plural(detail.combos.length, 'combo')}</h4>
           <p className="note">
@@ -803,9 +814,13 @@ const Preview = ({
         </>
       ) : null}
 
-      <Works detail={detail} accepted={accepted} lockedIds={lockedIds} cards={cards} />
+      {detail === null ? (
+        <p className="note">Looking up combos…</p>
+      ) : (
+        <Works detail={detail} accepted={accepted} lockedIds={lockedIds} cards={cards} />
+      )}
 
-      <Semantics produces={detail.synergyProduces} wants={detail.synergyWants} />
+      <Semantics produces={shown.synergyProduces} wants={shown.synergyWants} />
     </aside>
   )
 }
@@ -1304,6 +1319,8 @@ export const Workspace = ({
   const [query, setQuery] = useState('')
   const [queryError, setQueryError] = useState<string | null>(null)
   const [detail, setDetail] = useState<api.CardDetail | null>(null)
+  /** Which card the preview is showing, known before its detail arrives. */
+  const [inspect, setInspect] = useState<string | null>(null)
   /**
    * Clicks the server has not seen yet.
    *
@@ -1591,11 +1608,37 @@ export const Workspace = ({
       .catch(() => setNotice('Could not copy — the browser blocked clipboard access'))
   }
 
+  /**
+   * Open the preview NOW, from what is already in memory.
+   *
+   * `/cards/batch` returns whole cards and every deck card and suggestion has
+   * already been hydrated, so the client is holding the name, type line, mana
+   * cost, oracle text and synergy tags before the click happens — eight of the
+   * ten things the preview renders. Waiting on a request to show text we
+   * downloaded minutes ago is latency we invented.
+   *
+   * Only printings and combos have to come from the server; they arrive second
+   * and slot in. That also means a card whose fetch fails still previews.
+   */
   const open = (oracleId: string): void => {
+    setInspect(oracleId)
+    setDetail(null)
     void api
       .getCardDetail(oracleId)
-      .then(setDetail)
-      .catch(() => setDetail(null))
+      .then((d) => {
+        // Ignore a response for a card the user has already navigated away
+        // from — two quick clicks otherwise race, and the loser wins.
+        setInspect((current) => {
+          if (current === d.oracleId) setDetail(d)
+          return current
+        })
+      })
+      .catch(() => undefined)
+  }
+
+  const closePreview = (): void => {
+    setInspect(null)
+    setDetail(null)
   }
 
   /** The deck as the user sees it: saved entries plus what is still in flight. */
@@ -2130,9 +2173,10 @@ export const Workspace = ({
         <section className="region analysis" aria-label="Analysis">
           <div className="analysis-scroll">
             <Preview
+              card={inspect === null ? undefined : cards.get(inspect)}
               detail={detail}
-              price={prices.get(detail?.oracleId ?? '')}
-              onClose={() => setDetail(null)}
+              price={prices.get(inspect ?? '')}
+              onClose={closePreview}
               accepted={acceptedIds}
               lockedIds={lockedIds}
               cards={cards}
