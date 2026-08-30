@@ -79,6 +79,39 @@ describe('the serverless handler', () => {
     expect(problem.title).toBe('API unavailable')
   })
 
+  it('names the near-miss variables that ARE set', async () => {
+    // The usual cause is a database integration having set its own name.
+    // Being told "not set" while looking at a page listing four Postgres URLs
+    // is a confusing place to be left.
+    delete process.env['DATABASE_URL']
+    process.env['POSTGRES_URL'] = 'postgresql://example/db'
+    try {
+      const handler = await loadHandler()
+      const res = new FakeResponse()
+      await handler({} as IncomingMessage, res as unknown as ServerResponse)
+      const problem = JSON.parse(res.body) as { detail: string }
+      expect(problem.detail).toMatch(/POSTGRES_URL/)
+      expect(problem.detail).toMatch(/reads DATABASE_URL only/)
+    } finally {
+      delete process.env['POSTGRES_URL']
+    }
+  })
+
+  it('never puts a connection string in the message', async () => {
+    // The detail reaches the browser. Names only — a DSN carries a password.
+    delete process.env['DATABASE_URL']
+    process.env['POSTGRES_URL'] = 'postgresql://user:hunter2@host/db'
+    try {
+      const handler = await loadHandler()
+      const res = new FakeResponse()
+      await handler({} as IncomingMessage, res as unknown as ServerResponse)
+      expect(res.body).not.toMatch(/hunter2/)
+      expect(res.body).not.toMatch(/postgresql:\/\//)
+    } finally {
+      delete process.env['POSTGRES_URL']
+    }
+  })
+
   it('does not cache a failed build', async () => {
     // A database unreachable for one moment must not poison the instance for
     // its whole life. Second call with the env repaired has to try again.

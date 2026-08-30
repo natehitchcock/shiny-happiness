@@ -36,9 +36,27 @@ const getApp = async (): Promise<FastifyInstance> => {
   building ??= (async () => {
     const config = configFromEnv()
     if (config === null) {
+      /*
+       * Name the variables that ARE set, because the usual cause is a near miss.
+       *
+       * Vercel's database integrations set their own names — `POSTGRES_URL`,
+       * `POSTGRES_PRISMA_URL`, `DATABASE_URL_UNPOOLED` — and this app reads
+       * `DATABASE_URL` and nothing else. "Not set" is a confusing thing to be
+       * told while looking at a settings page listing four Postgres URLs, so
+       * the message says which ones it can see. Names only: a connection string
+       * carries a password and this text reaches the browser.
+       */
+      const present = Object.keys(process.env)
+        .filter((k) => /^(POSTGRES|DATABASE|PG)/i.test(k))
+        .sort()
+      const found =
+        present.length === 0
+          ? ' No Postgres-related variables are set at all.'
+          : ` Variables that ARE set: ${present.join(', ')} — this app reads DATABASE_URL only.`
       throw new Error(
         'DATABASE_URL is not set on this deployment. Set it in Project Settings > ' +
-          'Environment Variables (see DEPLOYING.md), then redeploy.',
+          'Environment Variables to your pooled Neon connection string (see ' +
+          `DEPLOYING.md), then redeploy.${found}`,
       )
     }
     // The pool size is DATABASE_POOL_MAX and on Vercel it must be small: every
