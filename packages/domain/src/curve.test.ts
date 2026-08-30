@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ARCHETYPES } from './archetype.js'
 import type { CurveTarget } from './curve.js'
 import {
   CURVE_BUCKETS,
@@ -11,21 +12,94 @@ import {
 
 const flat = (n: number): number[] => new Array<number>(CURVE_BUCKETS).fill(n)
 
+/** Weighted mean bucket — "how expensive does this archetype want to be". */
+const mean = (t: CurveTarget): number => t.reduce((a, b, i) => a + b.ideal * i, 0)
+
+/** Total band width across the curve — "how much room does this archetype get". */
+const totalWidth = (t: CurveTarget): number => t.reduce((a, b) => a + (b.max - b.min), 0)
+
+const shareOf = (t: CurveTarget): number[] => t.map((b) => b.ideal)
+
 describe('curveTarget', () => {
   it('is a distribution that sums to one', () => {
-    for (const archetype of ['aggro', 'control', 'combo', 'midrange'] as const) {
+    for (const archetype of ARCHETYPES) {
       const sum = curveTarget(archetype).reduce((a, b) => a + b.ideal, 0)
-      expect(sum).toBeCloseTo(1, 6)
+      expect(sum, archetype).toBeCloseTo(1, 6)
     }
   })
 
-  it('gives aggro a lower curve than control', () => {
-    const aggro = curveTarget('aggro')
-    const control = curveTarget('control')
+  it('covers every archetype with a non-degenerate, non-negative shape', () => {
+    // Catches an archetype added to the union without a row, which would come
+    // back as `undefined` and NaN its way through the whole panel.
+    for (const archetype of ARCHETYPES) {
+      const target = curveTarget(archetype)
+      expect(target, archetype).toHaveLength(CURVE_BUCKETS)
+      for (const [bucket, band] of target.entries()) {
+        expect(band.ideal, `${archetype} mv${bucket}`).toBeGreaterThan(0)
+        expect(band.min, `${archetype} mv${bucket}`).toBeGreaterThanOrEqual(0)
+        expect(band.min, `${archetype} mv${bucket}`).toBeLessThanOrEqual(band.ideal)
+        expect(band.max, `${archetype} mv${bucket}`).toBeGreaterThanOrEqual(band.ideal)
+      }
+    }
+  })
 
-    // Weighted mean bucket: aggro should want cheaper cards.
-    const mean = (t: CurveTarget): number => t.reduce((a, b, i) => a + b.ideal * i, 0)
-    expect(mean(aggro)).toBeLessThan(mean(control))
+  it('gives every archetype its own shape rather than a copy of a neighbour', () => {
+    // Five of the nine rows were once within a card or two of each other at
+    // every bucket, which is a table that has an entry for an archetype without
+    // having an opinion about it. Distance is over shares, so a row rescaled is
+    // still a copy.
+    for (const a of ARCHETYPES) {
+      for (const b of ARCHETYPES) {
+        if (a >= b) continue
+        const [x, y] = [shareOf(curveTarget(a)), shareOf(curveTarget(b))]
+        const distance = Math.sqrt(x.reduce((s, v, i) => s + (v - (y[i] ?? 0)) ** 2, 0))
+        expect(distance, `${a} vs ${b}`).toBeGreaterThan(0.02)
+      }
+    }
+  })
+
+  it('keeps mana value zero small, because only 99 nonland cards live there', () => {
+    // The whole commander-legal corpus holds 99 nonland cards at mana value 0,
+    // most of them fast mana that brackets 1-3 do not want. A target above a few
+    // percent would tell every low-bracket deck it is short of cards it cannot
+    // reasonably play.
+    for (const archetype of ARCHETYPES) {
+      expect(curveTarget(archetype)[0]?.ideal, archetype).toBeLessThan(0.05)
+    }
+  })
+
+  it('front-loads aggro against control at every bucket, not just on average', () => {
+    // "Aggro is cheaper" has to hold as a shape, or the two rows differ in one
+    // bucket and agree everywhere else, which is not two archetypes.
+    const aggro = shareOf(curveTarget('aggro'))
+    const control = shareOf(curveTarget('control'))
+
+    for (const bucket of [1, 2, 3]) {
+      expect(aggro[bucket], `mv${bucket}`).toBeGreaterThan(control[bucket]!)
+    }
+    for (const bucket of [4, 5, 6, 7]) {
+      expect(aggro[bucket], `mv${bucket}`).toBeLessThan(control[bucket]!)
+    }
+    expect(mean(curveTarget('aggro'))).toBeLessThan(mean(curveTarget('control')))
+  })
+
+  it('makes ramp the only archetype that climbs again after its dip', () => {
+    // Ramp deliberately skips four and five — a four-drop costs what a ramp
+    // spell costs and does not advance the plan — then buys payoffs at six and
+    // up. Every other row falls monotonically once past its peak.
+    const climbs = (archetype: (typeof ARCHETYPES)[number]): boolean => {
+      const s = shareOf(curveTarget(archetype))
+      return s[6]! > s[5]!
+    }
+    expect(ARCHETYPES.filter(climbs)).toEqual(['ramp'])
+  })
+
+  it('gives tokens a finisher slot and aristocrats none', () => {
+    // Both build a board; only one has to buy a seven-mana card to cash it in,
+    // because aristocrats converts the board with a two-mana drain instead. If
+    // these two ever converge, the table has stopped distinguishing them.
+    const top = (archetype: 'tokens' | 'aristocrats'): number => curveTarget(archetype)[7]!.ideal
+    expect(top('tokens')).toBeGreaterThan(top('aristocrats') * 2)
   })
 
   it('blends a secondary archetype 70/30, like the role targets do', () => {
@@ -171,12 +245,45 @@ describe('curve ranges give wiggle room, and the room varies by archetype', () =
     expect(curveDeltas(curve, target)[2]?.withinRange).toBe(false)
   })
 
-  it('holds aggro to a tighter curve than control', () => {
-    // Aggro lives or dies on its early drops; control deliberately spreads.
-    const width = (t: CurveTarget, bucket: number): number =>
-      (t[bucket]?.max ?? 0) - (t[bucket]?.min ?? 0)
+  it('holds aggro to a tighter curve than control, over the whole curve', () => {
+    // Compared across all eight buckets rather than at one, because tolerance is
+    // a fraction of the archetype's OWN share: aggro's two-drop bucket is so fat
+    // that 25% of it can be wider in absolute terms than 40% of control's. This
+    // assertion used to be made at bucket 2 alone and was passing by 0.006 —
+    // true, but not for the reason it claimed.
+    expect(totalWidth(curveTarget('aggro'))).toBeLessThan(totalWidth(curveTarget('control')))
+  })
 
-    expect(width(curveTarget('aggro'), 2)).toBeLessThan(width(curveTarget('control'), 2))
+  it('orders the bands by how much of the plan is a schedule', () => {
+    // Aggro's clock is arithmetic and an unspent turn is gone, so it gets the
+    // least room of anyone. Ramp's whole plan is decoupling cost from turn, so
+    // it gets the most. Midrange sits between, as the archetype defined by not
+    // committing. Asserted as an ordering, since the individual widths are a
+    // judgement and the ordering is the claim.
+    const widths = new Map(ARCHETYPES.map((a) => [a, totalWidth(curveTarget(a))]))
+    const narrowest = [...widths].sort((a, b) => a[1] - b[1])[0]
+    const widest = [...widths].sort((a, b) => b[1] - a[1])[0]
+
+    expect(narrowest?.[0]).toBe('aggro')
+    expect(widest?.[0]).toBe('ramp')
+    expect(widths.get('aggro')!).toBeLessThan(widths.get('midrange')!)
+    expect(widths.get('midrange')!).toBeLessThan(widths.get('control')!)
+  })
+
+  it('keeps every tolerance inside a range where the band still says something', () => {
+    // Below about a fifth the band is narrower than the noise of one accepted
+    // card; above about a half it spans so much of the deck that `curveFit`
+    // returns zero for anything a builder would plausibly do, and the feature
+    // quietly switches itself off. Read back out of the output rather than from
+    // the table, so it holds for whatever produced the bands.
+    for (const archetype of ARCHETYPES) {
+      const target = curveTarget(archetype)
+      // The floor widens small buckets, so the minimum relative half-width over
+      // the curve is the archetype's own tolerance.
+      const relative = Math.min(...target.map((b) => (b.max - b.min) / 2 / b.ideal))
+      expect(relative, archetype).toBeGreaterThanOrEqual(0.2)
+      expect(relative, archetype).toBeLessThanOrEqual(0.5)
+    }
   })
 
   it('gives a hybrid the looser of its two tolerances', () => {

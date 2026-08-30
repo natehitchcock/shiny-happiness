@@ -39,6 +39,8 @@ export type SynergyTag =
   | 'untap'
   | 'treasure'
   | 'sacrifice-fodder'
+  | 'creature-etb'
+  | 'spell-cast'
 
 export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'creature-death',
@@ -55,6 +57,8 @@ export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'untap',
   'treasure',
   'sacrifice-fodder',
+  'creature-etb',
+  'spell-cast',
 ]
 
 /**
@@ -104,6 +108,17 @@ const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
   // Lands. Untap effects are how a landfall deck gets more than one trigger.
   ['landfall', 'untap'],
   ['landfall', 'token'],
+
+  // Blink. A token entering is a creature entering, and reanimation is the
+  // other way to make one enter — both are how a deck full of enters-the-
+  // battlefield triggers gets to fire them more than once.
+  ['creature-etb', 'token'],
+  ['creature-etb', 'graveyard-creature'],
+
+  // Spellslinger. Cantrips are how the deck finds the next spell, and its
+  // graveyard is where the spells it already cast are waiting to be recast.
+  ['spell-cast', 'card-draw'],
+  ['spell-cast', 'graveyard-creature'],
 ]
 
 const INTERACTIONS = ((): ReadonlyMap<SynergyTag, readonly SynergyTag[]> => {
@@ -132,40 +147,133 @@ interface Rule {
 /**
  * Written against Scryfall oracle conventions: the card's own name is spelled
  * out rather than `~`, reminder text is present, ability words are capitalised.
+ *
+ * The text a rule sees is `typeLine`, a newline, then `oracleText`. So an
+ * unanchored pattern reads the rules text, and `^[^\n]*` reads the type line —
+ * which is how "this card IS an artifact" is asked.
  */
 const PRODUCES: readonly Rule[] = [
   // A sacrifice outlet is the classic enabler: it turns creatures into deaths on
   // demand, which is what a death trigger is waiting for.
   { tag: 'creature-death', test: /\bsacrifice (a|another|an|one|two|X|\d+) creature/i },
-  { tag: 'creature-death', test: /\bsacrifice(s)? (a|another) creature\b/i },
+  { tag: 'creature-death', test: /\bsacrifices? (a|another|an|one|two|X|\d+) creatures?\b/i },
   { tag: 'creature-death', test: /\beach player sacrifices\b/i },
   { tag: 'creature-death', test: /\bdestroy target creature\b/i },
+  // A board wipe makes creatures die too. It is not a sacrifice outlet — it
+  // happens once, and it hits your own board — but a deck built on "whenever a
+  // creature dies" genuinely wants one.
+  //
+  // "Destroy target nonland permanent" and "fights target creature" were tried
+  // here and dropped at about 70% precision: the first as often points at an
+  // enchantment, and a fight as often fails to deal lethal damage.
+  { tag: 'creature-death', test: /\bdestroy all creatures\b/i },
 
   { tag: 'token', test: /\bcreate(s)? .{0,40}\btoken/i },
   { tag: 'sacrifice-fodder', test: /\bcreate(s)? .{0,40}\bcreature token/i },
 
   { tag: 'treasure', test: /\bTreasure token/i },
-  { tag: 'artifact-etb', test: /\bcreate(s)? .{0,30}\bartifact token/i },
+  // Any artifact card entering IS an artifact entering the battlefield, which is
+  // the whole of what an artifact payoff asks for. Naming the token types as
+  // well catches the cards that make artifacts without being one.
+  { tag: 'artifact-etb', test: /^[^\n]*\bArtifact\b/ },
+  {
+    tag: 'artifact-etb',
+    test: /\bcreate(s)? .{0,40}\b(artifact|Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment) token/i,
+  },
 
-  { tag: 'lifegain', test: /\byou gain \d+ life\b|\bgain(s)? \d+ life\b|\blifelink\b/i },
-  { tag: 'lifeloss', test: /\beach opponent loses \d+ life\b|\bloses? \d+ life\b/i },
+  // The numbers were a closed list of one, so "gain 4 life" read as nothing.
+  {
+    tag: 'lifegain',
+    test: /\bgains? (\d+|X) life\b|\bgains? life equal to\b|\bgains? that much life\b|\blifelink\b/i,
+  },
+  {
+    tag: 'lifeloss',
+    test: /\bloses? (\d+|X) life\b|\bloses? life equal to\b|\bloses? that much life\b/i,
+  },
+  // Damage to a player IS that player losing life, and "whenever a player loses
+  // life" triggers on it. Deliberately not "any target", which as often points
+  // at a creature and takes nobody's life total with it.
+  {
+    tag: 'lifeloss',
+    test: /\bdeals \d+ damage to (target player|target opponent|each opponent|each player)\b|\bdeals damage to (target player|each opponent)\b/i,
+  },
 
-  { tag: 'card-draw', test: /\bdraw(s)? (a|two|three|X|that many) cards?\b/i },
-  { tag: 'discard', test: /\bdiscard(s)? (a|two|X|your hand)\b/i },
+  {
+    tag: 'card-draw',
+    test: /\bdraws? (a|two|three|four|five|six|seven|X|that many|\d+) cards?\b|\bdraws? cards equal to\b/i,
+  },
+  // Whose discard. "Target opponent discards two cards" is a hand attack, not a
+  // loot engine, and this tag's payoffs are madness and "whenever you discard" —
+  // so matching `discards` with any subject was calling 296 hand-attack cards
+  // discard enablers. Scryfall templating makes the subject readable: a bare
+  // "discard a card" is addressed to you.
+  {
+    tag: 'discard',
+    test: /\bdiscard (a|an|two|three|four|X|\d+|that many|your hand)\b|\byou discard\b|\beach player discards\b/i,
+  },
 
   // Self-mill and reanimation fodder: something has to fill the graveyard.
+  // Self-mill only, for the same reason as `discard`: milling an opponent fills
+  // THEIR graveyard, and every payoff this tag pairs with reads your own.
   {
     tag: 'graveyard-creature',
-    test: /\bmill(s)? \d+|\bput(s)? the top .{0,30}into your graveyard/i,
+    test: /\bmill (a|two|three|four|five|six|seven|ten|X|that many|\d+) cards?\b|\byou mill\b|\beach player mills\b|\bsurveil \d+\b|\bput(s)? the top .{0,40}into your graveyard\b/i,
   },
   { tag: 'graveyard-creature', test: /\bdies\b.{0,60}\bgraveyard\b/i },
 
   { tag: 'plus1-counter', test: /\bput(s)? .{0,30}\+1\/\+1 counter/i },
-  { tag: 'untap', test: /\buntap target\b|\buntap all\b|\buntap(s)? another\b/i },
+  // A creature that arrives with counters on it is a +1/+1 deck's payload, and
+  // that templating never says "put".
+  { tag: 'plus1-counter', test: /\benters with (a|an|one|two|three|four|X|\d+) \+1\/\+1 counter/i },
+  {
+    tag: 'plus1-counter',
+    test: /\bdistribute (a|two|three|four|five|X|\d+) \+1\/\+1 counters?\b|\bdouble the number of \+1\/\+1 counters\b/i,
+  },
+
+  { tag: 'untap', test: /\buntap target\b|\buntap all\b|\buntaps? another\b/i },
+  { tag: 'untap', test: /\buntaps? (up to )?(one|two|three|X|\d+) target\b|\byou may untap\b/i },
+
+  // Ramp is what a landfall deck runs, and the old pattern wanted the word
+  // "land" AFTER "put" — so every fetch ("search your library for a basic land
+  // card, then put it onto the battlefield") read as nothing at all.
   {
     tag: 'landfall',
     test: /\bplay an additional land\b|\bput(s)? .{0,30}land .{0,20}battlefield/i,
   },
+  { tag: 'landfall', test: /\bland cards?\b[^.]{0,60}\bonto the battlefield\b/i },
+
+  // Nothing produced `attack-trigger` at all, so 1,848 cards wanted an event no
+  // card in the corpus could supply. These are the cards that cause attacks:
+  // another combat step, or a compulsion to attack.
+  //
+  // Goad, "target creature attacks this turn if able" and "untap all creatures
+  // you control" were all tried here and dropped. The first two point at an
+  // OPPONENT's creatures, which no "whenever a creature you control attacks"
+  // trigger ever sees, and the third is a vigilance trick more often than it is
+  // a second attack — and it already reads as `untap`.
+  {
+    tag: 'attack-trigger',
+    test: /\b(additional|extra) combat phase\b|\bcreatures you control attack (this turn|each combat) if able\b/i,
+  },
+
+  // Blink, and the other ways a creature enters again. A flicker effect is the
+  // enabler for every "when this creature enters" already on the board.
+  {
+    tag: 'creature-etb',
+    test: /\bexiles? .{0,70}return (it|them|that card|those cards) to the battlefield\b/i,
+  },
+  {
+    tag: 'creature-etb',
+    test: /\breturn (it|them) to the battlefield under (its owner's|your) control\b/i,
+  },
+  {
+    tag: 'creature-etb',
+    test: /\breturn target creature card from (your|a) graveyard to the battlefield\b/i,
+  },
+
+  // Casting an instant or sorcery IS the event a prowess or magecraft trigger
+  // waits for, and the type line says so without any reading of the rules text.
+  { tag: 'spell-cast', test: /^[^\n]*\b(Instant|Sorcery)\b/ },
 ]
 
 const WANTS: readonly Rule[] = [
@@ -186,13 +294,47 @@ const WANTS: readonly Rule[] = [
 
   { tag: 'graveyard-creature', test: /\breturn target creature card from your graveyard\b/i },
   { tag: 'graveyard-creature', test: /\bdelve\b|\bescape\b|\bthreshold\b|\bdelirium\b/i },
+  // The graveyard as a resource — which is what `delve` and `threshold` above
+  // already meant, so the tag was never only about creatures. A card that recurs
+  // from it, counts it, or pays with it is built for a deck that fills it.
+  {
+    tag: 'graveyard-creature',
+    test: /\bflashback\b|\bunearth\b|\bdisturb\b|\bembalm\b|\beternalize\b|\bdredge\b|\bjump-start\b|\bretrace\b|\baftermath\b|\bencore\b|\bdescend\b/i,
+  },
+  {
+    tag: 'graveyard-creature',
+    test: /\breturn (target |up to one target |another target )?(creature|permanent) cards? from (your|a) graveyard\b/i,
+  },
+  { tag: 'graveyard-creature', test: /\bcast .{0,40}from your graveyard\b/i },
+  { tag: 'graveyard-creature', test: /\bcards? in your graveyard\b/i },
 
-  { tag: 'artifact-etb', test: /\bwhenever an artifact enters\b/i },
+  {
+    tag: 'artifact-etb',
+    test: /\bwhenever an artifact (you control )?enters\b|\bwhenever another artifact\b|\bmetalcraft\b|\baffinity for artifacts\b|\bimprovise\b|\bfor each artifact you control\b|\bartifacts you control (get|have)\b/i,
+  },
   { tag: 'treasure', test: /\bwhenever .{0,30}Treasure .{0,20}sacrificed\b/i },
   { tag: 'landfall', test: /\bLandfall\b|\bwhenever a land .{0,20}enters\b/i },
   { tag: 'plus1-counter', test: /\bproliferate\b|\bwhenever .{0,40}\+1\/\+1 counter/i },
   { tag: 'attack-trigger', test: /\bwhenever .{0,30}attacks\b/i },
+  // A combat damage trigger is an attack trigger with a harder condition: it
+  // only ever fires because the creature attacked. It wants the same evasion,
+  // the same pump and the same extra combats.
+  { tag: 'attack-trigger', test: /\bwhenever .{0,45}deals combat damage to a player\b/i },
   { tag: 'untap', test: /\{T\}:/ },
+
+  // An enters-the-battlefield trigger is a card asking to be blinked, and a
+  // "whenever another creature enters" trigger is the same deck's payoff. Both
+  // want creatures to enter; only the blink effect produces it.
+  { tag: 'creature-etb', test: /\bwhen(ever)? this creature enters\b/i },
+  {
+    tag: 'creature-etb',
+    test: /\bwhenever (a|another) (nontoken )?creature (you control )?enters\b|\bwhenever one or more creatures enter\b/i,
+  },
+
+  {
+    tag: 'spell-cast',
+    test: /\bprowess\b|\bmagecraft\b|\bstorm\b|\bwhenever you cast (an instant|a sorcery|your first|an? noncreature)|\binstant and sorcery spells you (cast|control)\b|\bwhenever you copy an instant\b/i,
+  },
 ]
 
 export interface SynergyProfile {

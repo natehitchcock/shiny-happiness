@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { ARCHETYPES, type ArchetypeKey } from './archetype.js'
+import type { Bracket } from './bracket.js'
 import { dimensionKey, roleDimension, typeDimension } from './composition.js'
+import { curveTarget } from './curve.js'
 import { assessArchetype, compositionTargets } from './archetype-targets.js'
 
 const LAND = dimensionKey(roleDimension('land'))
@@ -17,6 +19,19 @@ const idealsOf = (archetype: ArchetypeKey, secondary: ArchetypeKey | null = null
     ]),
   )
 
+const BRACKETS = [1, 2, 3, 4, 5] as const satisfies readonly Bracket[]
+
+/** Roles do not overlap — `primaryRole` puts each card in exactly one. */
+const roleSum = (
+  archetype: ArchetypeKey,
+  secondary: ArchetypeKey | null,
+  bracket: Bracket = 3,
+): number =>
+  compositionTargets(archetype, secondary, { bracket }).reduce(
+    (sum, t) => (t.dimension.kind === 'role' ? sum + t.ideal : sum),
+    0,
+  )
+
 describe('compositionTargets', () => {
   it('covers every archetype', () => {
     for (const archetype of ARCHETYPES) {
@@ -24,6 +39,134 @@ describe('compositionTargets', () => {
       expect(targets.length).toBeGreaterThan(0)
       expect(idealsOf(archetype).get(LAND)).toBeGreaterThan(0)
     }
+  })
+
+  it('gives every archetype the four dimensions every Commander deck has', () => {
+    // A row missing one of these is a row nobody finished, and the meter for it
+    // simply would not render.
+    for (const archetype of ARCHETYPES) {
+      const ideals = idealsOf(archetype)
+      for (const key of [LAND, RAMP, DRAW, REMOVAL, CREATURE]) {
+        expect(ideals.get(key), `${archetype} ${key}`).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it('gives every archetype its own vector rather than a copy of a neighbour', () => {
+    // Two archetypes with the same numbers are one archetype presented as a
+    // choice, and `assessArchetype` cannot tell them apart either.
+    for (const a of ARCHETYPES) {
+      for (const b of ARCHETYPES) {
+        if (a >= b) continue
+        const [x, y] = [idealsOf(a), idealsOf(b)]
+        const keys = new Set([...x.keys(), ...y.keys()])
+        const distance = [...keys].reduce((s, k) => s + ((x.get(k) ?? 0) - (y.get(k) ?? 0)) ** 2, 0)
+        expect(Math.sqrt(distance), `${a} vs ${b}`).toBeGreaterThan(3)
+      }
+    }
+  })
+
+  describe('the 99-card budget', () => {
+    // Counting uses `primaryRole`, so role ideals are mutually exclusive and
+    // `Σ roles` is a real budget rather than a loose sum. Voltron used to spend
+    // 97 of 99 and went over outright at bracket 4 — a vector no deck can be
+    // built to, which also made the archetype unreachable by `assessArchetype`.
+
+    it('leaves a pure archetype room for cards that are not role cards', () => {
+      for (const archetype of ARCHETYPES) {
+        // Eight slots at the common bracket: the threats and payoffs that make
+        // the deck a deck rather than a list of services.
+        expect(roleSum(archetype, null, 3), archetype).toBeLessThanOrEqual(91)
+      }
+    })
+
+    it('stays inside 99 for every archetype at every bracket', () => {
+      for (const archetype of ARCHETYPES) {
+        for (const bracket of BRACKETS) {
+          expect(roleSum(archetype, null, bracket), `${archetype} b${bracket}`).toBeLessThanOrEqual(
+            95,
+          )
+        }
+      }
+    })
+
+    it('stays inside 99 for every hybrid at every bracket', () => {
+      // The blend keeps primary-only dimensions whole and adds secondary-only
+      // ones on top, so a hybrid's role budget can only grow. Two role-dense
+      // archetypes are the worst case and this is where it is caught.
+      for (const primary of ARCHETYPES) {
+        for (const secondary of ARCHETYPES) {
+          for (const bracket of BRACKETS) {
+            const sum = roleSum(primary, secondary, bracket)
+            expect(sum, `${primary}+${secondary} b${bracket}`).toBeLessThanOrEqual(99)
+          }
+        }
+      }
+    })
+  })
+
+  describe('the mana base', () => {
+    it('keeps every land count inside a range a Commander deck can be built at', () => {
+      // Every modifier combination, because the modifiers stack: the curve one,
+      // the land-back one and the bracket one all land on the same row.
+      for (const archetype of ARCHETYPES) {
+        for (const bracket of BRACKETS) {
+          for (const averageManaValue of [2.0, 3.0, 4.5]) {
+            const land = new Map(
+              compositionTargets(archetype, null, { bracket, averageManaValue }).map((t) => [
+                dimensionKey(t.dimension),
+                t.ideal,
+              ]),
+            ).get(LAND)!
+            expect(land, `${archetype} b${bracket} mv${averageManaValue}`).toBeGreaterThanOrEqual(
+              30,
+            )
+            expect(land, `${archetype} b${bracket} mv${averageManaValue}`).toBeLessThanOrEqual(40)
+          }
+        }
+      }
+    })
+
+    it('does not shift a land count twice for one cheap curve', () => {
+      // The base land number is the count at a NEUTRAL curve; the modifier then
+      // corrects for how far the built deck sits from neutral. If a base had
+      // already priced in its own archetype's cheap curve, applying the modifier
+      // would be the same correction applied twice, and the archetypes with the
+      // most extreme curves would land outside what anyone plays. Checked at the
+      // curve each archetype actually targets.
+      for (const archetype of ARCHETYPES) {
+        const curve = curveTarget(archetype)
+        const averageManaValue = curve.reduce((a, band, i) => a + band.ideal * i, 0)
+        const land = new Map(
+          compositionTargets(archetype, null, { bracket: 3, averageManaValue }).map((t) => [
+            dimensionKey(t.dimension),
+            t.ideal,
+          ]),
+        ).get(LAND)!
+        expect(land, `${archetype} at its own curve`).toBeGreaterThanOrEqual(33)
+        expect(land, `${archetype} at its own curve`).toBeLessThanOrEqual(38)
+      }
+    })
+
+    it('never asks more than half the deck to be a mana source', () => {
+      // Lands plus ramp. Ramp's identity is the most RAMP, not the most mana
+      // sources — the row used to want 38 lands and 17 ramp, which is 55 cards
+      // producing mana and 19 left to spend it on.
+      for (const archetype of ARCHETYPES) {
+        const ideals = idealsOf(archetype)
+        const sources = ideals.get(LAND)! + ideals.get(RAMP)!
+        expect(sources, archetype).toBeGreaterThanOrEqual(40)
+        expect(sources, archetype).toBeLessThanOrEqual(53)
+      }
+    })
+
+    it('gives aggro the fewest mana sources, because flooding hurts it most', () => {
+      const sourcesOf = (a: ArchetypeKey): number => idealsOf(a).get(LAND)! + idealsOf(a).get(RAMP)!
+      for (const other of ARCHETYPES) {
+        if (other === 'aggro') continue
+        expect(sourcesOf('aggro'), other).toBeLessThan(sourcesOf(other))
+      }
+    })
   })
 
   it('gives control more draw and removal than aggro, and far fewer creatures', () => {

@@ -10,10 +10,28 @@ import type { ArchetypeKey } from './archetype.js'
  * signal to stop.
  *
  * These are share-of-nonland-spells distributions, not card counts, so they hold
- * whether the deck is 40 spells or 65. Established deckbuilding shapes, not
- * derived from a corpus: aggro front-loads, control pays for its power later,
- * combo clusters around its pieces. They are a starting point and the UI shows
+ * whether the deck is 40 spells or 65. There is no deck corpus to derive them
+ * from (ADR-0008) and there will not be one, so they are the source of truth
+ * indefinitely and every row below has to say why it is that shape. The UI shows
  * them as a target to sit near, never a quota to hit.
+ *
+ * WHY A SEPARATE TABLE AT ALL. The obvious alternative is to compute the curve
+ * from the archetype's role mix in `archetype-targets.ts` — take each role's
+ * ideal count and each role's typical cost, and add them up. That was tried
+ * against the ingested Scryfall corpus (34k commander-legal cards, `edhrec_rank`
+ * as the popularity order, which ADR-0008 keeps) and it does not work: composing
+ * all nine rows that way produces nine curves with means between 3.18 and 3.40,
+ * i.e. the same curve nine times. Role *counts* barely move a deck's curve,
+ * because every role's own cost distribution peaks at two and three.
+ *
+ * What separates an aggro curve from a control curve is which HALF of each role
+ * the deck buys — Swords to Plowshares and Path against Cyclonic Rift and a
+ * wrath, both `spot-removal`/`board-wipe`, four mana apart. That skew is not
+ * recoverable from a count, so it is stated here, per archetype, on purpose.
+ *
+ * HOW TO READ A ROW. `midrange` is the anchor: it is deliberately set to the
+ * curve the composed role mix predicts (~3.3 mean), because midrange is the
+ * archetype defined by not skewing. Every other row is a stated skew off it.
  */
 
 /** Buckets 0–7, where 7 holds everything at mana value 7 and above. */
@@ -39,20 +57,54 @@ export type CurveTarget = readonly CurveBand[]
 /**
  * How much wiggle room each archetype gets, as a fraction of its own share.
  *
- * Not uniform, because the archetypes differ in how much the curve IS the deck.
- * Aggro lives or dies on its early drops, so it is held tightly; ramp and
- * control deliberately spread across the top end and a wide band there is
- * correct rather than sloppy.
+ * The ordering axis is: HOW MUCH OF THE PLAN IS A SCHEDULE. A deck that has to
+ * do a specific thing by a specific turn is held tightly, because a card that
+ * slips a bucket costs a turn it cannot get back. A deck whose plan is a
+ * resource curve rather than a schedule is held loosely, because its cards are
+ * substitutable across costs and a band that flagged the difference would be
+ * flagging a preference, not a fault.
+ *
+ * Note this is a fraction of the archetype's OWN share, so a tight archetype
+ * with a fat bucket can still get a wider band there in absolute terms than a
+ * loose archetype with a thin one. "Aggro is held tighter than control" is true
+ * of the whole curve, not guaranteed bucket by bucket — the test asserts it over
+ * the whole curve for that reason.
+ *
+ * One scalar per archetype, not one per bucket. Ramp is the case that argues for
+ * per-bucket (its early rocks are on a schedule; its payoffs are the opposite),
+ * and it is knowingly not served well here. Doc 16 makes tolerance a single
+ * per-deck setting, so splitting it now would design against a scoped feature to
+ * fix one row.
  */
 const TOLERANCE: Record<ArchetypeKey, number> = {
+  /** Pure schedule. Damage per turn is arithmetic and an unspent turn is gone. */
   aggro: 0.25,
-  combo: 0.3,
-  aristocrats: 0.3,
+  /** The gear must land while the creature is still alive to carry it. */
   voltron: 0.3,
+  /** The pieces cost what they cost; either you deploy the pair this turn or not. */
+  combo: 0.3,
+  /** Outlet plus fodder plus payoff has to be online before the table stabilises. */
+  aristocrats: 0.3,
+  /**
+   * A tax has to precede the mana it taxes. Sphere of Resistance on turn six is
+   * not a late Sphere, it is no Sphere. Moved in from 0.4, which had stax nearly
+   * as curve-agnostic as control and implied a lock deck can afford to be slow.
+   */
+  stax: 0.3,
+  /** Two real builds — cheap makers plus anthems, or fewer bigger floods. */
   tokens: 0.35,
+  /** The archetype defined by not committing to a point on the curve. */
   midrange: 0.35,
-  stax: 0.4,
-  control: 0.45,
+  /**
+   * Answers are fungible across cost — a counterspell at two and a wrath at five
+   * are both "interaction" — and counter-control and wrath-control are both real
+   * decks, so the band has to cover a genuinely bimodal design space. Not as
+   * loose as ramp, though: control still has to survive to the late game, so its
+   * early buckets are a real requirement rather than a preference. Was 0.45,
+   * which made it indistinguishable from ramp and left almost no curve signal.
+   */
+  control: 0.4,
+  /** Loosest: the entire plan is decoupling cost from turn, so where the payoffs sit is open. */
   ramp: 0.45,
 }
 
@@ -68,17 +120,118 @@ const banded = (weights: readonly number[], tolerance: number): CurveTarget => {
   })
 }
 
+/**
+ * Weights, not shares — `banded` normalises them, so a row can be edited one
+ * bucket at a time without rebalancing the other seven.
+ *
+ * ABOUT BUCKET 0. It is the smallest real choice in the table: the corpus holds
+ * 99 commander-legal nonland cards at mana value zero, and most of them are fast
+ * mana (Lotus Petal, the Moxen, Lion's Eye Diamond) that brackets 1–3 do not
+ * want. Scryfall's `cmc` also puts only pure-X costs here — `{X}{X}` Walking
+ * Ballista is 0 but `{X}{B}{B}` Torment of Hailfire is 2 — so this bucket is
+ * NOT "the X spells". Every row is therefore ~1%, and the two exceptions
+ * (combo, stax) are the archetypes that actually have a use for those 99 cards.
+ */
 const SHAPES: Record<ArchetypeKey, readonly number[]> = {
-  //          mv0   1     2     3     4     5     6    7+
-  aggro: [2, 14, 22, 20, 12, 6, 3, 1],
-  midrange: [2, 9, 17, 19, 16, 11, 6, 3],
-  control: [2, 8, 14, 16, 16, 13, 9, 6],
-  combo: [3, 12, 20, 18, 13, 8, 4, 2],
-  ramp: [2, 10, 18, 15, 12, 10, 8, 7],
-  aristocrats: [2, 11, 20, 19, 13, 8, 4, 2],
-  voltron: [3, 13, 21, 18, 12, 7, 4, 2],
-  tokens: [2, 11, 19, 19, 14, 8, 5, 2],
-  stax: [3, 12, 20, 17, 13, 9, 5, 2],
+  //             mv0  1   2   3   4   5   6  7+
+
+  /**
+   * The anchor row, and the only one not skewed: this is close to what the
+   * composed role mix predicts, which is the right definition of "midrange" —
+   * efficient at every point and committed to none. Also the fallback curve for
+   * every deck with no archetype (`recommend.ts`), so it is left alone unless
+   * there is a reason beyond taste. Mean ~3.3.
+   */
+  midrange: [1, 10, 18, 19, 16, 11, 6, 3],
+
+  /**
+   * Skews down hardest. Aggro buys the cheap half of every role it plays —
+   * one-mana removal, dorks and Signets rather than five-mana rocks — and its
+   * threats are the ones that can attack on the turn they are cast. The top four
+   * buckets are about a third of what the role mix would predict: a six-drop in
+   * an aggro deck is a turn spent not attacking. Mean ~2.7, the lowest here.
+   */
+  aggro: [1, 15, 23, 20, 11, 5, 2, 1],
+
+  /**
+   * The mirror image of aggro, and the shape that most justifies this table
+   * existing: control's role counts are unremarkable, but it buys the expensive
+   * end of each — Cyclonic Rift over a bounce spell, a wrath over a shock, a
+   * five-mana draw engine over a cantrip. Two and three are roughly halved
+   * against the composed prediction and five and six roughly doubled. Its few
+   * threats are large because it has to win with a small number of them.
+   * Mean ~3.8, the highest here.
+   */
+  control: [1, 8, 14, 17, 17, 14, 10, 6],
+
+  /**
+   * Cheap like aggro, but with the table's only real bucket-0 presence and a
+   * longer tail. Combo is the one archetype whose plan converts turn-one mana
+   * straight into a win, so Lotus Petal and the Moxen are the point rather than
+   * filler; and the eight tutors it runs are not cheap — the `tutor` role's own
+   * cost distribution is the highest of any role in the corpus after board
+   * wipes, because the popular tutors past Demonic and Vampiric are five- and
+   * six-mana creature tutors.
+   */
+  combo: [3, 14, 21, 18, 11, 7, 4, 2],
+
+  /**
+   * The only deliberately BIMODAL row. Ramp is fat at one to three (its own
+   * accelerants, whose corpus cost distribution peaks hard at two and three),
+   * then dips at four and five, then rises again at six and up. The dip is the
+   * whole point and the previous monotone-decreasing row could not express it: a
+   * four-drop costs a ramp deck exactly what a ramp spell costs and does not
+   * advance the plan, so the deck skips that rung on purpose.
+   *
+   * Mean ~3.4, which is inside the neutral band of the land modifier in
+   * `archetype-targets.ts` rather than over its 3.5 line — deliberate, so a ramp
+   * deck that leans further into its payoffs earns the extra land by doing so
+   * rather than being given it twice.
+   */
+  ramp: [2, 11, 20, 17, 9, 8, 9, 8],
+
+  /**
+   * Cheap and repeatable, with almost NO top end — 7+ is the thinnest in the
+   * table after aggro. That is the sharp contrast with tokens: both build a
+   * board, but aristocrats converts it with a two-mana Blood Artist, so it never
+   * has to buy a seven-mana card to cash the board in. Its recursion package
+   * pulls it a little above combo.
+   */
+  aristocrats: [1, 11, 21, 20, 13, 8, 4, 1],
+
+  /**
+   * Higher than midrange, which is the opposite of the "go-wide is cheap"
+   * intuition and is what the corpus says: `token-maker` and `anthem` are two of
+   * the more expensive roles by their own cost distributions, and tokens runs
+   * nineteen of them between the two.
+   *
+   * Read as midrange with two trades. The one-drop bucket is thinner, because a
+   * one-mana card in a go-wide deck makes one body and there is nothing to pump
+   * it with yet. And a chunk of the five bucket moves to 7+, because the board
+   * this deck builds does not kill anyone by itself — Craterhoof, a mass pump,
+   * an overrun — and that finisher is a slot the deck must actually leave open.
+   * Aristocrats is the deliberate contrast: same board, no finisher needed.
+   */
+  tokens: [1, 9, 18, 21, 18, 10, 6, 5],
+
+  /**
+   * Nearly as low as aggro despite being a slower deck, because voltron is the
+   * only archetype that pays for its cards TWICE: cast cost, then equip cost,
+   * then the commander tax when the creature is answered. Its printed curve has
+   * to be low for its effective curve to be playable. Peaks at two harder than
+   * aggro and has a thinner one-drop bucket, matching `equipment` in the corpus
+   * (a third of the popular equipment costs two; almost none costs one).
+   */
+  voltron: [1, 12, 23, 19, 12, 6, 3, 1],
+
+  /**
+   * Front-loaded, and more so than the role mix alone would give it. A tax has
+   * to be deployed before the mana it taxes exists, so stax buys the cheap half
+   * of its own role even though the `stax` role's corpus distribution peaks at
+   * three. The small 7+ weight is the lock finisher — a deck that stops the
+   * table has to be able to end the game or it has only made it longer.
+   */
+  stax: [2, 12, 22, 20, 12, 7, 4, 2],
 }
 
 /**

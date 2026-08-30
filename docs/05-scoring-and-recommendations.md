@@ -116,6 +116,13 @@ corpus once `DATA-03` lands. A starting point, not a claim of optimality:
 | board-wipe | 1 | 3 | 5 |
 | wincon | 2 | 4 | 6 |
 
+**`wincon` is in this table and in no archetype row.** Doc 14 §14.2 defines the
+nine vectors over eight dimensions and `wincon` is not one of them, so
+`compositionTargets` never emits a `wincon` target and there is no `fills-wincon`
+group. Left as a known gap rather than papered over: adding the dimension changes
+what nine archetypes offer and what `assessArchetype` measures, which is a change
+worth making deliberately rather than to tidy a table.
+
 Adjustments to apply as pure modifiers on top of the archetype row, each
 individually testable:
 

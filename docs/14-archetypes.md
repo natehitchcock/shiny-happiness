@@ -53,20 +53,23 @@ interface CompositionTarget {
 }
 ```
 
-**Seed ideals.** Same status as the base table in doc 05 §5.4: established
-deckbuilding heuristics, to be *replaced* by corpus-derived percentiles once
-`DATA-03` and `ING-05` land. They are a starting point, not a claim of optimality.
+**Seed ideals.** `DATA-03` and `ING-05` are not coming — [ADR-0008](adr/0008-drop-edhrec.md)
+removed the corpus these were to be replaced by, so they are the source of truth
+indefinitely rather than a placeholder. Still not a claim of optimality; the
+reasoning for each row now lives beside it in
+`packages/domain/src/archetype-targets.ts`, because a number nobody can argue
+with is a number nobody can correct.
 
 | | land | ramp | draw | spot-rem. | wipe | tutor | protect. | creature |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| aggro | 34 | 9 | 8 | 7 | 1 | 2 | 4 | 32 |
+| aggro | 35 | 9 | 8 | 7 | 1 | 2 | 4 | 32 |
 | midrange | 36 | 11 | 9 | 8 | 3 | 3 | 4 | 26 |
-| control | 37 | 11 | 12 | 12 | 5 | 3 | 5 | 14 |
+| control | 36 | 11 | 12 | 12 | 5 | 3 | 5 | 14 |
 | combo | 34 | 13 | 10 | 6 | 1 | 8 | 7 | 20 |
-| ramp | 38 | 17 | 9 | 6 | 3 | 3 | 4 | 22 |
-| aristocrats | 35 | 10 | 9 | 7 | 2 | 4 | 4 | 30 |
-| voltron | 36 | 10 | 8 | 8 | 2 | 5 | 10 | 12 |
-| tokens | 35 | 10 | 9 | 7 | 2 | 3 | 5 | 24 |
+| ramp | 37 | 15 | 9 | 6 | 3 | 3 | 4 | 22 |
+| aristocrats | 35 | 10 | 9 | 7 | 3 | 4 | 4 | 30 |
+| voltron | 36 | 10 | 8 | 8 | 2 | 5 | 7 | 12 |
+| tokens | 35 | 10 | 8 | 7 | 2 | 3 | 4 | 24 |
 | stax | 35 | 12 | 8 | 8 | 3 | 5 | 5 | 16 |
 
 Archetype-specific dimensions, applied only where the archetype names them:
@@ -74,10 +77,28 @@ Archetype-specific dimensions, applied only where the archetype names them:
 | Archetype | Additional targets |
 | --- | --- |
 | aristocrats | `sac-outlet` 5, `recursion` 7 |
-| voltron | `equipment` 8, `aura` 4, `evasion` 6 |
-| tokens | `token-maker` 14, `anthem` 6 |
+| voltron | `equipment` 7, `aura` 3, `evasion` 3 |
+| tokens | `token-maker` 14, `anthem` 5 |
 | stax | `stax` 12 |
 | combo | (tutors and protection already raised above) |
+
+**Two constraints bind the table, and the first revision to it broke on both.**
+
+*Roles do not overlap.* Composition counts by `primaryRole`, so `land + Σ roles`
+is a budget against 99 and the remainder is the deck's threats and payoffs. The
+first voltron row spent 97 of 99 and went over outright at bracket 4, because it
+was written as though `protection` and `equipment` were separate cards — under
+`ROLE_PRECEDENCE` a pair of Lightning Greaves is protection, not equipment, and
+almost every evasion-granter in the deck is counted as something else first. A
+vector no deck can be built to is also a vector `assessArchetype` can never
+match, so the archetype quietly became unreachable.
+
+*Lands are the neutral-curve number.* The curve modifier below removes a land
+under 2.8 average mana value and adds one over 3.5. Aggro's own target curve sits
+at ~2.7 and control's at ~3.8, so both trip it every time — and if the base
+number had already priced that in, the shift would be applied twice. It had been:
+aggro was settling at 33 lands and control at 38. The table now holds the count
+at a neutral curve, and aggro settles at 34, control at 37.
 
 The **bracket and curve modifiers from doc 05 §5.4 still apply on top** — they are
 orthogonal. A Bracket 5 combo deck gets the combo row plus the bracket-5 draw and

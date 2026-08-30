@@ -33,6 +33,9 @@ const KRENKO = card(
   '{T}: Create X 1/1 red Goblin creature tokens, where X is the number of Goblins you control.',
 )
 const COUNTERSPELL = card('Counterspell', 'Instant', 'Counter target spell.')
+// Nothing at all: no rules text, and a type line that names no event. Counterspell
+// is no longer this card — an instant PRODUCES `spell-cast` by being one.
+const GRIZZLY_BEARS = card('Grizzly Bears', 'Creature — Bear', '')
 
 describe('deriveSynergy', () => {
   it('reads a death trigger as WANTING creature deaths', () => {
@@ -52,7 +55,7 @@ describe('deriveSynergy', () => {
   })
 
   it('gives a card with no interactions an empty profile rather than a guess', () => {
-    const profile = deriveSynergy(COUNTERSPELL)
+    const profile = deriveSynergy(GRIZZLY_BEARS)
 
     expect(profile.produces).toEqual([])
     expect(profile.wants).toEqual([])
@@ -84,6 +87,255 @@ describe('deriveSynergy', () => {
 
     const produces = deriveSynergy(many).produces
     expect(new Set(produces).size).toBe(produces.length)
+  })
+})
+
+/**
+ * ADR-0016 widened these rules against the loaded corpus. Each case here is real
+ * oracle text from a card the rule newly reads, and — more importantly — each
+ * rule that was tightened or rejected has a card that must NOT match, because
+ * the whole argument of that ADR is that a wrong tag costs more than a gap.
+ */
+describe('deriveSynergy — the events the regexes used to miss', () => {
+  it('reads an instant or sorcery as producing a spell cast', () => {
+    // The event a prowess trigger waits for is "you cast an instant or sorcery",
+    // and the type line answers that without reading a word of rules text.
+    expect(deriveSynergy(COUNTERSPELL).produces).toContain('spell-cast')
+  })
+
+  it('does not let a creature produce a spell cast by talking about spells', () => {
+    const mentor = card(
+      'Monastery Mentor',
+      'Creature — Human Monk',
+      'Prowess\nWhenever you cast a noncreature spell, create a 1/1 white Monk creature token with prowess.',
+    )
+    const profile = deriveSynergy(mentor)
+
+    expect(profile.wants).toContain('spell-cast')
+    expect(profile.produces).not.toContain('spell-cast')
+  })
+
+  it('reads an enters-the-battlefield trigger as wanting creatures to enter', () => {
+    const slime = card(
+      'Acidic Slime',
+      'Creature — Ooze',
+      'Deathtouch\nWhen this creature enters, destroy target artifact, enchantment, or land.',
+    )
+
+    expect(deriveSynergy(slime).wants).toContain('creature-etb')
+  })
+
+  it('does not read "enters tapped" as an enters trigger', () => {
+    // No trigger, nothing to blink for. The word "enters" alone is not an event.
+    const wall = card('Wall of Wood', 'Creature — Wall', 'Defender\nThis creature enters tapped.')
+
+    expect(deriveSynergy(wall).wants).not.toContain('creature-etb')
+  })
+
+  it('reads a flicker effect as producing an enter', () => {
+    const blur = card(
+      'Blur',
+      'Instant',
+      "Flash\nExile target creature you control, then return that card to the battlefield under its owner's control.\nDraw a card.",
+    )
+
+    expect(deriveSynergy(blur).produces).toContain('creature-etb')
+  })
+
+  it('reads an artifact as producing an artifact entering', () => {
+    expect(deriveSynergy(card('Sol Ring', 'Artifact', '{T}: Add {C}{C}.')).produces).toContain(
+      'artifact-etb',
+    )
+  })
+
+  it('does not read destroying an artifact as making one enter', () => {
+    // The type line is the only place this question can be answered; the word
+    // "artifact" in the rules text is as often an artifact leaving.
+    const shatter = card('Shatter', 'Instant', 'Destroy target artifact.')
+
+    expect(deriveSynergy(shatter).produces).not.toContain('artifact-etb')
+  })
+
+  it('reads your own discard, and not an opponent’s', () => {
+    // "Target opponent discards two cards" is a hand attack. It does not feed
+    // madness and it does not fill your graveyard, which is all this tag pairs
+    // with, so counting it was labelling 296 cards as something they are not.
+    const looting = card(
+      'Faithless Looting',
+      'Sorcery',
+      'Draw two cards, then discard two cards.\nFlashback {2}{R}',
+    )
+    const mindRot = card('Mind Rot', 'Sorcery', 'Target player discards two cards.')
+
+    expect(deriveSynergy(looting).produces).toContain('discard')
+    expect(deriveSynergy(mindRot).produces).not.toContain('discard')
+  })
+
+  it('reads self-mill, and not milling an opponent', () => {
+    // Same reason: an opponent's graveyard is not the resource this tag means.
+    const supplier = card(
+      "Stitcher's Supplier",
+      'Creature — Zombie',
+      'When this creature enters or dies, mill three cards.',
+    )
+    const scour = card('Tome Scour', 'Sorcery', 'Target player mills five cards.')
+
+    expect(deriveSynergy(supplier).produces).toContain('graveyard-creature')
+    expect(deriveSynergy(scour).produces).not.toContain('graveyard-creature')
+  })
+
+  it('reads a fetch as producing landfall', () => {
+    // The old pattern wanted the word "land" AFTER "put", so every ramp spell in
+    // the corpus — the most common landfall enabler there is — read as nothing.
+    const growth = card(
+      'Rampant Growth',
+      'Sorcery',
+      'Search your library for a basic land card, put it onto the battlefield tapped, then shuffle.',
+    )
+
+    expect(deriveSynergy(growth).produces).toContain('landfall')
+  })
+
+  it('does not read a land that goes to hand as landfall', () => {
+    const cycler = card(
+      'Shefet Monitor',
+      'Creature — Lizard',
+      'Basic landcycling {2} ({2}, Discard this card: Search your library for a basic land card, reveal it, put it into your hand, then shuffle.)',
+    )
+
+    expect(deriveSynergy(cycler).produces).not.toContain('landfall')
+  })
+
+  it('reads an extra combat phase as producing attacks', () => {
+    // Nothing produced this tag at all, so 1,848 cards wanted an event no card
+    // in the corpus could supply.
+    const assault = card(
+      'Relentless Assault',
+      'Sorcery',
+      'Untap all creatures that attacked this turn. After this main phase, there is an additional combat phase.',
+    )
+
+    expect(deriveSynergy(assault).produces).toContain('attack-trigger')
+  })
+
+  it('does not read goad as producing attacks', () => {
+    // Goad makes an OPPONENT's creature attack, which no "whenever a creature
+    // you control attacks" trigger ever sees.
+    const goad = card(
+      'Sing to the Water',
+      'Instant',
+      'Goad target creature. (Until your next turn, that creature attacks a player other than you if able.)',
+    )
+
+    expect(deriveSynergy(goad).produces).not.toContain('attack-trigger')
+  })
+
+  it('reads a combat damage trigger as wanting to attack', () => {
+    const rogue = card(
+      'Thieving Sprite',
+      'Creature — Faerie Rogue',
+      'Flying\nWhenever this creature deals combat damage to a player, draw a card.',
+    )
+
+    expect(deriveSynergy(rogue).wants).toContain('attack-trigger')
+  })
+
+  it('reads damage to a player as life lost', () => {
+    // Damage to a player IS that player losing life, and the payoff side of this
+    // tag — "whenever a player loses life" — triggers on it.
+    const chandra = card(
+      'Chandra, Pyrogenius',
+      'Legendary Planeswalker — Chandra',
+      '+2: Chandra, Pyrogenius deals 2 damage to each opponent.',
+    )
+
+    expect(deriveSynergy(chandra).produces).toContain('lifeloss')
+  })
+
+  it('does not read damage to "any target" as life lost', () => {
+    // It points at a creature as often as at a player.
+    const bolt = card('Lightning Bolt', 'Instant', 'Lightning Bolt deals 3 damage to any target.')
+
+    expect(deriveSynergy(bolt).produces).not.toContain('lifeloss')
+  })
+
+  it('reads a board wipe as producing deaths', () => {
+    const wrath = card(
+      'Wrath of God',
+      'Sorcery',
+      "Destroy all creatures. They can't be regenerated.",
+    )
+
+    expect(deriveSynergy(wrath).produces).toContain('creature-death')
+  })
+
+  it('does not read "destroy target nonland permanent" as producing deaths', () => {
+    // Tried, measured at about 70%, dropped: it as often points at an
+    // enchantment, and a confident wrong tag costs more than a gap.
+    const rend = card(
+      'Void Rend',
+      'Instant',
+      "This spell can't be countered.\nDestroy target nonland permanent.",
+    )
+
+    expect(deriveSynergy(rend).produces).not.toContain('creature-death')
+  })
+
+  it('reads a creature that arrives with counters', () => {
+    // The templating never says "put", so the old pattern saw none of these.
+    const swimmer = card(
+      'Nimbus Swimmer',
+      'Creature — Leviathan',
+      'Flying\nThis creature enters with X +1/+1 counters on it.',
+    )
+
+    expect(deriveSynergy(swimmer).produces).toContain('plus1-counter')
+  })
+
+  it('counts life and cards it could not count before', () => {
+    // "Four" and "equal to" were simply absent from the closed lists of numbers.
+    const chastise = card(
+      'Chastise',
+      'Instant',
+      'Destroy target attacking creature. You gain life equal to its power.',
+    )
+    const flare = card('Thoughtflare', 'Instant', 'Draw four cards, then discard two cards.')
+    const strike = card(
+      'Synchronized Strike',
+      'Instant',
+      'Untap up to two target creatures. They each get +2/+2 until end of turn.',
+    )
+
+    expect(deriveSynergy(chastise).produces).toContain('lifegain')
+    expect(deriveSynergy(flare).produces).toContain('card-draw')
+    expect(deriveSynergy(strike).produces).toContain('untap')
+  })
+
+  it('reads the graveyard as a resource, not only as a source of creatures', () => {
+    // `delve` and `threshold` were already in this tag, so it never meant only
+    // creatures. Flashback and "cards in your graveyard" belong with them.
+    const ghoultree = card(
+      'Ghoultree',
+      'Creature — Zombie Treefolk',
+      'This spell costs {1} less to cast for each creature card in your graveyard.',
+    )
+    const looting = card(
+      'Faithless Looting',
+      'Sorcery',
+      'Draw two cards, then discard two cards.\nFlashback {2}{R}',
+    )
+
+    expect(deriveSynergy(ghoultree).wants).toContain('graveyard-creature')
+    expect(deriveSynergy(looting).wants).toContain('graveyard-creature')
+  })
+
+  it('gives both new tags a place in the vocabulary and the interaction table', () => {
+    // A tag nothing is paired with is invisible to the deck view, which is the
+    // failure mode this whole exercise is about.
+    expect(SYNERGY_TAGS).toContain('creature-etb')
+    expect(SYNERGY_TAGS).toContain('spell-cast')
+    expect(interactsWith('creature-etb')).toContain('token')
+    expect(interactsWith('spell-cast')).toContain('card-draw')
   })
 })
 

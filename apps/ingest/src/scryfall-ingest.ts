@@ -35,6 +35,19 @@ import type { Card, Printing } from '@roundtable/domain'
  *      is per printing, and a card qualifies only if EVERY printing carries it.
  *   2. `oracle_cards` — one row per card. The oracle-level truth the domain
  *      models, written with the provenance pass 1 computed.
+ *
+ * Pass 1 READS in order but WRITES last. `printings.oracle_id` references
+ * `cards`, so a printing cannot be inserted before the card it belongs to
+ * exists. Writing them as they streamed worked on every database that already
+ * had a corpus and failed on every empty one — which is to say, it worked
+ * everywhere except the case that matters, and was found by pointing this at a
+ * fresh Neon database rather than by any test.
+ *
+ * The printings are therefore held in memory until the cards are in. That is
+ * ~110k rows and tens of megabytes for a command that runs at deploy time, and
+ * the alternative — streaming `default_cards` a second time — would mean
+ * downloading a 200 MB file twice from a service whose terms ask us to use the
+ * bulk export precisely so we do not hammer it (ADR-0009).
  */
 
 export interface IngestReport {
@@ -76,9 +89,16 @@ export const ingestScryfall = async (
   let printingCount = 0
   let printings: Printing[] = []
 
-  const flushPrintings = async (): Promise<void> => {
+  /**
+   * Every printing, held until the cards exist. See the note above the passes.
+   *
+   * `printings` stays the batch buffer so the shape below is unchanged; it
+   * drains into this instead of into the database.
+   */
+  const pending: Printing[] = []
+  const holdPrintings = (): void => {
     if (printings.length > 0) {
-      printingCount += await upsertPrintings(pool, printings)
+      pending.push(...printings)
       printings = []
     }
   }
@@ -97,11 +117,11 @@ export const ingestScryfall = async (
     if (printing !== null) printings.push(printing)
 
     if (printings.length >= batchSize) {
-      await flushPrintings()
+      holdPrintings()
       options.onProgress?.('printings', printingsRead)
     }
   }
-  await flushPrintings()
+  holdPrintings()
 
   // ---- pass 2: one row per card ----
   const cardsEntry = await bulkDataEntry('oracle_cards', options)
@@ -159,6 +179,12 @@ export const ingestScryfall = async (
     }
   }
   await flushCards()
+
+  // ---- pass 3: the printings, now that their cards exist ----
+  for (let i = 0; i < pending.length; i += batchSize) {
+    printingCount += await upsertPrintings(pool, pending.slice(i, i + batchSize))
+    options.onProgress?.('printings', i)
+  }
 
   await setSnapshotCounts(pool, snapshotId, { cards: cardCount, combos: 0 })
   // Promoted last. Until this line runs, readers still see the old corpus.
