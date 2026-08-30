@@ -23,6 +23,14 @@ export type DeckCommand =
       readonly origin: Origin
       readonly lock?: boolean
     }
+  /**
+   * Remove ONE accepted copy and record nothing (ADR-0012).
+   *
+   * Distinct from `exclude`, which removes every copy and bans the card under
+   * pillar P6. This is an amount, not a judgement: taking 34 Mountains to 33
+   * must not delete all 34 and ban Mountain from the deck forever.
+   */
+  | { readonly type: 'remove'; readonly oracleId: OracleId }
   | { readonly type: 'exclude'; readonly oracleId: OracleId }
   | { readonly type: 'restore'; readonly oracleId: OracleId }
   | { readonly type: 'lock'; readonly oracleId: OracleId; readonly locked: boolean }
@@ -225,6 +233,24 @@ export const applyCommands = (
             addedAt: context.now,
           },
         ]
+        applied.push(command)
+        continue
+      }
+
+      case 'remove': {
+        const copies = acceptedCopies(command.oracleId)
+        const victim = copies[copies.length - 1]
+        if (victim === undefined) {
+          rejected.push({ command, reason: { kind: 'not-in-deck', oracleId: command.oracleId } })
+          continue
+        }
+        if (victim.locked) {
+          rejected.push({ command, reason: { kind: 'locked', oracleId: command.oracleId } })
+          continue
+        }
+        // The most recently added copy goes, so removing one of 34 Mountains
+        // leaves the other 33 with their original `addedAt` and origins.
+        entries = entries.filter((e) => e !== victim)
         applied.push(command)
         continue
       }

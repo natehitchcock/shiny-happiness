@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
 import { usePipeline, type Phase } from './pipeline'
+import { formatDecklist } from '@roundtable/domain'
 import type { Card } from './api'
 
 /** Human-readable label for a composition dimension. */
@@ -444,7 +445,7 @@ const Curve = ({ curve }: { curve: api.Analysis['curve'] }): React.JSX.Element =
 }
 
 interface PendingCommand {
-  readonly type: 'accept' | 'exclude'
+  readonly type: 'accept' | 'exclude' | 'remove'
   readonly oracleId: string
 }
 
@@ -493,6 +494,169 @@ const ProgressBar = ({
   </div>
 )
 
+/**
+ * One basic land, with its count.
+ *
+ * A number box AND a pair of steppers, because both gestures are wanted: +1
+ * repeatedly while eyeballing the curve, or type 34 when you already know. The
+ * box commits on blur and on Enter so a half-typed "3" of "34" never fires.
+ */
+const BasicRow = ({
+  card,
+  count,
+  onSet,
+}: {
+  card: api.Card
+  count: number
+  onSet: (next: number) => void
+}): React.JSX.Element => {
+  const [draft, setDraft] = useState(String(count))
+  const commit = (raw: string): void => {
+    const parsed = Number.parseInt(raw, 10)
+    // A deck cannot hold a negative number of Mountains; anything unreadable
+    // falls back to what is already there rather than to zero.
+    const next = Number.isFinite(parsed) ? Math.max(0, parsed) : count
+    setDraft(String(next))
+    if (next !== count) onSet(next)
+  }
+
+  // Follow the deck when it changes underneath us (a batch landing, say).
+  useEffect(() => setDraft(String(count)), [count])
+
+  return (
+    <div className="card-row basic-row">
+      <span className="name">{card.name}</span>
+      <button
+        className="act step"
+        onClick={() => onSet(Math.max(0, count - 1))}
+        disabled={count === 0}
+        aria-label={`One fewer ${card.name}`}
+      >
+        −
+      </button>
+      <input
+        className="basic-count"
+        type="text"
+        inputMode="numeric"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit((e.target as HTMLInputElement).value)
+        }}
+        aria-label={`Number of ${card.name}`}
+      />
+      <button
+        className="act step"
+        onClick={() => onSet(count + 1)}
+        aria-label={`One more ${card.name}`}
+      >
+        +
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Paste a decklist, see what it resolved to, then commit.
+ *
+ * The preview is not optional politeness: doc 15 §15.3 requires that nothing
+ * applies before the user confirms, so a typo costs one line rather than the
+ * whole paste. Unresolved lines are listed, never silently dropped.
+ */
+const ImportDialog = ({
+  deckId,
+  onCommit,
+  onClose,
+}: {
+  deckId: string
+  onCommit: (cards: { oracleId: string; quantity: number }[]) => void
+  onClose: () => void
+}): React.JSX.Element => {
+  const [text, setText] = useState('')
+  const [preview, setPreview] = useState<api.ImportPreview | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const check = (): void => {
+    setBusy(true)
+    setError(null)
+    void api
+      .importPreview(deckId, text)
+      .then((p) => {
+        setPreview(p)
+        setBusy(false)
+      })
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : 'Could not read that list')
+        setBusy(false)
+      })
+  }
+
+  const total = (preview?.resolved ?? []).reduce((n, r) => n + r.quantity, 0)
+
+  return (
+    <div className="sheet" role="dialog" aria-label="Import a decklist">
+      <div className="sheet-head">
+        <h3>Import a decklist</h3>
+        <button className="act" onClick={onClose} aria-label="Close import">
+          Close
+        </button>
+      </div>
+
+      <textarea
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value)
+          setPreview(null)
+        }}
+        placeholder={'1 Sol Ring\n1 Rhystic Study\n34 Mountain'}
+        aria-label="Decklist text"
+        rows={8}
+      />
+
+      {error !== null ? <p className="problem">{error}</p> : null}
+
+      {preview === null ? (
+        <button className="primary" onClick={check} disabled={busy || text.trim() === ''}>
+          {busy ? 'Reading…' : 'Preview'}
+        </button>
+      ) : (
+        <>
+          <p className="note">
+            {plural(total, 'card')} across {plural(preview.resolved.length, 'line')} resolved.
+          </p>
+          {preview.unresolved.length > 0 ? (
+            <div className="unavailable">
+              <strong>Not recognised — these will not be added:</strong>
+              {preview.unresolved.map((u, i) => (
+                <div key={i}>
+                  {u.name} — {u.reason}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div className="row" style={{ marginTop: '0.5rem' }}>
+            <button
+              className="primary"
+              onClick={() => {
+                onCommit(preview.resolved)
+                onClose()
+              }}
+              disabled={preview.resolved.length === 0}
+            >
+              Add {plural(total, 'card')}
+            </button>
+            <button className="act" onClick={() => setPreview(null)}>
+              Back
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => {
   const [deck, setDeck] = useState(initial)
   const [groups, setGroups] = useState<api.Group[]>([])
@@ -511,6 +675,9 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
    * per-card spinner, so a card in flight cannot be clicked twice.
    */
   const [pending, setPending] = useState<readonly PendingCommand[]>([])
+  const [basics, setBasics] = useState<api.Card[]>([])
+  const [importing, setImporting] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
   const deckRef = useRef(deck)
   const queryRef = useRef(query)
   deckRef.current = deck
@@ -526,8 +693,8 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
         current.id,
         commands.map((c) =>
           c.type === 'accept'
-            ? { type: 'accept', oracleId: c.oracleId, origin: 'recommended' }
-            : { type: 'exclude', oracleId: c.oracleId },
+            ? { type: 'accept', oracleId: c.oracleId, origin: 'manual' }
+            : { type: c.type, oracleId: c.oracleId },
         ),
         current.version,
       )
@@ -577,11 +744,41 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
     refresh()
   }, [query, refresh])
 
-  const act = (oracleId: string, type: 'accept' | 'exclude'): void => {
+  // Basics never change for a deck — its colour identity is fixed by its
+  // commanders — so this is fetched once rather than with every recompute.
+  useEffect(() => {
+    void api
+      .basicLands(deck.id)
+      .then((r) => setBasics(r.items))
+      .catch(() => setBasics([]))
+  }, [deck.id])
+
+  const act = (oracleId: string, type: PendingCommand['type']): void => {
     // Applied to the view immediately. This is the whole point of the buffer:
     // the click is instant and the recompute catches up.
     setPending((current) => [...current, { type, oracleId }])
     pipeline.schedule({ type, oracleId })
+  }
+
+  /**
+   * Move a basic to an exact count.
+   *
+   * Emitted as N discrete commands rather than a "set count" verb: the batch is
+   * already atomic (doc 10 §10.3), and `remove` means one copy (ADR-0012), so
+   * the difference IS the command list. Decrement uses `remove`, never
+   * `exclude` — reducing Mountains must not ban Mountains.
+   */
+  const setBasicCount = (oracleId: string, next: number): void => {
+    const current = optimistic.entries.filter(
+      (e) => e.oracleId === oracleId && e.zone === 'accepted',
+    ).length
+    const delta = next - current
+    if (delta === 0) return
+
+    const type: PendingCommand['type'] = delta > 0 ? 'accept' : 'remove'
+    const commands = Array.from({ length: Math.abs(delta) }, () => ({ type, oracleId }))
+    setPending((queued) => [...queued, ...commands])
+    for (const c of commands) pipeline.schedule(c)
   }
 
   const setDeckOption = (body: Parameters<typeof api.patchDeck>[1]): void => {
@@ -592,6 +789,56 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
         pipeline.refresh()
       })
       .catch(() => undefined)
+  }
+
+  /**
+   * Export the deck as plain text, formatted by the DOMAIN's own formatter.
+   *
+   * No endpoint for it: `web` and `api` share `packages/domain`, so the client
+   * formats the list itself and the two cannot produce different files. Copy
+   * first, because copying is what people actually do with a decklist
+   * (doc 15 §15.4).
+   */
+  const exportDeck = (): void => {
+    const counts = new Map<string, number>()
+    for (const e of optimistic.entries) {
+      if (e.zone !== 'accepted') continue
+      counts.set(e.oracleId, (counts.get(e.oracleId) ?? 0) + 1)
+    }
+    const nameOf = (id: string): string =>
+      cards.get(id)?.name ?? basics.find((b) => b.oracleId === id)?.name ?? 'Unknown card'
+
+    const text = formatDecklist(
+      {
+        name: deck.name,
+        entries: [
+          ...deck.commanders.map((id) => ({
+            oracleId: id as never,
+            name: nameOf(id),
+            quantity: 1,
+            isCommander: true,
+            category: null,
+            setCode: null,
+            collectorNumber: null,
+          })),
+          ...[...counts].map(([id, quantity]) => ({
+            oracleId: id as never,
+            name: nameOf(id),
+            quantity,
+            isCommander: false,
+            category: null,
+            setCode: null,
+            collectorNumber: null,
+          })),
+        ],
+      },
+      'text',
+    )
+
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => setNotice(`Copied ${plural(counts.size + deck.commanders.length, 'line')}`))
+      .catch(() => setNotice('Could not copy — the browser blocked clipboard access'))
   }
 
   const open = (oracleId: string): void => {
@@ -607,6 +854,10 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
     for (const p of pending) {
       if (p.type === 'accept') {
         entries.push({ oracleId: p.oracleId, zone: 'accepted', locked: false })
+      } else if (p.type === 'remove') {
+        // One copy, and nothing recorded — the card stays suggestible.
+        const at = entries.findIndex((e) => e.oracleId === p.oracleId && e.zone === 'accepted')
+        if (at >= 0) entries.splice(at, 1)
       } else {
         const at = entries.findIndex((e) => e.oracleId === p.oracleId && e.zone === 'accepted')
         if (at >= 0) entries.splice(at, 1)
@@ -618,6 +869,7 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
   }, [deck, pending])
 
   const inFlight = useMemo(() => new Set(pending.map((p) => p.oracleId)), [pending])
+  const basicIds = useMemo(() => new Set(basics.map((b) => b.oracleId)), [basics])
 
   const accepted = optimistic.entries.filter((e) => e.zone === 'accepted')
   const excluded = optimistic.entries.filter((e) => e.zone === 'excluded')
@@ -632,7 +884,12 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
       byKey.set(key, lines)
     }
     for (const id of deck.commanders) put('commander', id)
-    for (const e of accepted) put(sectionOf(cards.get(e.oracleId)), e.oracleId)
+    for (const e of accepted) {
+      // Basics have their own section with its own controls; listing them twice
+      // would make the counts disagree with each other.
+      if (basicIds.has(e.oracleId)) continue
+      put(sectionOf(cards.get(e.oracleId)), e.oracleId)
+    }
 
     return DECK_SECTIONS.map((section) => ({
       ...section,
@@ -667,7 +924,38 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
         </span>
         <ProgressBar phase={pipeline.phase} progress={pipeline.progress} label={pipeline.label} />
         <span className="meta deck-count">{deckSize} / 100 CARDS</span>
+        <button className="act" onClick={() => setImporting(true)}>
+          Import
+        </button>
+        <button className="act" onClick={exportDeck}>
+          Export
+        </button>
       </header>
+
+      {importing ? (
+        <ImportDialog
+          deckId={deck.id}
+          onClose={() => setImporting(false)}
+          onCommit={(resolved) => {
+            // Straight through the ordinary command path, so an import is one
+            // batch and is undone exactly like any other (doc 10 §10.3).
+            const commands = resolved.flatMap((r) =>
+              Array.from({ length: r.quantity }, () => ({
+                type: 'accept' as const,
+                oracleId: r.oracleId,
+              })),
+            )
+            setPending((queued) => [...queued, ...commands])
+            for (const c of commands) pipeline.schedule(c)
+          }}
+        />
+      ) : null}
+
+      {notice !== null ? (
+        <p className="banner note" role="status">
+          {notice}
+        </p>
+      ) : null}
 
       {pipeline.error !== null ? (
         <p className="banner problem" role="status">
@@ -713,6 +1001,25 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
           ))}
           {accepted.length === 0 ? (
             <p className="note">Nothing accepted yet. Suggestions are in the middle.</p>
+          ) : null}
+
+          {basics.length > 0 ? (
+            <div className="deck-section">
+              <h3>
+                Basic lands
+                <span className="count">
+                  {accepted.filter((e) => basicIds.has(e.oracleId)).length}
+                </span>
+              </h3>
+              {basics.map((b) => (
+                <BasicRow
+                  key={b.oracleId}
+                  card={b}
+                  count={accepted.filter((e) => e.oracleId === b.oracleId).length}
+                  onSet={(next) => setBasicCount(b.oracleId, next)}
+                />
+              ))}
+            </div>
           ) : null}
 
           {excluded.length > 0 ? (
@@ -879,84 +1186,102 @@ const Workspace = ({ deck: initial }: { deck: api.Deck }): React.JSX.Element => 
           {groups.length === 0 ? <p className="note">Working…</p> : null}
         </section>
 
-        <section className="region" aria-label="Analysis">
-          <Preview
-            detail={detail}
-            price={prices.get(detail?.oracleId ?? '')}
-            onClose={() => setDetail(null)}
-          />
+        <section className="region analysis" aria-label="Analysis">
+          <div className="analysis-scroll">
+            <Preview
+              detail={detail}
+              price={prices.get(detail?.oracleId ?? '')}
+              onClose={() => setDetail(null)}
+            />
 
-          <h2 style={{ marginTop: '1.25rem' }}>Composition</h2>
-          {deficits.map((d) => {
-            const name = dimensionName(d.dimension)
-            const target = analysis?.targets.find((t) => dimensionName(t.dimension) === name)
-            const have = (target?.ideal ?? 0) + d.delta
-            const pct = target?.ideal ? Math.min(100, (have / target.ideal) * 100) : 0
-            return (
-              <div className="meter" key={name}>
-                <div className="meter-label">
-                  <span>{name}</span>
-                  <span className="delta">
-                    {have} / {target?.ideal ?? 0}
-                  </span>
+            <h2 style={{ marginTop: '1.25rem' }}>Composition</h2>
+            {deficits.map((d) => {
+              const name = dimensionName(d.dimension)
+              const target = analysis?.targets.find((t) => dimensionName(t.dimension) === name)
+              const have = (target?.ideal ?? 0) + d.delta
+              const pct = target?.ideal ? Math.min(100, (have / target.ideal) * 100) : 0
+              return (
+                <div className="meter" key={name}>
+                  <div className="meter-label">
+                    <span>{name}</span>
+                    <span className="delta">
+                      {have} / {target?.ideal ?? 0}
+                    </span>
+                  </div>
+                  <div className="meter-track">
+                    <div className="meter-fill" data-short={true} style={{ width: `${pct}%` }} />
+                  </div>
                 </div>
-                <div className="meter-track">
-                  <div className="meter-fill" data-short={true} style={{ width: `${pct}%` }} />
-                </div>
+              )
+            })}
+            {deficits.length === 0 && analysis !== null ? (
+              <p className="note">No shortfalls.</p>
+            ) : null}
+
+            {analysis !== null ? (
+              <>
+                <h2 style={{ marginTop: '1.25rem' }}>Reads as</h2>
+                <p className="note">
+                  {analysis.archetype.assessed} ({Math.round(analysis.archetype.confidence * 100)}%
+                  confidence) · avg mana value {analysis.curve.averageManaValue.toFixed(2)}
+                </p>
+
+                {analysis.deckCombos.length > 0 ? (
+                  <>
+                    <h2 style={{ marginTop: '1.25rem' }}>
+                      Combos assembled
+                      <span className="count">{analysis.deckCombos.length}</span>
+                    </h2>
+                    {/* Its own scroller: a deck can assemble dozens, and letting
+                      them push the rest of the rail off-screen would bury the
+                      things next to them. No slice — every combo the deck
+                      actually has is listed. */}
+                    <div className="combo-list">
+                      {analysis.deckCombos.map((c) => (
+                        <p className="note" key={c.comboId}>
+                          {c.pieces.map((p) => cards.get(p)?.name ?? p.slice(0, 6)).join(' + ')} →{' '}
+                          {c.produces.join(', ')}
+                        </p>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
+              </>
+            ) : null}
+
+            {unavailable.length > 0 ? (
+              <div className="unavailable">
+                <strong>Not computed:</strong>
+                {unavailable.map((u) => (
+                  <div key={u.key}>
+                    {u.key} — {u.reason}
+                  </div>
+                ))}
               </div>
-            )
-          })}
-          {deficits.length === 0 && analysis !== null ? (
-            <p className="note">No shortfalls.</p>
-          ) : null}
+            ) : null}
+          </div>
 
+          {/* Pinned to the bottom of the rail. The curve and the legality
+              verdict are the two things a builder checks constantly, so they
+              stay on screen however far the notes above them scroll. */}
           {analysis !== null ? (
-            <>
-              <h2 style={{ marginTop: '1.25rem' }}>Reads as</h2>
-              <p className="note">
-                {analysis.archetype.assessed} ({Math.round(analysis.archetype.confidence * 100)}%
-                confidence) · avg mana value {analysis.curve.averageManaValue.toFixed(2)}
-              </p>
-
-              {analysis.deckCombos.length > 0 ? (
-                <>
-                  <h2 style={{ marginTop: '1.25rem' }}>Combos assembled</h2>
-                  {analysis.deckCombos.slice(0, 6).map((c) => (
-                    <p className="note" key={c.comboId}>
-                      {c.pieces.map((p) => cards.get(p)?.name ?? p.slice(0, 6)).join(' + ')} →{' '}
-                      {c.produces.join(', ')}
-                    </p>
-                  ))}
-                </>
-              ) : null}
-
-              <h2 style={{ marginTop: '1.25rem' }}>Mana curve</h2>
+            <div className="analysis-pinned">
+              <h2>Mana curve</h2>
               <Curve curve={analysis.curve} />
               <p className="note">
                 Average mana value {analysis.curve.averageManaValue.toFixed(2)}
               </p>
 
-              <h2 style={{ marginTop: '1.25rem' }}>Legality</h2>
+              <h2 style={{ marginTop: '0.75rem' }}>Legality</h2>
               {analysis.legality.problems.length === 0 ? (
                 <p className="note">No problems found.</p>
               ) : (
-                analysis.legality.problems.slice(0, 6).map((p, i) => (
+                analysis.legality.problems.slice(0, 4).map((p, i) => (
                   <p className="problem" key={i}>
                     {p.kind}
                   </p>
                 ))
               )}
-            </>
-          ) : null}
-
-          {unavailable.length > 0 ? (
-            <div className="unavailable">
-              <strong>Not computed:</strong>
-              {unavailable.map((u) => (
-                <div key={u.key}>
-                  {u.key} — {u.reason}
-                </div>
-              ))}
             </div>
           ) : null}
         </section>

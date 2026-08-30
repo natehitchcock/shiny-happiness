@@ -121,7 +121,7 @@ const acceptCommand = {
   },
 } as const
 
-const oracleOnlyCommand = (type: 'exclude' | 'restore') =>
+const oracleOnlyCommand = (type: 'exclude' | 'restore' | 'remove') =>
   ({
     type: 'object',
     required: ['type', 'oracleId'],
@@ -169,6 +169,7 @@ export const commandsBody = {
       items: {
         oneOf: [
           acceptCommand,
+          oracleOnlyCommand('remove'),
           oracleOnlyCommand('exclude'),
           oracleOnlyCommand('restore'),
           lockCommand,
@@ -198,4 +199,12 @@ export const recommendationsBody = {
     // rest from the archetype's defaults, so any subset is valid.
     weights: { type: 'object', additionalProperties: { type: 'number' } },
   },
+} as const
+
+/** A pasted decklist. Generous but bounded — 100 cards is ~4 KB. */
+export const importPreviewBody = {
+  type: 'object',
+  required: ['text'],
+  additionalProperties: false,
+  properties: { text: { type: 'string', minLength: 1, maxLength: 100_000 } },
 } as const

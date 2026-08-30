@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { Pool, PoolClient } from 'pg'
-import { applyBatch, createDeck, getCards, getDeck } from '@roundtable/db'
+import {
+  allCardNames,
+  applyBatch,
+  createDeck,
+  findBasicLands,
+  getCards,
+  getDeck,
+} from '@roundtable/db'
 import type {
   ArchetypeKey,
   Bracket,
@@ -11,9 +18,23 @@ import type {
   DeckEntry,
   OracleId,
 } from '@roundtable/domain'
-import { applyCommands, deckColorIdentity, deckId, oracleId } from '@roundtable/domain'
+import {
+  applyCommands,
+  buildNameIndex,
+  deckColorIdentity,
+  deckId,
+  oracleId,
+  parseDecklist,
+  resolveDecklist,
+} from '@roundtable/domain'
 import { badRequest, notFound, sendProblem, unprocessable } from '../errors.js'
-import { commandsBody, createDeckBody, deckIdParams, patchDeckBody } from '../schemas.js'
+import {
+  commandsBody,
+  createDeckBody,
+  deckIdParams,
+  importPreviewBody,
+  patchDeckBody,
+} from '../schemas.js'
 
 /**
  * Deck ownership is API-03's job.
@@ -120,6 +141,71 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
     })
     return rep.status(201).send(deck)
   })
+
+  /**
+   * The basic lands this deck may run (ADR-0012 / doc 05 §5.2).
+   *
+   * Its own endpoint rather than part of the candidate pool: basics are never
+   * suggested, so they are not candidates, but the deck still needs them.
+   */
+  app.get(
+    '/api/v1/decks/:id/basic-lands',
+    { schema: { params: deckIdParams } },
+    async (req, rep) => {
+      const id = (req.params as { id: string }).id
+      const deck = await getDeck(pool, deckId(id))
+      if (deck === null) return sendProblem(rep, notFound(`No deck with id ${id}`))
+      return { items: await findBasicLands(pool, deck.colorIdentity) }
+    },
+  )
+
+  /**
+   * Resolve a pasted decklist. Applies NOTHING.
+   *
+   * Doc 15 §15.3 and AGENTS.md §8 are explicit that an import must be previewed
+   * before it lands — "a typo costs one line, never the paste". The client shows
+   * what resolved and what did not, and only then sends accepts through the
+   * ordinary command endpoint, so an import is undone the same way any other
+   * batch is.
+   *
+   * This is a slice of API-04, not API-04: there is no in-place fixing of
+   * unresolved lines yet, and illegal/previously-excluded are not reported.
+   */
+  app.post(
+    '/api/v1/decks/:id/import/preview',
+    { schema: { params: deckIdParams, body: importPreviewBody } },
+    async (req, rep) => {
+      const id = (req.params as { id: string }).id
+      const { text } = req.body as { text: string }
+
+      const deck = await getDeck(pool, deckId(id))
+      if (deck === null) return sendProblem(rep, notFound(`No deck with id ${id}`))
+
+      const parsed = parseDecklist(text)
+      const index = buildNameIndex(await allCardNames(pool))
+      const { resolved, unresolved } = resolveDecklist(parsed.entries, index)
+
+      const names = new Map(
+        (
+          await getCards(
+            pool,
+            resolved.map((r) => r.oracleId),
+          )
+        ).map((c) => [c.oracleId, c.name]),
+      )
+
+      return {
+        resolved: resolved.map((r) => ({
+          oracleId: r.oracleId,
+          name: names.get(r.oracleId) ?? r.entry.name,
+          quantity: r.entry.quantity,
+        })),
+        // Reported, never dropped: an unresolved line is the user's to fix.
+        unresolved: unresolved.map((u) => ({ name: u.entry.name, reason: u.reason })),
+        problems: parsed.problems,
+      }
+    },
+  )
 
   app.get('/api/v1/decks/:id', { schema: { params: deckIdParams } }, async (req, rep) => {
     const id = (req.params as { id: string }).id

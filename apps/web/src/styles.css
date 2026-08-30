@@ -821,3 +821,158 @@ select {
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------------- basics */
+
+.basic-row .name {
+  flex: 1;
+}
+
+.basic-count {
+  width: 3.2rem;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  padding: 2px 4px;
+  flex: 0 0 auto;
+}
+
+/* Square, so the pair reads as one stepper rather than two words. */
+.act.step {
+  min-width: 1.6rem;
+  padding: 2px 0;
+  text-align: center;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.act.step:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------- sheet */
+
+.sheet {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  width: min(560px, calc(100vw - 2rem));
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: calc(var(--step) * 2);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 45%);
+}
+
+.sheet-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--step);
+  margin-bottom: var(--step);
+}
+
+.sheet-head h3 {
+  flex: 1;
+  margin: 0;
+  font-family: var(--display);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.sheet textarea {
+  width: 100%;
+  background: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  color: var(--parchment);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  padding: var(--step);
+  margin-bottom: var(--step);
+  resize: vertical;
+}
+
+/* ---------------------------------------------------------------- rail */
+
+/*
+ * The analysis rail follows the viewport.
+ *
+ * The deck and the suggestions are both long lists; the rail is a dashboard for
+ * them, and a dashboard you have to scroll back up to read is not doing its job.
+ * It is a full-height column with a scrolling body and a pinned foot.
+ */
+.region.analysis {
+  position: sticky;
+  top: 62px;
+  align-self: start;
+  height: calc(100vh - 62px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--step);
+  overflow: hidden;
+}
+
+.analysis-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  /* Room for the scrollbar so text does not sit under it. */
+  padding-right: 4px;
+}
+
+/*
+ * Curve and legality stay put.
+ *
+ * These are the two things checked constantly while building — is the curve
+ * right, is the deck still legal — so they are pinned rather than scrolled to.
+ */
+.analysis-pinned {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--rule);
+  padding-top: var(--step);
+}
+
+.analysis-pinned > h2 {
+  font-family: var(--ui);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+  margin: 0 0 var(--step);
+}
+
+/* A deck can assemble dozens of combos; they get their own scroller so they
+   cannot push everything else out of the rail. */
+.combo-list {
+  max-height: 12rem;
+  overflow-y: auto;
+  padding-right: 4px;
+  border-left: 1px solid var(--rule);
+  padding-left: var(--step);
+}
+
+.analysis h2 .count {
+  margin-left: var(--step);
+  font-family: var(--mono);
+  color: var(--parchment-dim);
+  letter-spacing: 0;
+}
+
+/* The rail stops being a sidebar on a narrow screen, so it stops being sticky
+   too — pinning a full-height column in a single-column layout would hide the
+   content underneath it. */
+@media (max-width: 900px) {
+  .region.analysis {
+    position: static;
+    height: auto;
+    overflow: visible;
+  }
+
+  .analysis-scroll {
+    overflow: visible;
+  }
+}

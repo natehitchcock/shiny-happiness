@@ -350,3 +350,79 @@ describe('applyCommands — restore does not need the corpus', () => {
     expect(outcome.deck.entries).toEqual([])
   })
 })
+
+describe('applyCommands — remove is an amount, not a judgement (ADR-0012)', () => {
+  const mountain = card('Mountain', { typeLine: 'Basic Land — Mountain' })
+
+  it('takes exactly one copy and leaves the rest', () => {
+    const start = deck([entry('Mountain'), entry('Mountain'), entry('Mountain')])
+
+    const outcome = applyCommands(
+      start,
+      [{ type: 'remove', oracleId: oracleId('Mountain') }],
+      ctxWithCommander([mountain]),
+    )
+
+    expect(outcome.rejected).toEqual([])
+    expect(outcome.deck.entries.filter((e) => e.zone === 'accepted')).toHaveLength(2)
+  })
+
+  it('does NOT exclude the card, so it can still be suggested', () => {
+    // The whole reason this is a separate verb from `exclude`.
+    const start = deck([entry('Mountain')])
+
+    const outcome = applyCommands(
+      start,
+      [{ type: 'remove', oracleId: oracleId('Mountain') }],
+      ctxWithCommander([mountain]),
+    )
+
+    expect(outcome.deck.entries).toEqual([])
+    expect(outcome.deck.entries.filter((e) => e.zone === 'excluded')).toEqual([])
+  })
+
+  it('rejects removing a card that is not in the deck', () => {
+    const outcome = applyCommands(
+      deck(),
+      [{ type: 'remove', oracleId: oracleId('Mountain') }],
+      ctxWithCommander([mountain]),
+    )
+
+    expect(outcome.rejected[0]?.reason).toEqual({
+      kind: 'not-in-deck',
+      oracleId: oracleId('Mountain'),
+    })
+  })
+
+  it('refuses to remove a locked copy', () => {
+    const start = deck([entry('Mountain', { locked: true })])
+
+    const outcome = applyCommands(
+      start,
+      [{ type: 'remove', oracleId: oracleId('Mountain') }],
+      ctxWithCommander([mountain]),
+    )
+
+    expect(outcome.rejected[0]?.reason).toMatchObject({ kind: 'locked' })
+  })
+
+  it('removes several copies when asked several times in one batch', () => {
+    const start = deck([entry('Mountain'), entry('Mountain'), entry('Mountain')])
+    const remove: DeckCommand = { type: 'remove', oracleId: oracleId('Mountain') }
+
+    const outcome = applyCommands(start, [remove, remove], ctxWithCommander([mountain]))
+
+    expect(outcome.applied).toHaveLength(2)
+    expect(outcome.deck.entries).toHaveLength(1)
+  })
+
+  it('refuses to remove a commander', () => {
+    const outcome = applyCommands(
+      deck(),
+      [{ type: 'remove', oracleId: oracleId('Cmdr') }],
+      ctxWithCommander([]),
+    )
+
+    expect(outcome.rejected[0]?.reason).toMatchObject({ kind: 'is-commander' })
+  })
+})

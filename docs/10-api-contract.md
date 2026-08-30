@@ -99,7 +99,8 @@ POST /api/v1/decks/:id/commands
 
 type DeckCommand =
   | { type: 'accept';   oracleId; origin: Origin; lock?: boolean }
-  | { type: 'exclude';  oracleId }
+  | { type: 'remove';   oracleId }          // one copy; still suggestible
+  | { type: 'exclude';  oracleId }          // all copies; never suggested (P6)
   | { type: 'restore';  oracleId }          // excluded → absent (candidate again)
   | { type: 'lock';     oracleId; locked: boolean }
   | { type: 'setRole';  oracleId; roles: Role[] }

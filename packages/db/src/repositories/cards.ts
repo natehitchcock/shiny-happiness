@@ -211,3 +211,42 @@ export const searchCardsByName = async (pool: Pool, term: string, limit = 50): P
   )
   return rows.map(toCard)
 }
+
+/**
+ * The basic lands a deck may legally run.
+ *
+ * A separate query because `findEligibleCards` deliberately EXCLUDES basics —
+ * "the mana base is its own tool" (doc 05 §5.2) — so they never appear as
+ * candidates and the deck builder otherwise has no way to add one at all.
+ *
+ * Colourless basics (Wastes) are legal in every deck, so the identity test is
+ * containment rather than intersection.
+ */
+export const findBasicLands = async (
+  pool: Pool,
+  colorIdentity: readonly Color[],
+): Promise<Card[]> => {
+  const { rows } = await pool.query<CardRow>(
+    `SELECT * FROM cards
+      WHERE type_line ILIKE 'Basic%Land%'
+        AND legality_commander = 'legal'
+        AND color_identity <@ $1::char(1)[]
+      ORDER BY cardinality(color_identity), name`,
+    [colorIdentity],
+  )
+  return rows.map(toCard)
+}
+
+/**
+ * Every legal card's name and oracle id, for decklist resolution (doc 15 §15.3).
+ *
+ * The whole table, because fuzzy matching needs somewhere to fuzz to: a typo
+ * only resolves if the near-miss candidates are present. Two columns of 32k
+ * rows, and an import is a rare operation.
+ */
+export const allCardNames = async (pool: Pool): Promise<{ oracleId: OracleId; name: string }[]> => {
+  const { rows } = await pool.query<{ oracle_id: string; name: string }>(
+    "SELECT oracle_id, name FROM cards WHERE legality_commander <> 'not_legal'",
+  )
+  return rows.map((r) => ({ oracleId: r.oracle_id as OracleId, name: r.name }))
+}

@@ -81,7 +81,16 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
   const settleFrom = useRef(0)
   const result = useRef<unknown>(null)
   const resolved = useRef(false)
-  const frame = useRef<number | null>(null)
+  /**
+   * An interval, deliberately NOT requestAnimationFrame.
+   *
+   * rAF is paused in a background tab, so a user who switched away mid-query
+   * came back to a pipeline frozen in `querying` that never applied its result
+   * and never released the spinner. A state machine must not depend on the tab
+   * being looked at. Chrome throttles background timers to about a second,
+   * which is slow but still finishes.
+   */
+  const frame = useRef<ReturnType<typeof setInterval> | null>(null)
   /**
    * Zero for a filter change. The settle exists to let a user keep adding
    * before the list moves; a filter has nothing to keep adding to, and holding
@@ -99,7 +108,7 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
   }
 
   const stop = useCallback((): void => {
-    if (frame.current !== null) cancelAnimationFrame(frame.current)
+    if (frame.current !== null) clearInterval(frame.current)
     frame.current = null
   }, [])
 
@@ -166,20 +175,43 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
         return
       }
     }
-
-    frame.current = requestAnimationFrame(tick)
   }, [finish])
 
+  /**
+   * `skipBuffer` is for a run with nothing to batch.
+   *
+   * The buffer exists to collect CLICKS. An initial load or a filter change has
+   * none, and making the first paint wait 1.2 s for a window that can never fill
+   * leaves the deck rail reading "Loading…" for no reason at all.
+   */
   const start = useCallback(
-    (withSettle: boolean): void => {
+    (withSettle: boolean, skipBuffer = false): void => {
       settleMs.current = withSettle ? SETTLE_MS : 0
       stop()
-      setPhaseBoth('buffering')
-      startedAt.current = now()
       setProgress(0)
       result.current = null
       resolved.current = false
-      frame.current = requestAnimationFrame(tick)
+      startedAt.current = now()
+
+      if (skipBuffer) {
+        setPhaseBoth('querying')
+        void run
+          .current([])
+          .then((value) => {
+            result.current = value
+            resolved.current = true
+          })
+          .catch((e: unknown) => {
+            setError(e instanceof Error ? e.message : 'Could not refresh suggestions')
+            result.current = null
+            resolved.current = true
+          })
+      } else {
+        setPhaseBoth('buffering')
+      }
+
+      // ~60 fps while visible; throttled but still running when not.
+      frame.current = setInterval(tick, 16)
     },
     [stop, tick],
   )
@@ -202,7 +234,7 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
   const refresh = useCallback((): void => {
     setQueued(0)
     items.current = []
-    start(false)
+    start(false, true)
   }, [start])
 
   useEffect(() => stop, [stop])

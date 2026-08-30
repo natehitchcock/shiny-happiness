@@ -122,6 +122,18 @@ export const hydrate = async (oracleIds: string[]): Promise<Hydrated> => {
   }
 }
 
+export const basicLands = (deckId: string): Promise<{ items: Card[] }> =>
+  request(`/decks/${deckId}/basic-lands`)
+
+export interface ImportPreview {
+  resolved: { oracleId: string; name: string; quantity: number }[]
+  unresolved: { name: string; reason: string }[]
+  problems: { line: number; text: string; reason: string }[]
+}
+
+export const importPreview = (deckId: string, text: string): Promise<ImportPreview> =>
+  request(`/decks/${deckId}/import/preview`, { method: 'POST', body: JSON.stringify({ text }) })
+
 export const getCardDetail = (oracleId: string): Promise<CardDetail> =>
   request(`/cards/${oracleId}`)
 
