@@ -64,6 +64,21 @@ rather than a missing database.
 exercises the function, the pool, the schema and the device-id fallback in one
 call. Then open the site and build a deck.
 
+## Two notes on `vercel.json`
+
+JSON has no comments, so the two non-obvious bits live here.
+
+**The function runtime is deliberately not pinned.** An earlier version pinned
+`@vercel/node@5.3.28`, which does not exist — the deploy failed with `ETARGET`
+before it built anything. Vercel already selects the Node runtime for a `.ts`
+file under `/api`, so pinning it buys nothing and adds a version that has to
+stay real and stay compatible. Leave it unset.
+
+**The `functions` key is `api/*.ts`, not `api/[...path].ts`.** That key is a
+glob, and `[...path]` in a glob is a character class — it would match one
+character from the set `.path` rather than the file we mean. `api/*.ts` has no
+brackets in the pattern, so it matches the file by its literal name.
+
 ## Things to know before the first deploy
 
 **Cold starts.** A cold invocation builds the Fastify instance and opens a
