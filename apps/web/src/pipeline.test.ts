@@ -143,10 +143,13 @@ describe('refresh', () => {
     expect(harness.applied).toEqual(['RESULT'])
   })
 
-  it('settles on every refresh after that', async () => {
-    // The regression this pairs with: a filter run — or the auto-query firing —
-    // replaces a list the user is already reading, and used to do it with no
-    // warning at all.
+  it('applies a later refresh without a settle too', async () => {
+    // A filter run is the user ASKING for the list to change. Holding it back
+    // three seconds to warn them about a change they requested made filtering
+    // take about seven seconds to visibly do anything.
+    //
+    // The settle belongs to the accept path, where the list moves under someone
+    // who did not ask for it to.
     const { hook, harness } = setup()
     const result = hook.result as { current: ReturnType<typeof usePipeline<string>> }
 
@@ -160,11 +163,22 @@ describe('refresh', () => {
     advance(32)
     await harness.resolve()
     advance(BAR_TO_HALFWAY)
+    expect(harness.applied).toHaveLength(2)
+  })
+
+  it('still settles an ACCEPT, which is what the settle is for', async () => {
+    const { hook, harness } = setup()
+    const result = hook.result as { current: ReturnType<typeof usePipeline<string>> }
+
+    act(() => result.current.schedule('a'))
+    advance(BUFFER_MS + 32)
+    await harness.resolve()
+    advance(BAR_TO_HALFWAY)
     expect(result.current.phase).toBe('settling')
-    expect(harness.applied).toHaveLength(1)
+    expect(harness.applied).toEqual([])
 
     advance(SETTLE_MS + 200)
-    expect(harness.applied).toHaveLength(2)
+    expect(harness.applied).toEqual(['RESULT'])
   })
 
   it('skips the click buffer, because a filter has no clicks to collect', async () => {

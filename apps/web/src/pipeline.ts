@@ -238,17 +238,27 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
     [start],
   )
 
+  /**
+   * A refresh applies as soon as the answer lands. No settle.
+   *
+   * The settle exists for ONE reason: after an accept, the list is about to
+   * reshuffle under someone who is still clicking, so they get three seconds of
+   * warning and a chance to add more first. A filter run is the opposite
+   * situation — the user asked for the list to change and is waiting for it.
+   *
+   * This was briefly the other way round, and the result was a filter that took
+   * about seven seconds to visibly do anything: a real query over the pool is
+   * slow enough on its own without three seconds of deliberate delay on the end
+   * of it. Waiting to protect someone from a change they requested is not
+   * courtesy, it is lag.
+   *
+   * The settle's own fix stands untouched — for an accept it is still measured
+   * from when the answer lands, never from when the request left.
+   */
   const refresh = useCallback((): void => {
     setQueued(0)
     items.current = []
-    // A settle on every refresh EXCEPT the first.
-    //
-    // The first is the initial load: there is nothing on screen yet, so there
-    // is nothing to reshuffle under anyone, and holding the first paint back
-    // three seconds is just lag. Every refresh after it replaces a list the
-    // user is already reading — a filter run, or the auto-query firing — and
-    // those get the same warning an accept does.
-    start(applied.current, true)
+    start(false, true)
   }, [start])
 
   useEffect(() => stop, [stop])
