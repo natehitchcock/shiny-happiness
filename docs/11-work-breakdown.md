@@ -49,7 +49,7 @@ administrator rights, no service.
 **Verify:**
 
 ```bash
-pnpm check          # lint + typecheck + 434 tests
+pnpm check          # lint + typecheck + 722 tests
 ```
 
 The integration tests need a real Postgres and SKIP (loudly) without one. The
