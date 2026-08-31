@@ -106,12 +106,28 @@ describe('the basic-land row', () => {
     expect(width?.value).toBe('3.2rem')
   })
 
-  it('lets the name take the remaining space', () => {
+  it('lets the name take the remaining space, down to a floor', () => {
     const name = row().querySelector('.name')!
-    expect(winner(name, 'flex')?.value).toBe('1')
-    // Without this a flex child will not shrink below its content, which is
-    // what makes the ellipsis on long land names do nothing.
-    expect(winner(name, 'min-width')?.value).toBe('0')
+    // `1 1 auto` is `flex: 1` with the basis spelled out; both mean "take what
+    // is left".
+    expect(winner(name, 'flex')?.value).toMatch(/^1( 1 auto)?$/)
+
+    /*
+     * This used to assert `min-width: 0`, and that assertion was the bug.
+     *
+     * Zero does make a flex child shrink below its content, which is what lets
+     * the ellipsis work on a long land name — but it also lets the name shrink
+     * to NOTHING. Measured on the running app at a 230 px deck rail: the name
+     * was 0 px wide while the mana cost, price, lock and remove held 213 px
+     * between them, so every row had its controls and named no card.
+     *
+     * A floor keeps both properties: the ellipsis still engages, and the name
+     * never disappears. The controls give way instead, via the container
+     * queries asserted below.
+     */
+    const floor = winner(name, 'min-width')?.value
+    expect(floor).toBeDefined()
+    expect(Number.parseFloat(floor ?? '0')).toBeGreaterThan(0)
   })
 })
 
@@ -167,5 +183,60 @@ describe('the mana column', () => {
     const column = row().querySelector('.mana')!
     expect(winner(column, 'display')?.value).toBe('flex')
     expect(winner(column, 'justify-content')?.value).toBe('flex-end')
+  })
+})
+
+describe('a deck row never loses the card name', () => {
+  /*
+   * Measured on the running app before the fix: at a 230 px deck rail the name
+   * was 0 px wide while the mana cost (74), price (54), lock (27) and remove
+   * (58) held 213 px between them. The row still had every control and no
+   * longer said which card they acted on.
+   *
+   * The name was the only flexible item — `flex: 1; min-width: 0` — so it
+   * absorbed the entire deficit. The least important things on the row pushed
+   * out the only one that identifies it.
+   */
+  const deckRow = (): HTMLElement => {
+    document.body.innerHTML = `
+      <section class="region">
+        <div class="card-row">
+          <span class="name as-link">Skirk Prospector</span>
+          <span class="mana">{1}{R}</span>
+          <span class="cash">$0.34</span>
+          <button class="act lock">Lock</button>
+          <button class="act exclude">Remove</button>
+        </div>
+      </section>`
+    return document.querySelector('.card-row .name') as HTMLElement
+  }
+
+  it('gives the name a floor it cannot shrink below', () => {
+    const value = winner(deckRow(), 'min-width')?.value
+    expect(value).toBeDefined()
+    // Anything but zero. `min-width: 0` is what let it vanish.
+    expect(value).not.toBe('0')
+    expect(Number.parseFloat(value ?? '0')).toBeGreaterThan(0)
+  })
+
+  it('lets the price step aside before the name does', () => {
+    // A CONTAINER query, not a media query: the rail's width comes from the
+    // workspace grid and the draggable divider, so the viewport does not know
+    // it. A `@media` rule would hide the price on a wide screen with a narrow
+    // rail, and show it on a phone.
+    expect(css).toMatch(/container-type:\s*inline-size/)
+    expect(css).toMatch(
+      /@container[^{]*max-width:\s*320px[^{]*\{\s*\.card-row \.cash\s*\{\s*display:\s*none/,
+    )
+  })
+
+  it('drops the mana cost only at a width below the price threshold', () => {
+    // Order matters: the price is an estimate that goes stale in a day and is
+    // repeated in the deck total, so it goes first.
+    const cash = /@container \(max-width:\s*(\d+)px\)\s*\{\s*\.card-row \.cash/.exec(css)
+    const mana = /@container \(max-width:\s*(\d+)px\)\s*\{\s*\.card-row \.mana/.exec(css)
+    expect(cash).not.toBeNull()
+    expect(mana).not.toBeNull()
+    expect(Number(mana?.[1])).toBeLessThan(Number(cash?.[1]))
   })
 })

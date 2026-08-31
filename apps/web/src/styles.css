@@ -110,12 +110,56 @@ button {
   background: var(--ink-3);
 }
 
+/*
+ * The name never shrinks to nothing.
+ *
+ * It was `min-width: 0`, which let it absorb the whole deficit when the rail
+ * got narrow: measured at a 230 px deck rail, the name was 0 px wide while the
+ * mana cost (74), price (54), lock (27) and remove (58) held 213 px between
+ * them. The row still had its controls and no longer said which card they
+ * acted on — the least important things on the row pushed out the only one
+ * that identifies it.
+ *
+ * 5rem is about eight characters plus the ellipsis: enough to tell two cards
+ * apart, and short enough that it is only reached when the rail is genuinely
+ * cramped. Below that the controls give way instead — see the container query.
+ */
 .card-row .name {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: 5rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * A narrow rail drops the price, then the mana cost.
+ *
+ * A CONTAINER query, not a media query: the rail's width is set by the
+ * workspace grid and by wherever the user has dragged the divider, so the
+ * viewport does not know it. A `@media` rule here would hide the price on a
+ * wide screen with a dragged-narrow rail and show it on a phone.
+ *
+ * The price goes first because it is the most disposable thing on the row: it
+ * is an estimate that goes stale within a day (ADR-0009 Q7) and it is repeated
+ * in the deck total above. The mana cost follows, because at that width the
+ * choice is between a cost and a name, and a row that cannot say which card it
+ * is has stopped being a row.
+ */
+.region {
+  container-type: inline-size;
+}
+
+@container (max-width: 320px) {
+  .card-row .cash {
+    display: none;
+  }
+}
+
+@container (max-width: 250px) {
+  .card-row .mana {
+    display: none;
+  }
 }
 
 .card-row .cost {
