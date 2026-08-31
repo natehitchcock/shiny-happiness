@@ -240,22 +240,29 @@ describe('deriveSynergy — the events the regexes used to miss', () => {
     expect(deriveSynergy(rogue).wants).toContain('attack-trigger')
   })
 
-  it('reads damage to a player as life lost', () => {
-    // Damage to a player IS that player losing life, and the payoff side of this
-    // tag — "whenever a player loses life" — triggers on it.
+  it('reads damage to a player as damage, not as life lost', () => {
+    // This test used to assert `lifeloss`, on the true premise that damage to a
+    // player makes that player lose life. ADR-0023 separates the two events:
+    // the premise holds for the payoff side only, and as a producer tag it told
+    // a burn deck it was a drain deck.
     const chandra = card(
       'Chandra, Pyrogenius',
       'Legendary Planeswalker — Chandra',
       '+2: Chandra, Pyrogenius deals 2 damage to each opponent.',
     )
 
-    expect(deriveSynergy(chandra).produces).toContain('lifeloss')
+    expect(deriveSynergy(chandra).produces).toContain('player-damage')
+    expect(deriveSynergy(chandra).produces).not.toContain('lifeloss')
   })
 
-  it('does not read damage to "any target" as life lost', () => {
-    // It points at a creature as often as at a player.
+  it('reads damage to "any target" as damage to a player', () => {
+    // Also reversed by ADR-0023. Excluding "any target" was right for
+    // `lifeloss` — a Bolt pointed at a creature takes nobody's life total with
+    // it — and wrong for a damage tag, which asks whether the card can be
+    // pointed at a face. Lightning Bolt matched no rule at all before.
     const bolt = card('Lightning Bolt', 'Instant', 'Lightning Bolt deals 3 damage to any target.')
 
+    expect(deriveSynergy(bolt).produces).toContain('player-damage')
     expect(deriveSynergy(bolt).produces).not.toContain('lifeloss')
   })
 
@@ -1042,5 +1049,307 @@ describe('synergyMatches — a card that is its own engine', () => {
     const matches = synergyMatches(engine, deck)
     expect(matches).toHaveLength(1)
     expect(matches[0]?.direction).toBe('enables')
+  })
+})
+
+describe('deriveSynergy — damage is not life loss (ADR-0023)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), typeLine, oracleText })
+
+  // Real oracle text throughout, abbreviated only where the tail is irrelevant.
+  const IMPACT_TREMORS = derive(
+    'Impact Tremors',
+    'Enchantment',
+    'Whenever a creature you control enters, this enchantment deals 1 damage to each opponent.',
+  )
+  const MANABARBS = derive(
+    'Manabarbs',
+    'Enchantment',
+    'Whenever a player taps a land for mana, this enchantment deals 1 damage to that player.',
+  )
+  const PRICE_OF_PROGRESS = derive(
+    'Price of Progress',
+    'Instant',
+    'Price of Progress deals damage to each player equal to twice the number of nonbasic lands that player controls.',
+  )
+  const FIREBALL = derive(
+    'Fireball',
+    'Sorcery',
+    'This spell costs {1} more to cast for each target beyond the first.\nFireball deals X damage divided evenly, rounded down, among any number of targets.',
+  )
+  const EXSANGUINATE = derive(
+    'Exsanguinate',
+    'Sorcery',
+    'Each opponent loses X life. You gain life equal to the life lost this way.',
+  )
+  const VITO = derive(
+    'Vito, Thorn of the Dusk Rose',
+    'Legendary Creature — Vampire Cleric',
+    'Whenever you gain life, target opponent loses that much life.',
+  )
+  const EXQUISITE_BLOOD = derive(
+    'Exquisite Blood',
+    'Enchantment',
+    'Whenever an opponent loses life, you gain that much life.',
+  )
+  const TORBRAN = derive(
+    'Torbran, Thane of Red Fell',
+    'Legendary Creature — Dwarf Noble',
+    'If a red source you control would deal damage to an opponent or a permanent an opponent controls, it deals that much damage plus 2 instead.',
+  )
+
+  describe('the producer side, where the two events come apart', () => {
+    it('tags a burn card as damage and not as life loss', () => {
+      // The reported defect, in one card. 384 of the 1,446 cards that produced
+      // `lifeloss` were these — they never mention life at all.
+      expect(IMPACT_TREMORS.produces).toContain('player-damage')
+      expect(IMPACT_TREMORS.produces).not.toContain('lifeloss')
+      expect(MANABARBS.produces).toContain('player-damage')
+      expect(MANABARBS.produces).not.toContain('lifeloss')
+    })
+
+    it('tags a drain card as life loss and not as damage', () => {
+      // The other direction, and the reason this is a split rather than a
+      // rename: Exsanguinate deals no damage, so a damage payoff must not see
+      // it.
+      expect(EXSANGUINATE.produces).toContain('lifeloss')
+      expect(EXSANGUINATE.produces).not.toContain('player-damage')
+      expect(VITO.produces).toContain('lifeloss')
+      expect(VITO.produces).not.toContain('player-damage')
+    })
+
+    it('gives a card that does both both tags', () => {
+      // 13 cards in the corpus burn and drain in one sentence. Claiming one and
+      // not the other would be false whichever one was picked — the same ruling
+      // ADR-0022 made for "each player discards".
+      const bolas = derive(
+        'Nicol Bolas, the Deceiver',
+        'Legendary Planeswalker — Bolas',
+        '+3: Each opponent loses 3 life unless that player sacrifices a nonland permanent of their choice or discards a card.\n−3: Destroy target creature. Draw a card.\n−11: Nicol Bolas deals 7 damage to each opponent. You draw seven cards.',
+      )
+
+      expect(bolas.produces).toEqual(expect.arrayContaining(['lifeloss', 'player-damage']))
+    })
+
+    it('reads the amount trailing the target', () => {
+      // "deals damage to each player equal to twice…" — the amount comes after
+      // the target, so the rule that requires "deals N damage to" cannot see it.
+      expect(PRICE_OF_PROGRESS.produces).toContain('player-damage')
+    })
+
+    it('reads the X-spell finisher that names no target', () => {
+      expect(FIREBALL.produces).toContain('player-damage')
+    })
+
+    it('does not read combat damage as damage to a player', () => {
+      // Most damage in Magic is combat damage, and 751 cards carry "deals
+      // combat damage to a player". None of them is a burn card, and
+      // `attack-trigger` already owns the event. The rules exclude it without a
+      // word about combat: the templating never states an amount, so the word
+      // "combat" occupies exactly the position the rule wants the number in.
+      const edric = derive(
+        'Edric, Spymaster of Trest',
+        'Legendary Creature — Elf Rogue',
+        'Whenever a creature deals combat damage to one of your opponents, its controller may draw a card.',
+      )
+
+      expect(edric.produces).not.toContain('player-damage')
+    })
+
+    it('still reads a combat trigger whose effect is noncombat damage', () => {
+      // Why the exclusion above has to be per clause rather than per card. A
+      // card-level "has the words combat damage" filter would have dropped
+      // Kediss, whose entire function is to burn the rest of the table.
+      const kediss = derive(
+        'Kediss, Emberclaw Familiar',
+        'Legendary Creature — Elemental Lizard',
+        'Whenever a commander you control deals combat damage to an opponent, it deals that much damage to each other opponent.',
+      )
+
+      expect(kediss.produces).toContain('player-damage')
+    })
+
+    it('does not read damage aimed at creatures, or at you', () => {
+      const wipe = derive(
+        'Blasphemous Act',
+        'Sorcery',
+        'Blasphemous Act deals 13 damage to each creature.',
+      )
+      // The same noun doing the opposite job: "your OPPONENTS CONTROL" is a
+      // board wipe, not a burn spell.
+      const sweeper = derive(
+        'Boiling Earth',
+        'Sorcery',
+        'Boiling Earth deals 1 damage to each creature your opponents control.',
+      )
+      const tomb = derive(
+        'Ancient Tomb',
+        'Land',
+        '{T}: Add {C}{C}. This land deals 2 damage to you.',
+      )
+
+      expect(wipe.produces).not.toContain('player-damage')
+      expect(sweeper.produces).not.toContain('player-damage')
+      expect(tomb.produces).not.toContain('player-damage')
+    })
+  })
+
+  describe('the payoff side, which is where the entailment lives', () => {
+    it('lets a life-loss payoff be satisfied by damage', () => {
+      // The nuance the whole change turns on. Damage dealt to a player IS that
+      // player losing life, so Exquisite Blood really does trigger off a Bolt —
+      // it prints "(Damage causes loss of life.)" on the card.
+      expect(EXQUISITE_BLOOD.wants).toEqual(expect.arrayContaining(['lifeloss', 'player-damage']))
+    })
+
+    it('does not let a drain producer satisfy a damage payoff', () => {
+      // The one-way half. Torbran doubles damage and does nothing at all for a
+      // drain spell, so it wants `player-damage` and not `lifeloss`. If this
+      // ever fails, the relation has become symmetric and the defect is back.
+      expect(TORBRAN.wants).toContain('player-damage')
+      expect(TORBRAN.wants).not.toContain('lifeloss')
+      expect(EXSANGUINATE.produces).not.toContain('player-damage')
+    })
+
+    it('keeps the bridge off payoffs about your own life', () => {
+      // The producer rules tag damage aimed at opponents and players, never
+      // "deals 2 damage to you", so offering Vilis a burn spell would be a
+      // match on a life total the spell never touches. 12 cards sit on
+      // `lifeloss` alone for this reason.
+      const vilis = derive(
+        'Vilis, Broker of Blood',
+        'Legendary Creature — Demon',
+        'Flying\n{B}, Pay 2 life: Target creature gets -1/-1 until end of turn.\nWhenever you lose life, draw that many cards. (Damage causes loss of life.)',
+      )
+
+      expect(vilis.wants).toContain('lifeloss')
+      expect(vilis.wants).not.toContain('player-damage')
+    })
+
+    it('reads a payoff whose subject is not third person', () => {
+      // `los[et]s?`, not `loses`. The old rule reached 7 of the 19 real
+      // life-loss payoffs because it required the inflected verb.
+      const emet = derive(
+        'Emet-Selch of the Third Seat',
+        'Legendary Creature — Elder Wizard',
+        'Spells you cast from your graveyard cost {2} less to cast.\nWhenever one or more opponents lose life, you may cast target instant or sorcery card from your graveyard.',
+      )
+
+      expect(emet.wants).toEqual(expect.arrayContaining(['lifeloss', 'player-damage']))
+    })
+
+    it('refuses a producer wearing a payoff sentence', () => {
+      // The comma is where a trigger condition ends (ADR-0022). All seven cards
+      // the old gap misread are producers, and every one has that comma. A
+      // direction inversion is the worst error this file can make.
+      const withinRange = derive(
+        'Within Range',
+        'Enchantment',
+        'When this enchantment enters, create two 1/1 red Warrior creature tokens.\nWhenever you attack, each opponent loses life equal to the number of creatures attacking them.',
+      )
+
+      expect(withinRange.produces).toContain('lifeloss')
+      expect(withinRange.wants).not.toContain('lifeloss')
+      expect(withinRange.wants).not.toContain('player-damage')
+    })
+
+    it('refuses a damage payoff whose source is the card itself', () => {
+      // An evasive creature hitting in combat. No burn spell has ever triggered
+      // Curiosity, so the deck cannot supply what it asks for.
+      const curiosity = derive(
+        'Curiosity',
+        'Enchantment — Aura',
+        'Enchant creature\nWhenever enchanted creature deals damage to an opponent, you may draw a card.',
+      )
+
+      expect(curiosity.wants).not.toContain('player-damage')
+    })
+
+    it('refuses damage prevention, which reads like a payoff and is its opposite', () => {
+      // Both match "would deal damage to a player". Requiring the amplifying
+      // consequence — "it deals double / triple / that much plus" — is what
+      // sorts a burn payoff from the card that turns the burn off.
+      const ghosts = derive(
+        'Ghosts of the Innocent',
+        'Creature — Spirit',
+        'If a source would deal damage to a permanent or player, it deals half that damage, rounded down, to that permanent or player instead.',
+      )
+      const alchemist = derive(
+        'Battletide Alchemist',
+        'Creature — Kithkin Cleric',
+        'If a source would deal damage to a player, you may prevent X of that damage, where X is the number of Clerics you control.',
+      )
+
+      expect(ghosts.wants).not.toContain('player-damage')
+      expect(alchemist.wants).not.toContain('player-damage')
+    })
+
+    it('reads the passive voice, where the damage has no named source', () => {
+      // "Whenever an opponent IS DEALT damage" is the same payoff written from
+      // the other end, and it is the wording that does not care where the
+      // damage came from — which is exactly what a burn deck can supply.
+      const spitfire = derive(
+        "Chandra's Spitfire",
+        'Creature — Elemental',
+        'Flying\nWhenever an opponent is dealt noncombat damage, this creature gets +3/+0 until end of turn.',
+      )
+
+      expect(spitfire.wants).toContain('player-damage')
+    })
+  })
+
+  describe('the pair table, which cannot say "A causes B but not the reverse"', () => {
+    it('carries the new tag', () => {
+      expect(SYNERGY_TAGS).toContain('player-damage')
+    })
+
+    it('pairs burn with the spells it is cast from', () => {
+      // 489 of the 1,576 producers are instants or sorceries, and 58 cards read
+      // "whenever you cast an instant or sorcery spell, this deals 2 damage to
+      // each opponent" — Guttersnipe, Firebrand Archer, Electrostatic Field.
+      expect(interactsWith('player-damage')).toContain('spell-cast')
+    })
+
+    it('refuses to pair damage with life loss', () => {
+      // The refusal this ADR exists for. The table is unordered by
+      // construction, and its one consumer renders a pair as "Benefits, and
+      // benefits from" — a sentence that is symmetric in English too. Damage
+      // causes life loss; life loss causes no damage. The entailment is carried
+      // by the payoff rule instead, which is the only side it holds on.
+      expect(interactsWith('player-damage')).not.toContain('lifeloss')
+      expect(interactsWith('lifeloss')).not.toContain('player-damage')
+    })
+
+    it('refuses to pair damage with attacking', () => {
+      // Combat damage is the event this tag is defined to exclude.
+      expect(interactsWith('player-damage')).not.toContain('attack-trigger')
+    })
+  })
+
+  describe('what a deck sees', () => {
+    it('offers a burn card to a deck built on an opponent losing life', () => {
+      const bolt = derive(
+        'Lightning Bolt',
+        'Instant',
+        'Lightning Bolt deals 3 damage to any target.',
+      )
+      const deck = deckSynergy([oracleId('Exquisite Blood')], [], (id) =>
+        id === oracleId('Exquisite Blood') ? EXQUISITE_BLOOD : undefined,
+      )
+
+      const match = synergyMatches(bolt, deck).find((m) => m.tag === 'player-damage')
+      expect(match?.direction).toBe('enables')
+      expect(match?.weight).toBe(COMMANDER_WEIGHT)
+    })
+
+    it('does not offer a damage doubler to a deck that only drains', () => {
+      // The whole point of the direction. Exsanguinate is not what Torbran is
+      // for, and before this change every drain spell claimed to be.
+      const deck = deckSynergy([oracleId('Exsanguinate')], [], (id) =>
+        id === oracleId('Exsanguinate') ? EXSANGUINATE : undefined,
+      )
+
+      expect(synergyMatches(TORBRAN, deck)).toEqual([])
+    })
   })
 })

@@ -24,6 +24,15 @@ import type { OracleId } from './ids.js'
  * of them. Where the subject changes what the card is for, the tag says so:
  * `discard`/`opponent-discard`, `sacrifice-fodder`/`opponent-sacrifice`.
  *
+ * Two events can also stand in a ONE-WAY relation (ADR-0023). Damage dealt to a
+ * player is that player losing life (CR 120.3c, and four cards in the corpus
+ * print "(Damage causes loss of life.)" as reminder text), but a drain spell
+ * deals no damage. So `player-damage` and `lifeloss` are separate events, and
+ * the entailment lives on the PAYOFF side only: a rule that reads "whenever an
+ * opponent loses life" emits both tags, and no producer rule ever does. That
+ * asymmetry is why the relation is not in `INTERACTION_PAIRS`, which is
+ * unordered by construction — see the note there.
+ *
  * Like role derivation (doc 02 §2.4), these heuristics are wrong often enough to
  * matter, and that is expected rather than a defect to engineer away — "does
  * this card enable sacrifice" is a judgement about how a card plays. The curated
@@ -50,6 +59,7 @@ export type SynergyTag =
   | 'spell-cast'
   | 'opponent-discard'
   | 'opponent-sacrifice'
+  | 'player-damage'
 
 export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'creature-death',
@@ -71,6 +81,7 @@ export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'spell-cast',
   'opponent-discard',
   'opponent-sacrifice',
+  'player-damage',
 ]
 
 /**
@@ -171,6 +182,35 @@ const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
   ['opponent-discard', 'lifeloss'],
   ['opponent-sacrifice', 'lifeloss'],
   ['opponent-sacrifice', 'creature-death'],
+
+  /*
+   * Burn (ADR-0023). A burn deck is a spellslinger deck: 489 of the 1,576 cards
+   * that deal damage to a player are instants or sorceries, and 58 cards spell
+   * the causation out in one line — "whenever you cast an instant or sorcery
+   * spell, this deals 2 damage to each opponent" is Guttersnipe, Firebrand
+   * Archer, Urabrask and Electrostatic Field. Casting is what fires the
+   * damage, and the damage is what the deck casts spells for, so the pair is
+   * true read in either direction, which is the bar this table sets.
+   *
+   * `player-damage` ↔ `lifeloss` is REFUSED, and it is the whole reason
+   * ADR-0023 exists. Damage to a player IS life loss; life loss is NOT damage.
+   * This table cannot say that: it is unordered on purpose (see the note above
+   * it), and its one consumer renders a pair as "Benefits, and benefits from:
+   * …", a sentence that is symmetric in English too. Adding the pair would put
+   * the conflation back with a drain spell claiming to feed Torbran. The
+   * entailment is carried on the payoff side instead — one regex, two tags,
+   * in `WANTS` below — because that is the only side where it holds.
+   *
+   * `player-damage` ↔ `attack-trigger` is refused for the same reason in the
+   * other direction: combat damage is the thing this tag is defined to exclude,
+   * and `attack-trigger` already owns "whenever this deals combat damage".
+   *
+   * `player-damage` ↔ `creature-etb` was considered on the strength of Impact
+   * Tremors and Purphoros and refused: what those cards pair is a trigger
+   * CONDITION with an effect. Admit that and every trigger condition pairs with
+   * every effect, which is not a relation between events at all.
+   */
+  ['player-damage', 'spell-cast'],
 ]
 
 const INTERACTIONS = ((): ReadonlyMap<SynergyTag, readonly SynergyTag[]> => {
@@ -271,12 +311,62 @@ const PRODUCES: readonly Rule[] = [
     tag: 'lifeloss',
     test: /\bloses? (\d+|X) life\b|\bloses? life equal to\b|\bloses? that much life\b/i,
   },
-  // Damage to a player IS that player losing life, and "whenever a player loses
-  // life" triggers on it. Deliberately not "any target", which as often points
-  // at a creature and takes nobody's life total with it.
+  /*
+   * Damage to a player is its own event (ADR-0023).
+   *
+   * This rule used to be a second `lifeloss` producer, on the true premise that
+   * damage to a player makes that player lose life. The premise does not
+   * survive being turned into a tag: 384 of the 1,446 cards that produced
+   * `lifeloss` never mentioned life at all, so Impact Tremors, Purphoros and
+   * Manabarbs were reported as drain, and the app told a burn deck it was a
+   * Vito deck. The user put it in five words: "damage is not life loss, they
+   * are separate effects."
+   *
+   * The entailment is real and is kept — on the payoff side, where it is the
+   * only side that holds. See `WANTS` below.
+   *
+   * Three rules, because Scryfall templates the amount three ways. Requiring
+   * the amount is also what excludes combat damage without a word about it:
+   * "deals combat damage to a player" is 751 cards, and none of them states a
+   * number, so the word "combat" sits exactly where this rule wants the amount.
+   * A card-level exclusion of "combat damage" was rejected on Kediss, Emberclaw
+   * Familiar and Amarant Coral — combat-triggered cards whose EFFECT is
+   * noncombat damage to every other opponent. The clause is the unit, not the
+   * card.
+   *
+   * "any target" is deliberately IN, reversing the note this rule used to
+   * carry. Excluding it was right for `lifeloss` — a Bolt pointed at a creature
+   * takes nobody's life total with it — and wrong for this tag, which asks
+   * whether the card deals damage at a face, not whether it always does. 548
+   * cards, sampled 25, all burn: Tarfire, Staggershock, Skewer the Critics,
+   * Prodigal Sorcerer. Lightning Bolt itself was reachable by no rule at all
+   * before this.
+   *
+   * The window is bounded and looks past the first target, because "deals 2
+   * damage to target creature and 2 damage to that creature's controller" is a
+   * player-damage card whose first noun is a creature. The lookahead is what
+   * keeps "each creature your opponents CONTROL" and "target creature an
+   * opponent CONTROLS" out — those are the same word doing the opposite job.
+   */
   {
-    tag: 'lifeloss',
-    test: /\bdeals \d+ damage to (target player|target opponent|each opponent|each player)\b|\bdeals damage to (target player|each opponent)\b/i,
+    tag: 'player-damage',
+    test: /\bdeals (?:(?:\d+|X|that much) damage|damage equal to [^.\n]{0,60}?) to (?:any target|[^.\n]{0,40}\b(?:player|opponent|controller)s?\b(?!\s+(?:controls?|own)))/i,
+  },
+  // The amount trailing the target: "deals damage to each player equal to twice
+  // the number of nonbasic lands that player controls" (Price of Progress).
+  // Narrow on purpose — a bare "deals damage to an opponent" is nearly always
+  // the trigger clause of a payoff, and reading it here would invert direction.
+  {
+    tag: 'player-damage',
+    test: /\bdeals damage to (?:target player|target opponent|each player|each opponent|that player)\b/i,
+  },
+  // The X-spell finisher, which names no target at all. 26 cards, read by hand,
+  // all burn: Fireball, Rolling Thunder, Conflagrate, Bogardan Hellkite,
+  // Inferno Titan. "Among any number of target creatures" is a different
+  // sentence and is not matched.
+  {
+    tag: 'player-damage',
+    test: /\bdamage divided [^.\n]{0,40}among (?:any number of targets|one, two, or three targets)\b/i,
   },
 
   {
@@ -427,7 +517,75 @@ const WANTS: readonly Rule[] = [
   { tag: 'token', test: /\bwhenever .{0,30}token .{0,20}enters\b/i },
 
   { tag: 'lifegain', test: /\bwhenever you gain life\b/i },
-  { tag: 'lifeloss', test: /\bwhenever .{0,30}loses life\b/i },
+  /*
+   * A life-loss payoff, and the one place `lifeloss` and `player-damage` meet
+   * (ADR-0023).
+   *
+   * The gap stops at a comma for the reason ADR-0022 gives: the comma is where
+   * a trigger CONDITION ends, and past it the sentence is the effect. All seven
+   * cards the old `.{0,30}` shape misread are producers, and every one of them
+   * has that comma — "Whenever you attack, each opponent loses life" (Within
+   * Range), "Whenever this creature deals combat damage to a player, that
+   * player loses life" (Graveblade Marauder). A direction inversion is the
+   * worst error this file can make, and the boundary costs nothing.
+   *
+   * `los[et]s?` rather than `loses`, because the third person is not the only
+   * subject: "whenever YOU LOSE life" is Vilis and Transcendence, and the old
+   * rule reached 7 of the 19 real payoffs.
+   */
+  { tag: 'lifeloss', test: /\bwhenever [^.,\n]{0,40}\blos[et]s? life\b/i },
+  /*
+   * The same payoff, claimed for damage as well — this is the ADR-0023 bridge.
+   *
+   * Damage dealt to a player causes that player to lose that much life, so
+   * "whenever an opponent loses life" fires off a Lightning Bolt. Exquisite
+   * Blood, Mindcrank, Bloodthirsty Conqueror and The Master of Lake-town all
+   * carry "(Damage causes loss of life.)" in their own reminder text; the model
+   * would be denying something the cards print.
+   *
+   * The reverse is false, which is the whole shape of the change: NO producer
+   * rule emits `lifeloss` for damage, so a drain spell never satisfies a damage
+   * payoff. One-way, and expressible only here — `INTERACTION_PAIRS` is
+   * unordered.
+   *
+   * Narrower than the rule above on purpose: only the payoffs about somebody
+   * ELSE's life. The producer rules tag damage aimed at players and opponents,
+   * never "deals 2 damage to you", so extending the bridge to "whenever you
+   * lose life" would offer Vilis a burn spell that never touches your total.
+   * That leaves 12 self-life payoffs on `lifeloss` alone, which is correct.
+   */
+  {
+    tag: 'player-damage',
+    test: /\bwhenever [^.,\n]{0,40}\b(?:an opponent|a player|that player|one or more (?:opponents|players)|opponents) los[et]s? life\b/i,
+  },
+  /*
+   * The damage payoffs proper: the doublers and the "any source you control"
+   * triggers. 59 cards, read one by one.
+   *
+   * The amplifier rule asks for the CONSEQUENCE, not the subject, because the
+   * subject is spelled twenty ways ("a source you control", "a red source", "a
+   * Giant source you control", "an instant or sorcery source you control") and
+   * because the consequence is what sorts a burn payoff from its opposite:
+   * Ghosts of the Innocent halves that damage and Battletide Alchemist prevents
+   * it. Both match "would deal damage to a player"; neither is anything a burn
+   * deck wants, and requiring "it deals double / triple / that much plus"
+   * refuses them.
+   *
+   * The trigger rule refuses "whenever THIS CREATURE deals damage to an
+   * opponent" — Curiosity, Abyssal Specter, Looter il-Kor. Those are evasive
+   * creatures hitting in combat, and no burn spell has ever triggered one; the
+   * source has to be something other than the card itself for the deck to be
+   * able to supply it. Malcolm and Breeches are refused for the same reason one
+   * step out: their source is restricted to Pirates you control.
+   */
+  {
+    tag: 'player-damage',
+    test: /\bwould deal (?:noncombat )?damage to (?:a permanent or player|an opponent|a player|that player)[^.\n]{0,60}\bit deals (?:double|triple|twice|that much damage plus)\b/i,
+  },
+  {
+    tag: 'player-damage',
+    test: /\bwhenever a[a-z ]{0,20}source you control deals (?:noncombat |excess )?damage to (?:an opponent|a player|another player|one or more of your opponents)\b|\bwhenever (?:an opponent|a player) is dealt (?:noncombat )?damage\b/i,
+  },
   { tag: 'card-draw', test: /\bwhenever you draw\b|\bif you.{0,20}drawn.{0,20}card\b/i },
   { tag: 'discard', test: /\bmadness\b|\bwhenever you discard\b/i },
 

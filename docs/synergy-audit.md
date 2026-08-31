@@ -45,6 +45,40 @@ Recall is out of scope. This audit says nothing about the 16,684 untagged cards.
 > Force) — is untouched and still open. Those cards now additionally carry
 > `opponent-sacrifice`, which is the tag that does describe them.
 
+> **Second addendum, 2026-08-31 —
+> [ADR-0023](adr/0023-damage-is-not-life-loss.md) splits damage out of
+> `lifeloss`.** A user reported it in five words: "damage is not life loss, they
+> are separate effects". The rule that read "deals N damage to each opponent" as
+> a `lifeloss` producer is gone; those cards carry a new tag, `player-damage`.
+> Measured against the shipped rules on the 31,782 commander-legal cards:
+>
+> | tag | direction | corpus | sampled | precision |
+> | --- | --- | ---: | ---: | --- |
+> | `player-damage` | produces | 1,576 | 55 (two seeds) | **100%** |
+> | `player-damage` | wants | 59 | 59 (all) | **100% / 97% strict** |
+> | `lifeloss` | wants | 19 | 19 (all) | **100%** |
+>
+> **This moves two rows of §1.** `produces lifeloss` drops from 1,446 tagged
+> cards to **1,062** — 384 cards were tagged only because they dealt damage, and
+> all 384 now carry `player-damage` instead. Nothing became untagged, and 13
+> cards that genuinely do both keep both. The §1 sample for `produces lifeloss`
+> was drawn before the split and is not re-drawn here; its 72% figure now
+> describes a smaller population and, since the removed cards were the ones
+> being counted wrong, should be read as a floor.
+>
+> `wants lifeloss` goes from 7 cards to **19**, and the single error in that
+> population — **Within Range**, called out in §4 as a direction inversion — is
+> fixed. It is the only card in the corpus that loses the tag. The gap in that
+> rule now stops at a comma (ADR-0022's boundary) and the verb no longer has to
+> be third person, so "whenever you lose life" is finally reachable.
+>
+> **The §3.4 defect is untouched and is now the sharpest one left.** `lifeloss`
+> is still subject-blind — "you lose 2 life" and "each opponent loses 2 life"
+> are one tag — which is precisely the split ADR-0022 made for `discard` and
+> `sacrifice-fodder`, one tag over. ADR-0023 deliberately did not attempt it:
+> a producer split needs its own sampling and would move the 1,062 figure again.
+> §3.4's suggested tightening is still the right shape.
+
 ---
 
 ## 1. Precision table
@@ -305,6 +339,11 @@ word before "creatures":
 
 ### 3.4 `produces lifeloss` — 72% precision, 951 cards. Your life is not their life.
 
+> Still open after [ADR-0023](adr/0023-damage-is-not-life-loss.md), which split
+> *damage* out of this tag but not *subject*. The population is now 1,062 rather
+> than the 1,446 that ADR-0023 measured or the 951 sampled here; the tightening
+> suggested below is unchanged and is the sharpest defect left in this file.
+
 ```ts
 { tag: 'lifeloss', test: /\beach opponent loses \d+ life\b|\bloses? \d+ life\b/i }
 ```
@@ -523,7 +562,7 @@ same thing. Everything in this section is that error.
 | `wants plus1-counter` (§3.1) | **440 of 563 cards are tagged both directions**; 389 match the producer phrasing | Two counter-*makers* are reported to each other as `payoff`. The single largest defect in the audit. |
 | `treasure` (§2) | `WANTS` rule matches **0** cards; **18** genuine Treasure payoffs exist and are tagged `produces treasure` only | **Captain Lannery Storm** ("Whenever you sacrifice a Treasure, Captain Lannery Storm gets +1/+0") is filed as a Treasure *source*. Two Treasure sources then read as redundancy rather than as engine-and-payoff. Also **Gold Rush**, **Black Market Tycoon**, **Evin, Waterdeep Opportunist**. |
 | `produces discard` (§3.5) | Hobgoblin, Mantled Marauder and cards like it | "Whenever **you discard** a card, …" matched the produce rule. A pure payoff filed as an enabler. |
-| `wants lifeloss` | 1 of the 8-card population | **Within Range** — "Whenever you attack, **each opponent loses life** equal to the number of creatures attacking them." A drain *source* filed as a drain *payoff*. It is not tagged `produces lifeloss` at all, because that rule requires a literal digit and this card says "life equal to". |
+| `wants lifeloss` | 1 of the 8-card population — **fixed by [ADR-0023](adr/0023-damage-is-not-life-loss.md)** | **Within Range** — "Whenever you attack, **each opponent loses life** equal to the number of creatures attacking them." A drain *source* filed as a drain *payoff*. The payoff rule's gap now stops at the comma, which is where the trigger condition ends, and this card no longer matches. |
 | `produces graveyard-creature` (§3.6) | part of the 52 | **Kami of Mourning** grants a graveyard creature a recursion trigger — it wants a stocked graveyard; it is tagged as filling one. **Syr Konrad, the Grim** is a graveyard payoff that matched via `dies … graveyard`. |
 | `produces token` | not counted | **Life Finds a Way** — populate ("Create a token that's a copy of a creature token **you control**") is tagged produces only. Populate *requires* a token first; the card wants tokens at least as much as it makes them. A missing want rather than a wrong produce, but the same failure of the direction model. |
 
