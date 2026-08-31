@@ -1,10 +1,17 @@
-# 16. Archetype customiser — scope
+# 16. Archetype customiser
 
-**Status: scoped, not built.** This document is the design for review. Nothing in
-it is implemented.
+**Status: built.** Roles, curve and tolerance are all tunable per deck. The three
+open questions at the end are answered, with the reasoning kept rather than
+deleted — and §16.10 records where the build diverged from this design and why.
 
 Let a builder tune the role targets and the mana curve their deck is judged
 against, instead of accepting the archetype preset.
+
+No ADR. Every contract change is a NEW OPTIONAL FIELD — `Deck.targetOverrides`,
+`CompositionTarget.source`, `CurveBand.source`, `fills-deficit`'s `source`, and
+one optional parameter each on `compositionTargets` and `curveTarget`. Nothing
+existing changed shape or went away, which is exactly the line AGENTS.md R2
+draws.
 
 ## Why it is worth doing
 
@@ -42,14 +49,24 @@ actually changed:
 
 ```ts
 export interface TargetOverrides {
-  /** Role → ideal card count. Absent means "use the archetype's". */
+  /** Dimension key (`role:ramp`, `type:creature`) → ideal card count. */
   readonly roles?: Readonly<Record<string, number>>
-  /** Eight buckets, 0–7+. A sparse array; absent entries use the archetype's. */
+  /** Eight buckets, 0–7+. Sparse; absent entries use the archetype's. */
   readonly curve?: Readonly<Record<number, number>>
   /** 0..1. Absent means the archetype's own tolerance. */
   readonly tolerance?: number
 }
 ```
+
+`roles` is keyed by `dimensionKey`, not by `Role` — see §16.10. A key the
+archetype does not name ADDS that target: a midrange deck that wants five stax
+pieces can say so without becoming a stax deck, which is this document's opening
+complaint one level down.
+
+Read out of `jsonb` through `parseTargetOverrides`, which drops anything it
+cannot read rather than throwing. A bad key costs that key, not the deck — and a
+deck that will not open is an override nobody can clear, which is the exact trap
+§16.5 exists to avoid.
 
 Sparse rather than a full snapshot for two reasons. The presets will be revised —
 they are seed values and doc 14 expects them to improve — and a deck holding a
@@ -78,12 +95,27 @@ rather than anywhere else.
 
 ## Storage and contract
 
-- Migration `0004`: `decks.target_overrides jsonb NOT NULL DEFAULT '{}'`.
-- `Deck` gains `targetOverrides: TargetOverrides`. Additive, defaults to empty.
+- Migration **`0013`** (not `0004` — that number was taken by the deck
+  description before this was built): `decks.target_overrides jsonb NOT NULL
+  DEFAULT '{}'`.
+- `Deck` gains `targetOverrides?: TargetOverrides`. Additive; absent and `{}`
+  mean the same thing and no consumer has to tell them apart.
 - `PATCH /decks/:id` accepts `targetOverrides`, replacing wholesale — the object
-  is small and a merge protocol would be a second thing to get wrong.
-- `GET /decks/:id/analysis` already returns `targets`; it gains `source:
-  'archetype' | 'custom'` per dimension so the UI can mark what was changed.
+  is small and a merge protocol would be a second thing to get wrong. It also
+  accepts `null`, meaning "clear it": a merging endpoint could never express a
+  deletion, because "reset ramp" and "leave ramp alone" are both an absent key.
+- `GET /decks/:id/analysis` returns `source: 'archetype' | 'custom'` per target
+  and per curve band, so the UI can mark what was changed. It also returns
+  `preset` per target and a whole `curve.preset`, because the sheet has to show
+  the value being overridden and cannot derive it — the preset the deck would be
+  judged by includes the bracket and curve modifiers, which depend on the deck's
+  own average mana value. `targetOverrides` is echoed back too, so the sheet
+  never has to reconstruct the sparse set by diffing (which would report a false
+  override every time a typed number happened to equal the preset).
+- `Reason` gains `source` on `fills-deficit`. Pillar P4: "fills a ramp gap" and
+  "fills the ramp target you set" are different claims, and a card suggested
+  against a number the builder typed is suggested on their authority. Hiding that
+  hides the one thing they can change when the suggestions look wrong.
 
 No new endpoint. No change to `DeckCommand` — a target is a property of the deck,
 not an operation on its contents, and putting it through the command batch would
@@ -91,21 +123,41 @@ make "I moved a slider" undoable in the same queue as "I added a card".
 
 ## The interface
 
-A sheet, opened from the archetype label in the masthead. Two columns: roles on
-the left, curve on the right, each row a number box with the preset shown beside
-it in dim text, and a reset arrow that appears only on a changed row.
+A sheet, opened from **"Adjust targets" on the Composition panel** — not from the
+archetype label in the masthead, as originally sketched. The composition list IS
+the thing being tuned; a control for it two regions away has to be found before
+it can be used, and the panel it edits is where a builder is already looking when
+they disagree with a number. Two columns: roles on the left, curve on the right,
+each row a number box with the preset shown beside it in dim text, and a reset
+arrow that appears only on a changed row.
 
 Three things it must do that a naive form would not:
 
 - **Show the preset, always.** The value you are overriding is the context for
   the number you are typing. A box showing only `36` cannot tell you the
   archetype wanted 34.
-- **Total as you type.** Roles and curve each sum, against 99. Over is a warning,
-  not a block — a builder may knowingly aim high while cutting, exactly as they
-  may knowingly cross a bracket line (doc 03 §3.2).
-- **Say what changes.** On commit, the same change summary the bracket switch
-  uses: which groups appear or disappear, how many cut hints change. Tuning a
-  target with no visible consequence is how a user loses trust in the numbers.
+- **Total as you type.** Over is a warning, not a block — a builder may knowingly
+  aim high while cutting, exactly as they may knowingly cross a bracket line
+  (doc 03 §3.2). Two corrections to this document's arithmetic, both in the
+  build:
+  - The **roles** total counts ROLE dimensions only, against 99. A creature that
+    ramps is counted once as `ramp` and once as `creature`, so adding the type
+    rows in would produce a budget no deck could satisfy —
+    `archetype-targets.ts` states the same rule as its first constraint.
+  - The **curve** total is against `CURVE_REFERENCE_SPELLS` (63), not 99. The
+    curve excludes lands, and totalling it against a whole deck would show room
+    the deck does not have.
+- **Say what changes.** On commit, a summary read off the analysis that comes
+  back: which roles crossed into or out of needing cards — which is exactly the
+  set of `fills-` groups that appear or disappear, since a group exists iff its
+  role is short — and how the cut-hint count moved. Both halves come from one
+  response, so the summary can never describe a state that did not exist. Tuning
+  a target with no visible consequence is how a user loses trust in the numbers.
+
+Every control is a native input or button with an accessible name, Escape
+closes, and focus lands in the first field on open (AGENTS.md R4). A customised
+row is marked in the meters and the curve by a glyph and a border, never by
+colour alone.
 
 Reduced to one sentence: it is the composition panel made editable, in place,
 with the preset visible behind each field.
@@ -120,21 +172,93 @@ with the preset visible behind each field.
   numbers instead of a spreadsheet. If a single tolerance proves too blunt, a
   per-dimension one is an additive change later.
 
-## Open questions for you
+## 16.9 The three open questions, answered
 
-1. **Does the curve editor earn its place in v1?** The roles half is what people
-   actually argue with; the curve is already a range and is more forgiving. Half
-   the build, most of the value — I would ship roles first and add the curve once
-   the shape of the sheet is proven.
-2. **Should an override survive an archetype change?** If you tune midrange and
-   then switch to control, do your numbers follow, or reset? I lean **follow, and
-   say so loudly** — silently discarding a user's typed numbers is worse than
-   carrying numbers they may not want, and there is a reset for the latter.
-3. **Is "over 99" a warning or a block?** I lean warning, per doc 03 §3.2's
-   principle that the user may knowingly cross their own line.
+### 1. Does the curve editor earn its place in v1? — **Yes, both halves shipped.**
+
+The scope note leaned toward roles first. It was overruled by what the two halves
+turned out to cost once the sparse machinery existed. The expensive parts —
+deciding sparseness, the storage shape, the migration, the PATCH field, the
+`source` flag, the sheet, and the reset affordance — are shared; the curve half
+is one more function of about thirty lines and a second column of the same number
+boxes. "Half the build" was an estimate made before the shared half was written,
+and it did not survive contact with it.
+
+The argument that decided it, though, is not cost. The curve target feeds
+`curveFit`, which is a term in the recommendation ordering for **every card**,
+and `suggestCuts`, which is what tells a builder what to remove. A builder who
+disagrees with the curve is disagreeing with the sort order of the whole pool,
+and telling them "roles are yours, the curve is still ours" leaves the more
+pervasive of the two signals uncorrectable. Shipping half would also have frozen
+the sheet's layout around one column and made the second column a redesign rather
+than an addition.
+
+What the curve half costs, and it is a real cost, is the reference count. A
+per-bucket override is a count of `CURVE_REFERENCE_SPELLS = 63` — 99 cards minus
+36 lands — because `curveTarget` takes no deck. Deriving the denominator from the
+deck's own nonland count was rejected: the target a builder typed would then
+drift under them every time they accepted a card, which is a worse failure than
+being one card off in a 58-spell deck. Everything downstream works in shares, so
+the constant only fixes the ratio between a pinned bucket and the preset shape
+around it.
+
+### 2. Should an override survive an archetype change? — **Yes: follow, and say so.**
+
+The scope note's reasoning holds and the build follows it. Silently discarding
+numbers a builder typed is worse than carrying numbers they may not want, because
+only one of those is reversible: there is a reset for the second and nothing at
+all for the first. The two are independent columns in one `UPDATE`, and neither
+clears the other.
+
+"Say so loudly" is the same change summary as any other save. Switching archetype
+produces new targets for every row the builder did not pin, so the summary
+already reports what moved — and the overridden rows are marked in the meters, so
+a row that did not move when the archetype changed says why on its own face. A
+separate archetype-switch warning would be a second mechanism for something the
+first already covers.
+
+### 3. Is "over 99" a warning or a block? — **A warning.**
+
+Per doc 03 §3.2: the user may knowingly cross their own line. The total turns
+rust and says it is over; the save button stays enabled. The curve behaves the
+same way one level down — counts summing past the reference renormalise, keeping
+the SHAPE that was asked for rather than clamping to something nobody typed.
+
+## 16.10 Where the build diverged from this design
+
+Four places. Each is a change to this document made in the same commit as the
+code, per AGENTS.md §10.
+
+1. **Overrides are keyed by `dimensionKey`, not by `Role`.** A role map cannot
+   express "18 creatures", and `type:creature` is a row the composition panel
+   already draws and one of the numbers people most want to move. The dimension
+   key space is what the meters, the targets and the `fills-` groups already use,
+   so an override needs no translation anywhere.
+
+2. **An overridden dimension skips the bracket and curve modifiers.** This
+   document listed those modifiers as "not tunable" and left them applying on
+   top. They exist to correct a preset written at a neutral curve for the deck in
+   front of you; a number the builder typed while looking at that same deck has
+   already accounted for it, and applying the correction again counts it twice.
+   It also matters for trust: typing 36 lands and watching the meter read 35 is a
+   form the user cannot control, and this document's whole interface argument is
+   that the number you type is the number you are judged against. Every dimension
+   NOT overridden keeps both modifiers in full, which is what "not tunable" was
+   protecting.
+
+3. **One tolerance really is one number, so the role bands are scaled by it.**
+   The role bands were fixed card counts with no tolerance in them at all. They
+   are now scaled by `tolerance / 0.35` — 0.35 being the midrange row's own curve
+   tolerance and the middle of that table, which makes "leave the slider alone"
+   the exact identity. Floored at one card wide: a target you can only hit
+   exactly is one every deck fails, which is the same argument `MIN_HALF_WIDTH`
+   already makes in `curve.ts`.
+
+4. **The sheet opens from the Composition panel, and the totals are against 99
+   for roles and 63 for the curve.** Both covered above.
 
 ## Estimate
 
-Roles only: migration, one domain parameter, one PATCH field, one sheet — about
-the size of the Universes Beyond change. With the curve editor: roughly half
-again.
+Recorded as written, for calibration: "roles only… about the size of the
+Universes Beyond change. With the curve editor: roughly half again." The shared
+half dominated and the curve column came in well under "half again" — see §16.9.

@@ -80,6 +80,8 @@ export interface Reason {
   delta?: number
   tag?: string
   withOracleIds?: string[]
+  /** Whose target a `fills-deficit` gap is measured against (doc 16). */
+  source?: 'archetype' | 'custom'
 }
 
 export interface Recommendation {
@@ -118,7 +120,25 @@ export interface Deck {
   version: number
   excludeUniversesBeyond: boolean
   budget: { maxTotalUsd: number | null; maxCardUsd: number | null } | null
+  /** The per-deck target sheet (doc 16). `{}` for a deck on its preset. */
+  targetOverrides?: TargetOverrides
   entries: { oracleId: string; zone: 'accepted' | 'excluded'; locked: boolean }[]
+}
+
+/**
+ * Sparse target overrides, in the wire shape (doc 16).
+ *
+ * Restated here rather than imported from the domain because every other type
+ * in this file is the JSON the server sends, and mixing one branded domain type
+ * into that set is how a `Deck` here starts pretending to be a `Deck` there.
+ * Counts, never shares: the client sends the number the builder typed.
+ */
+export interface TargetOverrides {
+  /** Keyed by dimension key — `role:ramp`, `type:creature`. */
+  roles?: Record<string, number>
+  /** Keyed by mana-value bucket, 0–7. */
+  curve?: Record<string, number>
+  tolerance?: number
 }
 
 export interface Unavailable {
@@ -300,6 +320,12 @@ export const patchDeck = (
     description?: string
     excludeUniversesBeyond?: boolean
     budget?: { maxTotalUsd: number | null; maxCardUsd: number | null } | null
+    /**
+     * Replaced wholesale, never merged (doc 16). `null` or `{}` clears every
+     * override and puts the deck back on its archetype — the way out has to
+     * exist, or a tuned target is a trap.
+     */
+    targetOverrides?: TargetOverrides | null
   },
 ): Promise<Deck> => request(`/decks/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 
@@ -388,7 +414,13 @@ export interface Analysis {
     max: number
     locked: number
     actual: number
+    /** `custom` when the builder typed this ideal (doc 16). */
+    source?: 'archetype' | 'custom'
+    /** What the archetype wanted. `null` where it has no opinion at all. */
+    preset?: number | null
   }[]
+  /** The deck's own sparse overrides, echoed back for the sheet. */
+  targetOverrides?: TargetOverrides
   cuts: {
     oracleId: string
     score: number
@@ -406,7 +438,9 @@ export interface Analysis {
   curve: {
     averageManaValue: number
     histogram: number[]
-    target: { ideal: number; min: number; max: number }[]
+    target: { ideal: number; min: number; max: number; source?: 'archetype' | 'custom' }[]
+    /** The archetype's own shape, for the buckets the builder pinned (doc 16). */
+    preset?: { ideal: number; min: number; max: number }[]
     locked: number[]
     deltas: {
       bucket: number

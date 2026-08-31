@@ -3,7 +3,9 @@ import * as api from './api'
 import { usePipeline, type Phase } from './pipeline'
 import { AUTO_QUERY_MS, useAutoQuery } from './autoquery'
 import {
+  archetypeTolerance,
   COLORS,
+  CURVE_REFERENCE_SPELLS,
   dimensionKeysOf,
   formatDecklist,
   interactsWith,
@@ -149,7 +151,15 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
     case 'near-combo':
       return `one card from ${plural(item.nearCombosAt1, 'combo')}`
     case 'fills-deficit':
-      return `fills ${dimensionName(r.dimension ?? {})} gap`
+      // Two different claims, and pillar P4 says the reason has to make the one
+      // that is true. A card suggested against a number the builder typed is
+      // being suggested on their authority, not the archetype's, and reading
+      // "fills ramp gap" there hides the fact that THEY chose the gap — which
+      // is exactly the thing they would want to re-examine when the suggestions
+      // look wrong.
+      return r.source === 'custom'
+        ? `fills the ${dimensionName(r.dimension ?? {})} target you set`
+        : `fills ${dimensionName(r.dimension ?? {})} gap`
     case 'curve-fit': {
       const mv = String(r.manaValue ?? 0)
       if (r.direction === 'short' && (r.delta ?? 0) > 0) {
@@ -1262,6 +1272,10 @@ const Curve = ({
         {curve.deltas.map((d) => {
           // The band decides, not the ideal: inside it the bucket is fine.
           const direction = d.withinRange ? 'balanced' : d.delta > 0 ? 'short' : 'over'
+          // Said in the label, not only drawn: a bucket the builder pinned is
+          // not the archetype's claim any more, and colour alone never carries
+          // identity here (see the key below).
+          const pinned = curve.target[d.bucket]?.source === 'custom' ? ', target you set' : ''
           const label = d.withinRange
             ? `in range (${String(d.min)}–${String(d.max)})`
             : direction === 'short'
@@ -1272,7 +1286,8 @@ const Curve = ({
               className="curve-col"
               key={d.bucket}
               title={`Mana value ${String(d.bucket)}${d.bucket === 7 ? '+' : ''}: ${String(d.actual)} cards, want ${String(d.min)}–${String(d.max)} — ${label}`}
-              aria-label={`Mana value ${String(d.bucket)}: ${String(d.actual)} cards (${String(locked[d.bucket] ?? 0)} locked), target range ${String(d.min)} to ${String(d.max)}, ${label}`}
+              aria-label={`Mana value ${String(d.bucket)}: ${String(d.actual)} cards (${String(locked[d.bucket] ?? 0)} locked), target range ${String(d.min)} to ${String(d.max)}, ${label}${pinned}`}
+              data-custom={curve.target[d.bucket]?.source === 'custom'}
             >
               {/* The acceptable range, drawn as a band rather than a line —
                   anywhere inside it is fine, which is what a range means. */}
@@ -1317,6 +1332,290 @@ const Curve = ({
         <span>— band is the target range</span>
       </p>
     </>
+  )
+}
+
+/**
+ * The archetype customiser (doc 16).
+ *
+ * The composition panel made editable, in place, with the preset visible behind
+ * every field. Three things a naive form would not do, all three of them the
+ * reason this is a component rather than a row of inputs:
+ *
+ *   * THE PRESET IS ALWAYS SHOWN. The value you are overriding is the context
+ *     for the number you are typing. A box reading 36 cannot tell you the
+ *     archetype wanted 34.
+ *   * IT TOTALS AS YOU TYPE, and going over is a WARNING, not a block. A
+ *     builder may knowingly aim high while cutting, exactly as they may
+ *     knowingly cross a bracket line (doc 03 §3.2).
+ *   * EVERY OVERRIDE HAS A WAY OUT. A per-row reset appears on a changed row,
+ *     and "Reset all" clears the lot. An override you cannot clear is a trap,
+ *     and typing a row back to its preset removes it from the sparse set rather
+ *     than pinning the same number — otherwise a deck would silently stop
+ *     inheriting preset revisions for a row the user never meant to freeze.
+ *
+ * Keyboard throughout (AGENTS.md R4): every control is a native input or
+ * button, Escape closes, and focus lands in the first field on open.
+ */
+
+/** Sum of the ROLE ideals only. Types overlap roles and must not be added in. */
+const roleBudget = (rows: readonly { key: string; value: number }[]): number =>
+  rows.reduce((sum, r) => (r.key.startsWith('role:') ? sum + r.value : sum), 0)
+
+interface TargetRow {
+  readonly key: string
+  readonly name: string
+  /** What the archetype asked for, or null where it has no opinion. */
+  readonly preset: number | null
+}
+
+const TargetSheet = ({
+  analysis,
+  archetypePreset,
+  onSave,
+  onClose,
+}: {
+  analysis: api.Analysis
+  /** The archetype's own tolerance, from the domain's own table. */
+  archetypePreset: number
+  onSave: (overrides: api.TargetOverrides) => void
+  onClose: () => void
+}): React.JSX.Element => {
+  const saved = analysis.targetOverrides ?? {}
+  const [roles, setRoles] = useState<Record<string, number>>({ ...(saved.roles ?? {}) })
+  const [curve, setCurve] = useState<Record<string, number>>({ ...(saved.curve ?? {}) })
+  const [tolerance, setTolerance] = useState<number | null>(saved.tolerance ?? null)
+  const firstFieldRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    firstFieldRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
+  const roleRows: TargetRow[] = analysis.targets.map((t) => ({
+    key: dimensionKeyOf(t.dimension),
+    name: dimensionName(t.dimension),
+    // `preset` is absent on a server that predates doc 16, and null for a
+    // dimension the override invented. Both mean "the archetype said nothing".
+    preset: t.preset ?? (t.source === 'custom' ? null : t.ideal),
+  }))
+
+  /** Preset counts per bucket, from the share the archetype asked for. */
+  const curvePreset = (analysis.curve.preset ?? analysis.curve.target).map((b) =>
+    Math.round(b.ideal * CURVE_REFERENCE_SPELLS),
+  )
+
+  const roleValue = (row: TargetRow): number => roles[row.key] ?? row.preset ?? 0
+  const curveValue = (bucket: number): number => curve[String(bucket)] ?? curvePreset[bucket] ?? 0
+
+  /*
+   * Setting a row back to its preset DELETES the override rather than storing
+   * the same number. Sparse is the whole design: a deck that pins 34 lands
+   * because 34 was already the preset stops inheriting every later revision of
+   * that preset, silently, and would have no way to tell it had.
+   */
+  const setRole = (row: TargetRow, next: number): void =>
+    setRoles((prev) => {
+      const out = { ...prev }
+      if (next === row.preset) delete out[row.key]
+      else out[row.key] = next
+      return out
+    })
+
+  const setCurveBucket = (bucket: number, next: number): void =>
+    setCurve((prev) => {
+      const out = { ...prev }
+      if (next === curvePreset[bucket]) delete out[String(bucket)]
+      else out[String(bucket)] = next
+      return out
+    })
+
+  const roleTotal = roleBudget(roleRows.map((r) => ({ key: r.key, value: roleValue(r) })))
+  const curveTotal = curvePreset.reduce((sum, _p, bucket) => sum + curveValue(bucket), 0)
+  const dirty = Object.keys(roles).length > 0 || Object.keys(curve).length > 0 || tolerance !== null
+
+  const numberBox = (
+    label: string,
+    value: number,
+    preset: number | null,
+    changed: boolean,
+    onChange: (next: number) => void,
+    onReset: () => void,
+    ref?: React.RefObject<HTMLInputElement | null>,
+  ): React.JSX.Element => (
+    <div className="target-row" key={label}>
+      <label className="target-name" htmlFor={`target-${label}`}>
+        {label}
+      </label>
+      <input
+        id={`target-${label}`}
+        ref={ref}
+        className="target-box"
+        type="number"
+        inputMode="numeric"
+        min={0}
+        max={99}
+        step={1}
+        value={value}
+        data-custom={changed}
+        onChange={(e) => {
+          const next = Number(e.target.value)
+          // A cleared box is not zero. Ignoring an unparseable value leaves the
+          // row where it was rather than pinning it to nothing mid-keystroke.
+          if (Number.isFinite(next)) onChange(Math.max(0, Math.min(99, Math.round(next))))
+        }}
+        aria-label={`${label} target, currently ${String(value)}${preset === null ? '' : `, archetype wants ${String(preset)}`}`}
+      />
+      <span className="target-preset">{preset === null ? 'new' : preset}</span>
+      {changed ? (
+        <button className="act target-reset" onClick={onReset} aria-label={`Reset ${label}`}>
+          {'↺'}
+        </button>
+      ) : (
+        // A placeholder, so the columns do not jump as rows change.
+        <span className="target-reset" aria-hidden="true" />
+      )}
+    </div>
+  )
+
+  return (
+    <div className="sheet targets-sheet" role="dialog" aria-label="Adjust targets">
+      <div className="sheet-head">
+        <h3>Targets</h3>
+        <button
+          className="act"
+          onClick={() => {
+            setRoles({})
+            setCurve({})
+            setTolerance(null)
+          }}
+          disabled={!dirty}
+        >
+          Reset all
+        </button>
+        <button className="act" onClick={onClose} aria-label="Close targets">
+          Close
+        </button>
+      </div>
+
+      <p className="note">
+        Counts, not percentages. A row you leave alone keeps following the archetype, including
+        every later revision of it — only what you type here is stored.
+      </p>
+
+      <div className="targets-cols">
+        <div className="targets-col">
+          <h4>Roles</h4>
+          {roleRows.map((row) =>
+            numberBox(
+              row.name,
+              roleValue(row),
+              row.preset,
+              roles[row.key] !== undefined,
+              (next) => setRole(row, next),
+              () =>
+                setRoles((prev) => {
+                  const out = { ...prev }
+                  delete out[row.key]
+                  return out
+                }),
+              row === roleRows[0] ? firstFieldRef : undefined,
+            ),
+          )}
+          <p className="note target-total" data-over={roleTotal > 99}>
+            {/* Roles only. A creature that ramps is counted once as ramp and
+                once as a creature, so adding the type rows in would produce a
+                budget no deck could ever satisfy. */}
+            Roles total {roleTotal} of 99
+            {roleTotal > 99 ? ' — over, and buildable only if you cut' : ''}
+          </p>
+        </div>
+
+        <div className="targets-col">
+          <h4>Mana curve</h4>
+          {curvePreset.map((preset, bucket) =>
+            numberBox(
+              bucket === 7 ? '7+' : String(bucket),
+              curveValue(bucket),
+              preset,
+              curve[String(bucket)] !== undefined,
+              (next) => setCurveBucket(bucket, next),
+              () =>
+                setCurve((prev) => {
+                  const out = { ...prev }
+                  delete out[String(bucket)]
+                  return out
+                }),
+            ),
+          )}
+          <p className="note target-total" data-over={curveTotal > CURVE_REFERENCE_SPELLS}>
+            {/* Against the nonland-spell count a curve is a count of, not
+                against 99 — the curve excludes lands, so totalling it against a
+                whole deck would read as room the deck does not have. */}
+            Curve total {curveTotal} of {CURVE_REFERENCE_SPELLS} spells
+            {curveTotal > CURVE_REFERENCE_SPELLS ? ' — over; the shape still applies' : ''}
+          </p>
+        </div>
+      </div>
+
+      <div className="target-tolerance">
+        <label htmlFor="target-tolerance">How strict</label>
+        <input
+          id="target-tolerance"
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={Math.round((tolerance ?? archetypePreset) * 100)}
+          onChange={(e) => setTolerance(Number(e.target.value) / 100)}
+          aria-label={`Tolerance, currently ${String(Math.round((tolerance ?? archetypePreset) * 100))} per cent, archetype wants ${String(Math.round(archetypePreset * 100))}`}
+        />
+        <span className="target-preset">{Math.round(archetypePreset * 100)}%</span>
+        {tolerance === null ? (
+          <span className="target-reset" aria-hidden="true" />
+        ) : (
+          <button
+            className="act target-reset"
+            onClick={() => setTolerance(null)}
+            aria-label="Reset tolerance"
+          >
+            {'↺'}
+          </button>
+        )}
+      </div>
+      <p className="note">
+        Tighter bands flag smaller misses. Every band stays at least one card wide, whatever this
+        says — a target you can only hit exactly is one every deck fails.
+      </p>
+
+      <div className="row" style={{ marginTop: '0.5rem' }}>
+        <button
+          className="primary"
+          onClick={() => {
+            // Sparse on the wire, exactly as it is held: only what was typed.
+            const next: api.TargetOverrides = {}
+            if (Object.keys(roles).length > 0) next.roles = roles
+            if (Object.keys(curve).length > 0) next.curve = curve
+            if (tolerance !== null) next.tolerance = tolerance
+            onSave(next)
+          }}
+        >
+          Save targets
+        </button>
+        <button className="act" onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -1884,7 +2183,20 @@ export const Workspace = ({
   const [pending, setPending] = useState<readonly PendingCommand[]>([])
   const [basics, setBasics] = useState<api.Card[]>([])
   const [importing, setImporting] = useState(false)
+  const [tuningTargets, setTuningTargets] = useState(false)
   const [hideSettledRoles, setHideSettledRoles] = useState(false)
+  /**
+   * What saving a target actually did, in words (doc 16).
+   *
+   * "Say what changes" — tuning a target with no visible consequence is how a
+   * user stops trusting the numbers. Both halves are read off the SAME analysis
+   * response, so the summary can never describe a state that did not exist:
+   * which roles crossed into or out of being short (that is exactly the set of
+   * `fills-` groups that appear or disappear, since a group exists iff its role
+   * is short), and how many cut hints there now are.
+   */
+  const targetsBaselineRef = useRef<{ short: string[]; cuts: number } | null>(null)
+  const [targetsChange, setTargetsChange] = useState<string | null>(null)
   /**
    * Queries promoted to columns.
    *
@@ -2282,6 +2594,41 @@ export const Workspace = ({
     pipeline.schedule({ type: 'restore', oracleId })
     pipeline.schedule({ type: 'accept', oracleId })
   }
+
+  /** The roles the analysis says are short — one `fills-` group each. */
+  const shortRoles = (a: api.Analysis): string[] =>
+    a.targets.filter((t) => t.actual < t.min).map((t) => dimensionName(t.dimension))
+
+  /*
+   * Fires on the FIRST analysis to arrive after a target save, and only then.
+   *
+   * The dependency is `analysis` alone: setting the baseline does not change
+   * it, so this cannot run against the response that was already on screen, and
+   * the ref is cleared on the way through so a later unrelated refresh does not
+   * re-announce a change nobody just made.
+   */
+  useEffect(() => {
+    const baseline = targetsBaselineRef.current
+    if (baseline === null || analysis === null) return
+    targetsBaselineRef.current = null
+
+    const now = shortRoles(analysis)
+    const appeared = now.filter((r) => !baseline.short.includes(r))
+    const gone = baseline.short.filter((r) => !now.includes(r))
+    const cutDelta = analysis.cuts.length - baseline.cuts
+
+    const parts: string[] = []
+    if (appeared.length > 0) parts.push(`${appeared.join(', ')} now needs cards`)
+    if (gone.length > 0) parts.push(`${gone.join(', ')} no longer does`)
+    if (cutDelta !== 0) {
+      parts.push(`${cutDelta > 0 ? '+' : ''}${String(cutDelta)} cut hints`)
+    }
+    setTargetsChange(
+      parts.length === 0
+        ? 'Targets saved. Nothing else moved.'
+        : `Targets saved — ${parts.join('; ')}.`,
+    )
+  }, [analysis])
 
   const setDeckOption = (body: Parameters<typeof api.patchDeck>[1]): void => {
     void api
@@ -2764,6 +3111,26 @@ export const Workspace = ({
           Export
         </button>
       </header>
+
+      {tuningTargets && analysis !== null ? (
+        <TargetSheet
+          analysis={analysis}
+          // From the domain's own table, so the preset the sheet shows is the
+          // one `curveTarget` would have used — not a number retyped here.
+          archetypePreset={archetypeTolerance(
+            deck.archetype as Parameters<typeof archetypeTolerance>[0],
+          )}
+          onClose={() => setTuningTargets(false)}
+          onSave={(overrides) => {
+            targetsBaselineRef.current = { short: shortRoles(analysis), cuts: analysis.cuts.length }
+            setTuningTargets(false)
+            // Wholesale, and through the ordinary deck-option path: a target is
+            // a property of the deck, not an operation on its contents, so it
+            // does NOT go through the command batch (doc 16).
+            setDeckOption({ targetOverrides: overrides })
+          }}
+        />
+      ) : null}
 
       {importing ? (
         <ImportDialog
@@ -3350,7 +3717,35 @@ export const Workspace = ({
               sheet={singleColumn}
             />
 
-            <h2 style={{ marginTop: '1.25rem' }}>Composition</h2>
+            <h2 style={{ marginTop: '1.25rem' }}>
+              Composition
+              {/* The handle for doc 16's sheet, on the panel it edits rather
+                  than in the masthead: this list IS the thing being tuned, and
+                  a control for it two regions away has to be found first. */}
+              {analysis === null ? null : (
+                <button
+                  className="act"
+                  style={{ marginLeft: '0.5rem' }}
+                  onClick={() => setTuningTargets(true)}
+                  aria-haspopup="dialog"
+                  aria-expanded={tuningTargets}
+                >
+                  Adjust targets
+                </button>
+              )}
+            </h2>
+            {targetsChange === null ? null : (
+              <p className="note target-change" role="status">
+                {targetsChange}{' '}
+                <button
+                  className="act"
+                  onClick={() => setTargetsChange(null)}
+                  aria-label="Dismiss target change summary"
+                >
+                  OK
+                </button>
+              </p>
+            )}
             <label className="check" title={HIDE_SETTLED_HELP}>
               <input
                 type="checkbox"
@@ -3369,7 +3764,17 @@ export const Workspace = ({
               return (
                 <div className="meter" key={r.name}>
                   <div className="meter-label">
-                    <span>{r.name}</span>
+                    <span>
+                      {r.name}
+                      {/* Marked, because this bar is no longer the archetype's
+                          opinion — a builder has to be able to see which of
+                          these numbers are their own before trusting either. */}
+                      {r.source === 'custom' ? (
+                        <span className="target-mark" title="You set this target">
+                          {' ✎'}
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="delta">
                       {r.locked > 0 ? `${String(r.locked)}\u25C6 ` : ''}
                       {r.actual} / {r.ideal}
@@ -3377,7 +3782,7 @@ export const Workspace = ({
                   </div>
                   <div
                     className="meter-track"
-                    title={`${String(r.actual)} of a target ${String(r.ideal)} (range ${String(r.min)}–${String(r.max)}), ${String(r.locked)} locked`}
+                    title={`${String(r.actual)} of a target ${String(r.ideal)} (range ${String(r.min)}–${String(r.max)}), ${String(r.locked)} locked${r.source === 'custom' ? `; you set this — the archetype wanted ${r.preset === null || r.preset === undefined ? 'nothing here' : String(r.preset)}` : ''}`}
                   >
                     <div
                       className="meter-fill"

@@ -893,6 +893,77 @@ describeDb('packages/db against real PostgreSQL', () => {
       const deck = await getDeck(db.pool, id)
       expect(deck!.entries.find((e) => e.oracleId === card)?.tags).toEqual(['Ramp', 'SORCERY'])
     })
+
+    /**
+     * Per-deck target overrides (doc 16, migration 0013).
+     *
+     * Both write paths are covered, because they are different statements: the
+     * INSERT in `createDeck` never names the column and relies on the migration
+     * default, and the UPDATE in `PATCH /decks/:id` sets it explicitly. A test
+     * that only covered one would leave the other free to be wrong.
+     */
+    describe('target overrides', () => {
+      it('starts empty on a freshly inserted deck', async () => {
+        // The INSERT path. `createDeck` does not name the column, so this is
+        // asserting the migration's DEFAULT and the row-to-deck mapping at once.
+        const fresh = deckId(randomUUID())
+        await createDeck(db.pool, {
+          id: fresh,
+          ownerId: owner,
+          name: 'Fresh',
+          commanders: [uuid()],
+          targetBracket: 3,
+          archetype: 'midrange',
+          colorIdentity: ['R'],
+        })
+        expect((await getDeck(db.pool, fresh))?.targetOverrides).toEqual({})
+      })
+
+      it('round-trips a sparse override through the UPDATE path', async () => {
+        await db.pool.query('UPDATE decks SET target_overrides = $2::jsonb WHERE id = $1', [
+          id,
+          JSON.stringify({ roles: { 'role:ramp': 14 }, curve: { 2: 15 }, tolerance: 0.2 }),
+        ])
+        expect((await getDeck(db.pool, id))?.targetOverrides).toEqual({
+          roles: { 'role:ramp': 14 },
+          curve: { 2: 15 },
+          tolerance: 0.2,
+        })
+      })
+
+      it('can be cleared back to the archetype', async () => {
+        // The way out has to exist. An override a builder cannot get rid of is
+        // a trap, and this is the statement `PATCH` issues to undo one.
+        await db.pool.query("UPDATE decks SET target_overrides = '{}'::jsonb WHERE id = $1", [id])
+        expect((await getDeck(db.pool, id))?.targetOverrides).toEqual({})
+      })
+
+      it('survives a malformed row rather than poisoning the deck', async () => {
+        // jsonb holds whatever was written — including by a build that knew a
+        // different shape. A cast would push "twelve" into `compositionTargets`
+        // and produce a NaN target nothing downstream can render, so the parse
+        // drops the bad key and keeps the good one.
+        await db.pool.query('UPDATE decks SET target_overrides = $2::jsonb WHERE id = $1', [
+          id,
+          JSON.stringify({ roles: { 'role:ramp': 'twelve', 'role:draw': 9 }, tolerance: 'loose' }),
+        ])
+        expect((await getDeck(db.pool, id))?.targetOverrides).toEqual({ roles: { 'role:draw': 9 } })
+      })
+
+      it('reads a non-object jsonb as no overrides at all', async () => {
+        await db.pool.query('UPDATE decks SET target_overrides = $2::jsonb WHERE id = $1', [
+          id,
+          JSON.stringify([1, 2, 3]),
+        ])
+        expect((await getDeck(db.pool, id))?.targetOverrides).toEqual({})
+      })
+
+      it('refuses a null, so no reader has to decide what one means', async () => {
+        await expect(
+          db.pool.query('UPDATE decks SET target_overrides = NULL WHERE id = $1', [id]),
+        ).rejects.toThrow(/null value|not-null/i)
+      })
+    })
   })
 
   describe('optimistic concurrency (doc 12 §12.7)', () => {

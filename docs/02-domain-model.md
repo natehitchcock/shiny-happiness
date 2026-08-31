@@ -50,6 +50,14 @@ interface Deck {
   colorIdentity: Color[]          // derived from commanders; cached
   entries: DeckEntry[]
   budget: BudgetConstraint | null
+  // The role counts, curve buckets and tolerance this builder disagrees with
+  // the archetype about (doc 16). SPARSE: only what they typed, so the deck
+  // keeps inheriting preset revisions for everything else. Absent and `{}`
+  // mean the same thing. NOT a DeckCommand — a target is a property of the
+  // deck, not an operation on its contents, and a slider in the undo queue
+  // beside "I added a card" is two very different sizes of mistake sharing
+  // one Ctrl+Z.
+  targetOverrides?: TargetOverrides
   createdAt: string
   updatedAt: string
 }

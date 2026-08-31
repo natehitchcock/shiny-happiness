@@ -16,6 +16,7 @@ import {
   curveDeltas,
   curveTarget,
   deckSynergy,
+  hasTargetOverrides,
   lockedComposition,
   lockedCurve,
   primaryRole,
@@ -42,6 +43,9 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
     const accepted = acceptedSet(deck)
 
     const deficits = findDeficits(counts, context.targets)
+    const presetIdeals = new Map(
+      context.presetTargets.map((t) => [dimensionKey(t.dimension), t.ideal]),
+    )
     const assessment = assessArchetype(counts.byDimension)
 
     // Colour pips from mana costs; sources from the accepted lands' identity.
@@ -82,7 +86,13 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
       }
     }
 
-    const targetCurve = curveTarget(deck.archetype, deck.archetypeSecondary)
+    const targetCurve = curveTarget(deck.archetype, deck.archetypeSecondary, deck.targetOverrides)
+    // What the archetype alone would have asked for, so the sheet can show the
+    // preset behind each pinned bucket (doc 16). Same call, minus the overrides,
+    // so the two can never be computed differently.
+    const presetCurve = hasTargetOverrides(deck.targetOverrides)
+      ? curveTarget(deck.archetype, deck.archetypeSecondary)
+      : targetCurve
 
     // What the deck already does, so a cut hint knows what it would break.
     const synergy = deckSynergy(
@@ -196,7 +206,27 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
         // Locked count per role, for the committed portion of each bar.
         locked: lockedByDimension.get(dimensionKey(t.dimension)) ?? 0,
         actual: counts.byDimension.get(dimensionKey(t.dimension)) ?? 0,
+        /*
+         * What the archetype wanted here, whether or not it was overridden
+         * (doc 16). `source` on the target itself says WHICH of the two numbers
+         * is in force; this says what the other one was.
+         *
+         * A dimension the override INVENTED — a midrange deck asking for five
+         * stax pieces — has no preset, and `null` says so rather than `0`,
+         * which would read as "the archetype wanted none of these" when the
+         * truth is that the archetype has no opinion about them at all.
+         */
+        preset:
+          presetIdeals.get(dimensionKey(t.dimension)) ?? (t.source === 'custom' ? null : t.ideal),
       })),
+      /**
+       * The deck's own overrides, echoed back so the sheet can render exactly
+       * what it will be saving over. Derived state — `targets` above is the
+       * thing that is actually used — but a client that had to reconstruct the
+       * sparse set by diffing targets against presets would get a false
+       * positive every time an override happened to equal the preset.
+       */
+      targetOverrides: deck.targetOverrides ?? {},
       cuts,
       deficits: deficits.map((d) => ({ dimension: d.dimension, delta: d.delta })),
       archetype: {
@@ -212,6 +242,9 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
         // The target shape and the per-bucket gap, so the panel can draw both
         // and say which mana values need more or fewer cards (ADR-0011).
         target: targetCurve,
+        // The archetype's own shape, for the buckets the builder pinned. Same
+        // shape as `target`; equal to it when nothing is overridden.
+        preset: presetCurve,
         deltas: curveDeltas(counts.manaCurve, targetCurve),
         // Cards the user has committed to at each mana value, so the curve can
         // show what is settled and what is still moving.

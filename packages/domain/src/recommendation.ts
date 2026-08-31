@@ -1,5 +1,5 @@
 import type { BracketFlag } from './bracket.js'
-import type { CompositionDimension } from './composition.js'
+import type { CompositionDimension, TargetSource } from './composition.js'
 import type { ComboId, OracleId } from './ids.js'
 import type { SynergyTag } from './synergy.js'
 import type { Role } from './role.js'
@@ -40,6 +40,18 @@ export type Reason =
       readonly kind: 'fills-deficit'
       readonly dimension: CompositionDimension
       readonly deficit: number
+      /**
+       * Whose target this gap is measured against (doc 16).
+       *
+       * "Fills a ramp gap" and "fills the ramp target you set" are different
+       * claims, and pillar P4 says a recommendation must make the one that is
+       * true: a card suggested because the builder typed 14 ramp is being
+       * suggested on the builder's own authority, not the archetype's, and a
+       * reason that hides that is a reason the user cannot audit. Optional, so
+       * a reader that predates doc 16 renders exactly what it did before
+       * (AGENTS.md R2); absent reads as `archetype`.
+       */
+      readonly source?: TargetSource
     }
   /**
    * What this land taps for, relative to the deck's colours.

@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { compositionTargets } from './archetype-targets.js'
 import type { Card, CardType } from './card.js'
 import { countComposition, findDeficits, shortfalls } from './composition-analysis.js'
-import { dimensionKey, roleDimension, typeDimension } from './composition.js'
+import { dimensionFromKey, dimensionKey, roleDimension, typeDimension } from './composition.js'
 import type { Deck, DeckEntry } from './deck.js'
 import { deckId, oracleId, printingId } from './ids.js'
 import type { OracleId } from './ids.js'
+import { ROLE_PRECEDENCE } from './role.js'
 import type { Role } from './role.js'
 
 const card = (name: string, role: Role, types: CardType[], manaValue: number): Card => ({
@@ -178,6 +179,31 @@ describe('findDeficits', () => {
     const counts = countComposition(deckOf([]), CARDS)
     const deficits = findDeficits(counts, targets)
     expect(deficits.every((d) => typeof d.actual === 'number')).toBe(true)
+  })
+})
+
+describe('dimensionFromKey', () => {
+  it('round-trips every dimension the app can build a key for', () => {
+    // The two live at opposite ends of the override path: `dimensionKey` writes
+    // the key into the deck's stored overrides, `dimensionFromKey` reads it back
+    // when the archetype does not name that dimension. If they drift, an
+    // override survives a save and then silently stops applying.
+    for (const role of ROLE_PRECEDENCE) {
+      const dim = roleDimension(role)
+      expect(dimensionFromKey(dimensionKey(dim))).toEqual(dim)
+    }
+    for (const type of ['creature', 'artifact', 'land'] as CardType[]) {
+      const dim = typeDimension(type)
+      expect(dimensionFromKey(dimensionKey(dim))).toEqual(dim)
+    }
+  })
+
+  it('returns null for a key in neither namespace', () => {
+    // Null, not a fabricated dimension: an unparseable key is one override to
+    // drop, never a `role:undefined` row appearing in the meters.
+    expect(dimensionFromKey('ramp')).toBeNull()
+    expect(dimensionFromKey('')).toBeNull()
+    expect(dimensionFromKey('spell:ramp')).toBeNull()
   })
 })
 

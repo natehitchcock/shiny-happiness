@@ -7,7 +7,7 @@ scope (files it may touch), explicit dependencies, and a definition of done.
 
 ## 11.0 Current state — read this first
 
-Last updated: 2026-08-30, end of the fourth build session.
+Last updated: 2026-08-31, end of the fourth build session.
 
 **It runs.** `pnpm --filter @roundtable/web dev` with the API up gives a working
 deck workspace against 34,492 real cards, 110,577 printings and 108,046 real
@@ -84,6 +84,18 @@ No Docker? Any PostgreSQL 16 works. The third session used the EDB portable
 binaries (`initdb` into a user directory, `pg_ctl -o "-p 5433"`) — no
 administrator rights, no service.
 
+**The archetype presets can be argued with.** [Doc 16](16-archetype-customiser.md)
+is built: a builder tunes the role counts, the eight curve buckets and one
+"how strict" setting per deck, from "Adjust targets" on the Composition panel.
+The override is **sparse** — only what was typed is stored, so a deck that pins
+`ramp` still inherits every later revision of `draw` — and it is stored as
+**counts**, because builders think in "36 lands". Migration `0013` adds
+`decks.target_overrides jsonb NOT NULL DEFAULT '{}'`; a deck that overrides
+nothing is byte-identical to before. No ADR: every contract change is a new
+optional field (AGENTS.md R2). A recommendation filling a gap the builder
+invented now says so — "fills the ramp target you set", not "fills ramp gap" —
+because pillar P4 asks the reason to name the thing they can change.
+
 **Is a deployment current?** `GET /api/v1/health` says so without credentials —
 the applied migration head, anything unapplied, and whether a corpus snapshot is
 live ([ADR-0019](adr/0019-health-endpoint-reports-the-applied-schema.md)). It
@@ -93,7 +105,7 @@ returned an error; see DEPLOYING.md.
 **Verify:**
 
 ```bash
-pnpm check          # lint + typecheck + 949 tests
+pnpm check          # lint + typecheck + 1132 tests
 ```
 
 The integration tests need a real Postgres and SKIP (loudly) without one. The
@@ -302,8 +314,12 @@ The domain layer is done, so everything below is now unblocked in its own right.
 
 | Doc | What it is |
 | --- | --- |
-| [16 — Archetype customiser](16-archetype-customiser.md) | Let a builder tune the role targets and curve their deck is judged against, instead of accepting the archetype preset. Sparse per-deck override so decks keep inheriting preset improvements; both target functions gain one optional parameter and nothing downstream changes. Three open questions at the end. |
 | [17 — The deck web](17-deck-web.md) | A second view of one deck: every card as its art, every relationship as a coloured line. Scoped, not built. Density is the whole problem — a real themed 99 has 1,011 benefits edges and 756 combos one card away — so the reduction rules and the validated four-colour edge palette are most of the document. Three open questions at the end. |
+
+[Doc 16, the archetype customiser](16-archetype-customiser.md), was in this table
+and is now **built** — roles, curve and tolerance, all three of its open
+questions answered in §16.9 and its four divergences from the design recorded in
+§16.10.
 
 ## 11.10 UI-01: a gallery instead of Storybook
 

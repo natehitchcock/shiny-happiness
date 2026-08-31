@@ -54,8 +54,11 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
         targets: context.targets,
         counts: context.counts,
         weights: weightsFor(deck.archetype, body.weights ?? {}),
-        // The curve a deck of this archetype wants (ADR-0011).
-        curveTarget: curveTarget(deck.archetype, deck.archetypeSecondary),
+        // The curve a deck of this archetype wants (ADR-0011), as tuned by this
+        // deck's own overrides (doc 16). The analysis endpoint builds the same
+        // target from the same three arguments; the two MUST agree, or the panel
+        // says the deck is short at two while the ordering thinks otherwise.
+        curveTarget: curveTarget(deck.archetype, deck.archetypeSecondary, deck.targetOverrides),
         // What this deck already does and wants, commander weighted (ADR-0011).
         deckSynergy: deckSynergy(
           deck.commanders,

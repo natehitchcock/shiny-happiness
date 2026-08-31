@@ -13,6 +13,7 @@ import type {
   Zone,
 } from '@roundtable/domain'
 import type { Pool, PoolClient } from 'pg'
+import { parseTargetOverrides } from '@roundtable/domain'
 import { withTransaction } from '../client.js'
 
 interface DeckRow {
@@ -28,6 +29,8 @@ interface DeckRow {
   readonly budget_max_card: string | null
   readonly status: string
   readonly exclude_universes_beyond: boolean
+  /** `jsonb`, so whatever was written. Parsed, never cast — see `toDeck`. */
+  readonly target_overrides: unknown
   readonly version: number
   readonly created_at: Date
   readonly updated_at: Date
@@ -74,6 +77,17 @@ const toDeck = (row: DeckRow, entries: readonly DeckEntry[]): Deck => ({
           maxCardUsd: row.budget_max_card === null ? null : Number(row.budget_max_card),
         },
   excludeUniversesBeyond: row.exclude_universes_beyond,
+  /*
+   * Parsed rather than cast. `target_overrides` is jsonb and the driver hands
+   * back whatever is in it, including rows written by a build that knew a
+   * different shape. `parseTargetOverrides` drops what it cannot read, so a bad
+   * key costs that key and the deck still opens on its archetype's presets —
+   * casting instead would push `{"role:ramp": "twelve"}` all the way into
+   * `compositionTargets` and produce a NaN target nothing downstream can render.
+   *
+   * Also covers a hand-built row in a test that predates the column.
+   */
+  targetOverrides: parseTargetOverrides(row.target_overrides),
   status: row.status as Deck['status'],
   version: row.version,
   createdAt: row.created_at.toISOString(),

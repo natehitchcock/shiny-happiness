@@ -1,0 +1,39 @@
+-- Per-deck target overrides (doc 16).
+--
+-- The archetype preset drives more of the app than its name suggests: the role
+-- vector and curve shape decide the `fills-<dimension>` groups, the composition
+-- meters, the two-sided curve score and the cut hints. A builder who disagrees
+-- with the preset disagrees with all of it at once, and the only recourse today
+-- is picking a different archetype that is wrong in a different way. This column
+-- is where their correction lives.
+--
+-- SPARSE, so `{}` is the overwhelmingly common value and every existing deck
+-- gets it. Shape:
+--
+--   { "roles": { "role:ramp": 12, "type:creature": 18 },
+--     "curve": { "2": 14 },
+--     "tolerance": 0.2 }
+--
+-- Rejected alternative: columns. `target_roles jsonb`, `target_curve jsonb`,
+-- `target_tolerance real` would let the tolerance be typed by the database, but
+-- the other two would still be jsonb, and three columns that are only ever read
+-- and written together as one object is three chances for two of them to be
+-- updated and the third not. `PATCH /decks/:id` replaces this wholesale for the
+-- same reason.
+--
+-- Rejected alternative: a `deck_target_overrides` side table, one row per
+-- overridden dimension. It would make "reset one role" a DELETE and would let
+-- the database enforce the count range. It was rejected because the whole object
+-- is at most a few dozen small numbers, it is read on EVERY analysis and
+-- recommendation request as part of the deck row, and a join per request to
+-- rebuild an object this small is a cost with nothing on the other side of it.
+--
+-- NOT NULL DEFAULT '{}' rather than nullable: "has not overridden anything" and
+-- "has overridden nothing" are the same deck, and a nullable column would make
+-- every reader decide which one NULL was.
+ALTER TABLE decks
+  ADD COLUMN target_overrides jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+-- No index. The column is never a search key — it is read with the deck row it
+-- sits on and written by that deck's PATCH, and an index on a jsonb column
+-- nothing queries is upkeep with no reader.

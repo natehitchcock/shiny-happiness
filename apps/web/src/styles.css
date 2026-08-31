@@ -1896,6 +1896,117 @@ select {
   opacity: 0.4;
   cursor: default;
 }
+/* ------------------------------------------------- archetype customiser */
+
+/* Wider than the import sheet: it is two columns of numbers, and stacking them
+   on a phone is the responsive behaviour rather than a special case. */
+.targets-sheet {
+  width: min(640px, calc(100vw - 2rem));
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+}
+
+.targets-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--step) * 3);
+}
+
+@media (max-width: 560px) {
+  .targets-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.targets-col h4 {
+  margin: 0 0 var(--step);
+  font-family: var(--display);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+}
+
+.target-row {
+  display: grid;
+  grid-template-columns: 1fr 4rem 2.2rem 1.8rem;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+
+.target-name {
+  font-size: 0.75rem;
+}
+
+.target-box {
+  width: 100%;
+  background: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  color: var(--parchment);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  padding: 2px 4px;
+}
+
+/* An overridden field is marked by its border as well as by the reset arrow
+   next to it: colour is never the only signal for anything in this app. */
+.target-box[data-custom='true'] {
+  border-color: var(--brass);
+  color: var(--brass);
+}
+
+/* The preset, dim, beside the box — the context for the number being typed. */
+.target-preset {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--parchment-dim);
+  text-align: right;
+}
+
+/* Fixed width whether or not the button is there, so rows do not jump as
+   overrides come and go. */
+.target-reset {
+  display: inline-block;
+  min-width: 1.6rem;
+  text-align: center;
+}
+
+.target-total {
+  margin-top: var(--step);
+}
+
+/* A warning, never a block: the builder may knowingly aim high while cutting,
+   exactly as they may knowingly cross a bracket line (doc 03 §3.2). */
+.target-total[data-over='true'] {
+  color: var(--rust);
+}
+
+.target-tolerance {
+  display: grid;
+  grid-template-columns: auto 1fr 2.2rem 1.8rem;
+  align-items: center;
+  gap: var(--step);
+  margin-top: calc(var(--step) * 2);
+  font-size: 0.75rem;
+}
+
+/* The mark on a meter or curve column whose target the builder set. */
+.target-mark {
+  color: var(--brass);
+  font-size: 0.7rem;
+}
+
+.curve-col[data-custom='true'] .curve-band {
+  border: 1px dashed var(--brass);
+}
+
+.target-change {
+  color: var(--brass);
+}
+
 /* Said rather than implied: the group is still here, its need is just met. */
 .group-head .satisfied {
   color: var(--brass);

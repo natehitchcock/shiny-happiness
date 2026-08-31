@@ -2,13 +2,16 @@ import type { ArchetypeKey } from './archetype.js'
 import type { Bracket } from './bracket.js'
 import type { CardType } from './card.js'
 import {
+  dimensionFromKey,
   dimensionKey,
   roleDimension,
   typeDimension,
   type CompositionDimension,
   type CompositionTarget,
+  type TargetSource,
 } from './composition.js'
 import type { Role } from './role.js'
+import { DEFAULT_ROLE_TOLERANCE, type TargetOverrides } from './target-overrides.js'
 
 /**
  * Archetype target vectors (doc 14 §14.2, DOM-09).
@@ -20,9 +23,10 @@ import type { Role } from './role.js'
  * were argued for and which were typed to fill the line.
  *
  * They are not a claim of optimality, and the UI presents them as a range with an
- * ideal marked rather than as a number to hit. Doc 16 scopes letting a builder
- * override them per deck; until that ships these presets are the only answer the
- * app has, which raises rather than lowers the bar on justifying them.
+ * ideal marked rather than as a number to hit. A builder can now override any of
+ * them per deck (doc 16), which lowers the stakes on a wrong row but NOT the bar
+ * on justifying one: an override is a correction someone had to notice and make,
+ * and a row nobody argued for is a row every deck starts wrong on.
  *
  * THREE CONSTRAINTS BIND EVERY ROW.
  *
@@ -263,20 +267,46 @@ const IDEALS: Record<ArchetypeKey, Ideals> = {
 /**
  * Half-width of the acceptable band around an ideal. A deck at 34 lands is not
  * broken and the UI must not say it is, so every target is a range.
+ *
+ * `tolerance` is the deck's own "how strict" setting (doc 16), and it is the
+ * SAME number the curve uses, which is why it is scaled against
+ * `DEFAULT_ROLE_TOLERANCE` rather than being multiplied in raw: 0.35 is the
+ * midrange row's curve tolerance and the middle of that table, so leaving the
+ * slider where it starts is the identity and the widths below are unchanged.
+ * The alternative — a second, role-only tolerance — was rejected because doc 16
+ * is explicit that one setting covers the whole sheet, and two sliders that
+ * both say "how strict" is a spreadsheet.
+ *
+ * Never narrower than one card, for the reason `MIN_HALF_WIDTH` exists in
+ * `curve.ts`: a zero-width band means "exactly 36 lands or your deck is broken",
+ * which nobody means, and it would make every meter permanently red.
  */
-const band = (dimension: CompositionDimension, ideal: number): number => {
-  if (dimension.kind === 'type') return 6 // creature counts vary far more than role counts
-  if (dimension.role === 'land') return 3
-  return ideal <= 6 ? 2 : 3
+const band = (dimension: CompositionDimension, ideal: number, tolerance?: number): number => {
+  const base =
+    dimension.kind === 'type'
+      ? 6 // creature counts vary far more than role counts
+      : dimension.role === 'land'
+        ? 3
+        : ideal <= 6
+          ? 2
+          : 3
+  if (tolerance === undefined) return base
+  return Math.max(1, Math.round(base * (tolerance / DEFAULT_ROLE_TOLERANCE)))
 }
 
-const toTarget = (dimension: CompositionDimension, ideal: number): CompositionTarget => {
-  const width = band(dimension, ideal)
+const toTarget = (
+  dimension: CompositionDimension,
+  ideal: number,
+  tolerance: number | undefined,
+  source: TargetSource,
+): CompositionTarget => {
+  const width = band(dimension, ideal, tolerance)
   return {
     dimension,
     ideal,
     min: Math.max(0, ideal - width),
     max: ideal + width,
+    source,
   }
 }
 
@@ -308,11 +338,24 @@ export interface TargetOptions {
  * primary and rounds to whole cards, because you cannot play 10.7 ramp spells.
  * Bracket and curve modifiers apply on top — they are orthogonal to archetype
  * (doc 14 §14.2).
+ *
+ * `overrides` is the per-deck sheet (doc 16) and is the LAST thing applied, so
+ * an overridden dimension is the final number and skips the bracket and curve
+ * modifiers. That is a deliberate divergence from doc 16, which listed those
+ * modifiers as "not tunable" and left them running on top. They exist to correct
+ * a preset written at a neutral curve for the deck in front of you; a number the
+ * builder typed while looking at that same deck has already accounted for it,
+ * so applying the correction again would be counting it twice. It also matters
+ * for trust: typing 36 lands and watching the meter read 35 is a form the user
+ * cannot control, and doc 16's whole interface argument is that the number you
+ * type is the number you are judged against. Every dimension NOT overridden
+ * keeps both modifiers in full, which is what "not tunable" was protecting.
  */
 export const compositionTargets = (
   archetype: ArchetypeKey,
   secondary: ArchetypeKey | null,
   options: TargetOptions,
+  overrides?: TargetOverrides,
 ): readonly CompositionTarget[] => {
   const primary = dimensionsOf(IDEALS[archetype])
 
@@ -373,7 +416,29 @@ export const compositionTargets = (
     bump(dimensionKey(roleDimension('spot-removal')), -1)
   }
 
-  return [...primary].map(([key, { dim }]) => toTarget(dim, targets.get(key) ?? 0))
+  // ---- Per-deck overrides (doc 16) ----
+  // Last, so the number the builder typed is the number they are judged
+  // against. See the note on this function for why the modifiers above are
+  // deliberately not re-applied to an overridden dimension.
+  const custom = new Set<string>()
+  for (const [key, ideal] of Object.entries(overrides?.roles ?? {})) {
+    const dim = primary.get(key)?.dim ?? dimensionFromKey(key)
+    // A key that parses to no dimension is dropped, not defaulted: inventing a
+    // `role:undefined` target would put an unnameable row in the meters.
+    if (dim === null) continue
+    primary.set(key, { dim, ideal })
+    targets.set(key, ideal)
+    custom.add(key)
+  }
+
+  return [...primary].map(([key, { dim }]) =>
+    toTarget(
+      dim,
+      targets.get(key) ?? 0,
+      overrides?.tolerance,
+      custom.has(key) ? 'custom' : 'archetype',
+    ),
+  )
 }
 
 // ---------------------------------------------------------------------------
