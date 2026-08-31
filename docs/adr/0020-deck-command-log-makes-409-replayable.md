@@ -1,4 +1,4 @@
-# ADR-0018 — A per-deck command log is what makes a `409` replayable
+# ADR-0020 — A per-deck command log is what makes a `409` replayable
 
 - **Status:** accepted
 - **Date:** 2026-08-30
