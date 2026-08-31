@@ -216,6 +216,7 @@ POST /api/v1/decks/:id/recommendations
       rationale: string,
       total: number,                // before limitPerGroup
       items: Recommendation[]       // ordered; see doc 05 §5.6
+                                    // up to limitPerGroup + 3, see below
     }>,
     unavailable: Array<{ key: CandidateGroupKey, reason: string }>,
     // The deck's emphasis and how far it reaches. `[]` when there is none.
@@ -261,6 +262,27 @@ that worked. `supporting` is the count of eligible candidates carrying that tag,
 before the query filter, so `0` lets the client say *"nothing in your colours
 produces or wants landfall"* rather than leaving the builder to wonder why their
 click did nothing.
+
+**`items` may be up to three longer than `limitPerGroup`** when the deck has a
+focus ([ADR-0026](adr/0026-a-focus-guarantees-its-top-three-in-every-category.md)).
+Scoring only orders *within* a group, so a card supporting the builder's focus
+could sort below the cut and never appear in that category at all. Each group
+therefore carries the top three supporters of the focus that the cut would have
+dropped, appended after the cut — which is also their score position, since
+being below the cut is why they are here. The list **extends**; it never
+displaces, because emphasis removing a suggestion is the one thing it promises
+not to do. `total` is unchanged: those cards were always members, they were
+merely not shown.
+
+Those rows carry `guaranteed: true` on their `keyword-synergy` reason, which is
+a different claim from `emphasised: true` — the latter is true of every
+supporter in the list, the former says this row scores below the cut and is
+shown anyway. A client that truncates group rows again on its own must not
+truncate these away, or the guarantee stops at the server.
+
+The guarantee reaches past the **cut**, never past the **filter**: an excluded
+card is not a candidate at all (P6), and a card withheld by `query` stays
+withheld.
 
 ```
 GET /api/v1/decks/:id/combo-index

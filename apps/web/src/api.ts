@@ -121,6 +121,17 @@ export interface Reason {
    * because of an emphasis has to make the second one. Absent means the first.
    */
   emphasised?: boolean
+  /**
+   * Whether this row is on the page only because of the focus guarantee
+   * (ADR-0026) — one of the top three supporters of the deck's focus in this
+   * category, which the group's own cut would otherwise have dropped.
+   *
+   * Read for two things, and both need it on the wire rather than inferred from
+   * where the row sits: the sentence under the card name, and the combo merge,
+   * which halves its rows for density and must not halve away a row the server
+   * promised. Position does not survive that merge or a column sort.
+   */
+  guaranteed?: boolean
 }
 
 export interface Recommendation {

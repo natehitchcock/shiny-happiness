@@ -145,6 +145,21 @@ const SYNERGY_THRESHOLD = 0.15
 const STAPLE_INCLUSION = 0.25
 const TOP_BY_TYPE_LIMIT = 10
 
+/**
+ * How many of the focus's supporters every category must show (ADR-0026).
+ *
+ * Emphasis used to move the score and nothing else, so a card supporting the
+ * builder's declared focus could sort below `limitPerGroup` and never appear in
+ * that category at all. The builder said what the deck is about and the
+ * category answered with nothing about it.
+ *
+ * Three, because the number has to be small enough to read as a sample and
+ * large enough to be one: one card is an anecdote and cannot show a range, and
+ * the client asks for `limitPerGroup: 8`, so anything much larger stops being a
+ * guarantee inside a category and becomes a takeover of it.
+ */
+const FOCUS_GUARANTEE = 3
+
 interface Scratch {
   readonly pooled: PoolCard
   readonly degree: number
@@ -213,6 +228,65 @@ const dimensionLabel = (dimension: CompositionDimension): string =>
  * Replaces a flat 25%-per-bucket comparison that could only ever reward, never
  * penalise — so an over-full mana value produced no signal to stop.
  */
+
+/**
+ * The supporters of the deck's focus that the cut would have dropped, and that
+ * this group must show anyway (ADR-0026).
+ *
+ * "TOP 3 OF THE FOCUS AS A WHOLE", not three per emphasised tag. The rejected
+ * alternative is the reason to say so: a builder with four tags would be owed
+ * twelve extra rows in a category the client renders eight rows of, so the
+ * guarantee would be bigger than the thing it is a guarantee about, and each
+ * further tag would dilute the ordering the score just computed. It would also
+ * be a second, contradictory model of what a focus IS — `emphasisScore` sums
+ * every emphasised match onto ONE saturating term, so the scorer already treats
+ * the focus as a single thing, and a per-tag guarantee would have the ordering
+ * and the guarantee disagreeing about that. What the per-tag reading buys, and
+ * what is knowingly given up: a weakly-supported tag can be shut out of its
+ * three slots by a strongly-supported one, which is this same defect one level
+ * down. It is bounded — `supporting` per tag is reported either way, so the
+ * builder can still see that a tag reached nothing — and it is recoverable,
+ * because emphasising that tag alone gives it the three slots outright.
+ *
+ * RANKED BY THE GROUP'S OWN ORDER, restricted to supporters, rather than by
+ * `emphasisScore` alone. The score already carries the emphasis term, so the
+ * leading supporters here are the ones this category would show if it showed
+ * only supporters — one ordering, the one the user can already see. Ranking by
+ * emphasis alone would put a card that does nothing but carry the tag above one
+ * that carries the tag AND closes the gap the category is named after, and it
+ * would need a second ranking that appears nowhere on screen.
+ *
+ * EXTENDS, NEVER DISPLACES. Returning three rows to be swapped in at the cut
+ * would make emphasis remove suggestions, which is the one thing it promises
+ * not to do (`semantic-emphasis.ts`, and the interface says it in three
+ * places). The caller appends these.
+ *
+ * `members` is already past eligibility (so an excluded card cannot be here at
+ * all, P6) and already past the query filter (so the search box still means
+ * what it says — the query filters, emphasis does not).
+ *
+ * With no emphasis every `emphasised` is empty — `emphasisMatches` returns `[]`
+ * before it looks at anything — so this returns `[]` and the output is
+ * byte-identical to what it was before the guarantee existed. That falls out of
+ * the data rather than being guarded on `emphasis.length`, deliberately: a
+ * guard would be a branch no test could distinguish from its own removal.
+ */
+const focusGuaranteed = (members: readonly Scratch[], limit: number): readonly Scratch[] => {
+  if (members.length <= limit) return []
+  let held = 0
+  for (const s of members.slice(0, limit)) if (s.emphasised.length > 0) held += 1
+  if (held >= FOCUS_GUARANTEE) return []
+
+  const extra: Scratch[] = []
+  for (const s of members.slice(limit)) {
+    if (held + extra.length >= FOCUS_GUARANTEE) break
+    // Fewer than three supporters in this group means fewer than three rows.
+    // Padding to three with cards that do not support the focus would answer a
+    // question about the focus with cards that have nothing to do with it.
+    if (s.emphasised.length > 0) extra.push(s)
+  }
+  return extra
+}
 
 export const recommend = (input: RecommendInput): RecommendResult => {
   const identity = new Set(input.colorIdentity)
@@ -475,13 +549,34 @@ export const recommend = (input: RecommendInput): RecommendResult => {
           (b.pooled.card.edhrecRank ?? Number.MAX_SAFE_INTEGER) ||
         (a.pooled.card.name < b.pooled.card.name ? -1 : 1),
     )
+    /*
+     * The cut, then the focus's supporters it would have dropped (ADR-0026).
+     *
+     * APPENDED, which is also their natural score position: they are here
+     * precisely because they sorted below `limit`, so "at the end" and "where
+     * the score put them" are the same place. Pinning them to the top was
+     * rejected — a card the group scores 40th is not the first thing this
+     * category has to say, and hoisting it above nine cards that beat it makes
+     * a claim on the builder's attention that the app's own ranking does not
+     * support. Ordering within a group is what the score is for (P5); the
+     * guarantee decides what is PRESENT, not what leads.
+     *
+     * `items.length` can therefore exceed `limitPerGroup`, which is a change in
+     * what the response means and is why this has an ADR. `total` is untouched:
+     * it counts the group's members, and the guarantee did not find any new
+     * ones.
+     */
+    const guaranteed = focusGuaranteed(members, limit)
     groups.push({
       key,
       label: labelFor(key, deficits),
       rationale: rationaleFor(key),
       total: members.length,
       withheldByFilter: withheld.get(key) ?? 0,
-      items: members.slice(0, limit).map(toRecommendation),
+      items: [
+        ...members.slice(0, limit).map((s) => toRecommendation(s, false)),
+        ...guaranteed.map((s) => toRecommendation(s, true)),
+      ],
     })
   }
 
@@ -515,8 +610,25 @@ export const recommend = (input: RecommendInput): RecommendResult => {
   }
 }
 
-const toRecommendation = (s: Scratch): Recommendation => {
-  const [first, ...rest] = s.reasons
+/**
+ * The reasons, with the focus guarantee named on the one that already names the
+ * focus (ADR-0026, pillar P4).
+ *
+ * A guaranteed row ALWAYS has a `keyword-synergy` reason to mark: it is here
+ * because `emphasised` is non-empty, and that is exactly the condition under
+ * which the scoring pass pushes that reason with `emphasised: true`. The
+ * fallback still exists because a `Reason[]` cannot express that invariant, and
+ * a silent throw here would turn a reason-shaping bug into a dead page.
+ *
+ * Rejected: a reason kind of its own. "Shown because of your focus" and
+ * "supports your emphasised untap" are the same relationship stated twice, and
+ * two chips saying one thing is how a row full of reasons stops being read.
+ */
+const withGuarantee = (reasons: readonly Reason[]): Reason[] =>
+  reasons.map((r) => (r.kind === 'keyword-synergy' ? { ...r, guaranteed: true } : r))
+
+const toRecommendation = (s: Scratch, guaranteed: boolean): Recommendation => {
+  const [first, ...rest] = guaranteed ? withGuarantee(s.reasons) : s.reasons
   if (first === undefined) {
     // Unreachable: scoring guarantees at least one reason. Kept as a throw rather
     // than a silent empty array, because an unexplained recommendation is a bug

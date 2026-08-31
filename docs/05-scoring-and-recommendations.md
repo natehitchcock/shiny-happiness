@@ -219,6 +219,38 @@ Three properties are load-bearing:
   suggestions it always did; `RecommendResult.emphasis` reports
   `supporting: 0` per tag so the absence is named rather than mimed.
 
+### The focus guarantee
+
+Scoring only orders within a group, and every group ends at `limitPerGroup`. A
+card supporting the builder's declared focus could therefore sort below that cut
+and never appear in the category at all — the builder said what the deck is
+about and the category showed them nothing about it.
+
+Every group carries **the top three supporters of the focus**, taken in the
+group's own order and appended after the cut
+([ADR-0026](adr/0026-a-focus-guarantees-its-top-three-in-every-category.md)):
+
+- **Three across the focus as a whole**, not three per emphasised tag — a
+  four-tag deck would otherwise be owed twelve rows in a category the client
+  renders eight of, and `emphasisScore` already treats a focus as one saturating
+  term rather than N independent ones.
+- **The list extends, never displaces.** Holding it at `limit` would make
+  emphasis remove suggestions, which it promises not to do. `total` is
+  unchanged; those cards were always members.
+- **Appended, not pinned to the top.** They are here because they scored below
+  the cut, so the end IS their score position. Grouping is the product's
+  opinion, ordering is the score's (P5), and presence is the guarantee's.
+- **Supporters already above the cut count towards the three**, so a
+  well-supported focus adds nothing. Fewer than three supporters means fewer
+  than three rows; the list is never padded with cards that do not support the
+  focus.
+- **Past the cut, never past the filter.** An excluded card is not a candidate
+  (P6) and a card withheld by the query stays withheld.
+- The rows say so: `guaranteed: true` on the `keyword-synergy` reason, rendered
+  as *"top 3 here for your emphasised opponent discard"*. `emphasised: true` is
+  true of every supporter on the page; this is the claim that explains a row
+  below the cut (§5.7, P4).
+
 `Reason` says which of the two claims it is making: a `keyword-synergy` reason
 about an emphasised tag carries `emphasised: true`, so "benefits from your
 sacrifice fodder" and "benefits from your EMPHASISED sacrifice fodder" are

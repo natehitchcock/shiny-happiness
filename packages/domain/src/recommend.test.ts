@@ -722,3 +722,231 @@ describe('semantic emphasis', () => {
     expect(recommend(baseInput({ pool: [pooled('a')] })).emphasis).toEqual([])
   })
 })
+
+/**
+ * The focus guarantee (ADR-0026).
+ *
+ * Emphasis moved the SCORE and nothing else, so a card supporting the builder's
+ * focus could still sort below `limitPerGroup` and never appear in that
+ * category at all. The builder said what the deck is about and the category
+ * showed them nothing about it.
+ *
+ * THE FIXTURE HAS TO OVERFLOW, or none of this is being tested. A pool smaller
+ * than the limit never reaches the slice, and a pool where every card supports
+ * the focus cannot tell a guarantee from an ordinary sort — both are ways this
+ * feature can be shipped with tests that cannot fail. So: 21 cards into a limit
+ * of 5, of which four support the focus and seventeen do not, and the four are
+ * held BELOW the cut by a bracket penalty larger than the emphasis term (−0.5
+ * against +0.2) so the guarantee is the only thing that can put them on screen.
+ */
+describe('the focus guarantee', () => {
+  const CUT = 5
+
+  /** Seventeen cards that have nothing to do with the focus. */
+  const plain = () =>
+    Array.from({ length: 17 }, (_, i) => {
+      const name = `plain-${String(i).padStart(2, '0')}`
+      return pooled(name, { card: card(name, { edhrecRank: 100 + i }) })
+    })
+
+  /**
+   * A card supporting the focus, penalised so it cannot climb into the top five
+   * on score alone. A Game Changer in a bracket-3 deck is exactly this card in
+   * the real corpus: it supports the thing the deck is about, and the bracket
+   * penalty buries it below cards that do not.
+   */
+  const supporter = (name: string, rank: number, over: Partial<Card> = {}) =>
+    pooled(name, {
+      card: card(name, { edhrecRank: rank, synergyProduces: ['untap'], ...over }),
+      bracketFlags: ['game-changer'],
+    })
+
+  const overflowing = (over: Partial<RecommendInput> = {}) =>
+    recommend(
+      baseInput({
+        limitPerGroup: CUT,
+        pool: [
+          ...plain(),
+          supporter('sup-a', 900),
+          supporter('sup-b', 901),
+          supporter('sup-c', 902),
+          supporter('sup-d', 903),
+        ],
+        ...over,
+      }),
+    )
+
+  const staple = (r: ReturnType<typeof recommend>) => r.groups.find((g) => g.key === 'staple')!
+  const ids = (r: ReturnType<typeof recommend>) => staple(r).items.map((i) => i.oracleId)
+
+  it('cuts the supporters off the list when nothing is emphasised', () => {
+    // The defect, pinned. Without this the rest of the block proves nothing: if
+    // the supporters made the cut on their own there is no guarantee to test.
+    const unfocused = ids(overflowing())
+    expect(unfocused).toHaveLength(CUT)
+    expect(unfocused).not.toContain(oracleId('sup-a'))
+  })
+
+  it('includes the top three supporters of the focus in the category', () => {
+    const focused = ids(overflowing({ emphasis: ['untap'] }))
+    expect(focused).toContain(oracleId('sup-a'))
+    expect(focused).toContain(oracleId('sup-b'))
+    expect(focused).toContain(oracleId('sup-c'))
+  })
+
+  it('stops at three — the fourth supporter is not carried in', () => {
+    expect(ids(overflowing({ emphasis: ['untap'] }))).not.toContain(oracleId('sup-d'))
+  })
+
+  it('EXTENDS the list rather than displacing anything (emphasis never removes)', () => {
+    // Holding the list at exactly `limit` would make emphasis REMOVE cards,
+    // which is stated to the user in three places and pinned by the API's own
+    // "never removes a suggestion" test.
+    const unfocused = ids(overflowing())
+    const focused = ids(overflowing({ emphasis: ['untap'] }))
+    expect(focused).toHaveLength(CUT + 3)
+    for (const id of unfocused) expect(focused).toContain(id)
+    // And the rows that were already there keep their places: the guaranteed
+    // three sit at the end, at the score position they already had, rather than
+    // pinned above cards that outscore them.
+    expect(focused.slice(0, CUT)).toEqual(unfocused)
+  })
+
+  it('leaves the reported total alone — the guarantee shows more, it counts nothing new', () => {
+    expect(staple(overflowing({ emphasis: ['untap'] })).total).toBe(21)
+    expect(staple(overflowing()).total).toBe(21)
+  })
+
+  it('changes nothing at all when no focus is set', () => {
+    expect(ids(overflowing({ emphasis: [] }))).toEqual(ids(overflowing()))
+  })
+
+  it('adds nothing when the top three already made the cut', () => {
+    // The common case for a well-supported focus: the guarantee is already
+    // satisfied by the ordering, and must be a no-op rather than a second copy.
+    const result = recommend(
+      baseInput({
+        limitPerGroup: CUT,
+        emphasis: ['untap'],
+        pool: [
+          ...plain(),
+          // No bracket flag, so the emphasis term alone carries them to the top.
+          pooled('top-a', { card: card('top-a', { synergyProduces: ['untap'] }) }),
+          pooled('top-b', { card: card('top-b', { synergyProduces: ['untap'] }) }),
+          pooled('top-c', { card: card('top-c', { synergyProduces: ['untap'] }) }),
+        ],
+      }),
+    )
+    expect(ids(result)).toHaveLength(CUT)
+    expect(new Set(ids(result)).size).toBe(CUT)
+  })
+
+  it('counts a supporter that made the cut towards the three', () => {
+    // One supporter above the line means two more are owed, not three.
+    const result = recommend(
+      baseInput({
+        limitPerGroup: CUT,
+        emphasis: ['untap'],
+        pool: [
+          ...plain(),
+          pooled('top-a', { card: card('top-a', { synergyProduces: ['untap'] }) }),
+          supporter('sup-a', 900),
+          supporter('sup-b', 901),
+          supporter('sup-c', 902),
+        ],
+      }),
+    )
+    expect(ids(result)).toHaveLength(CUT + 2)
+    expect(ids(result)).toContain(oracleId('sup-a'))
+    expect(ids(result)).toContain(oracleId('sup-b'))
+    expect(ids(result)).not.toContain(oracleId('sup-c'))
+  })
+
+  it('includes what exists when a group holds fewer than three supporters', () => {
+    // Never padded to three with cards that do not support the focus.
+    const result = recommend(
+      baseInput({
+        limitPerGroup: CUT,
+        emphasis: ['untap'],
+        pool: [...plain(), supporter('sup-a', 900)],
+      }),
+    )
+    expect(ids(result)).toHaveLength(CUT + 1)
+    expect(ids(result)).toContain(oracleId('sup-a'))
+  })
+
+  it('never resurrects an excluded card (pillar P6)', () => {
+    // The easiest thing here to get wrong: the guarantee reaches past the cut,
+    // and a builder's rejection lives on the other side of it.
+    const result = overflowing({
+      emphasis: ['untap'],
+      excluded: new Set([oracleId('sup-a')]),
+    })
+    expect(ids(result)).not.toContain(oracleId('sup-a'))
+    // And the three are still filled, from what is left.
+    expect(ids(result)).toContain(oracleId('sup-d'))
+  })
+
+  it('never resurrects a card the query withheld', () => {
+    // Emphasis never filters; the QUERY does, and that is its whole job. A
+    // guarantee reaching past the filter would make the search box a lie.
+    const result = overflowing({
+      emphasis: ['untap'],
+      query: ast('t:creature'),
+      pool: [
+        ...plain(),
+        supporter('sup-a', 900, { typeLine: 'Artifact', types: ['artifact'] }),
+        supporter('sup-b', 901, { typeLine: 'Artifact', types: ['artifact'] }),
+        supporter('sup-c', 902, { typeLine: 'Artifact', types: ['artifact'] }),
+      ],
+    })
+    expect(ids(result)).toHaveLength(CUT)
+    expect(ids(result)).not.toContain(oracleId('sup-a'))
+    expect(staple(result).withheldByFilter).toBe(3)
+  })
+
+  it('never puts a card in a group it does not already belong to (pillar P5)', () => {
+    // Grouping is the product's opinion. The guarantee inserts into the group
+    // the card was already assigned to; it never moves one to a group that has
+    // room.
+    const groupsOf = (r: ReturnType<typeof recommend>) =>
+      Object.fromEntries(r.groups.flatMap((g) => g.items.map((i) => [i.oracleId, g.key])))
+    expect(groupsOf(overflowing({ emphasis: ['untap'], limitPerGroup: 60 }))).toEqual(
+      groupsOf(overflowing({ limitPerGroup: 60 })),
+    )
+  })
+
+  it('says the card is on the page because of the focus (pillar P4)', () => {
+    const item = staple(overflowing({ emphasis: ['untap'] })).items.find(
+      (i) => i.oracleId === oracleId('sup-a'),
+    )!
+    expect(item.reasons).toContainEqual({
+      kind: 'keyword-synergy',
+      tag: 'untap',
+      direction: 'theme',
+      withOracleIds: [],
+      emphasised: true,
+      guaranteed: true,
+    })
+  })
+
+  it('makes no such claim about a supporter that made the cut on its own', () => {
+    const result = recommend(
+      baseInput({
+        limitPerGroup: CUT,
+        emphasis: ['untap'],
+        pool: [
+          ...plain(),
+          pooled('top-a', { card: card('top-a', { synergyProduces: ['untap'] }) }),
+        ],
+      }),
+    )
+    const item = staple(result).items.find((i) => i.oracleId === oracleId('top-a'))!
+    expect(item.reasons.find((r) => r.kind === 'keyword-synergy')).not.toHaveProperty('guaranteed')
+  })
+
+  it('emits no duplicate rows', () => {
+    const focused = ids(overflowing({ emphasis: ['untap'] }))
+    expect(new Set(focused).size).toBe(focused.length)
+  })
+})

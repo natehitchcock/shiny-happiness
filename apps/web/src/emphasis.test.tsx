@@ -541,3 +541,125 @@ describe('a suggestion that rose because of the emphasis', () => {
     )
   })
 })
+
+// ------------------------------------------- the guarantee has to reach the screen
+
+/**
+ * The focus guarantee, as far as the browser (ADR-0026).
+ *
+ * A guarantee the server keeps and the client then truncates away is not a
+ * guarantee, and this client truncates twice: the workspace asks for
+ * `limitPerGroup: 8` rather than the domain's default 60, and the three
+ * `combo-N` groups are merged into one heading whose rows are then HALVED for
+ * density. The first is fine — the domain applies the guarantee at whatever
+ * limit it is given. The second is not, and is what these pin.
+ */
+describe('the focus guarantee on screen', () => {
+  const comboItem = (oracleId: string, score: number, guaranteed: boolean) => ({
+    oracleId,
+    score,
+    comboDegree: 1,
+    nearCombosAt1: 0,
+    completedCombos: [],
+    combos: [],
+    reasons: [
+      {
+        kind: 'keyword-synergy',
+        direction: 'payoff' as const,
+        tag: 'opponent-discard',
+        emphasised: true,
+        ...(guaranteed ? { guaranteed: true } : {}),
+      },
+    ],
+  })
+
+  /**
+   * Six combo rows, the last of them there only because of the focus.
+   *
+   * Six is chosen so the halving BITES: `Math.ceil(6 / 2)` keeps three, and the
+   * guaranteed row — lowest score, so last in the merged sort — is in the half
+   * that would be thrown away. A fixture of two rows could not tell a fixed
+   * merge from a broken one.
+   */
+  const merged = (): api.Recommendations =>
+    recs({
+      emphasis: [{ tag: 'opponent-discard', supporting: 196 }],
+      groups: [
+        {
+          key: 'combo-1',
+          label: 'Completes 1 combo',
+          rationale: 'Finishes one combo',
+          total: 6,
+          items: [
+            comboItem('c1', 0.9, false),
+            comboItem('c2', 0.8, false),
+            comboItem('c3', 0.7, false),
+            comboItem('c4', 0.6, false),
+            comboItem('c5', 0.5, false),
+            comboItem('guaranteed', 0.1, true),
+          ],
+        },
+      ],
+    } as unknown as Partial<api.Recommendations>)
+
+  beforeEach(() => {
+    mocked.hydrate.mockResolvedValue({
+      cards: new Map([
+        ['cmd', commander],
+        ...['c1', 'c2', 'c3', 'c4', 'c5'].map((id): [string, api.Card] => [
+          id,
+          card({ oracleId: id, name: `Filler ${id}` }),
+        ]),
+        ['guaranteed', card({ oracleId: 'guaranteed', name: 'Syphon Mind' })],
+      ]),
+      prices: new Map(),
+      images: new Map(),
+    } satisfies api.Hydrated)
+  })
+
+  it('survives the combo merge, which halves every other row away', async () => {
+    mocked.getRecommendations.mockResolvedValue(merged())
+    await mount(deck({ semanticEmphasis: ['opponent-discard'] }))
+    // The halving still happens — this is a density decision about the merged
+    // heading and the guarantee is not an excuse to undo it.
+    await waitFor(() => expect(screen.queryByText('Filler c5')).toBeNull())
+    // But the row the server promised the builder is still on the page.
+    expect(screen.getByText('Syphon Mind')).toBeDefined()
+  })
+
+  it('says why it is there, rather than sitting at the bottom unexplained', async () => {
+    mocked.getRecommendations.mockResolvedValue(merged())
+    await mount(deck({ semanticEmphasis: ['opponent-discard'] }))
+    await waitFor(() =>
+      expect(screen.getByText(/top 3 here for your emphasised opponent discard/i)).toBeDefined(),
+    )
+  })
+})
+
+// ------------------------------------------------------ what the copy promises
+
+describe('what the interface promises about a focus', () => {
+  /*
+   * The copy said emphasis "only reorders". It now also KEEPS the top three
+   * supporters in every category, which is an addition rather than a
+   * reordering, so the sentence had to change or it would be a promise the
+   * server no longer keeps. What did NOT change is the half that matters:
+   * nothing is ever hidden.
+   */
+  it('no longer claims a focus does nothing but reorder', async () => {
+    mocked.getRecommendations.mockResolvedValue(
+      recs({ emphasis: [{ tag: 'opponent-discard', supporting: 196 }] }),
+    )
+    await mount(deck({ semanticEmphasis: ['opponent-discard'] }))
+    expect(focusPanel().textContent).not.toMatch(/only reorders|reorders your suggestions/i)
+  })
+
+  it('says the top few supporters are kept in every category', async () => {
+    mocked.getRecommendations.mockResolvedValue(
+      recs({ emphasis: [{ tag: 'opponent-discard', supporting: 196 }] }),
+    )
+    await mount(deck({ semanticEmphasis: ['opponent-discard'] }))
+    expect(focusPanel().textContent).toMatch(/top three|top 3/i)
+    expect(focusPanel().textContent).toMatch(/categor/i)
+  })
+})
