@@ -61,11 +61,16 @@ the page it returns, not for everything the scan touched.
 
 ```
 POST   /api/v1/decks     { name, commanders, targetBracket, archetype,
-                           archetypeSecondary? }                        → Deck
+                           archetypeSecondary?, semanticEmphasis? }     → Deck
+       semanticEmphasis is accepted at CREATION because that is when the
+       builder is asked: the start screen offers the chosen commander's own
+       semantics before the deck exists. It is not validated against the
+       commander's tags — a deck may legitimately be built toward something
+       its commander does not do — and coverage is reported instead.
 GET    /api/v1/decks/:id                                                → Deck
 PATCH  /api/v1/decks/:id { name?, targetBracket?, archetype?,
                            archetypeSecondary?, budget?, status?,
-                           targetOverrides? }                           → Deck
+                           targetOverrides?, semanticEmphasis? }        → Deck
        Changing archetype moves targets only — it never adds or removes a
        card (doc 14 §14.4), and it does NOT clear targetOverrides
        (doc 16 §16.9).
@@ -74,6 +79,13 @@ PATCH  /api/v1/decks/:id { name?, targetBracket?, archetype?,
        express a deletion — "reset ramp" and "leave ramp alone" are both
        an absent key. `null` and `{}` both clear it, which is the way back
        to the archetype.
+       semanticEmphasis is replaced wholesale for the same reason, and that
+       IS the de-emphasise control: removing a tag is sending the same array
+       one shorter, and `null` or `[]` clears the focus. There is no add or
+       remove verb, so an emphasis that cannot be taken off is not
+       representable. Members must be SynergyTags; an unknown one is a 400.
+       Stored and returned in canonical `SYNERGY_TAGS` order, not click
+       order, so the same set always serialises identically (doc 05).
 DELETE /api/v1/decks/:id                       soft delete, 30-day recovery
 POST   /api/v1/decks/:id/duplicate  { name? }  → Deck   full copy: entries,
                                                         origins, exclusions, locks
@@ -191,6 +203,8 @@ POST /api/v1/decks/:id/recommendations
       items: Recommendation[]       // ordered; see doc 05 §5.6
     }>,
     unavailable: Array<{ key: CandidateGroupKey, reason: string }>,
+    // The deck's emphasis and how far it reaches. `[]` when there is none.
+    emphasis: Array<{ tag: SynergyTag, supporting: number }>,
     query?: {
       matched: number,              // pool size after the filter
       total: number,                // pool size before it
@@ -211,6 +225,14 @@ right.
 
 `unavailable` is how degradation is communicated (doc 05 §5.3) — a group that
 could not be computed is reported, never silently omitted.
+
+`emphasis` is the same discipline one level down. Emphasis reorders and **never
+filters**, so a deck that emphasises a tag nothing in its colours supports gets
+back a completely normal list — indistinguishable, on its own, from an emphasis
+that worked. `supporting` is the count of eligible candidates carrying that tag,
+before the query filter, so `0` lets the client say *"nothing in your colours
+produces or wants landfall"* rather than leaving the builder to wonder why their
+click did nothing.
 
 ```
 GET /api/v1/decks/:id/combo-index
@@ -254,6 +276,11 @@ GET /api/v1/decks/:id/analysis
       targets: CompositionTarget[],
       // The deck's own sparse overrides, echoed back for the customiser sheet.
       targetOverrides: TargetOverrides,
+      // The semantics the builder said the deck is about, echoed the same way.
+      // A SEPARATE key, because it is a separate axis: targets say how many
+      // ramp cards the deck should hold, emphasis says which of two ramp cards
+      // to offer first, and a deck may have opinions about both.
+      semanticEmphasis: SynergyTag[],
       deficits: Array<{ dimension: CompositionDimension, delta: number }>,
       archetype: {
         declared: ArchetypeKey,

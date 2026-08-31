@@ -268,6 +268,14 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
        * positive every time an override happened to equal the preset.
        */
       targetOverrides: deck.targetOverrides ?? {},
+      /**
+       * The semantics the builder said this deck is about, echoed the same way
+       * and for the same reason. A SEPARATE key from `targetOverrides`, because
+       * they are separate axes: one says how many ramp cards the deck should
+       * hold, the other says which of two ramp cards to offer first, and a deck
+       * may have opinions about both (doc 16).
+       */
+      semanticEmphasis: deck.semanticEmphasis ?? [],
       cuts,
       deficits: deficits.map((d) => ({ dimension: d.dimension, delta: d.delta })),
       archetype: {

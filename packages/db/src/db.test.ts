@@ -1073,6 +1073,111 @@ describeDb('packages/db against real PostgreSQL', () => {
         ).rejects.toThrow(/null value|not-null/i)
       })
     })
+
+    /**
+     * Per-deck semantic emphasis (migration 0014).
+     *
+     * Both write paths again, and here they are genuinely different statements:
+     * `createDeck`'s INSERT now NAMES the column and normalises the value on the
+     * way in, while `PATCH /decks/:id` writes it with a COALESCE. Covering only
+     * the INSERT would leave the update free to be wrong, which is exactly how a
+     * mutation survived here last week.
+     */
+    describe('semantic emphasis', () => {
+      it('starts empty on a freshly inserted deck that names none', async () => {
+        const fresh = deckId(randomUUID())
+        await createDeck(db.pool, {
+          id: fresh,
+          ownerId: owner,
+          name: 'Fresh',
+          commanders: [uuid()],
+          targetBracket: 3,
+          archetype: 'midrange',
+          colorIdentity: ['B'],
+        })
+        expect((await getDeck(db.pool, fresh))?.semanticEmphasis).toEqual([])
+      })
+
+      it('stores the emphasis the start screen chose, through the INSERT path', async () => {
+        // The user is asked before the deck exists, so this has to be settable
+        // at creation and not only by a follow-up PATCH.
+        const fresh = deckId(randomUUID())
+        await createDeck(db.pool, {
+          id: fresh,
+          ownerId: owner,
+          name: 'Tergrid',
+          commanders: [uuid()],
+          targetBracket: 3,
+          archetype: 'midrange',
+          colorIdentity: ['B'],
+          semanticEmphasis: ['opponent-sacrifice', 'opponent-discard'],
+        })
+        // Canonical order, not click order — see `parseSemanticEmphasis`.
+        expect((await getDeck(db.pool, fresh))?.semanticEmphasis).toEqual([
+          'opponent-discard',
+          'opponent-sacrifice',
+        ])
+      })
+
+      it('normalises duplicates and unknown tags on the way in', async () => {
+        const fresh = deckId(randomUUID())
+        await createDeck(db.pool, {
+          id: fresh,
+          ownerId: owner,
+          name: 'Noisy',
+          commanders: [uuid()],
+          targetBracket: 3,
+          archetype: 'midrange',
+          colorIdentity: ['B'],
+          semanticEmphasis: ['untap', 'untap', 'not-a-tag'] as never,
+        })
+        expect((await getDeck(db.pool, fresh))?.semanticEmphasis).toEqual(['untap'])
+      })
+
+      it('round-trips an emphasis through the UPDATE path', async () => {
+        await db.pool.query('UPDATE decks SET semantic_emphasis = $2::jsonb WHERE id = $1', [
+          id,
+          JSON.stringify(['opponent-discard', 'untap']),
+        ])
+        expect((await getDeck(db.pool, id))?.semanticEmphasis).toEqual([
+          'untap',
+          'opponent-discard',
+        ])
+      })
+
+      it('can be cleared, because de-emphasising is the point', async () => {
+        // The way out has to exist. This is the statement `PATCH` issues for
+        // `semanticEmphasis: null`.
+        await db.pool.query('UPDATE decks SET semantic_emphasis = $2::jsonb WHERE id = $1', [
+          id,
+          JSON.stringify(['untap']),
+        ])
+        await db.pool.query("UPDATE decks SET semantic_emphasis = '[]'::jsonb WHERE id = $1", [id])
+        expect((await getDeck(db.pool, id))?.semanticEmphasis).toEqual([])
+      })
+
+      it('survives a tag a newer build wrote rather than poisoning the deck', async () => {
+        await db.pool.query('UPDATE decks SET semantic_emphasis = $2::jsonb WHERE id = $1', [
+          id,
+          JSON.stringify(['opponent-discard', 'mill-yourself']),
+        ])
+        expect((await getDeck(db.pool, id))?.semanticEmphasis).toEqual(['opponent-discard'])
+      })
+
+      it('reads a non-array jsonb as no emphasis at all', async () => {
+        await db.pool.query('UPDATE decks SET semantic_emphasis = $2::jsonb WHERE id = $1', [
+          id,
+          JSON.stringify({ untap: true }),
+        ])
+        expect((await getDeck(db.pool, id))?.semanticEmphasis).toEqual([])
+      })
+
+      it('refuses a null, so no reader has to decide what one means', async () => {
+        await expect(
+          db.pool.query('UPDATE decks SET semantic_emphasis = NULL WHERE id = $1', [id]),
+        ).rejects.toThrow(/null value|not-null/i)
+      })
+    })
   })
 
   describe('optimistic concurrency (doc 12 §12.7)', () => {

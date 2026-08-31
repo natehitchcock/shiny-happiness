@@ -107,6 +107,33 @@ optional field (AGENTS.md R2). A recommendation filling a gap the builder
 invented now says so — "fills the ramp target you set", not "fills ramp gap" —
 because pillar P4 asks the reason to name the thing they can change.
 
+**A deck can say what it is ABOUT, not only what it does.** `Deck` gains
+`semanticEmphasis` — a set of the mechanical synergy tags the builder picked,
+offered from the chosen commander's own tags at the start screen and toggled by
+clicking a chip afterwards. Migration `0014` adds
+`decks.semantic_emphasis jsonb NOT NULL DEFAULT '[]'`; a deck that emphasises
+nothing is byte-identical to before, and no ADR is needed because every contract
+change is a new optional field (AGENTS.md R2). Scoring gains its own additive
+term (doc 05 §5.6) rather than a multiplier on `synergyScore`, because
+`synergyScore` also decides the `high-synergy` GROUP and a user preference must
+not relabel a card (P5). It never filters: `POST .../recommendations` returns
+`emphasis: [{ tag, supporting }]` so a tag nothing in the deck's colours
+supports is *named*, not mimed by an unchanged list. Reversibility is the design
+— the emphasis is replaced wholesale, so de-emphasising is saving the list one
+shorter and `null` clears it.
+
+Measured on the real corpus, mono-black, Tergrid leading: emphasising
+`opponent-discard` reorders eight of the ten candidate groups and every group's
+membership and size is unchanged, exactly as P5 requires. `Rankle, Master of
+Pranks` goes 4th → 1st in `fills-draw`, `Syphon Mind`, `Waste Not` and `Dark
+Deal` enter its top ten, and `high-synergy` swaps nine of its ten for
+opponent-discard cards led by `Tinybones, Bauble Burglar` and `Torment of
+Hailfire`. Each of them explains itself as *emphasised* rather than as ordinary
+synergy.
+
+**The UI half is not built.** Nothing renders the start-screen prompt or the
+chips above the commander yet; the storage, scoring, reasons and endpoints are.
+
 **The deck is a picture now, at `#web`.** [Doc 17](17-deck-web.md) is built: a
 second mode, entered from the masthead, that replaces everything below it with
 one node per card — the art crop — and one line per relationship. It makes **no

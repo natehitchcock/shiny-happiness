@@ -94,6 +94,14 @@ export interface Reason {
   withOracleIds?: string[]
   /** Whose target a `fills-deficit` gap is measured against (doc 16). */
   source?: 'archetype' | 'custom'
+  /**
+   * Whether a `keyword-synergy` reason names a tag the builder EMPHASISED.
+   *
+   * Pillar P4: "benefits from your sacrifice fodder" and "benefits from your
+   * EMPHASISED sacrifice fodder" are different claims, and a card that rose
+   * because of an emphasis has to make the second one. Absent means the first.
+   */
+  emphasised?: boolean
 }
 
 export interface Recommendation {
@@ -134,6 +142,15 @@ export interface Deck {
   budget: { maxTotalUsd: number | null; maxCardUsd: number | null } | null
   /** The per-deck target sheet (doc 16). `{}` for a deck on its preset. */
   targetOverrides?: TargetOverrides
+  /**
+   * The commander semantics this deck is about. `[]` for a deck with no focus.
+   *
+   * Members of the same vocabulary as `Card.synergyProduces` /
+   * `Card.synergyWants` — which is the whole point: the chips the start screen
+   * offers are read straight off the chosen commander, and picking one is
+   * putting its own tag in this array. In canonical order, not click order.
+   */
+  semanticEmphasis?: string[]
   entries: { oracleId: string; zone: 'accepted' | 'excluded'; locked: boolean }[]
 }
 
@@ -323,6 +340,14 @@ export const createDeck = (body: {
   targetBracket: number
   archetype: string
   excludeUniversesBeyond?: boolean
+  /**
+   * The semantics picked at the start screen, before the deck exists.
+   *
+   * Sent with the create rather than by a follow-up PATCH because that is when
+   * the builder is asked, and a deck created without it would score its first
+   * suggestions against no focus at all.
+   */
+  semanticEmphasis?: readonly string[]
 }): Promise<Deck> => request('/decks', { method: 'POST', body: JSON.stringify(body) })
 
 export const patchDeck = (
@@ -338,6 +363,13 @@ export const patchDeck = (
      * exist, or a tuned target is a trap.
      */
     targetOverrides?: TargetOverrides | null
+    /**
+     * Replaced wholesale too, and that IS the de-emphasise button: removing a
+     * tag is sending the same array one shorter, and `null` or `[]` clears the
+     * focus entirely. There is no add or remove verb, so there is no way to
+     * end up with an emphasis that cannot be taken off.
+     */
+    semanticEmphasis?: readonly string[] | null
   },
 ): Promise<Deck> => request(`/decks/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 
@@ -403,6 +435,15 @@ export interface Recommendations {
   columns: { query: string; matched: string[]; error?: string }[]
   unavailable: Unavailable[]
   query: { matched: number; total: number; errors: { message: string; position: number }[] }
+  /**
+   * The deck's emphasis, and how many eligible candidates carry each tag.
+   *
+   * `[]` when nothing is emphasised. `supporting: 0` is the case worth
+   * rendering: emphasis reorders and never filters, so an emphasis nothing in
+   * the deck's colours supports comes back with a completely normal list, and
+   * without this the builder has no way to tell that from one that worked.
+   */
+  emphasis: { tag: string; supporting: number }[]
 }
 
 export const getRecommendations = (

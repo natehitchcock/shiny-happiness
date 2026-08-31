@@ -21,6 +21,7 @@ import type {
   DeckCommandBatch,
   DeckEntry,
   OracleId,
+  SemanticEmphasis,
   TargetOverrides,
 } from '@roundtable/domain'
 import {
@@ -180,6 +181,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
       archetype: ArchetypeKey
       archetypeSecondary?: ArchetypeKey | null
       excludeUniversesBeyond?: boolean
+      semanticEmphasis?: SemanticEmphasis | null
     }
     const commanders = body.commanders.map(oracleId)
 
@@ -236,6 +238,18 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
       // does not get to declare a colour identity the cards disagree with.
       colorIdentity: deckColorIdentity(commanders, cards),
       excludeUniversesBeyond: body.excludeUniversesBeyond ?? false,
+      /*
+       * NOT checked against the commanders' own tags.
+       *
+       * The start screen offers the commander's semantics, so in practice this
+       * is always a subset of them — but the user's first sentence is about
+       * clicking a semantic anywhere, and a deck may legitimately be built
+       * toward something its commander does not do yet. Rejecting that here
+       * would refuse a true statement about the deck; `recommend` reports how
+       * much of the pool actually supports each emphasised tag instead, which
+       * tells the builder the same thing without overruling them.
+       */
+      semanticEmphasis: body.semanticEmphasis ?? [],
     })
     return rep.status(201).send(deck)
   })
@@ -340,6 +354,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
         status?: Deck['status']
         excludeUniversesBeyond?: boolean
         targetOverrides?: TargetOverrides | null
+        semanticEmphasis?: SemanticEmphasis | null
       }
 
       /*
@@ -360,6 +375,22 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
       const overrides =
         'targetOverrides' in body ? JSON.stringify(body.targetOverrides ?? {}) : null
 
+      /*
+       * The emphasis is replaced WHOLESALE too, and that is the de-emphasise
+       * button (P4, and the half of the request that says "I should be able to
+       * de emphasise if I wish").
+       *
+       * There is deliberately no add/remove protocol. A `POST .../emphasis/:tag`
+       * pair would need its own idempotency story, and it could not express
+       * "clear all" without a third verb. Sending the whole list makes removing
+       * a tag the same operation as adding one — the client always holds the
+       * complete set, because it drew every chip before one could be clicked —
+       * so an emphasis the user cannot get rid of is unrepresentable rather than
+       * merely unlikely. `null` and `[]` both mean no emphasis.
+       */
+      const emphasis =
+        'semanticEmphasis' in body ? JSON.stringify(body.semanticEmphasis ?? []) : null
+
       // COALESCE keeps every unsupplied column as it was. Changing archetype moves
       // targets only — no statement here touches `deck_entries` (doc 14 §14.4).
       const { rowCount } = await pool.query(
@@ -376,6 +407,10 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
          -- COALESCE, not a CASE flag: $13 is already null exactly when the key
          -- is absent, because an explicit JSON null was turned into '{}' above.
          target_overrides    = COALESCE($13::jsonb, target_overrides),
+         -- Same COALESCE shape as the line above, and for the same reason: $14
+         -- is null exactly when the key is absent, because an explicit JSON
+         -- null was already turned into '[]'.
+         semantic_emphasis   = COALESCE($14::jsonb, semantic_emphasis),
          updated_at          = now()
        WHERE id = $1 AND deleted_at IS NULL`,
         [
@@ -392,6 +427,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
           body.excludeUniversesBeyond ?? null,
           body.description ?? null,
           overrides,
+          emphasis,
         ],
       )
       if ((rowCount ?? 0) === 0) return sendProblem(rep, notFound(`No deck with id ${id}`))

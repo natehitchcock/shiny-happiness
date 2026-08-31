@@ -10,10 +10,11 @@ import type {
   OracleId,
   Origin,
   Role,
+  SemanticEmphasis,
   Zone,
 } from '@roundtable/domain'
 import type { Pool, PoolClient } from 'pg'
-import { parseTargetOverrides } from '@roundtable/domain'
+import { parseSemanticEmphasis, parseTargetOverrides } from '@roundtable/domain'
 import { withTransaction } from '../client.js'
 
 interface DeckRow {
@@ -31,6 +32,8 @@ interface DeckRow {
   readonly exclude_universes_beyond: boolean
   /** `jsonb`, so whatever was written. Parsed, never cast — see `toDeck`. */
   readonly target_overrides: unknown
+  /** `jsonb` array of `SynergyTag`. Parsed, never cast — see `toDeck`. */
+  readonly semantic_emphasis: unknown
   readonly version: number
   readonly created_at: Date
   readonly updated_at: Date
@@ -88,6 +91,16 @@ const toDeck = (row: DeckRow, entries: readonly DeckEntry[]): Deck => ({
    * Also covers a hand-built row in a test that predates the column.
    */
   targetOverrides: parseTargetOverrides(row.target_overrides),
+  /*
+   * Parsed rather than cast, same discipline as `target_overrides` above and
+   * the same failure it avoids: a tag written by a build that knew a different
+   * vocabulary would otherwise reach `emphasisMatches` and quietly weight a tag
+   * no card can ever carry. Dropping it costs that tag and leaves the rest of
+   * the emphasis working, which is what a builder can recover from.
+   *
+   * Also covers a hand-built row in a test that predates the column.
+   */
+  semanticEmphasis: parseSemanticEmphasis(row.semantic_emphasis),
   status: row.status as Deck['status'],
   version: row.version,
   createdAt: row.created_at.toISOString(),
@@ -130,13 +143,23 @@ export interface CreateDeckInput {
   readonly archetypeSecondary?: ArchetypeKey | null
   readonly colorIdentity: readonly Color[]
   readonly excludeUniversesBeyond?: boolean
+  /**
+   * The commander semantics the builder picked at the start screen.
+   *
+   * Set at creation rather than by a follow-up PATCH because that is when the
+   * user is asked — "before I start making the deck" — and a two-request
+   * create would leave a window in which the deck exists with the wrong focus
+   * and any recommendation fetched in it is scored against nothing.
+   */
+  readonly semanticEmphasis?: SemanticEmphasis
 }
 
 export const createDeck = async (pool: Pool, input: CreateDeckInput): Promise<Deck> => {
   const { rows } = await pool.query<DeckRow>(
     `INSERT INTO decks (id, owner_id, name, description, commanders, target_bracket, archetype,
-                        archetype_secondary, color_identity, exclude_universes_beyond)
-     VALUES ($1, $2, $3, $4, $5::uuid[], $6, $7, $8, $9::char(1)[], $10) RETURNING *`,
+                        archetype_secondary, color_identity, exclude_universes_beyond,
+                        semantic_emphasis)
+     VALUES ($1, $2, $3, $4, $5::uuid[], $6, $7, $8, $9::char(1)[], $10, $11::jsonb) RETURNING *`,
     [
       input.id,
       input.ownerId,
@@ -148,6 +171,9 @@ export const createDeck = async (pool: Pool, input: CreateDeckInput): Promise<De
       input.archetypeSecondary ?? null,
       input.colorIdentity,
       input.excludeUniversesBeyond ?? false,
+      // Normalised through the parser on the way IN as well as out, so the row
+      // holds the canonical order and a duplicate tag can never be stored.
+      JSON.stringify(parseSemanticEmphasis(input.semanticEmphasis ?? [])),
     ],
   )
   return toDeck(rows[0]!, [])

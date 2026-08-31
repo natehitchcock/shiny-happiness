@@ -70,6 +70,10 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
               : { produces: card.synergyProduces, wants: card.synergyWants }
           },
         ),
+        // What the builder said this deck is ABOUT, as opposed to what it
+        // happens to do. Its own scoring term — it reorders within a group and
+        // never changes which group a card is in (pillar P5).
+        emphasis: deck.semanticEmphasis ?? [],
         query: queryNode,
         // No corpus statistics exist (ADR-0008), so groups 6-7 report as
         // unavailable rather than being silently absent.
@@ -169,6 +173,17 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
           ...context.missing.map((m) => ({ key: m.source, reason: m.reason })),
         ],
         columns: columnResults,
+        /*
+         * The emphasis, and how much of the pool each tag actually reaches.
+         *
+         * Sent even when `supporting` is healthy, so the chips above the
+         * commander can be rendered from the same response that scored against
+         * them. `supporting: 0` is the case this exists for: emphasis never
+         * filters, so an emphasis nothing supports returns a completely normal
+         * list, and without this line the builder has no way to tell that from
+         * an emphasis that worked.
+         */
+        emphasis: result.emphasis,
         query: {
           matched: result.groups.reduce((n, g) => n + g.total, 0),
           total: context.pool.length,

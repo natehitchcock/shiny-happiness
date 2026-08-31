@@ -58,6 +58,15 @@ interface Deck {
   // beside "I added a card" is two very different sizes of mistake sharing
   // one Ctrl+Z.
   targetOverrides?: TargetOverrides
+  // The commander semantics this deck is ABOUT (doc 05 §5.6). A set of
+  // SynergyTags, picked from the commander's own tags at the start screen and
+  // toggled by clicking a chip afterwards. A SEPARATE axis from
+  // targetOverrides: a target says how many ramp cards the deck should hold,
+  // an emphasis says which of two ramp cards to offer first. Absent and `[]`
+  // mean the same thing; clearing it is saving an empty list, so an emphasis
+  // that cannot be removed is not representable. Not a DeckCommand, for the
+  // same reason targetOverrides is not.
+  semanticEmphasis?: SynergyTag[]
   createdAt: string
   updatedAt: string
 }
