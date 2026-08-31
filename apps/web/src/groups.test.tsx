@@ -278,6 +278,18 @@ describe('expanding a group', () => {
       setter?.call(box, 'mv<=3')
       box.dispatchEvent(new Event('input', { bubbles: true }))
     })
+    /*
+     * Committed explicitly, through the button.
+     *
+     * Typing does not run the filter — it never did — and this test used to
+     * rely on the auto-query countdown to commit it for us, so it silently
+     * depended on that setting being ON by default. It is off by default now,
+     * and the dependency was never the point: what is under test is that a NEW
+     * QUESTION drops the expansion, whichever way the question was asked.
+     */
+    await act(async () => {
+      screen.getByLabelText(/^Run this filter/).click()
+    })
 
     await waitFor(() => expect(screen.queryByLabelText('Add Goblin Matron')).toBeNull(), {
       timeout: 8_000,

@@ -41,6 +41,15 @@ const dimensionKeyOf = (d: { role?: string; type?: string }): string =>
 
 const dimensionName = (d: { role?: string; type?: string }): string => d.role ?? d.type ?? '—'
 
+/**
+ * The auto-query wait in whole seconds, for the one control that names it.
+ *
+ * Derived, never typed: the checkbox and its tooltip both read "four seconds"
+ * against a two-second constant, so the control that exists to tell you how
+ * long you have was wrong by a factor of two.
+ */
+const AUTO_QUERY_SECONDS = Math.round(AUTO_QUERY_MS / 1000)
+
 /** Prices are estimates, and the interface has to say so (ADR-0009 Q7). */
 const usd = (value: number | null | undefined): string =>
   value === null || value === undefined ? '—' : `$${value.toFixed(2)}`
@@ -639,16 +648,25 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  /**
-   * The same countdown the suggestion filter uses, on the same constant.
+  /*
+   * No countdown here. The commander search is committed by Enter or by the
+   * button, and by nothing else.
    *
-   * Two characters is the floor — one letter matches most of Magic — and below
-   * it nothing is pending, so nothing counts down.
+   * This screen ran the same two-second auto-query the suggestion filter has,
+   * and it behaved badly for the reason the two screens differ: a commander
+   * name is long and is typed in bursts, so the countdown expired mid-name
+   * over and over. Each expiry fired a search for a PREFIX, and because the
+   * result list below was never cleared, the page then showed a full list of
+   * matches for "Kren" while the box said "Krenko, Mob" — an answer to a
+   * question the user had already moved past, indistinguishable from an answer
+   * to the one they were asking.
+   *
+   * The suggestion filter keeps the countdown (it is a short query language,
+   * and the box is beside the list it filters). Here it is removed rather than
+   * defaulted off: there is no setting on this screen, so an off-by-default
+   * checkbox would have nowhere to live and the landing page would be the one
+   * place the preference could not be honoured.
    */
-  const auto = useAutoQuery(
-    { enabled: term.trim().length >= 2, draft: term, committed: query },
-    () => setQuery(term),
-  )
 
   useEffect(() => {
     if (query.trim().length < 2) {
@@ -659,6 +677,16 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
     }
     let cancelled = false
     setSearch('searching')
+    /*
+     * Drop the previous query's matches before asking for the next.
+     *
+     * Kept, they made the list read as the answer to whatever is in the box
+     * now. The button carries the spinner, so an empty list during the request
+     * is not a silent state — and `search === 'done'` gates the "Nothing found"
+     * line, so an in-flight search cannot flash it either.
+     */
+    setResults([])
+    setResultImages(new Map())
     void api
       /*
        * `is:commander`, not `type:legendary type:creature`.
@@ -753,10 +781,12 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
                 if (e.key === 'Enter') setQuery(term)
               }}
             />
+            {/* `remaining={null}`: nothing counts down here, so the button is
+                a magnifying glass and never a ring. */}
             <SearchButton
               what="search"
               onRun={() => setQuery(term)}
-              remaining={auto.remaining}
+              remaining={null}
               restartKey={term}
               busy={search === 'searching'}
             />
@@ -2792,11 +2822,22 @@ export const Workspace = ({
    * deck state.
    */
   const [autoQuery, setAutoQuery] = useState<boolean>(
-    // On by default, and only off if the user turned it off. Absent is not the
-    // same as 'off': the first is "never expressed a view", the second is a
-    // decision, and defaulting the first to off meant most people never saw the
-    // feature at all.
-    () => localStorage.getItem('lw.autoQuery') !== 'off',
+    /*
+     * OFF by default, and only on if the user turned it on.
+     *
+     * It used to default on, on the argument that "absent" is not "off" and
+     * that a feature nobody switches on is a feature nobody sees. Playtesting
+     * settled it the other way: a query is expensive, the countdown fires while
+     * you are still reading the list it is about to replace, and a list that
+     * rearranges itself under the cursor is worse than one that waits. The
+     * button and Enter are both right there, and the ring around the button is
+     * what advertises the setting to anyone who wants it.
+     *
+     * Absent is still not the same as 'off' — it is "never expressed a view",
+     * and that now reads as the default rather than as a decision. Anyone who
+     * has ALREADY ticked the box has 'on' stored and keeps it.
+     */
+    () => localStorage.getItem('lw.autoQuery') === 'on',
   )
   useEffect(() => {
     localStorage.setItem('lw.autoQuery', autoQuery ? 'on' : 'off')
@@ -4231,16 +4272,21 @@ export const Workspace = ({
               Exclude Universes Beyond
             </label>
 
+            {/* The delay is written from `AUTO_QUERY_MS`, not typed in.
+                Both of these said "four seconds" against a two-second constant
+                — the label had been left behind when the wait was shortened,
+                so the one control that tells you how long you have was lying
+                about it by a factor of two. */}
             <label
               className="check"
-              title="Stop typing and the filter runs by itself after four seconds. The ring around the magnifying glass shows how long is left; typing anything resets it."
+              title={`Stop typing and the filter runs by itself after ${AUTO_QUERY_SECONDS} seconds. The ring around the magnifying glass shows how long is left; typing anything resets it. Off by default — the button and Enter run it immediately.`}
             >
               <input
                 type="checkbox"
                 checked={autoQuery}
                 onChange={(e) => setAutoQuery(e.target.checked)}
               />
-              Auto query after 4 seconds
+              Auto query after {AUTO_QUERY_SECONDS} seconds
             </label>
 
             <label className="option-field">
