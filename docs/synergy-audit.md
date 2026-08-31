@@ -19,6 +19,32 @@ corpus-wide with SQL, and those counts are given per rule below.
 
 Recall is out of scope. This audit says nothing about the 16,684 untagged cards.
 
+> **Addendum, 2026-08-31 — [ADR-0022](adr/0022-synergy-events-have-a-subject.md)
+> splits two of the tags below by subject.** `discard` and `sacrifice-fodder`
+> keep their meanings unchanged (yours), and two new tags carry the other
+> subject. Measured against the shipped rules on the 31,782 commander-legal
+> cards, by the same read-them-by-hand method:
+>
+> | tag | direction | corpus | sampled | precision |
+> | --- | --- | ---: | ---: | --- |
+> | `opponent-discard` | produces | 481 | 25 | **100%** |
+> | `opponent-discard` | wants | 30 | 30 (all) | **97%** |
+> | `opponent-sacrifice` | produces | 304 | 25 | **100%** |
+> | `opponent-sacrifice` | wants | 15 | 15 (all) | **100%** |
+>
+> This does not move any number in §1: nothing that carried `discard` or
+> `sacrifice-fodder` loses it, with one checked exception — 14 cards lose
+> `produces discard` because their only evidence was a punisher clause
+> ("…unless they sacrifice a permanent of their choice **or discard a card**")
+> addressed to an opponent. All 14 were read by hand and all 14 now carry
+> `opponent-discard` instead. That is a precision *gain* for `PRODUCES discard`,
+> not a change to any sample here.
+>
+> The §3.2b defect at fix-order rank 13 — `PRODUCES creature-death` reading
+> "each player sacrifices" when what is sacrificed is a *land* (Destructive
+> Force) — is untouched and still open. Those cards now additionally carry
+> `opponent-sacrifice`, which is the tag that does describe them.
+
 ---
 
 ## 1. Precision table

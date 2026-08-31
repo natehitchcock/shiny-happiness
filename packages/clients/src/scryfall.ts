@@ -442,7 +442,15 @@ export const toCard = (
   const derived = deriveRoles({ oracleId: id, typeLine, oracleText })
   // Derived here, stored by the ingest: doing it per request over 34k cards
   // would not fit API-02's 200 ms budget (ADR-0011).
-  const synergy = deriveSynergy({ oracleId: id, typeLine, oracleText })
+  // The faces go in as well as the join: a rule whose pattern spans a gap would
+  // otherwise match a subject on the front face against a verb on the back,
+  // which is how Tergrid's front half read as the Lantern's (ADR-0022).
+  const synergy = deriveSynergy({
+    oracleId: id,
+    typeLine,
+    oracleText,
+    ...(faces.length > 1 ? { oracleTextFaces: faces } : {}),
+  })
 
   return {
     oracleId: id,

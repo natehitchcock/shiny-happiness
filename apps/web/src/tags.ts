@@ -16,7 +16,11 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   lifegain: 'gaining life',
   lifeloss: 'opponents losing life',
   'card-draw': 'drawing cards',
-  discard: 'discarding',
+  // "discarding" on its own stopped being unambiguous the moment
+  // `opponent-discard` existed (ADR-0022): "causes discarding" would read as
+  // Mind Rot when it means Faithless Looting. The subject is now said out loud
+  // on both, because a reader cannot infer it from a word both cards use.
+  discard: 'discarding your own cards',
   'graveyard-creature': 'creatures in the graveyard',
   'artifact-etb': 'artifacts entering',
   'enchantment-etb': 'enchantments entering',
@@ -28,6 +32,8 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   'sacrifice-fodder': 'expendable bodies',
   'creature-etb': 'creatures entering',
   'spell-cast': 'casting spells',
+  'opponent-discard': 'opponents discarding',
+  'opponent-sacrifice': 'opponents sacrificing',
 }
 
 /**

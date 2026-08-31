@@ -18,6 +18,12 @@ import type { OracleId } from './ids.js'
  * Matching runs both directions. Adding a payoff for something the deck already
  * does is worth as much as adding an enabler for a payoff it already has.
  *
+ * An event also has a SUBJECT — who it happens to (ADR-0022). "You discard a
+ * card" and "each opponent discards a card" are two different events with two
+ * different payoff sets, and one tag cannot name both without lying about one
+ * of them. Where the subject changes what the card is for, the tag says so:
+ * `discard`/`opponent-discard`, `sacrifice-fodder`/`opponent-sacrifice`.
+ *
  * Like role derivation (doc 02 §2.4), these heuristics are wrong often enough to
  * matter, and that is expected rather than a defect to engineer away — "does
  * this card enable sacrifice" is a judgement about how a card plays. The curated
@@ -42,6 +48,8 @@ export type SynergyTag =
   | 'sacrifice-fodder'
   | 'creature-etb'
   | 'spell-cast'
+  | 'opponent-discard'
+  | 'opponent-sacrifice'
 
 export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'creature-death',
@@ -61,6 +69,8 @@ export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'sacrifice-fodder',
   'creature-etb',
   'spell-cast',
+  'opponent-discard',
+  'opponent-sacrifice',
 ]
 
 /**
@@ -126,6 +136,41 @@ const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
   // graveyard is where the spells it already cast are waiting to be recast.
   ['spell-cast', 'card-draw'],
   ['spell-cast', 'graveyard-creature'],
+
+  /*
+   * Stax and punisher (ADR-0022). One deck, two halves of one question: what
+   * can I make an opponent give up, and what do I get when they do.
+   *
+   * The two opponent tags feed each other because the cards say so in one
+   * breath — Torment of Hailfire, Nicol Bolas, Forbidden Ritual and Tergrid's
+   * own Lantern all read "unless that player sacrifices a permanent OR
+   * discards a card". A deck that can force one is already built to force the
+   * other.
+   *
+   * Both pair with `lifeloss` because that is what the punisher shell converts
+   * them into in both directions: "loses 3 life unless they discard" is the
+   * producer, and Megrim, Liliana's Caress, Raiders' Wake and Fell Specter are
+   * the payoff — every one of them turns an opponent's discard into life lost.
+   *
+   * `opponent-sacrifice` pairs with `creature-death` because Grave Pact spells
+   * out the edge: "whenever a creature you control dies, each other player
+   * sacrifices a creature". Your deaths are literally what makes them sacrifice.
+   *
+   * Three pairings were considered and REJECTED, because they would rebuild the
+   * conflation this ADR exists to remove:
+   *
+   *   - `discard` ↔ `opponent-discard`. Looting yourself does not feed Megrim
+   *     and Megrim does not feed madness. Same verb, different event.
+   *   - `sacrifice-fodder` ↔ `opponent-sacrifice`. Your tokens are not what an
+   *     edict eats.
+   *   - `graveyard-creature` ↔ `opponent-discard`. ADR-0016 already ruled that
+   *     an opponent's graveyard is not the resource, and nothing here changes
+   *     that. Tergrid steals from it, which is a property of Tergrid.
+   */
+  ['opponent-discard', 'opponent-sacrifice'],
+  ['opponent-discard', 'lifeloss'],
+  ['opponent-sacrifice', 'lifeloss'],
+  ['opponent-sacrifice', 'creature-death'],
 ]
 
 const INTERACTIONS = ((): ReadonlyMap<SynergyTag, readonly SynergyTag[]> => {
@@ -165,6 +210,30 @@ const PRODUCES: readonly Rule[] = [
   { tag: 'creature-death', test: /\bsacrifice (a|another|an|one|two|X|\d+) creature/i },
   { tag: 'creature-death', test: /\bsacrifices? (a|another|an|one|two|X|\d+) creatures?\b/i },
   { tag: 'creature-death', test: /\beach player sacrifices\b/i },
+
+  /*
+   * An edict is not a sacrifice outlet (ADR-0022).
+   *
+   * `sacrifice-fodder` is the aristocrats tag: its producers are your token
+   * makers and its payoff is "sacrifice a creature:", an outlet you feed with
+   * your own board. "Each opponent sacrifices a creature of their choice" is
+   * the opposite card — it costs an opponent a permanent and it is what
+   * Tergrid, It That Betrays, Mazirek and Mayhem Devil are waiting for.
+   *
+   * Same subject test as `opponent-discard`: the third-person "sacrifices",
+   * never the imperative "Sacrifice a creature:", which is addressed to you.
+   * That is what keeps a card sacrificing its OWN tokens out of this tag.
+   * "each player sacrifices" matches this and `creature-death` both, which is
+   * correct — a symmetric edict genuinely does both.
+   */
+  {
+    tag: 'opponent-sacrifice',
+    test: /\b(each|target|that|each other) (player|opponent)s? (may )?sacrifices\b|\bdefending player sacrifices\b|\b(players|opponents) each sacrifice\b/i,
+  },
+  {
+    tag: 'opponent-sacrifice',
+    test: /\bunless (they|that player) sacrifices?\b|\b(any|each) (player|opponent) may sacrifice\b/i,
+  },
   { tag: 'creature-death', test: /\bdestroy target creature\b/i },
   // A board wipe makes creatures die too. It is not a sacrifice outlet — it
   // happens once, and it hits your own board — but a deck built on "whenever a
@@ -219,9 +288,58 @@ const PRODUCES: readonly Rule[] = [
   // so matching `discards` with any subject was calling 296 hand-attack cards
   // discard enablers. Scryfall templating makes the subject readable: a bare
   // "discard a card" is addressed to you.
+  //
+  // ADR-0016 narrowed it to here and stopped, which deleted the opponent side
+  // rather than modelling it. `opponent-discard` below is that side.
+  //
+  // One narrowing, and it is the reported bug. The punisher template —
+  // "…loses 3 life unless they sacrifice a nonland permanent of their choice
+  // OR DISCARD A CARD" — puts the bare infinitive "discard" in the sentence
+  // because its subject is "they", and the rule read that as being addressed
+  // to you. Tergrid's Lantern is one of the cards it happened to, which is how
+  // the front half's payoff came to be reported as the deck's own looting.
+  //
+  // The lookbehind is the narrow instrument on purpose. A card-level exclusion
+  // would strip a card that has a punisher clause AND a real loot ability; this
+  // only refuses the one clause. Checked rather than assumed: exactly 14 cards
+  // in the commander-legal corpus lose `discard` this way, all 14 were read by
+  // hand, and all 14 are opponent-discard cards (Painful Quandary, Wrench Mind,
+  // Court of Ambition, Torment of Scarabs, Tergrid…). None was a loot card.
   {
     tag: 'discard',
-    test: /\bdiscard (a|an|two|three|four|X|\d+|that many|your hand)\b|\byou discard\b|\beach player discards\b/i,
+    test: /\byou discard\b|\beach player discards\b|(?<!\bunless (?:they|that player|its controller)[^.\n]{0,60})\bdiscard (a|an|two|three|four|X|\d+|that many|your hand)\b/i,
+  },
+
+  /*
+   * The other side of the same verb (ADR-0022).
+   *
+   * Scryfall names the subject before the verb and inflects it, which is the
+   * whole reason the split is readable at all: "discard a card" is addressed to
+   * you, "<somebody> discards a card" is addressed to them. So the rule asks
+   * for a third-person subject rather than for the word "discard".
+   *
+   * "each player discards" deliberately matches BOTH this and `discard` above.
+   * A wheel hits your hand and theirs; claiming one and not the other would be
+   * false either way round.
+   *
+   * The trap this was expected to have — "target player draws a card, then
+   * discards a card", the looter you point at yourself — turns out not to
+   * exist. That templating never puts "discards" next to its subject, so of the
+   * 435 cards this rule reads exactly one (Lumengrid Augur) is loot-shaped, and
+   * it earns the tag on a separate clause anyway. No exclusion was needed;
+   * checking was.
+   */
+  {
+    tag: 'opponent-discard',
+    test: /\b(each|target|that|each other) (player|opponent)s? discards?\b|\bdefending player discards\b|\b(players|opponents) each discards?\b/i,
+  },
+  // The forms that put something between the subject and the verb. The punisher
+  // template — "loses 3 life unless they sacrifice a permanent OR discard a
+  // card" — is Tergrid's own Lantern, and an adjacent-words rule reads right
+  // past it. `[^.\n]` keeps the gap inside one sentence and inside one face.
+  {
+    tag: 'opponent-discard',
+    test: /\bunless (they|that player|its controller)[^.\n]{0,60}\bdiscards?\b|\bhave target (player|opponent) discards?\b|\breveals? their hand and discards\b/i,
   },
 
   // Self-mill and reanimation fodder: something has to fill the graveyard.
@@ -313,6 +431,53 @@ const WANTS: readonly Rule[] = [
   { tag: 'card-draw', test: /\bwhenever you draw\b|\bif you.{0,20}drawn.{0,20}card\b/i },
   { tag: 'discard', test: /\bmadness\b|\bwhenever you discard\b/i },
 
+  /*
+   * The payoffs the old single `discard` tag could not reach (ADR-0022).
+   *
+   * Megrim, Liliana's Caress, Waste Not, Geth's Grimoire, Raiders' Wake and
+   * Tergrid's front face all read "whenever an opponent discards". Under one
+   * tag they were paired with madness, which they have nothing to do with.
+   */
+  //
+  // The gap stops at a comma as well as at a full stop, because the comma is
+  // where a trigger condition ends. Tergrid reads "whenever an opponent
+  // sacrifices a nontoken permanent or discards a permanent card," — one
+  // condition, two events, no comma — while Painful Quandary reads "whenever an
+  // opponent casts a spell, that player loses 5 life unless they discard a
+  // card". Without the comma boundary the second reads as a payoff, and it is
+  // the opposite: it is a producer.
+  {
+    tag: 'opponent-discard',
+    test: /\bwhenever (an opponent|a player|one or more (players|opponents))[^.,\n]{0,60}\bdiscards?\b|\ban opponent discarded a card\b/i,
+  },
+  /*
+   * An empty enemy hand is the state a hand-attack deck is playing toward, and
+   * the cards that check for it — Tinybones, Guul Draz Specter, Hollowborn
+   * Barghest, Rekindled Flame — are unplayable without one. That is a payoff.
+   *
+   * Deliberately NOT hellbent, which is the same sentence about YOU ("as long
+   * as you have no cards in hand"). Hellbent is a self-discard payoff and
+   * belongs to `discard`; it is listed in ADR-0022 as found and not done rather
+   * than quietly folded in here, because widening `discard` is not this change.
+   *
+   * The verb is what keeps the two apart, and it is load-bearing rather than
+   * incidental: "HAS no cards in hand" is third person and "you HAVE no cards
+   * in hand" is not, which is the same inflection test the producer rules use.
+   * Matching `ha(s|ve)` here would pull all 34 hellbent cards in.
+   */
+  {
+    tag: 'opponent-discard',
+    test: /\b(an opponent|each opponent|that player|target opponent|a player)( [a-z]{1,12}){0,3} has no cards in hand\b|\bopponents? with no cards in hand\b/i,
+  },
+
+  // A sacrifice outlet is fed by your board; this is fed by theirs. Tergrid,
+  // It That Betrays, Mazirek, Mortician Beetle and Mayhem Devil all trigger on
+  // a sacrifice they do not control and could never say so before.
+  {
+    tag: 'opponent-sacrifice',
+    test: /\bwhenever (an opponent|a player|another player)[^.,\n]{0,60}\bsacrifices\b/i,
+  },
+
   { tag: 'graveyard-creature', test: /\breturn target creature card from your graveyard\b/i },
   { tag: 'graveyard-creature', test: /\bdelve\b|\bescape\b|\bthreshold\b|\bdelirium\b/i },
   // The graveyard as a resource — which is what `delve` and `threshold` above
@@ -391,10 +556,10 @@ export type SynergyOverrides = ReadonlyMap<OracleId, SynergyProfile>
 
 export const CURATED_SYNERGY: SynergyOverrides = new Map()
 
-const apply = (rules: readonly Rule[], text: string): SynergyTag[] => {
+const apply = (rules: readonly Rule[], texts: readonly string[]): SynergyTag[] => {
   const found = new Set<SynergyTag>()
   for (const rule of rules) {
-    if (rule.test.test(text)) found.add(rule.tag)
+    if (texts.some((text) => rule.test.test(text))) found.add(rule.tag)
   }
   return [...found]
 }
@@ -404,17 +569,54 @@ const apply = (rules: readonly Rule[], text: string): SynergyTag[] => {
  *
  * A card may both produce and want the same tag — a sacrifice outlet that also
  * triggers on death is a whole engine by itself — and that is kept rather than
- * collapsed, because it is true.
+ * collapsed, because it is true. Tergrid is the clearest case: her front face
+ * WANTS `opponent-discard` and her Lantern PRODUCES it, so she is her own
+ * engine, and reporting only one of those would describe a different card.
+ *
+ * Read one FACE at a time, not the joined text.
+ *
+ * `oracleText` joins a double-faced card's faces with a newline, and some rules
+ * span a gap that a newline can sit inside (`[^.]{0,40}` in the `dies` rule,
+ * `[^.]{0,60}` in the landfall one). On the joined string a subject on the
+ * front face can therefore find its verb on the back — two abilities that never
+ * share a game state, read as one sentence. Per face that cannot happen at all,
+ * rather than happening not to.
+ *
+ * **Measured, and it changes nothing today: 0 of the 825 multi-faced
+ * commander-legal cards derive differently split than joined.** The reason is
+ * that a `[^.]` gap can only cross the join when the front face's last line
+ * carries no full stop, and real oracle text ends its sentences — so the join
+ * is safe by accident of templating, not by construction.
+ *
+ * The number is worth stating because it also answers the question this change
+ * was expected to turn on. Tergrid is right either way round: her faces
+ * disagree about DIRECTION, not about subject, and `produces` and `wants` are
+ * separate rule sets, so the union over faces and the match over the join are
+ * the same set. Reading faces separately is not what fixed Tergrid.
+ *
+ * It is kept because it makes the boundary structural instead of incidental —
+ * the two rules above are safe only because nothing has yet been written on
+ * both sides of a `//` — and because the union across faces is the right model
+ * of the question: a card is a producer if either half produces.
+ *
+ * The type line is prefixed to every face rather than split with it. Scryfall
+ * gives one joined type line per card ("Legendary Creature — God // Legendary
+ * Artifact") and no per-face decomposition, and the `^[^\n]*` rules ask "is
+ * this card an artifact / an instant", which is a question about the card.
+ * Splitting a string we were never handed would be a guess.
  */
 export const deriveSynergy = (
-  card: Pick<Card, 'oracleId' | 'oracleText' | 'typeLine'>,
+  card: Pick<Card, 'oracleId' | 'oracleText' | 'typeLine'> & Partial<Pick<Card, 'oracleTextFaces'>>,
   options: { readonly curated?: SynergyOverrides } = {},
 ): SynergyProfile => {
   const curated = (options.curated ?? CURATED_SYNERGY).get(card.oracleId)
   if (curated !== undefined) return curated
 
-  const text = `${card.typeLine}\n${card.oracleText}`
-  return { produces: apply(PRODUCES, text), wants: apply(WANTS, text) }
+  // Absent means "single-faced, or ingested before the column existed"; the
+  // whole text is the only answer available and is the right one for the first.
+  const faces = card.oracleTextFaces ?? [card.oracleText]
+  const texts = faces.map((face) => `${card.typeLine}\n${face}`)
+  return { produces: apply(PRODUCES, texts), wants: apply(WANTS, texts) }
 }
 
 /**
