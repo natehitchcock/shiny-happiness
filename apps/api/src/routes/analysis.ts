@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
 import { getDeck } from '@roundtable/db'
-import type { CardType, Color, CommanderInfo, OracleId, Role } from '@roundtable/domain'
+import type { CardType, CommanderInfo, OracleId, Role } from '@roundtable/domain'
 import {
   BAROMETER_BASIS,
   BRACKET_DATA,
@@ -10,6 +10,11 @@ import {
   assessArchetype,
   bracketFindings,
   bracketViolations,
+  // Aliased: `colorBalance` is the name of the response key AND of the local
+  // holding it, and a function shadowed by a value of the same name reads as a
+  // bug even when it is not one (the same reason `oracleId` is aliased in the
+  // web app).
+  colorBalance as deckColorBalance,
   deckGameChangers,
   loadBracketRules,
   deckCombos,
@@ -50,20 +55,32 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
     )
     const assessment = assessArchetype(counts.byDimension)
 
-    // Colour pips from mana costs; sources from the accepted lands' identity.
-    const pips: Record<string, number> = { W: 0, U: 0, B: 0, R: 0, G: 0 }
-    const sources: Record<string, number> = { W: 0, U: 0, B: 0, R: 0, G: 0 }
-    for (const oracleId of accepted) {
-      const card = cards.get(oracleId)
-      if (card === undefined) continue
-      for (const symbol of card.manaCost?.match(/\{([WUBRG])\}/g) ?? []) {
-        const color = symbol.slice(1, -1)
-        pips[color] = (pips[color] ?? 0) + 1
-      }
-      if (card.types.includes('land')) {
-        for (const color of card.colorIdentity) sources[color] = (sources[color] ?? 0) + 1
-      }
-    }
+    /*
+     * What the deck IS, and what it MAKES (ADR-0024).
+     *
+     * One call, because the two charts must be counted over the same copies or
+     * they cannot be read against each other. The whole computation is in
+     * `packages/domain` rather than here: it is pure arithmetic over a deck and
+     * a card map, it has degenerate cases worth unit-testing (a deck of one
+     * colourless card, a corpus with no `producedMana`), and inlining it here
+     * would put it somewhere only an integration test against Postgres could
+     * reach.
+     */
+    const {
+      identity,
+      generation,
+      cards: colorBalanceCards,
+      producers,
+    } = deckColorBalance(deck, cards)
+    /*
+     * `unknownProduction` is computed and deliberately NOT forwarded. It counts
+     * cards whose production is unrecorded rather than empty, and it is
+     * structurally 0 on this path: migration 0008 added `produced_mana` as
+     * `NOT NULL DEFAULT '{}'`, so a row written before it and a fetchland are
+     * the same bytes on disk. A field that can only ever be zero invites a
+     * client to render a caveat that can never be true.
+     */
+    const colorBalance = { identity, generation, cards: colorBalanceCards, producers }
 
     // Summed over the CHEAPEST printing of each accepted card, commanders
     // included. An estimate, never a purchase price (ADR-0009 Q7, ADR-0011).
@@ -299,10 +316,7 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
         // show what is settled and what is still moving.
         locked: lockedByBucket,
       },
-      colorBalance: {
-        pips: pips as Record<Color, number>,
-        sources: sources as Record<Color, number>,
-      },
+      colorBalance,
       bracket: {
         target: deck.targetBracket,
         assessed: null,
@@ -377,6 +391,16 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
               },
             ]
           : []),
+        /*
+         * No `mana-production` gap is reported here, deliberately.
+         *
+         * `colorBalance.unknownProduction` counts cards whose production is not
+         * merely empty but unrecorded, and it is always 0 on this path: migration
+         * 0008 added `produced_mana` as `NOT NULL DEFAULT '{}'`, so a row written
+         * before it and a fetchland read back identically. There is no gap this
+         * route could detect, and a caveat wired to a branch that can never run
+         * would be a claim about the corpus we cannot actually make.
+         */
         ...(deck.commanders.length > 1
           ? [
               {

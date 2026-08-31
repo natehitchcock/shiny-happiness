@@ -65,6 +65,27 @@ The **501 art-less cards are gone** and several `apps/web` comments still said
 otherwise; they now read as the past tense doc 17 §17.2 established. The no-art
 code path stays — an unresolved printing is still a state the wire can express.
 
+**The colour panel is two charts now, and colourless is on both.**
+[ADR-0024](adr/0024-two-colour-charts-identity-and-generation.md). A user
+reported that colourless cards were missing from the mana colour pie, and behind
+that were three defects in one twelve-line block: neither count had a `C` bucket
+and the pip regex was `[WUBRG]`; the "sources" figure read `colorIdentity`, so
+Command Tower — empty identity, taps for all five — contributed to no colour at
+all and was indistinguishable from a fetchland; and both were counted over
+`acceptedSet`, a `Set` of oracle ids, so twelve Mountains were one.
+
+`colorBalance` now carries **`identity`** (one bucket per accepted copy, keyed
+`W U B R G M C`, so the slices sum to the deck) and **`generation`** (a count per
+kind of mana each copy produces, from `producedMana`, lands and rocks and dorks
+alike). Both are counted over `acceptedCopies(deck)` by one pure function in
+`packages/domain/src/color-balance.ts`. A gold card goes in `M` rather than in
+each of its colours, because a pie whose slices total more than the deck is a bar
+chart wearing one — and each figure states what its own slices sum to on screen.
+`pips` and `sources` are **off the wire**, which is the contract change the ADR
+exists for. The client's **"N lands" hedge is gone with them**: it was worded
+that way to work around the Set, and a label written around a bug should not
+outlive the bug.
+
 The app is called **Lotus Wizard** in the interface. The name is tentative and
 **not cleared** — `LEGAL-01` owns that, and there is a real question to answer
 first: see doc 04 §4.6. Package scopes stay `@roundtable/*` until it is settled.

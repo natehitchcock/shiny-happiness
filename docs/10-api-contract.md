@@ -322,7 +322,19 @@ GET /api/v1/decks/:id/analysis
       curve: { averageManaValue: number, histogram: number[],
                target: CurveBand[], preset: CurveBand[],
                deltas: CurveDelta[], locked: number[] },
-      colorBalance: { pips: Record<Color, number>, sources: Record<Color, number> },
+      // What the deck IS and what the deck MAKES (ADR-0024). Two records, both
+      // counted over accepted COPIES — twelve Mountains are twelve — and both
+      // carrying colourless, which the single chart these replaced had no key
+      // for at all.
+      //
+      // `identity` is one bucket per card, keyed `W U B R G M C` (`M` = two or
+      // more colours, `C` = none). Mutually exclusive, so it sums to `cards`.
+      // `generation` reads `producedMana`, NOT `colorIdentity`, and counts a
+      // card once per kind of mana it makes — so a Command Tower is in five of
+      // its slices and it sums to more than `producers`.
+      colorBalance: { identity: Record<IdentityBucket, number>,
+                      generation: Record<ManaLetter, number>,
+                      cards: number, producers: number },
       bracket: {
         target: Bracket,
         assessed: Bracket | null,   // what the deck actually looks like; null

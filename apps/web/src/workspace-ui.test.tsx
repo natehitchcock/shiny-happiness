@@ -905,42 +905,96 @@ describe('what is behind a bar', () => {
   })
 })
 
-// ------------------------------------------------------------- colour pie
+// ------------------------------------------------------------ colour pies
 
 /**
- * The mana colour pie under the composition bars.
+ * The two mana colour pies under the composition bars.
  *
- * `analysis.colorBalance` has been on the wire since API-02 and nothing has
- * ever rendered it. The interesting assertions here are not "a pie appears" —
- * they are the ones about the SECOND ENCODING, because Magic's own five colours
- * fail a categorical-palette check and are shipped anyway, and the letters and
- * counts are the entire reason that is defensible on a decision surface.
+ * They answer different questions over the same accepted copies: what the deck
+ * IS (colour identity, one bucket per card) and what it MAKES (produced mana,
+ * one count per kind a card makes). The interesting assertions here are not "a
+ * pie appears" — they are the ones about the SECOND ENCODING, because Magic's
+ * own colours fail a categorical-palette check and are shipped anyway, and the
+ * letters and counts are the entire reason that is defensible on a decision
+ * surface; and the ones about each figure SAYING WHAT ITS SLICES SUM TO, which
+ * is the difference between a pie and a decoration.
  */
-describe('the mana colour pie', () => {
+describe('the mana colour pies', () => {
   const withBalance = (
-    pips: Record<string, number>,
-    sources: Record<string, number> = {},
+    identity: Record<string, number>,
+    generation: Record<string, number> = {},
+    extra: { cards?: number; producers?: number } = {},
   ): void => {
+    const full = { W: 0, U: 0, B: 0, R: 0, G: 0, M: 0, C: 0, ...identity }
     mocked.getAnalysis.mockResolvedValue({
       ...analysis,
       colorBalance: {
-        pips: { W: 0, U: 0, B: 0, R: 0, G: 0, ...pips },
-        sources: { W: 0, U: 0, B: 0, R: 0, G: 0, ...sources },
+        identity: full,
+        generation: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, ...generation },
+        cards: extra.cards ?? Object.values(full).reduce((a, b) => a + b, 0),
+        producers: extra.producers ?? 0,
       },
     })
   }
 
-  it('draws a slice per colour the deck actually asks for, and none for the rest', async () => {
-    withBalance({ R: 12, G: 4 })
+  const figures = (container: HTMLElement): Element[] => [
+    ...container.querySelectorAll('.pie-figure'),
+  ]
+
+  it('draws two charts, titled for the two different questions', async () => {
+    withBalance({ R: 12, C: 4 }, { R: 20, C: 2 }, { producers: 22 })
     const { container } = render(<Workspace deck={deck} />)
     await waitFor(() => expect(container.querySelector('.pie')).not.toBeNull())
 
-    expect(container.querySelectorAll('.pie path')).toHaveLength(2)
-    // A colour with no pips is not a zero-width wedge — it is absent.
-    expect([...container.querySelectorAll('.pie-letter')].map((l) => l.textContent)).toEqual([
-      'R',
-      'G',
+    expect(figures(container)).toHaveLength(2)
+    expect([...container.querySelectorAll('.pie-title')].map((t) => t.textContent)).toEqual([
+      'Identity',
+      'Generation',
     ])
+  })
+
+  it('gives colourless cards a slice in BOTH charts', async () => {
+    /*
+     * The reported bug, from both ends. The old pie had no `C` bucket at all —
+     * its pip regex was `[WUBRG]` — so Sol Ring and Wastes were in the deck and
+     * in neither figure.
+     */
+    withBalance({ R: 30, C: 20 }, { R: 12, C: 9 }, { producers: 21 })
+    const { container } = render(<Workspace deck={deck} />)
+    await waitFor(() => expect(container.querySelector('.pie')).not.toBeNull())
+
+    const letters = figures(container).map((f) =>
+      [...f.querySelectorAll('.pie-letter')].map((l) => l.textContent),
+    )
+    expect(letters[0]).toEqual(['R', 'C'])
+    expect(letters[1]).toEqual(['R', 'C'])
+  })
+
+  it('draws a slice per bucket the deck actually has, and none for the rest', async () => {
+    withBalance({ R: 12, G: 4 }, { R: 20 }, { producers: 20 })
+    const { container } = render(<Workspace deck={deck} />)
+    await waitFor(() => expect(container.querySelector('.pie')).not.toBeNull())
+
+    // A bucket with no cards is not a zero-width wedge — it is absent.
+    expect(figures(container)[0]?.querySelectorAll('path')).toHaveLength(2)
+  })
+
+  it('gives a multicolour card its own M slice rather than one per colour', async () => {
+    /*
+     * The design decision the whole identity chart rests on. Counting a gold
+     * card once in each of its colours makes the slices total more than the
+     * deck holds, and a pie whose area is not a share is a bar chart wearing
+     * one. What it costs is stated on screen, in the caption below.
+     */
+    withBalance({ R: 40, M: 12, C: 20 })
+    const { container } = render(<Workspace deck={deck} />)
+    await waitFor(() => expect(container.querySelector('.pie')).not.toBeNull())
+
+    const rows = [...(figures(container)[0]?.querySelectorAll('.pie-key li') ?? [])].map(
+      (li) => li.textContent ?? '',
+    )
+    expect(rows).toEqual(['R40', 'M12', 'C20'])
+    expect(screen.getByText(/is in/)).toBeDefined()
   })
 
   it('labels every slice with its letter and its count', async () => {
@@ -949,7 +1003,7 @@ describe('the mana colour pie', () => {
      * three counts (lightness band, chroma floor, protan separation) and is
      * shipped unchanged because a player's white pips have to look white. What
      * pays for that is this: read the letters and the chart works with no
-     * colour vision at all.
+     * colour vision at all — including the grey `C` against the pale gold `M`.
      */
     withBalance({ W: 3, U: 7 })
     const { container } = render(<Workspace deck={deck} />)
@@ -965,55 +1019,87 @@ describe('the mana colour pie', () => {
   it('separates adjacent wedges with an edge, not only a hue change', async () => {
     // The other half of the secondary encoding, and the one a protan reader
     // needs between #a274ae and #2f74c8 (measured ΔE 6.3).
-    withBalance({ U: 5, B: 5 })
+    withBalance({ U: 5, B: 5 }, { U: 5, C: 5 }, { producers: 8 })
     const { container } = render(<Workspace deck={deck} />)
     await waitFor(() => expect(container.querySelector('.pie')).not.toBeNull())
 
-    for (const path of container.querySelectorAll('.pie path')) {
-      expect(path.getAttribute('stroke')).toBe('var(--ink)')
-    }
+    const paths = container.querySelectorAll('.pie path')
+    expect(paths).toHaveLength(4)
+    for (const path of paths) expect(path.getAttribute('stroke')).toBe('var(--ink)')
   })
 
-  it('names every colour and count in the accessible label, in words', async () => {
-    // `role="img"` means the wedges are not read individually, so the whole
-    // figure has to say what it shows — and "W 3" read aloud is two letters.
-    withBalance({ W: 3, G: 9 })
+  it('names every bucket and count in each accessible label, in words', async () => {
+    // `role="img"` means the wedges are not read individually, so each figure
+    // has to say what it shows — and "W 3" read aloud is two letters, while a
+    // lone "C" is a letter that happens to be a whole category.
+    withBalance({ W: 3, G: 9, C: 4 }, { G: 6, C: 5 }, { producers: 9 })
     render(<Workspace deck={deck} />)
-    const figure = await screen.findByRole('img', { name: /Coloured mana symbols/ })
-    expect(figure.getAttribute('aria-label')).toMatch(/white 3, green 9/)
-    expect(figure.getAttribute('aria-label')).toMatch(/12 symbols in total/)
+
+    const identity = await screen.findByRole('img', { name: /Colour identity/ })
+    expect(identity.getAttribute('aria-label')).toMatch(/white 3, green 9, colourless 4/)
+    expect(identity.getAttribute('aria-label')).toMatch(/exactly one, 16 cards in total/)
+
+    const generation = screen.getByRole('img', { name: /kind of mana/ })
+    expect(generation.getAttribute('aria-label')).toMatch(/green 6, colourless 5/)
+    expect(generation.getAttribute('aria-label')).toMatch(/over 9 cards/)
   })
 
-  it('draws a mono-colour deck as a whole circle, not a degenerate arc', async () => {
+  it('says what each chart sums to, and that the two totals are not the same', async () => {
+    /*
+     * Identity slices sum to the deck; generation slices sum to MORE, because
+     * a dual is in two of them. A reader told neither would assume the second
+     * number is a card count, which is the misreading that made "N lands" a
+     * necessary hedge on the old chart.
+     */
+    withBalance({ R: 30, C: 10 }, { R: 20, U: 6, C: 4 }, { producers: 24 })
+    render(<Workspace deck={deck} />)
+    await screen.findByRole('img', { name: /Colour identity/ })
+
+    expect(screen.getByText(/these add up to your 40 cards/)).toBeDefined()
+    expect(screen.getByText(/these total 30 across 24 cards/)).toBeDefined()
+  })
+
+  it('says "1 card" and not "1" for a deck that is only its commander', async () => {
+    // A real state — a commander chosen and nothing accepted yet — and the one
+    // the bare number reads wrong in.
+    withBalance({ M: 1 })
+    render(<Workspace deck={deck} />)
+    await screen.findByRole('img', { name: /Colour identity/ })
+
+    expect(screen.getByText(/these add up to your 1 card\./)).toBeDefined()
+  })
+
+  it('draws a single-bucket chart as a whole circle, not a degenerate arc', async () => {
     // An arc of exactly 2π has the same start and end point, so the path
     // command draws nothing at all — a mono-red deck would get a blank square.
-    withBalance({ R: 30 })
+    withBalance({ R: 30 }, { R: 30 }, { producers: 30 })
     const { container } = render(<Workspace deck={deck} />)
     await waitFor(() => expect(container.querySelector('.pie')).not.toBeNull())
 
     expect(container.querySelectorAll('.pie path')).toHaveLength(0)
-    expect(container.querySelectorAll('.pie circle')).toHaveLength(1)
+    expect(container.querySelectorAll('.pie circle')).toHaveLength(2)
   })
 
-  it('says a colourless deck is colourless rather than drawing an empty circle', async () => {
-    withBalance({})
+  it('says an empty deck is empty rather than drawing an empty circle', async () => {
+    withBalance({}, {})
     render(<Workspace deck={deck} />)
-    expect(await screen.findByText(/No coloured mana symbols yet/)).toBeDefined()
+    expect(await screen.findByText(/no colour identity to show/)).toBeDefined()
+    expect(screen.getByText(/Nothing in the deck makes mana yet/)).toBeDefined()
   })
 
-  it('calls the land figure what it is — distinct lands, not sources', async () => {
+  it('draws a deck whose cards mostly make no mana without implying they are missing', async () => {
     /*
-     * `colorBalance.sources` is counted over `acceptedSet`, a Set of oracle
-     * ids, so ten Mountains are ONE land. Calling that "sources" would be a
-     * wrong answer to the question a builder is actually asking about their
-     * mana base; naming it precisely makes it a right answer to a narrower one.
+     * Most of a deck is spells, and a generation chart covering a quarter of the
+     * cards is the normal case rather than an incomplete one. Its base is
+     * `producers`, said out loud, so the reader is never left to assume the
+     * chart is over the whole deck and that the rest went astray.
      */
-    withBalance({ R: 20 }, { R: 4 })
-    const { container } = render(<Workspace deck={deck} />)
-    await waitFor(() => expect(container.querySelector('.pie')).not.toBeNull())
+    withBalance({ R: 30 }, { R: 8 }, { producers: 8 })
+    render(<Workspace deck={deck} />)
+    await screen.findByRole('img', { name: /Colour identity/ })
 
-    expect(container.querySelector('.pie-sources')?.textContent).toBe('4 lands')
-    expect(screen.getByText(/A repeated basic counts once/)).toBeDefined()
+    expect(screen.getByText(/these total 8 across 8 cards/)).toBeDefined()
+    expect(screen.queryByText(/missing/)).toBeNull()
   })
 
   it('renders nothing at all against a server that does not send the field', async () => {

@@ -162,6 +162,31 @@ export const acceptedSet = (deck: Deck): ReadonlySet<OracleId> => {
   return accepted
 }
 
+/**
+ * Every accepted card, **one entry per copy**, commanders first.
+ *
+ * `acceptedSet` deliberately is not this. A Set is the right shape for combo
+ * lookups — a combo either has its pieces or it does not, and a second Mountain
+ * adds nothing — and the wrong shape for anything that counts the deck, where
+ * ten Mountains are ten cards. Both readings of "accepted" are real questions;
+ * naming them apart is what stops a caller reaching for the wrong one, which is
+ * how the colour pie came to report ten Mountains as one red source.
+ *
+ * A commander that ALSO has an accepted entry is counted once — the same guard
+ * `validateDeck` applies when it counts copies for the singleton rule. It
+ * happens: import a decklist with the commander in the hundred, then set it as
+ * the commander, and the deck holds both rows.
+ */
+export const acceptedCopies = (deck: Deck): readonly OracleId[] => {
+  const copies: OracleId[] = [...deck.commanders]
+  for (const entry of deck.entries) {
+    if (entry.zone === 'accepted' && !deck.commanders.includes(entry.oracleId)) {
+      copies.push(entry.oracleId)
+    }
+  }
+  return copies
+}
+
 /** Cards the user has removed. Never re-suggest these (pillar P6). */
 export const excludedSet = (deck: Deck): ReadonlySet<OracleId> => {
   const excluded = new Set<OracleId>()

@@ -621,24 +621,33 @@ export interface Analysis {
     }[]
   }
   /**
-   * What the deck's cards DEMAND against what its lands PRODUCE.
+   * What the deck IS, and what the deck MAKES (ADR-0024).
    *
-   * Already on the wire since API-02 and never declared here, so nothing has
-   * ever rendered it. Optional for the usual reason — a server from before it
-   * sends nothing, and the panel must then draw nothing rather than crash on a
-   * property of undefined.
+   * Optional for the usual reason — a server from before it sends nothing, and
+   * the panel must then draw nothing rather than crash on a property of
+   * undefined. A server from *between* API-02 and ADR-0024 sends the old
+   * `{ pips, sources }` instead, which has neither key here; the charts read
+   * `identity`/`generation` through `??`, so that server draws no chart rather
+   * than a chart of zeroes.
    *
-   * The two halves are counted differently and are NOT interchangeable.
-   * `pips` counts `{W}` symbols in mana costs, so a card costing `{W}{W}`
-   * contributes two; `sources` counts ACCEPTED LAND CARDS whose colour
-   * identity includes the colour. Both are computed over `acceptedSet`, which
-   * is a `Set` of oracle ids — so `sources` counts ten Mountains once, and is
-   * therefore "how many distinct lands make this colour" and not "how many
-   * mana sources you have". The UI has to say which question it is answering.
+   * The two halves are counted differently and are NOT interchangeable:
+   *
+   *   - `identity` is ONE bucket per accepted copy, keyed `W U B R G M C` —
+   *     `M` for two or more colours, `C` for none. Mutually exclusive, so it
+   *     sums to `cards` and a slice is a genuine share of the deck.
+   *   - `generation` counts a copy in EVERY kind of mana it produces, keyed
+   *     `W U B R G C`. A Command Tower is in five of those slices. It therefore
+   *     sums to more than `producers`, and a UI drawing it has to say so.
+   *
+   * Both are counted over COPIES, so twelve Mountains are twelve.
    */
   colorBalance?: {
-    pips: Record<string, number>
-    sources: Record<string, number>
+    identity: Record<string, number>
+    generation: Record<string, number>
+    /** Accepted copies counted, commanders included. `identity` sums to this. */
+    cards: number
+    /** Copies making at least one kind of mana. `generation` sums to MORE. */
+    producers: number
   }
   legality: { legal: boolean; problems: LegalityProblem[] }
   /**

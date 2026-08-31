@@ -25,6 +25,9 @@ const PIECE_B = oracleId(randomUUID())
 const RAMP = oracleId(randomUUID())
 const LAND = oracleId(randomUUID())
 const OFF_COLOR = oracleId(randomUUID())
+/** Command Tower and a fetch: identical colour identity, opposite production. */
+const TOWER = oracleId(randomUUID())
+const FETCH = oracleId(randomUUID())
 const BAD_COMMANDER = oracleId(randomUUID())
 const UNDECIDED = oracleId(randomUUID())
 /**
@@ -79,6 +82,10 @@ const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   // of every row in the real corpus and the one the analysis endpoint has to
   // report rather than rule on.
   ...(opts.canBeCommander === undefined ? {} : { canBeCommander: opts.canBeCommander }),
+  // Same shape and the same reason: a row from before migration 0008 records
+  // no production, and `[]` would claim it makes none. The colour generation
+  // chart has to tell those apart, so the fixture has to be able to be both.
+  ...(opts.producedMana === undefined ? {} : { producedMana: opts.producedMana }),
   edhrecRank: opts.edhrecRank ?? null,
   defaultPrinting: printingId(randomUUID()),
   roles: opts.roles ?? ['synergy'],
@@ -129,6 +136,8 @@ describeDb('API-02 contract', () => {
         synergyWants: [],
         colorIdentity: [],
         colors: [],
+        // A rock, so the generation chart is provably not lands-only.
+        producedMana: ['C'],
       }),
       card(LAND, 'Mountain', {
         typeLine: 'Basic Land — Mountain',
@@ -140,6 +149,37 @@ describeDb('API-02 contract', () => {
         manaCost: null,
         manaValue: 0,
         types: ['land'],
+        producedMana: ['R'],
+      }),
+      /*
+       * Command Tower, the card the old implementation could not see.
+       *
+       * Its colour identity is EMPTY and it taps for all five, so the "sources"
+       * figure — which read `colorIdentity` — gave the format's best fixing
+       * land a score of nothing in every colour.
+       */
+      card(TOWER, 'Command Tower', {
+        typeLine: 'Land',
+        types: ['land'],
+        roles: ['land'],
+        primaryRole: 'land',
+        manaCost: null,
+        manaValue: 0,
+        colorIdentity: [],
+        colors: [],
+        producedMana: ['W', 'U', 'B', 'R', 'G'],
+      }),
+      // A fetch: the same empty identity as the Tower and no production at all.
+      card(FETCH, 'Scalding Tarn', {
+        typeLine: 'Land',
+        types: ['land'],
+        roles: ['land'],
+        primaryRole: 'land',
+        manaCost: null,
+        manaValue: 0,
+        colorIdentity: [],
+        colors: [],
+        producedMana: [],
       }),
       card(OFF_COLOR, 'Blue Thing', { colorIdentity: ['U'], colors: ['U'] }),
       ...GAME_CHANGERS.map((id, index) => card(id, `Game Changer ${index}`, { gameChanger: true })),
@@ -376,7 +416,122 @@ describeDb('API-02 contract', () => {
       expect(body.archetype).toHaveProperty('assessed')
       expect(body.archetype).toHaveProperty('drivers')
       expect(body.curve).toHaveProperty('averageManaValue')
-      expect(body.colorBalance.pips).toHaveProperty('R')
+      expect(body.colorBalance.identity).toHaveProperty('R')
+      // The two buckets the first pie had no key for at all.
+      expect(body.colorBalance.identity).toHaveProperty('M')
+      expect(body.colorBalance.identity).toHaveProperty('C')
+      expect(body.colorBalance.generation).toHaveProperty('C')
+    })
+
+    describe('colour balance', () => {
+      const balanceOf = async (oracleIds: readonly string[]) => {
+        const fresh = (
+          await app.inject({
+            method: 'POST',
+            url: '/api/v1/decks',
+            payload: {
+              name: 'Colour balance',
+              commanders: [KROV],
+              targetBracket: 3,
+              archetype: 'midrange',
+            },
+          })
+        ).json()
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/decks/${fresh.id}/commands`,
+          payload: {
+            commands: oracleIds.map((id) => ({ type: 'accept', oracleId: id, origin: 'manual' })),
+            idempotencyKey: randomUUID(),
+            baseVersion: 1,
+          },
+        })
+        return (
+          await app.inject({ method: 'GET', url: `/api/v1/decks/${fresh.id}/analysis` })
+        ).json()
+      }
+
+      it('gives every accepted card exactly one identity bucket, colourless included', async () => {
+        /*
+         * Krovax (R) leads and a Mountain is red; Ramp Rock and Command Tower
+         * are colourless. Four cards, four slices, and the two colourless ones
+         * are IN the chart — the reported bug was that they were in the deck
+         * and in no slice at all.
+         *
+         * No multicolour card here: `M` needs two colours inside the
+         * commander's identity, and a mono-red commander cannot legally have
+         * one accepted. That bucket is pinned in the domain unit tests, where
+         * a fixture is free to be any colour.
+         */
+        const body = await balanceOf([RAMP, TOWER, LAND])
+        expect(body.colorBalance.identity).toMatchObject({ R: 2, U: 0, C: 2, M: 0 })
+        expect(body.colorBalance.cards).toBe(4)
+        const summed = Object.values(body.colorBalance.identity as Record<string, number>).reduce(
+          (a, b) => a + b,
+          0,
+        )
+        expect(summed).toBe(body.colorBalance.cards)
+      })
+
+      it('reads generation from produced mana, so Command Tower makes all five', async () => {
+        /*
+         * The regression this endpoint most needs pinned. `sources` used to be
+         * counted from `colorIdentity`, and Command Tower's identity is empty —
+         * so the format's best fixing land contributed to no colour at all.
+         */
+        const body = await balanceOf([TOWER, RAMP, LAND])
+        expect(body.colorBalance.generation).toMatchObject({
+          W: 1,
+          U: 1,
+          B: 1,
+          G: 1,
+          // Tower and Mountain.
+          R: 2,
+          // Sol Ring. A lands-only chart would not have this at all.
+          C: 1,
+        })
+        expect(body.colorBalance.producers).toBe(3)
+      })
+
+      it('gives a fetchland no production, though its identity matches the Tower', async () => {
+        const body = await balanceOf([FETCH])
+        expect(body.colorBalance.identity.C).toBe(1)
+        expect(body.colorBalance.generation).toMatchObject({
+          W: 0,
+          U: 0,
+          B: 0,
+          R: 0,
+          G: 0,
+          C: 0,
+        })
+        expect(body.colorBalance.producers).toBe(0)
+      })
+
+      it('sends no unknown-production count, because the database cannot express one', async () => {
+        /*
+         * Krovax is written to the database with no `producedMana` at all — the
+         * pre-migration-0008 state of every row in the real corpus — and reads
+         * back as `[]` regardless, because 0008 added the column as
+         * `NOT NULL DEFAULT '{}'`. A row that predates the migration and a
+         * fetchland are the same bytes on disk, so this endpoint contributes
+         * both to `producers` identically and has no gap it could report.
+         *
+         * The first draft of this route DID report one, on a count that is
+         * structurally always zero here. A caveat wired to a branch that cannot
+         * run is a claim about the corpus we are not in a position to make, so
+         * the field is dropped at this boundary rather than sent as a zero a
+         * client might render. The distinction stays alive in the domain unit
+         * tests, where a fixture can express it.
+         */
+        const body = await balanceOf([TOWER, FETCH])
+        expect(body.colorBalance).not.toHaveProperty('unknownProduction')
+        expect(body.unavailable.find((u: { key: string }) => u.key === 'mana-production')).toBe(
+          undefined,
+        )
+        // Krovax (unrecorded) and Scalding Tarn (explicitly empty) are alike:
+        // only Command Tower is a producer.
+        expect(body.colorBalance.producers).toBe(1)
+      })
     })
 
     it('reports a land deficit for a deck with no lands', async () => {

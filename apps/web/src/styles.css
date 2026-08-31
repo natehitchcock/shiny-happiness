@@ -1354,7 +1354,44 @@ select {
 
 /* A deck can assemble dozens of combos; they get their own scroller so they
    cannot push everything else out of the rail. */
-/* ------------------------------------------------------------- colour pie */
+/* ------------------------------------------------------------ colour pies */
+
+/*
+ * The two charts — what the deck IS and what it MAKES — side by side while
+ * there is room, and stacked when there is not.
+ *
+ * `auto-fit` rather than a media query: the panel this sits in is a 230 px rail
+ * on a phone and a much wider column on a desktop, and the breakpoint that
+ * matters is "does a pie plus its key still fit", which is a property of the
+ * container and not of the viewport. Below 2 × 9.5rem the two stack, which is
+ * the correct answer and not a degraded one — the gap between the charts is
+ * read vertically just as well.
+ */
+.pie-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: var(--step);
+  margin-bottom: var(--step);
+}
+
+.pie-figure {
+  margin: 0;
+  min-width: 0;
+}
+
+/*
+ * Which chart this is. A real heading, not a styled span: the two figures are
+ * otherwise indistinguishable to a screen reader reading the panel's outline,
+ * and "Identity" versus "Generation" is the whole reason there are two.
+ */
+.pie-title {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+}
 
 /*
  * The pie and its key, side by side while there is room and stacked when there
@@ -1362,15 +1399,18 @@ select {
  *
  * The key is not decoration and is never dropped: it carries the letter and the
  * count for every slice, which is the secondary encoding that makes this figure
- * readable without colour vision (see `ColorPie` for the measured validator
- * failures and why Magic's own colours are shipped anyway).
+ * readable without colour vision (see `Pie` for the measured validator failures
+ * and why Magic's own colours are shipped anyway).
  */
 .pie-block {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--step);
-  margin-bottom: var(--step);
+  /* The caption below is part of the figure, so the space that used to sit here
+     belongs to `.pie-pair` instead — otherwise the sentence saying what the
+     slices sum to floats nearer the next chart than to its own. */
+  margin-bottom: 4px;
 }
 
 .pie {
@@ -1421,12 +1461,12 @@ select {
   text-align: right;
 }
 
-.pie-sources {
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  color: var(--parchment-dim);
-  white-space: nowrap;
-}
+/* `.pie-sources` used to live here: a per-row "N lands" column, worded that way
+   because the number behind it was counted over a Set of oracle ids and really
+   was distinct lands rather than sources. Generation is its own chart now,
+   counted over copies and over everything that makes mana, so both the column
+   and the hedge in its label are gone — a label written to work around a bug
+   should not outlive the bug. */
 
 .combo-list {
   max-height: 12rem;

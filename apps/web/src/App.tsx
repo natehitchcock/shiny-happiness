@@ -9,7 +9,13 @@ import {
   CURVE_REFERENCE_SPELLS,
   dimensionKeysOf,
   formatDecklist,
+  // The two charts' slice order, from the package that also decides what goes
+  // in each slice. A hand-written `['W','U','B','R','G','M','C']` here would be
+  // a second copy of the server's bucket list, free to drift the day a key is
+  // added — which is exactly how `C` came to be missing from the first pie.
+  IDENTITY_BUCKETS,
   interactsWith,
+  MANA_LETTERS,
   rebaseCommands,
 } from '@roundtable/domain'
 // Aliased: `oracleId` is a parameter name a dozen times in this file, and a
@@ -2048,13 +2054,21 @@ const Breakdown = ({
 
 /* ------------------------------------------------------------ colour pie */
 
-/** Full names, for the accessible summary. A lone "W" read aloud is a letter. */
+/**
+ * Full names, for the accessible summary. A lone "W" read aloud is a letter.
+ *
+ * Seven, not five: `M` and `C` are slices here too, and a chart that named the
+ * five colours and left its colourless wedge to be read as the letter "C" would
+ * be doing the thing this map exists to prevent.
+ */
 const COLOR_NAMES: Readonly<Record<string, string>> = {
   W: 'white',
   U: 'blue',
   B: 'black',
   R: 'red',
   G: 'green',
+  M: 'multicolour',
+  C: 'colourless',
 }
 
 /** One slice's wedge, from the centre. Angles in radians, 0 at three o'clock. */
@@ -2066,13 +2080,21 @@ const wedge = (cx: number, cy: number, r: number, from: number, to: number): str
 }
 
 /**
- * The colour demand of the deck's cards, as a pie.
+ * The deck's colour, as two pies: what it IS, and what it MAKES.
  *
- * WHY A PIE AT ALL. It is a part-to-whole with at most five categories that sum
- * to a meaningful total, which is the one case a pie answers better than a bar:
- * "how much of my deck is blue" is a share, not a magnitude. That is the whole
- * of the justification and it does not generalise — nothing else on this
- * dashboard should become one.
+ * WHY TWO. They are different questions and one chart was answering neither.
+ * "How much of my deck is blue" is about the cards; "can I pay for it" is about
+ * the mana base, and a Boros deck of Plains and a Boros deck of Signets have
+ * the same identity and nothing else in common. Drawn side by side because the
+ * interesting reading is the GAP between them — a deck two-thirds green whose
+ * generation chart is one-third green is a deck that will not cast its spells.
+ *
+ * WHY A PIE AT ALL. Each is a part-to-whole with at most seven categories that
+ * sum to a meaningful total, which is the one case a pie answers better than a
+ * bar: a share, not a magnitude. That is the whole of the justification and it
+ * does not generalise — nothing else on this dashboard should become one. What
+ * each total MEANS differs between the two, and each says so in its own words
+ * under the figure; a pie whose reader cannot name its whole is a decoration.
  *
  * WHY THE COLOURS ARE NOT FIXED, AND WHAT IT COSTS.
  *
@@ -2103,100 +2125,179 @@ const wedge = (cx: number, cy: number, r: number, from: number, to: number): str
  * Read the letters and the chart works with no colour vision at all. The hues
  * are then a fast path for the readers who have them, which is what a secondary
  * encoding is for.
+ *
+ * That bargain now covers seven letters rather than five. `M` (gold) and `C`
+ * (colourless) come from the same `IDENTITY_COLORS` map and were measured in
+ * the same run — colourless is the cool grey that run forced, after the first
+ * draft sat at ΔE 13.9 against blue — and they get the letter, the count, the
+ * stroke and the spoken name exactly as the five do. Grey next to a pale gold
+ * is precisely the pair a letter has to carry.
  */
-const ColorPie = ({
+interface Slice {
+  /** `W`–`G`, `M` or `C`. The key into `IDENTITY_COLORS` and `COLOR_NAMES`. */
+  readonly key: string
+  readonly count: number
+}
+
+/**
+ * One pie, its key, and the sentence saying what its slices sum to.
+ *
+ * Shared by both charts rather than written twice. They differ in what they
+ * count and in nothing else, and two copies of the wedge maths is how one of
+ * them would come to draw the single-slice case as a whole circle and the other
+ * would draw a blank square.
+ */
+const Pie = ({
+  title,
+  slices,
+  summary,
+  caption,
+}: {
+  readonly title: string
+  readonly slices: readonly Slice[]
+  /** The accessible name: what is counted, named in words, and its total. */
+  readonly summary: string
+  /**
+   * What the slices add up to, on screen and in the reader's own terms.
+   *
+   * Required, not optional. The two charts sum to different things — one to the
+   * deck's card count, one to more than it — and a pie whose reader cannot name
+   * its whole is a decoration. Making it a prop means a third chart cannot be
+   * added without answering the question.
+   */
+  readonly caption: React.ReactNode
+}): React.JSX.Element => {
+  const total = slices.reduce((sum, s) => sum + s.count, 0)
+  const cx = 62
+  const cy = 62
+  const r = 44
+  let angle = -Math.PI / 2
+  return (
+    <figure className="pie-figure">
+      <h3 className="pie-title">{title}</h3>
+      <div className="pie-block">
+        <svg className="pie" viewBox="0 0 124 124" role="img" aria-label={summary}>
+          {slices.map((s) => {
+            const from = angle
+            const to = angle + (s.count / total) * Math.PI * 2
+            angle = to
+            return (
+              // One category, one slice, and a single-category deck is a whole
+              // circle: the arc command degenerates at exactly 2π — start and
+              // end point are the same — and would draw nothing at all.
+              slices.length === 1 ? (
+                <circle key={s.key} cx={cx} cy={cy} r={r} fill={IDENTITY_COLORS[s.key]} />
+              ) : (
+                <path
+                  key={s.key}
+                  d={wedge(cx, cy, r, from, to)}
+                  fill={IDENTITY_COLORS[s.key]}
+                  /* The gap. In the page's own ground colour rather than a
+                     transparent stroke, so adjacent wedges are separated by an
+                     edge and not only by a hue change — which is the half of
+                     the figure a protan reader is relying on. */
+                  stroke="var(--ink)"
+                  strokeWidth={2}
+                />
+              )
+            )
+          })}
+        </svg>
+        {/*
+          The letter and the count for every slice, in reading order.
+          Beside the pie rather than on it: at a 230 px rail a thin wedge has no
+          room for text, and text ON a slice inherits that slice's contrast —
+          the white one is L 0.913 and would need a dark glyph while the blue
+          needs a light one. Out here the page's own parchment-on-ink contrast
+          applies to all seven.
+        */}
+        <ul className="pie-key">
+          {slices.map((s) => (
+            <li key={s.key}>
+              <span className="pie-swatch" style={{ background: IDENTITY_COLORS[s.key] }} />
+              <span className="pie-letter">{s.key}</span>
+              <span className="pie-count">{s.count}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <figcaption className="note">{caption}</figcaption>
+    </figure>
+  )
+}
+
+/**
+ * Both charts, from one `colorBalance`.
+ *
+ * The two are computed by the server over the SAME accepted copies, which is
+ * what makes reading one against the other legitimate; splitting them across
+ * two requests, or counting one here and one there, would eventually put two
+ * different decks on the same row.
+ */
+const ColorPies = ({
   balance,
 }: {
   balance: NonNullable<api.Analysis['colorBalance']>
 }): React.JSX.Element => {
-  const slices = (COLORS as readonly string[])
-    .map((c) => ({ color: c, pips: balance.pips[c] ?? 0, sources: balance.sources[c] ?? 0 }))
-    .filter((s) => s.pips > 0)
-  const total = slices.reduce((sum, s) => sum + s.pips, 0)
+  /*
+   * `?? {}` because the wire is not the type. A server from between API-02 and
+   * ADR-0024 sends `{ pips, sources }` and neither key here exists on it; that
+   * draws the "nothing yet" line, which is wrong but harmless, rather than
+   * throwing on a property of undefined inside the render.
+   */
+  const identityCounts: Record<string, number> = balance.identity ?? {}
+  const generationCounts: Record<string, number> = balance.generation ?? {}
+  const identity = (IDENTITY_BUCKETS as readonly string[])
+    .map((key) => ({ key, count: identityCounts[key] ?? 0 }))
+    .filter((s) => s.count > 0)
+  const generation = (MANA_LETTERS as readonly string[])
+    .map((key) => ({ key, count: generationCounts[key] ?? 0 }))
+    .filter((s) => s.count > 0)
 
-  if (total === 0) {
-    // A colourless deck is a real answer, and an empty circle is not one.
-    return (
-      <p className="note">
-        No coloured mana symbols yet — the deck is empty, or everything in it is colourless.
-      </p>
-    )
-  }
+  const names = (slices: readonly Slice[]): string =>
+    slices.map((s) => `${COLOR_NAMES[s.key] ?? s.key} ${String(s.count)}`).join(', ')
+  const madeSlices = generation.reduce((sum, s) => sum + s.count, 0)
 
-  const cx = 62
-  const cy = 62
-  const r = 44
-  const summary = slices
-    .map((s) => `${COLOR_NAMES[s.color] ?? s.color} ${String(s.pips)}`)
-    .join(', ')
-
-  let angle = -Math.PI / 2
   return (
-    <div className="pie-block">
-      <svg
-        className="pie"
-        viewBox="0 0 124 124"
-        role="img"
-        aria-label={`Coloured mana symbols the deck's cards ask for: ${summary}. ${plural(total, 'symbol')} in total.`}
-      >
-        {slices.map((s) => {
-          const from = angle
-          const to = angle + (s.pips / total) * Math.PI * 2
-          angle = to
-          return (
-            // One colour, one slice, and a single-colour deck is a whole
-            // circle: the arc command degenerates at exactly 2π — start and end
-            // point are the same — and would draw nothing at all.
-            slices.length === 1 ? (
-              <circle key={s.color} cx={cx} cy={cy} r={r} fill={IDENTITY_COLORS[s.color]} />
-            ) : (
-              <path
-                key={s.color}
-                d={wedge(cx, cy, r, from, to)}
-                fill={IDENTITY_COLORS[s.color]}
-                /* The gap. In the page's own ground colour rather than a
-                   transparent stroke, so adjacent wedges are separated by an
-                   edge and not only by a hue change — which is the half of the
-                   figure a protan reader is relying on. */
-                stroke="var(--ink)"
-                strokeWidth={2}
-              />
-            )
-          )
-        })}
-      </svg>
-      {/*
-        The letter and the count for every slice, in reading order.
-        Beside the pie rather than on it: at a 230 px rail a thin wedge has no
-        room for text, and text ON a slice inherits that slice's contrast — the
-        white one is L 0.913 and would need a dark glyph while the blue needs a
-        light one. Out here the page's own parchment-on-ink contrast applies to
-        all five.
-      */}
-      <ul className="pie-key">
-        {slices.map((s) => (
-          <li key={s.color}>
-            <span className="pie-swatch" style={{ background: IDENTITY_COLORS[s.color] }} />
-            <span className="pie-letter">{s.color}</span>
-            <span className="pie-count">{s.pips}</span>
-            {/*
-              What the lands do about it.
-              Labelled as DISTINCT LANDS, which is the question the server
-              actually answers: `colorBalance.sources` is counted over
-              `acceptedSet`, a Set of oracle ids, so ten Mountains are one land.
-              Calling it "sources" would have made it a wrong answer to the
-              question a builder is really asking; naming it precisely makes it
-              a right answer to a narrower one, and the gap between the two
-              columns is still the thing worth looking at.
-            */}
-            <span className="pie-sources">{s.sources} lands</span>
-          </li>
-        ))}
-      </ul>
-      <p className="note">
-        Coloured symbols in your cards&rsquo; mana costs, and how many distinct lands make each
-        colour. A repeated basic counts once, here and in every bar above.
-      </p>
+    <div className="pie-pair">
+      {identity.length === 0 ? (
+        // An empty deck is a real answer and an empty circle is not one.
+        <p className="note">Nothing accepted yet, so there is no colour identity to show.</p>
+      ) : (
+        <Pie
+          title="Identity"
+          slices={identity}
+          summary={`Colour identity of the deck's cards: ${names(identity)}. Every card is in exactly one, ${plural(balance.cards, 'card')} in total.`}
+          caption={
+            <>
+              {/* `plural`, not the bare number: a one-card deck is a real state — a
+                  commander chosen and nothing accepted yet — and "add up to your 1"
+                  is the sentence that state would otherwise produce. */}
+              What the deck <em>is</em>. Every card sits in exactly one slice, so these add up to
+              your {plural(balance.cards, 'card')}. A card of two or more colours is in <b>M</b>,
+              not in each of its colours &mdash; otherwise the slices would total more than the deck
+              holds and the circle would mean nothing.
+            </>
+          }
+        />
+      )}
+      {generation.length === 0 ? (
+        <p className="note">Nothing in the deck makes mana yet.</p>
+      ) : (
+        <Pie
+          title="Generation"
+          slices={generation}
+          summary={`Cards that make each kind of mana: ${names(generation)}. Counted once per kind, over ${plural(balance.producers, 'card')} that make mana.`}
+          caption={
+            <>
+              What the deck <em>makes</em> &mdash; lands, rocks and dorks alike, not lands only. A
+              card is counted once for <em>each</em> kind of mana it makes, so a dual is in two
+              slices and these total {madeSlices} across {plural(balance.producers, 'card')}. Every
+              copy counts: twelve Mountains are twelve.
+            </>
+          }
+        />
+      )}
     </div>
   )
 }
@@ -5630,16 +5731,17 @@ export const Workspace = ({
               </p>
             ) : null}
 
-            {/* Under the composition bars, because it answers the same shape of
-                question about a different axis: those say how the deck divides
-                by ROLE, this says how it divides by COLOUR. Guarded on the
-                field rather than on `analysis`, so a server from before
-                API-02 renders the panel without it instead of an empty box. */}
+            {/* Under the composition bars, because they answer the same shape
+                of question about a different axis: those say how the deck
+                divides by ROLE, these say how it divides by COLOUR — and then
+                whether its mana agrees. Guarded on the field rather than on
+                `analysis`, so a server from before API-02 renders the panel
+                without them instead of an empty box. */}
             {analysis?.colorBalance === undefined ? null : (
               <>
                 <h2 style={{ marginTop: '1.25rem' }}>Mana colours</h2>
-                <Boundary name="The colour pie">
-                  <ColorPie balance={analysis.colorBalance} />
+                <Boundary name="The colour pies">
+                  <ColorPies balance={analysis.colorBalance} />
                 </Boundary>
               </>
             )}
