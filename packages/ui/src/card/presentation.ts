@@ -8,7 +8,7 @@
  * requirements") assertable rather than a claim.
  */
 
-import type { Color } from './types.js'
+import type { CardView, Color } from './types.js'
 
 export type ZoomLevel = 0 | 1 | 2 | 3
 
@@ -89,6 +89,36 @@ export const levelSpec = (level: ZoomLevel): LevelSpec => {
 /** Magic's card aspect ratio, 63 × 88 mm. Art crops are 626 × 457 on Scryfall. */
 export const CARD_ASPECT = 88 / 63
 export const ART_CROP_ASPECT = 457 / 626
+
+/**
+ * The image URL a level draws for this card, or `null` when it draws none.
+ *
+ * One function rather than `card.imageUris?.artCrop` written out at each call
+ * site, because `LevelSpec.asset` above is meant to be the rule for which asset
+ * a level loads and a hand-written property access is a second copy of it. Doc
+ * 07 §7.3 — "never load a full card image to render an L1 tile" — is then a
+ * property of this file rather than a convention three components each have to
+ * remember.
+ *
+ * `null` covers three different absences deliberately, because a caller can do
+ * nothing different about any of them:
+ *
+ *   - the level draws no image at all (L0)
+ *   - the card has no art — 501 in the real corpus have none on any printing
+ *   - the URL came back as an empty string
+ *
+ * That last one is not hypothetical. The database layer stores absent art as
+ * `NULL` but reads it back out as `''` to satisfy a type that says the field is
+ * a string, so an empty string is a real spelling of "no art" in this codebase.
+ * Passed through to an `<img>` it would resolve against the page URL and draw a
+ * broken image exactly where the fallback panel was supposed to draw a name.
+ */
+export const imageFor = (card: CardView, level: ZoomLevel): string | null => {
+  const { asset } = levelSpec(level)
+  if (asset === null) return null
+  const url = card.imageUris?.[asset]
+  return url === undefined || url === '' ? null : url
+}
 
 // ------------------------------------------------------------------ touch
 

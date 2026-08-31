@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Tile, tileLabel } from './Tile.js'
-import { HIT_TARGET_MIN, levelSpec } from './presentation.js'
+import { ART_CROP_ASPECT, HIT_TARGET_MIN, levelSpec } from './presentation.js'
 import type { CardView } from './types.js'
 
 afterEach(cleanup)
@@ -113,11 +113,34 @@ describe('Tile — what it draws', () => {
   })
 
   it('still renders the name when there is no art', () => {
-    // An unresolved card (ING-04 has not run, or an import that never resolves)
-    // is still a card you may want to accept.
+    // An unresolved card (501 in the corpus have no art on any printing, or it
+    // is an import that never resolves) is still a card you may want to accept.
     render(<Tile card={card({ imageUris: undefined })} />)
     expect(screen.getByText('Krenko, Mob Boss')).toBeDefined()
     expect(screen.getByRole('button').querySelector('img')).toBeNull()
+  })
+
+  it('treats an empty URL as no art, not as a URL', () => {
+    // The database stores absent art as NULL and reads it back as `''`. An
+    // `<img src="">` resolves to the page URL and draws a broken image over the
+    // hatched placeholder that is supposed to be there.
+    const { container } = render(<Tile card={card({ imageUris: { artCrop: '' } })} />)
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('.rt-tile-noart')).not.toBeNull()
+  })
+
+  it('loads lazily, decodes asynchronously, and holds its box open meanwhile', () => {
+    // 60–120 tiles are on screen at L1 and many more below the fold. The height
+    // is on the FRAME so the grid does not reflow as each one arrives.
+    const { container } = render(<Tile card={card()} />)
+    const image = container.querySelector('img')
+    expect(image?.getAttribute('loading')).toBe('lazy')
+    expect(image?.getAttribute('decoding')).toBe('async')
+
+    const w = levelSpec(1).width
+    const expected = `${String(Math.round(w * ART_CROP_ASPECT))}px`
+    expect(container.querySelector<HTMLElement>('.rt-tile-art')?.style.height).toBe(expected)
+    expect(image?.getAttribute('height')).toBe(String(Math.round(w * ART_CROP_ASPECT)))
   })
 })
 

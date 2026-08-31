@@ -11,7 +11,14 @@ import {
   type PrintingFacts,
 } from '@roundtable/db'
 import { cachedPrintingFacts } from '../corpus-cache.js'
-import type { AnnotatedCandidate, Card, Color, QueryField, QueryNode } from '@roundtable/domain'
+import type {
+  AnnotatedCandidate,
+  Card,
+  Color,
+  OracleId,
+  QueryField,
+  QueryNode,
+} from '@roundtable/domain'
 import { COLORS, isOk, matchesQuery, oracleId, parseQuery } from '@roundtable/domain'
 import { badRequest, notFound, sendProblem } from '../errors.js'
 import { cardBatchBody, cardSearchQuery, oracleIdParams } from '../schemas.js'
@@ -115,6 +122,45 @@ const asCandidate = (card: Card, facts: PrintingFacts | undefined): AnnotatedCan
   reserved: facts?.reserved ?? false,
   group: null,
 })
+
+/**
+ * Where a card's art lives on the wire.
+ *
+ * Beside the cards, never on them — the same arrangement `prices` already uses
+ * and for the same reason: an image URL belongs to a printing, and the domain
+ * `Card` is oracle identity (doc 02 §2.1). Putting `imageUris` on `Card` would
+ * make every consumer of the domain type carry a field that only the browser
+ * has any use for, and would need an ADR to change the contract; a second map
+ * needs neither.
+ *
+ * The URLs are Scryfall's own CDN, sent through unaltered. ADR-0021 records why
+ * that diverges from doc 04 §4.1's "no client request ever hits a third-party
+ * image host", and why `ING-04` is still the gated project it always was.
+ */
+interface ImageUris {
+  readonly artCrop: string | null
+  readonly normal: string | null
+}
+
+/**
+ * Absence stated, not implied.
+ *
+ * Every id the caller asked about gets an entry, exactly as `prices` does. A
+ * missing key and a card with no art would otherwise be the same thing on the
+ * wire, and they are not: 501 cards genuinely have no art on any printing, and
+ * a client that cannot tell that from "not loaded yet" will show a spinner
+ * forever.
+ */
+const NO_IMAGES: ImageUris = { artCrop: null, normal: null }
+
+const imagesFor = (
+  ids: readonly OracleId[],
+  facts: ReadonlyMap<OracleId, PrintingFacts>,
+): Record<string, ImageUris> => {
+  const images: Record<string, ImageUris> = {}
+  for (const id of ids) images[id] = facts.get(id)?.imageUris ?? NO_IMAGES
+  return images
+}
 
 interface Cursor {
   readonly name: string
@@ -285,7 +331,15 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
           )
           .slice(0, limit)
         if (near.length > 0) {
-          return { items: near, nextCursor: null, nameFallback: true }
+          return {
+            items: near,
+            images: imagesFor(
+              near.map((c) => c.oracleId),
+              facts,
+            ),
+            nextCursor: null,
+            nameFallback: true,
+          }
         }
       }
 
@@ -296,6 +350,12 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
       const lastOfPage = page[page.length - 1]
       return {
         items: page,
+        // Art for the page only, not for everything the scan touched. The facts
+        // map is already in hand, so this costs a lookup per returned card.
+        images: imagesFor(
+          page.map((c) => c.oracleId),
+          facts,
+        ),
         nextCursor: more && lastOfPage !== undefined ? encodeCursor(lastOfPage) : null,
       }
     },
@@ -318,7 +378,12 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
     // printing and goes stale in a day (ADR-0009 Q7).
     const prices: Record<string, number | null> = {}
     for (const id of ids) prices[id] = facts.get(id)?.priceUsd ?? null
-    return { items, prices }
+
+    // Art rides the same way, for the same reason (see `ImageUris`). This is the
+    // route that puts card imagery on screen at all: the client hydrates every
+    // card it draws through here, so art arriving with the hydration means no
+    // second round trip and no second cache to keep in step.
+    return { items, prices, images: imagesFor(ids, facts) }
   })
 
   app.get('/api/v1/cards/:oracleId', { schema: { params: oracleIdParams } }, async (req, rep) => {

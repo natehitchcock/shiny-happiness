@@ -12,7 +12,7 @@
  */
 
 import type { JSX } from 'react'
-import { CARD_ASPECT, levelSpec } from './presentation.js'
+import { CARD_ASPECT, imageFor, levelSpec } from './presentation.js'
 import { ComboBadge, IdentityStrip, ManaValue, Price, RoleDot } from './Badges.js'
 import { ManaCost } from './ManaCost.js'
 import { OracleText } from './OracleText.js'
@@ -44,7 +44,7 @@ export const Detail = ({
 }: DetailProps): JSX.Element => {
   const spec = levelSpec(3)
   const w = width ?? spec.width
-  const image = card.imageUris?.normal
+  const image = imageFor(card, 3)
   const reasons = card.reasons ?? []
 
   return (
@@ -59,13 +59,31 @@ export const Detail = ({
       {actions}
 
       <div className="rt-detail-body">
-        {image === undefined ? null : (
+        {image === null ? null : (
+          /*
+           * `aspectRatio` as well as the width and height attributes.
+           *
+           * The attributes alone would be enough in a browser that leaves the
+           * image's intrinsic sizing alone, but `.rt-detail-image` sets
+           * `height: auto` so the panel can be narrower than `w` — and the
+           * moment a stylesheet touches the height, whether the box is still
+           * reserved depends on the UA rule that derives a ratio from the
+           * attributes. Stating the ratio makes it not depend on that: the
+           * space is held from first paint, and the rules text below does not
+           * jump up the panel while the art is still in flight.
+           *
+           * `1 / CARD_ASPECT` because CSS wants width-over-height and
+           * `CARD_ASPECT` is height-over-width.
+           */
           <img
             className="rt-detail-image"
             src={image}
             alt={card.name}
+            loading="lazy"
+            decoding="async"
             width={w}
             height={Math.round(w * CARD_ASPECT)}
+            style={{ aspectRatio: 1 / CARD_ASPECT }}
           />
         )}
 

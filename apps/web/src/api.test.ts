@@ -70,3 +70,69 @@ describe('ApiError', () => {
     expect(error.body).toBeNull()
   })
 })
+
+/**
+ * Hydration carries three things now, and the third one is new (ADR-0021).
+ *
+ * Everything above the seam mocks this module wholesale, so these are the only
+ * tests that see the real mapping from the wire shape to the maps the workspace
+ * holds. Without them the art could be dropped here and every component test
+ * would still be green — which is exactly how the app ran for four sessions
+ * with the URLs ingested and no picture anywhere on screen.
+ */
+describe('hydrate', () => {
+  const ART = 'https://cards.scryfall.io/art_crop/front/1/2/krenko.jpg?1'
+  const NORMAL = 'https://cards.scryfall.io/normal/front/1/2/krenko.jpg?1'
+
+  it('keeps the art beside the cards, keyed by oracle id', async () => {
+    respond(200, {
+      items: [{ oracleId: 'o1', name: 'Krenko, Mob Boss' }],
+      prices: { o1: 1.5 },
+      images: { o1: { artCrop: ART, normal: NORMAL } },
+    })
+
+    const hydrated = await api.hydrate(['o1'])
+
+    expect(hydrated.images.get('o1')).toEqual({ artCrop: ART, normal: NORMAL })
+    // Beside, not on: a `Card` is oracle identity and an image belongs to a
+    // printing (doc 02 §2.1).
+    expect(hydrated.cards.get('o1')).not.toHaveProperty('imageUris')
+  })
+
+  it('keeps "this card has no art" as an answer rather than a gap', async () => {
+    // 501 cards have no art on any printing. Dropping the entry would make them
+    // indistinguishable from cards whose art has not arrived yet.
+    respond(200, {
+      items: [{ oracleId: 'o1', name: 'Krenko, Mob Boss' }],
+      prices: { o1: null },
+      images: { o1: { artCrop: null, normal: null } },
+    })
+
+    const hydrated = await api.hydrate(['o1'])
+
+    expect(hydrated.images.get('o1')).toEqual({ artCrop: null, normal: null })
+  })
+
+  it('survives a server that predates the images map', async () => {
+    // A deployment running an older API sends no `images` key at all. That must
+    // read as "no art known", not as a crash on the way in.
+    respond(200, { items: [{ oracleId: 'o1', name: 'Krenko' }], prices: { o1: 1 } })
+
+    const hydrated = await api.hydrate(['o1'])
+
+    expect(hydrated.images.size).toBe(0)
+    expect(hydrated.cards.size).toBe(1)
+  })
+
+  it('asks for nothing when there is nothing to ask about', async () => {
+    // The empty-input short circuit returns all three maps, and a caller that
+    // destructured `images` off it would otherwise get `undefined`.
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const hydrated = await api.hydrate([])
+
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(hydrated.images).toEqual(new Map())
+  })
+})

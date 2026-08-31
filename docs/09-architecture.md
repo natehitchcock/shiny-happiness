@@ -58,7 +58,7 @@ blocking change for other agents. See [AGENTS.md](../AGENTS.md).
 | Backend | Fastify + TypeScript | Fast, schema-first, JSON Schema validation shared with types |
 | Database | PostgreSQL | Cards, combos, decks, stats. GIN indexes for the combo index |
 | Cache | Redis | Recommendation results, rate-limit state |
-| Object store | S3-compatible | Cached card imagery (doc 04 §4.1) |
+| Object store | S3-compatible | Cached card imagery (doc 04 §4.1). **Not built, and not needed to show card art** — images are referenced from Scryfall's CDN ([ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md)). This row is `ING-04`, still gated on ADR-0009 Q4 |
 | Tests | Vitest, Playwright | Unit/integration; Playwright for E2E incl. mobile viewports |
 
 **Not Next.js**: the app is one authenticated, highly interactive workspace with

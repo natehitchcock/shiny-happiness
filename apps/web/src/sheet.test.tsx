@@ -170,6 +170,7 @@ beforeEach(() => {
       ['o1', 1.5],
       ['o2', 0.25],
     ]),
+    images: new Map(),
   } satisfies api.Hydrated)
   mocked.basicLands.mockResolvedValue({ items: [] })
   // The detail request is fire-and-forget in `open`; an unresolved promise here

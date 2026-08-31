@@ -2,12 +2,19 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import * as api from './api'
 import { usePipeline, type Phase } from './pipeline'
 import { AUTO_QUERY_MS, useAutoQuery } from './autoquery'
-import { dimensionKeysOf, formatDecklist, interactsWith, rebaseCommands } from '@roundtable/domain'
+import {
+  COLORS,
+  dimensionKeysOf,
+  formatDecklist,
+  interactsWith,
+  rebaseCommands,
+} from '@roundtable/domain'
 // Aliased: `oracleId` is a parameter name a dozen times in this file, and a
 // brander shadowed by a local of the same name reads as a bug even when it is
 // not one.
 import { oracleId as asOracleId } from '@roundtable/domain'
-import { ManaCost, OracleText } from '@roundtable/ui'
+import { CardFace, ManaCost, OracleText, levelSpec } from '@roundtable/ui'
+import type { CardView, Color } from '@roundtable/ui'
 import type { DeckCommand, SynergyTag } from '@roundtable/domain'
 import { DeckMenu } from './DeckMenu'
 import { Hint } from './Hint'
@@ -30,6 +37,65 @@ const dimensionName = (d: { role?: string; type?: string }): string => d.role ??
 /** Prices are estimates, and the interface has to say so (ADR-0009 Q7). */
 const usd = (value: number | null | undefined): string =>
   value === null || value === undefined ? '—' : `$${value.toFixed(2)}`
+
+/**
+ * The wire form of a card's art, as `CardView` wants it.
+ *
+ * The conversion is null-to-undefined and nothing else, but it is not cosmetic.
+ * `CardView.imageUris.normal` is `string | undefined`, so a `null` arriving from
+ * the API is neither a URL nor the absence the primitives test for, and
+ * `<img src={null}>` draws a broken image exactly where the no-art fallback was
+ * meant to draw a readable panel. A card with neither asset collapses to
+ * `undefined` outright, which is the shape the 501 art-less cards take.
+ *
+ * Here rather than in `api.ts` because it is a view-model mapping, not part of
+ * the HTTP seam — `api.ts` is where the wire types live and this is where they
+ * stop being wire types.
+ */
+const viewImageUris = (
+  images: api.ImageUris | undefined,
+): { artCrop?: string; normal?: string } | undefined => {
+  if (images === undefined) return undefined
+  if (images.artCrop === null && images.normal === null) return undefined
+  return {
+    ...(images.artCrop === null ? {} : { artCrop: images.artCrop }),
+    ...(images.normal === null ? {} : { normal: images.normal }),
+  }
+}
+
+/**
+ * An API card as the `@roundtable/ui` primitives want it.
+ *
+ * The primitives take a view model rather than a `Card` on purpose (see
+ * `packages/ui/src/card/types.ts`), so somebody has to do this mapping; doing it
+ * once here is what stops three call sites each inventing a slightly different
+ * one. Price and art come in as separate arguments because on the wire they are
+ * separate maps — a printing-level fact never rides on an oracle-level card.
+ *
+ * `colorIdentity` is filtered rather than cast. The API types it as `string[]`,
+ * and a letter outside WUBRG reaching `identityKey` would be read as a
+ * single-colour identity and painted the wrong colour, which is a wrong answer
+ * drawn confidently.
+ */
+const cardView = (
+  card: api.Card,
+  price: number | null | undefined,
+  images: api.ImageUris | undefined,
+): CardView => ({
+  oracleId: card.oracleId,
+  name: card.name,
+  manaCost: card.manaCost,
+  manaValue: card.manaValue,
+  colorIdentity: card.colorIdentity.filter((c): c is Color =>
+    (COLORS as readonly string[]).includes(c),
+  ),
+  typeLine: card.typeLine,
+  oracleText: card.oracleText,
+  oracleTextFaces: card.oracleTextFaces,
+  primaryRole: card.primaryRole,
+  priceUsd: price,
+  imageUris: viewImageUris(images),
+})
 
 /** A cut reason, in words. The badge never shows a bare kind. */
 const cutText = (r: {
@@ -380,6 +446,16 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
    */
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<api.Card[]>([])
+  /**
+   * Art for the search results, keyed by oracle id.
+   *
+   * Only the chosen commander is drawn from it — eight thumbnails in a result
+   * list would be eight images fetched to answer a question the names already
+   * answer — but it is kept for the whole page of results because the choice
+   * happens from that page and re-fetching on click would put a blank frame
+   * where the confirmation is supposed to be.
+   */
+  const [resultImages, setResultImages] = useState<Map<string, api.ImageUris>>(new Map())
   const [chosen, setChosen] = useState<api.Card | null>(null)
   /**
    * What the search is doing, so the box is never silently empty.
@@ -437,6 +513,10 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
       .then((r) => {
         if (cancelled) return
         setResults(r.items)
+        // `?? {}` because a server from before ADR-0021 does not send this, and
+        // the page has to keep working against one — with no art, not with a
+        // crash on a property of undefined.
+        setResultImages(new Map(Object.entries(r.images ?? {})))
         setSearch('done')
         setSearchError(null)
       })
@@ -446,6 +526,7 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
         // rendered an empty list, so an unreachable or empty API looked
         // exactly like a commander that does not exist.
         setResults([])
+        setResultImages(new Map())
         setSearch('failed')
         setSearchError(e instanceof Error ? e.message : 'Could not reach the card search')
       })
@@ -537,6 +618,15 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
               </p>
             ) : null}
 
+            {/*
+             * The results stay text rows, deliberately.
+             *
+             * Eight art crops here would be eight image requests to help pick
+             * between candidates that are already distinguished by the thing
+             * the reader typed — a name. Art earns its space at the moment the
+             * choice is MADE, below, where there is one card and getting it
+             * wrong means building a deck around the wrong legend.
+             */}
             {results.slice(0, 8).map((c) => (
               <CardRow
                 key={c.oracleId}
@@ -545,7 +635,26 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
               />
             ))}
           </div>
-        ) : null}
+        ) : (
+          /*
+           * The commander, as a card, once one is chosen.
+           *
+           * "Krenko" is four different legends and "Kenrith" is two; a name in
+           * a text field does not confirm which one this deck is being built
+           * around, and every later screen assumes the choice was right. The
+           * card face answers it at a glance, and `CardFace` carries the
+           * fallback for a commander with no art rather than leaving a hole.
+           *
+           * No `onActivate`: there is nothing to open here, so the frame is not
+           * a button and does not take focus.
+           */
+          <div className="start-chosen">
+            <CardFace card={cardView(chosen, undefined, resultImages.get(chosen.oracleId))} />
+            <p className="note">
+              Building around <strong>{chosen.name}</strong>. Search again to change it.
+            </p>
+          </div>
+        )}
 
         <div className="row">
           <div className="field" style={{ flex: 1 }}>
@@ -922,6 +1031,7 @@ const Preview = ({
   card,
   detail,
   price,
+  images,
   onClose,
   accepted,
   lockedIds,
@@ -933,6 +1043,8 @@ const Preview = ({
   /** Printings and combos. Arrives second; the panel does not wait for it. */
   detail: api.CardDetail | null
   price: number | null | undefined
+  /** Art for the default printing. Absent for the 501 cards that have none. */
+  images: api.ImageUris | undefined
   onClose: () => void
   accepted: ReadonlySet<string>
   lockedIds: ReadonlySet<string>
@@ -991,6 +1103,9 @@ const Preview = ({
   }, [shownId, sheet, onClose])
 
   if (shown === null || shown === undefined) return null
+  // Built once and read twice — the face draws from it, and the note line asks
+  // it whether there is a face at all before deciding where the price goes.
+  const view = cardView(shown, price, images)
   return (
     <aside
       ref={ref}
@@ -1036,21 +1151,65 @@ const Preview = ({
           </span>
         ) : null}
       </p>
+      {/*
+       * The card itself, at L2, through the primitive that owns that level.
+       *
+       * This is the one surface in the workspace where art earns its space
+       * outright: it shows one card, it is where somebody decides whether this
+       * is the Krenko they meant, and half of that question — the art, the
+       * frame, the set symbol — is answered by looking rather than by reading.
+       *
+       * Only when there IS art, which is the one place this deliberately does
+       * not use `CardFace`'s no-art fallback. That fallback is a card-shaped
+       * panel carrying the name, the cost, the type line and the rules text,
+       * which is exactly right in a grid where nothing else says them — and
+       * exactly wrong here, where the panel around it says all four already.
+       * Nothing is lost by omitting it: a card with no art still reads in full.
+       *
+       * The badge row comes with the primitive, and its price is why the note
+       * below drops the number when the face is on screen.
+       *
+       * Width: the L2 nominal 220 px only fits the sheet. The rail is
+       * `minmax(230px, 1fr)` and at its floor leaves about 168 px inside the
+       * region, the scroll gutter and the panel's own padding — so the rail
+       * gets the narrow-column width from `presentation.ts`. It is named
+       * `mobileWidth` because that is where a narrow column usually comes from;
+       * a 230 px rail is the same narrow column on a wider screen.
+       */}
+      {view.imageUris === undefined ? null : (
+        <div className="preview-art">
+          <CardFace card={view} width={sheet ? levelSpec(2).width : levelSpec(2).mobileWidth} />
+        </div>
+      )}
       {/* Oracle text is the card. Newlines are meaningful — they separate
           abilities — and the faces are meaningful too, so both are handed to
           the component: it spaces the abilities and rules a line between the
           faces. `oracleTextFaces` is absent for a single-faced card and for one
-          ingested before the field existed, which both render as one face. */}
+          ingested before the field existed, which both render as one face.
+
+          Repeated here although the image above shows it, for the reason L3
+          repeats it and L2 does not: an image cannot be selected, translated,
+          resized or read aloud, and this is the panel where someone is reading
+          rather than scanning. */}
       <p className="oracle">
         <OracleText text={shown.oracleText} faces={shown.oracleTextFaces} />
       </p>
       <p className="note">
-        {usd(price)} <span className="estimate">est.</span>
-        {/* The printing count is the one readable fact only the server has, so
-            it appears when it appears rather than holding the panel back. */}
+        {/* ADR-0009 Q7: a price is an estimate and the interface has to say so.
+            The number moves to the card's badge row when there is a card face
+            above to carry it — the same figure twice in one small panel is
+            noise — and comes back here when there is not, because the price
+            must never be the thing that goes missing.
+
+            What this line adds either way is WHICH printing the estimate is
+            for. The art above is the default printing and the price is the
+            cheapest one, and for about a third of the corpus those are two
+            different cards (ADR-0021). */}
+        {view.imageUris === undefined ? `${usd(price)} ` : ''}
+        <span className="estimate">est.</span>{' '}
         {detail === null
-          ? ''
-          : ` · ${String(detail.printings.length)} printing${detail.printings.length === 1 ? '' : 's'}`}
+          ? 'cheapest printing'
+          : `cheapest of ${String(detail.printings.length)} printing${detail.printings.length === 1 ? '' : 's'}`}
         {shown.universesBeyond ? ' · Universes Beyond' : ''}
       </p>
       {detail !== null && detail.combos.length > 0 ? (
@@ -1648,6 +1807,15 @@ export const Workspace = ({
   const [analysis, setAnalysis] = useState<api.Analysis | null>(null)
   const [cards, setCards] = useState<Map<string, api.Card>>(new Map())
   const [prices, setPrices] = useState<Map<string, number | null>>(new Map())
+  /**
+   * Card art, keyed the same way and filled from the same hydration.
+   *
+   * A separate map rather than a field on the cached `api.Card` for the reason
+   * doc 02 §2.1 gives: an image belongs to a printing and a `Card` is oracle
+   * identity. It is also what lets the art arrive late without invalidating a
+   * card the rest of the interface is already drawing from.
+   */
+  const [images, setImages] = useState<Map<string, api.ImageUris>>(new Map())
   const [query, setQuery] = useState('')
   const [queryError, setQueryError] = useState<string | null>(null)
   const [detail, setDetail] = useState<api.CardDetail | null>(null)
@@ -1969,6 +2137,7 @@ export const Workspace = ({
       setQueryError(r.recs.query.errors[0]?.message ?? null)
       setCards(r.hydrated.cards)
       setPrices(r.hydrated.prices)
+      setImages(r.hydrated.images)
       setColumnMatches(new Map(r.recs.columns.map((c) => [c.query, new Set(c.matched)])))
       setExtraItems(r.extra)
       setPending([])
@@ -2413,6 +2582,7 @@ export const Workspace = ({
         const hydrated = await api.hydrate(items.map((i) => i.oracleId))
         setCards((current) => new Map([...current, ...hydrated.cards]))
         setPrices((current) => new Map([...current, ...hydrated.prices]))
+        setImages((current) => new Map([...current, ...hydrated.images]))
         setExtraItems((current) => new Map(current).set(key, items))
       })
       .catch(() => undefined)
@@ -3172,6 +3342,7 @@ export const Workspace = ({
               card={inspect === null ? undefined : cards.get(inspect)}
               detail={detail}
               price={prices.get(inspect ?? '')}
+              images={images.get(inspect ?? '')}
               onClose={closePreview}
               accepted={acceptedIds}
               lockedIds={lockedIds}

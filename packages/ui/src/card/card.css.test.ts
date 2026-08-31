@@ -40,6 +40,21 @@ describe('card.css', () => {
     expect(rule('.rt-face-image:focus-visible')).toMatch(/outline:\s*2px solid/)
   })
 
+  it('offers a pointer cursor only on a face that can actually be activated', () => {
+    // `CardFace` drops the button role when it is given no `onActivate` — in the
+    // preview panel and on the start screen it SHOWS a card rather than
+    // offering one. A cursor that still says "click me" is the same false
+    // promise the role was removed to stop making.
+    expect(rule('.rt-face-image')).not.toMatch(/cursor:/)
+    expect(rule(".rt-face-image[role='button']")).toMatch(/cursor:\s*pointer/)
+  })
+
+  it('paints the reserved image box, so a card that is loading is not a hole', () => {
+    // The component sizes this frame inline; what CSS owes it is a ground
+    // colour, or the space held open for the art reads as a rendering fault.
+    expect(rule('.rt-face-image')).toMatch(/background:\s*var\(--/)
+  })
+
   it('scrolls the detail body, not the panel, so the actions stay put', () => {
     // doc 06 §6.5. The DOM half of this is asserted in Detail.test.tsx; this is
     // the half that makes it true on screen.

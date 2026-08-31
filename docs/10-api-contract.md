@@ -21,15 +21,35 @@ breaking change and needs an ADR plus a note in the work-breakdown task.
 
 ```
 GET /api/v1/cards/search?q=&colors=&limit=&cursor=
-    → { items: Card[], nextCursor }
+    → { items: Card[], images: ImageMap, nextCursor }
     q uses Scryfall-like syntax; parsing lives in packages/domain.
 
 GET /api/v1/cards/:oracleId
     → Card & { printings: Printing[], combos: Combo[], stats?: CardStats }
 
 POST /api/v1/cards/batch   { oracleIds: OracleId[] }
-    → { items: Card[] }     ≤ 500 per call; the client hydrates grids with this.
+    → { items: Card[], prices: PriceMap, images: ImageMap }
+      ≤ 500 per call; the client hydrates grids with this.
 ```
+
+**Printing-level facts ride BESIDE the cards, never on them.** A `Card` is
+oracle identity (doc 02 §2.1); a price and an image belong to a printing of it,
+so each is its own map keyed by oracle id:
+
+```
+PriceMap = Record<OracleId, number | null>          cheapest printing, an estimate (ADR-0009 Q7)
+ImageMap = Record<OracleId, { artCrop: string | null; normal: string | null }>
+                                                    default printing (ADR-0021)
+```
+
+Both maps carry an entry for **every id the caller asked about**, including ids
+the corpus does not know and cards that genuinely have no art — 501 of them.
+A missing key and a null value would otherwise be the same thing on the wire,
+and "not loaded yet" is a different answer from "there is none".
+
+The image URLs are Scryfall's own CDN, sent through unaltered
+([ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md)). `search` returns art for
+the page it returns, not for everything the scan touched.
 
 ## 10.3 Decks
 

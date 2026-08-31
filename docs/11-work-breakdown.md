@@ -22,6 +22,29 @@ images and leaves re-serving Scryfall's image files an open question gated on
 [ADR-0015](adr/0015-drawn-mana-symbols.md). This does **not** unblock `ING-04` or
 answer its question.
 
+**Cards have pictures now.** The art was ingested four sessions ago and never
+left the server: `/cards/batch` returns domain `Card`s, and a `Card` carries no
+image URL because an image belongs to a printing (doc 02 §2.1). Both card routes
+now send an `images` map beside `items` and `prices` —
+[ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md) — and the URLs are
+Scryfall's own CDN, referenced directly at the two sizes Scryfall publishes.
+Nothing is proxied, cached, resized or re-encoded.
+
+That **knowingly diverges from doc 04 §4.1's "no client request ever hits a
+third-party image host"**, which was a performance and privacy preference rather
+than a licensing constraint; §4.1 is struck through and points at the ADR. It
+does **not** unblock `ING-04`, which remains the separate, gated project it has
+always been: the question of whether this project may re-serve and resize
+Scryfall's image files from its own object store is untouched, and ADR-0009 Q4
+still says it must not ship without asking Scryfall first.
+
+Art appears in the preview panel and on the chosen commander at the start
+screen. It is deliberately **absent** from the deck rail, the suggestion feed and
+the commander search results — those are dense text lists read by name, and a
+thumbnail per row triples the scroll length to answer a question nobody asks of
+them. The reasoning is in the ADR, and `apps/web/src/art.test.tsx` pins both
+halves so the absences read as decisions rather than omissions.
+
 The app is called **Lotus Wizard** in the interface. The name is tentative and
 **not cleared** — `LEGAL-01` owns that, and there is a real question to answer
 first: see doc 04 §4.6. Package scopes stay `@roundtable/*` until it is settled.
@@ -89,7 +112,10 @@ API-02 performance test seeds a 20,000-card corpus and takes ~40 s.
 | Bracket UI | The API answers `bracket.violations`, `bracket.gameChangers` and `bracket.rules`, and nothing renders them. Doc 03 §3.2 describes the warning chip and the "Bracket check" panel; the masthead still prints a bare `BRACKET 3`. |
 
 **No third-party question is left open except Scryfall Q4** (image serving, which
-gates `ING-04`). `DATA-01` and `DATA-02` are
+gates `ING-04` — and which [ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md)
+routes around rather than answers: referencing Scryfall's CDN needs no
+permission that ADR-0009 has not already established, while re-serving from ours
+still does). `DATA-01` and `DATA-02` are
 answered ([ADR-0009](adr/0009-scryfall-terms.md), [ADR-0010](adr/0010-spellbook-terms.md)):
 Scryfall grants use explicitly, Spellbook publishes no prohibition. `DATA-03` is
 closed — EDHREC's terms forbid automated queries, and Archidekt carries the
@@ -177,7 +203,7 @@ against their interfaces; nothing depending on an unanswered question ships.
 | `ING-01` | ✅ **Done.** Scryfall bulk ingest: download, stream-parse, map to `Card`, snapshot-and-swap | DATA-01, DB-01 | ✅ 34,492 cards + printings from 38,627 records in <5 s against the real bulk file; re-run is idempotent. 4,135 non-playable records (art series, tokens, stickers, conspiracies) rejected — `CardType` is the definition of a deck card |
 | `ING-02` | ✅ **Done.** Spellbook combo ingest + oracle-id mapping, **failing loudly on unmapped cards** | DATA-02, DB-01 | ✅ 108,046 combos in 12.8 s with **zero unmapped**; pieces map on `oracleId` with no name matching. Only `OK` variants ingested; a combo naming an unknown card is reported, never stored |
 | ~~`ING-03`~~ | ❌ **Cut.** EDHREC stats fetcher. No aggregated-decklist source has usable terms — Archidekt carries the identical prohibition, Moxfield is out of scope, Deckstats is unreachable ([ADR-0008](adr/0008-drop-edhrec.md)). Inclusion and synergy statistics come from the project's own imported-deck corpus or not at all | — | — |
-| `ING-04`  | Image caching pipeline to object store, three sizes (doc 07 §7.3). **Still gated** on the ADR-0009 Q4 conversation with Scryfall; [ADR-0015](adr/0015-drawn-mana-symbols.md) sidestepped it for mana symbols only, by drawing those rather than serving them | ING-01                 | No client request ever hits a third-party image host                                                                                                             |
+| `ING-04`  | Image caching pipeline to object store, three sizes (doc 07 §7.3). **Still gated** on the ADR-0009 Q4 conversation with Scryfall, and still the whole of that question. Two changes have now reached this gate and gone around it rather than through it: [ADR-0015](adr/0015-drawn-mana-symbols.md) draws mana symbols instead of serving them, and [ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md) references Scryfall's CDN instead of re-serving from ours. **Neither answers the question, and the app showing card art is not evidence that this task is done or unblocked.** What this task adds over ADR-0021 is our own object store, our own cache headers, and derived sizes — which is exactly the "proxy" and "distort" wording ADR-0009 Q4 says must be confirmed first | ING-01                 | ~~No client request ever hits a third-party image host~~ — superseded by ADR-0021; the DoD to restate when this is picked up is a cache that does not re-encode and keeps the artist and copyright line legible at every size that shows them |
 | `ING-05` | Core package generation (doc 05 §5.5), per bracket and — where the corpus supports it — per archetype. Corpus is **MTGJSON** (MIT licensed, 192 official Commander decklists) plus curation, never a scraped aggregate ([ADR-0008](adr/0008-drop-edhrec.md)) | DOM-04, DOM-09 | Reproducible from a fixed corpus; output diff is human-reviewable; falls back to the bracket's general package rather than emitting one built from too few decks |
 
 ## 11.5 Backend
@@ -248,7 +274,10 @@ The domain layer is done, so everything below is now unblocked in its own right.
    Wizards no longer publishes stay null, and the list itself comes from the
    corpus. `DATA-03` is **closed** and `ING-03` **cut** — the project does not
    query EDHREC ([ADR-0008](adr/0008-drop-edhrec.md)). Scryfall Q4 (image
-   serving) is the one question still open, and it gates `ING-04` alone.
+   **serving**) is the one question still open, and it gates `ING-04` alone —
+   card art itself is on screen without it
+   ([ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md)), which changes what is
+   urgent about the question but not what the question is.
 
 **Needs infrastructure:**
 

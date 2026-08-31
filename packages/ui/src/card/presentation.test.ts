@@ -9,9 +9,11 @@ import {
   RAMP,
   hitPadding,
   identityKey,
+  imageFor,
   levelSpec,
   rampStep,
 } from './presentation.js'
+import type { CardView } from './types.js'
 import { contrast } from '../tokens.js'
 
 /** The DoD for UI-01: "each meets its size ... requirements". */
@@ -64,6 +66,49 @@ describe('the size budget', () => {
   it('uses the real card and art-crop proportions', () => {
     expect(CARD_ASPECT).toBeCloseTo(1.397, 2) // 88 / 63 mm
     expect(ART_CROP_ASPECT).toBeCloseTo(0.73, 2) // 457 / 626 px
+  })
+})
+
+describe('which image a level draws', () => {
+  const both: CardView = {
+    oracleId: 'o1',
+    name: 'Sol Ring',
+    imageUris: { artCrop: 'art.jpg', normal: 'full.jpg' },
+  }
+
+  it('draws the art crop at L1 and the full card above it', () => {
+    // The behavioural half of the rule `LevelSpec.asset` states as data, and the
+    // reason this function exists: three components reading `imageUris.artCrop`
+    // by hand are three chances to load a 745 px card face into a 72 px tile.
+    expect(imageFor(both, 1)).toBe('art.jpg')
+    expect(imageFor(both, 2)).toBe('full.jpg')
+    expect(imageFor(both, 3)).toBe('full.jpg')
+  })
+
+  it('draws nothing at L0, however much art the card has', () => {
+    // A pip is a mark. Fetching an image to draw one would be 5,000 requests
+    // for something 8 px across.
+    expect(imageFor(both, 0)).toBeNull()
+  })
+
+  it('reads a missing map as no art', () => {
+    expect(imageFor({ oracleId: 'o1', name: 'Unresolved Import' }, 2)).toBeNull()
+  })
+
+  it('reads a missing asset as no art, even when the other one is there', () => {
+    expect(imageFor({ oracleId: 'o1', name: 'X', imageUris: { normal: 'full.jpg' } }, 1)).toBeNull()
+  })
+
+  it('reads an empty string as no art, not as a URL', () => {
+    /*
+     * The database layer stores absent art as NULL and hands it back as `''`,
+     * because `Printing.imageUris` is typed as strings. An empty string reaching
+     * an `<img src>` resolves against the PAGE URL, so the browser fetches the
+     * document again and draws a broken image — in the exact spot the readable
+     * fallback panel was supposed to be.
+     */
+    expect(imageFor({ oracleId: 'o1', name: 'X', imageUris: { normal: '' } }, 2)).toBeNull()
+    expect(imageFor({ oracleId: 'o1', name: 'X', imageUris: { artCrop: '' } }, 1)).toBeNull()
   })
 })
 

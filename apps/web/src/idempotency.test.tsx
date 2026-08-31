@@ -110,6 +110,7 @@ beforeEach(() => {
   mocked.hydrate.mockResolvedValue({
     cards: new Map([['o1', card]]),
     prices: new Map([['o1', 1]]),
+    images: new Map(),
   } as unknown as api.Hydrated)
   mocked.basicLands.mockResolvedValue({ items: [] })
 })

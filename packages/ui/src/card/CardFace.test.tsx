@@ -34,6 +34,30 @@ describe('CardFace — size', () => {
     render(<CardFace card={card({ imageUris: { artCrop: 'art.jpg', normal: 'full.jpg' } })} />)
     expect(screen.getByRole('img').getAttribute('src')).toBe('full.jpg')
   })
+
+  it('reserves the box before the art lands, so nothing under it moves', () => {
+    // The frame carries the same width and height the image will, as inline
+    // styles. Without them a column of faces reflows every time one loads —
+    // and with 100 cards in a deck list that is the whole page jumping under
+    // whoever is reading it.
+    const { container } = render(<CardFace card={card()} />)
+    const frame = container.querySelector<HTMLElement>('.rt-face-image')
+    const w = levelSpec(2).width
+    expect(frame?.style.width).toBe(`${String(w)}px`)
+    expect(frame?.style.height).toBe(`${String(Math.round(w * CARD_ASPECT))}px`)
+  })
+})
+
+describe('CardFace — loading', () => {
+  it('loads lazily and decodes off the main thread', () => {
+    // A deck list is around 100 of these. Eager loading fetches every one of
+    // them before the first is on screen, and synchronous decoding blocks the
+    // scroll that brought them into view.
+    render(<CardFace card={card()} />)
+    const image = screen.getByRole('img')
+    expect(image.getAttribute('loading')).toBe('lazy')
+    expect(image.getAttribute('decoding')).toBe('async')
+  })
 })
 
 describe('CardFace — accessibility', () => {
@@ -95,6 +119,40 @@ describe('CardFace — an unresolved printing', () => {
     render(<CardFace card={card({ imageUris: undefined })} onActivate={onActivate} />)
     screen.getByRole('button').click()
     expect(onActivate).toHaveBeenCalledWith('o1')
+  })
+
+  it('falls back on an empty URL as well as on a missing one', () => {
+    // `''` is a real spelling of "no art" in this codebase: the database stores
+    // NULL and reads it back as an empty string. Left alone it becomes
+    // `<img src="">`, which resolves to the page URL — a second request for the
+    // document, drawn as a broken image where the readable panel belongs.
+    render(<CardFace card={card({ imageUris: { normal: '' } })} />)
+    expect(screen.queryByRole('img')).toBeNull()
+    expect(screen.getByText('Dockside Extortionist')).toBeDefined()
+  })
+})
+
+describe('CardFace — a button only when there is something to open', () => {
+  it('announces itself as a button when it can be activated', () => {
+    render(<CardFace card={card()} onActivate={vi.fn()} />)
+    const frame = screen.getByRole('button')
+    expect(frame.getAttribute('tabindex')).toBe('0')
+    expect(frame.getAttribute('aria-label')).toBe('Dockside Extortionist. Open details.')
+  })
+
+  it('is not a button, and not focusable, when nothing happens on activation', () => {
+    /*
+     * The frame used to claim `role="button"` and "Open details." whatever it
+     * was given. In the two places that show a card rather than offer one —
+     * the preview panel, where the details are already open around it, and the
+     * commander confirmation on the start screen — that put a control in the
+     * tab order that announced an action and then did nothing.
+     */
+    const { container } = render(<CardFace card={card()} />)
+    expect(screen.queryByRole('button')).toBeNull()
+    const frame = container.querySelector('.rt-face-image')
+    expect(frame?.getAttribute('tabindex')).toBeNull()
+    expect(frame?.getAttribute('aria-label')).toBeNull()
   })
 })
 

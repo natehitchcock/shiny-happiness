@@ -52,6 +52,15 @@ export interface CardView {
   readonly priceUsd?: number | null | undefined
   /** Bracket concerns this card raises — flagged, never filtered (doc 03). */
   readonly bracketFlags?: readonly string[] | undefined
+  /**
+   * Where the art is, at the two sizes anything above L0 draws.
+   *
+   * These are Scryfall's own CDN URLs, used exactly as published and never
+   * rewritten, resized or re-encoded — ADR-0021 has the reasoning and ADR-0009
+   * Q4 has the terms that constrain it. Read them through `imageFor`, which
+   * pairs a zoom level with the asset that level is allowed to load and treats
+   * an empty string as absence.
+   */
   readonly imageUris?:
     | {
         readonly artCrop?: string | undefined

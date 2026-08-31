@@ -37,6 +37,16 @@ const SCALE: PipScale = {
  * Fixtures chosen to exercise the cases that break primitives, not to look
  * pretty: no art, no price, a name too long for the strip, and a recommendation
  * that arrived with no reasons.
+ *
+ * Three of the six carry real art and three carry none, on purpose. This page
+ * exists to be LOOKED at, and both halves need looking at: the art path, which
+ * is what the app spends most of its pixels on, and the no-art fallback, which
+ * 501 cards in the corpus take and which no amount of test-passing proves is
+ * legible.
+ *
+ * The URLs are Scryfall's own CDN, unaltered and at the sizes Scryfall
+ * publishes — ADR-0021. They are addresses, not assets: nothing about them is
+ * card data committed to this repository, which AGENTS.md §5 forbids.
  */
 const FIXTURES: readonly CardView[] = [
   {
@@ -51,6 +61,12 @@ const FIXTURES: readonly CardView[] = [
     primaryRole: 'engine',
     comboDegree: 2,
     priceUsd: 4.2,
+    imageUris: {
+      artCrop:
+        'https://cards.scryfall.io/art_crop/front/c/8/c83ed3e0-82d0-4410-a6ca-b0f923eadf83.jpg?1783931576',
+      normal:
+        'https://cards.scryfall.io/normal/front/c/8/c83ed3e0-82d0-4410-a6ca-b0f923eadf83.jpg?1783931576',
+    },
     reasons: ['Blinks your enter-the-battlefield creatures every turn', 'Completes 2 combos'],
   },
   {
@@ -64,6 +80,12 @@ const FIXTURES: readonly CardView[] = [
     primaryRole: 'ramp',
     nearCombosAt1: 3,
     priceUsd: 1.75,
+    imageUris: {
+      artCrop:
+        'https://cards.scryfall.io/art_crop/front/9/1/91fdb56b-54d5-4272-8319-505ff987fe9b.jpg?1783903215',
+      normal:
+        'https://cards.scryfall.io/normal/front/9/1/91fdb56b-54d5-4272-8319-505ff987fe9b.jpg?1783903215',
+    },
     reasons: ['Two mana ahead on turn one, in every deck that can cast it'],
   },
   {
@@ -111,6 +133,14 @@ const FIXTURES: readonly CardView[] = [
     ],
     primaryRole: 'removal',
     priceUsd: 1.1,
+    // A split card's art crop is the LEFT half only, which is the sort of thing
+    // that is obvious on screen and invisible in a test.
+    imageUris: {
+      artCrop:
+        'https://cards.scryfall.io/art_crop/front/1/8/18303862-4726-4136-814f-157aa7006579.jpg?1783918420',
+      normal:
+        'https://cards.scryfall.io/normal/front/1/8/18303862-4726-4136-814f-157aa7006579.jpg?1783918420',
+    },
     reasons: ['Two spells on one card'],
   },
   {

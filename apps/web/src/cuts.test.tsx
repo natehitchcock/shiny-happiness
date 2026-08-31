@@ -114,6 +114,7 @@ beforeEach(() => {
       ['one', 1],
       ['two', 1],
     ]),
+    images: new Map(),
   } satisfies api.Hydrated)
   mocked.basicLands.mockResolvedValue({ items: [] })
 })

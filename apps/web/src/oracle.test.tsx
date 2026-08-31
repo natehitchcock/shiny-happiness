@@ -118,6 +118,7 @@ beforeEach(() => {
   mocked.hydrate.mockResolvedValue({
     cards: new Map([['o1', fireIce]]),
     prices: new Map([['o1', 1]]),
+    images: new Map(),
   } satisfies api.Hydrated)
   mocked.basicLands.mockResolvedValue({ items: [] })
   mocked.getCardDetail.mockResolvedValue({

@@ -214,10 +214,26 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   return (await response.json()) as T
 }
 
+/**
+ * Card art, as the API sends it: beside the cards, never on them.
+ *
+ * A `Card` is oracle identity and an image belongs to a printing (doc 02 §2.1),
+ * which is why this is a second map rather than two more fields — the same
+ * arrangement `prices` has had since API-01.
+ *
+ * Both members are nullable and 501 cards in the corpus are null in both: they
+ * have no art on any printing. That is a real answer, not a missing one, and
+ * the primitives draw a readable text panel for it.
+ */
+export interface ImageUris {
+  artCrop: string | null
+  normal: string | null
+}
+
 export const searchCards = (
   q: string,
   options: { limit?: number; excludeUniversesBeyond?: boolean } = {},
-): Promise<{ items: Card[] }> =>
+): Promise<{ items: Card[]; images?: Record<string, ImageUris> }> =>
   request(
     `/cards/search?q=${encodeURIComponent(q)}&limit=${String(options.limit ?? 12)}` +
       (options.excludeUniversesBeyond === true ? '&excludeUniversesBeyond=true' : ''),
@@ -227,20 +243,29 @@ export interface Hydrated {
   cards: Map<string, Card>
   /** Cheapest printing, in USD. An estimate — see `PriceNote`. */
   prices: Map<string, number | null>
+  /** Art from the DEFAULT printing, which is a different printing (ADR-0021). */
+  images: Map<string, ImageUris>
 }
 
 export const hydrate = async (oracleIds: string[]): Promise<Hydrated> => {
-  if (oracleIds.length === 0) return { cards: new Map(), prices: new Map() }
-  const body = await request<{ items: Card[]; prices: Record<string, number | null> }>(
-    '/cards/batch',
-    {
-      method: 'POST',
-      body: JSON.stringify({ oracleIds: [...new Set(oracleIds)].slice(0, 500) }),
-    },
-  )
+  if (oracleIds.length === 0) return { cards: new Map(), prices: new Map(), images: new Map() }
+  const body = await request<{
+    items: Card[]
+    prices: Record<string, number | null>
+    /**
+     * Optional because a server from before ADR-0021 does not send it, and an
+     * app talking to one must show cards with no art rather than crash on a
+     * missing map.
+     */
+    images?: Record<string, ImageUris>
+  }>('/cards/batch', {
+    method: 'POST',
+    body: JSON.stringify({ oracleIds: [...new Set(oracleIds)].slice(0, 500) }),
+  })
   return {
     cards: new Map(body.items.map((c) => [c.oracleId, c])),
     prices: new Map(Object.entries(body.prices)),
+    images: new Map(Object.entries(body.images ?? {})),
   }
 }
 

@@ -43,7 +43,11 @@ beforeEach(() => {
     query: { matched: 0, errors: [] },
   } as unknown as api.Recommendations)
   mocked.getAnalysis.mockRejectedValue(new Error('not needed for these tests'))
-  mocked.hydrate.mockResolvedValue({ cards: new Map(), prices: new Map() })
+  mocked.hydrate.mockResolvedValue({
+    cards: new Map(),
+    prices: new Map(),
+    images: new Map(),
+  })
   mocked.basicLands.mockResolvedValue({ items: [] })
 })
 

@@ -3,6 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Detail } from './Detail.js'
 import type { ComboLine } from './Detail.js'
+import { CARD_ASPECT } from './presentation.js'
 import type { CardView } from './types.js'
 
 afterEach(cleanup)
@@ -121,5 +122,39 @@ describe('Detail — reading, not scanning', () => {
   it('names the whole panel for a screen reader', () => {
     render(<Detail card={card()} />)
     expect(screen.getByLabelText('Thassa, Deep-Dwelling, details')).toBeDefined()
+  })
+})
+
+describe('Detail — the image', () => {
+  it('loads the full card, lazily and asynchronously', () => {
+    render(<Detail card={card({ imageUris: { artCrop: 'art.jpg', normal: 'full.jpg' } })} />)
+    const image = screen.getByRole('img')
+    expect(image.getAttribute('src')).toBe('full.jpg')
+    expect(image.getAttribute('loading')).toBe('lazy')
+    expect(image.getAttribute('decoding')).toBe('async')
+  })
+
+  it('holds the card shape open before the art arrives', () => {
+    /*
+     * `.rt-detail-image` sets `height: auto`, so whether the box is reserved by
+     * the width and height attributes alone depends on a UA rule deriving a
+     * ratio from them. Stating the ratio makes it not depend on that — and the
+     * everything-below, which is the rules text and the reasons, does not jump
+     * up the panel while the art is in flight.
+     */
+    const { container } = render(<Detail card={card()} width={280} />)
+    const image = container.querySelector<HTMLElement>('.rt-detail-image')
+    expect(image?.getAttribute('width')).toBe('280')
+    expect(image?.getAttribute('height')).toBe(String(Math.round(280 * CARD_ASPECT)))
+    expect(image?.style.aspectRatio).not.toBe('')
+  })
+
+  it('draws no image element at all rather than an empty one', () => {
+    // `''` is how the database spells absent art on the way out. An `<img src="">`
+    // asks the browser for the page again and draws it broken.
+    render(<Detail card={card({ imageUris: { normal: '' } })} />)
+    expect(screen.queryByRole('img')).toBeNull()
+    // The card still reads in full — the image was never the only copy.
+    expect(screen.getByText(/At the beginning of your end step/)).toBeDefined()
   })
 })

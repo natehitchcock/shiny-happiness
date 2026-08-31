@@ -19,6 +19,13 @@ import { createSnapshotCache, identityKey } from './snapshot-cache.js'
  *   eligible cards         34,492 rows   12.1 MB   (five-colour deck)
  *   printing facts         34,492 rows    1.9 MB
  *
+ * The last line is bigger now. ADR-0021 put the Scryfall image URLs on the
+ * facts map, which took the row payload from 4.28 MB to 12.05 MB measured as
+ * JSON — call it 5 MB on the wire against the 1.9 MB above. It is still the
+ * cheapest place for them, because this map is read once per snapshot and the
+ * routes that need art (`/cards/batch`, `/cards/search`) were already loading
+ * it on every request.
+ *
  * ~86 MB per request. On a metered managed database that exhausted a 5 GB
  * monthly transfer allowance in about sixty requests and took the deployment
  * down with `500`s on every route that reads the database.
@@ -79,7 +86,7 @@ export const cachedEligibleCards = async (
   )
 
 /**
- * Price, rarity, set and reserved-list status for every card.
+ * Price, rarity, set, reserved-list status and art URLs for every card.
  *
  * Cached hardest of the three. It is the smallest read but the most frequent:
  * the deck context needs it, and so do `/cards/batch` and the card detail

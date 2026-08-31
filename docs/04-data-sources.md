@@ -65,9 +65,18 @@ plus **bulk data files** (all cards as one JSON download, regenerated daily).
   for ingestion is still the crawl the first rule forbids.
 - **Send a descriptive `User-Agent` and an `Accept` header.** Anonymous or
   spoofed agents get blocked, correctly.
-- **Do not hotlink images at scale.** Fetch once, cache to our own object store,
-  serve from our CDN with the correct attribution. Respect their image URLs'
-  cache lifetimes and never rewrite them into our own hostname without caching.
+- ~~**Do not hotlink images at scale.**~~ **Superseded by
+  [ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md).** The app now references
+  `cards.scryfall.io` URLs directly, at the two sizes Scryfall publishes, and no
+  image passes through infrastructure of ours. This paragraph asked for the
+  opposite — fetch once, cache to our own object store, serve from our CDN — and
+  that is precisely the pipeline ADR-0009 Q4 says must not ship without asking
+  Scryfall first. The rule was a **performance and privacy preference, not a
+  licensing constraint**, and holding to it meant shipping a deck builder with
+  no card imagery in it at all. What survives from it is binding and is restated
+  in ADR-0021: never rewrite an image URL into our own hostname, never re-encode
+  or resize, and respect the cache lifetimes on the URLs as given. `ING-04` — the
+  caching pipeline this paragraph describes — is unchanged and still gated.
 - **Do not redistribute** bulk card data or images as a dataset of our own.
 
 **Card images are copyright Wizards of the Coast**, not Scryfall's to license.

@@ -167,7 +167,17 @@
   position: relative;
   border-radius: 8px;
   overflow: hidden;
+  /* The reserved box, painted. The component sets the exact width and height
+     inline, and this is what occupies it until the art arrives — without a
+     ground colour the frame is invisible and the panel looks broken rather than
+     loading. */
   background: var(--ink-2);
+}
+/* Only the frame that can actually be activated looks activatable. `CardFace`
+   drops the button role when no `onActivate` is given — in the preview panel
+   and on the start screen it shows a card rather than offering one — and a
+   pointer cursor over something that does nothing is the same lie in CSS. */
+.rt-face-image[role='button'] {
   cursor: pointer;
 }
 .rt-face-image:focus-visible {

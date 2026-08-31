@@ -564,6 +564,24 @@ select {
   }
 }
 
+/*
+ * The card face in the preview panel.
+ *
+ * Centred rather than left-aligned: the panel is wider than the card at every
+ * width the rail actually takes, and a card pushed against the left rule reads
+ * as a mis-set image rather than as the subject of the panel.
+ *
+ * Nothing here sizes the card. `CardFace` sets its own width and height inline
+ * from `presentation.ts`, which is what reserves the box before the art lands;
+ * a width in this file would be a second source for the same number and the one
+ * that silently wins.
+ */
+.preview-art {
+  display: flex;
+  justify-content: center;
+  margin: var(--step) 0;
+}
+
 .preview-head {
   display: flex;
   align-items: baseline;
@@ -1261,6 +1279,29 @@ select {
 .start-results .note,
 .start-results .problem {
   margin: 0 0 var(--step);
+}
+
+/*
+ * The chosen commander, shown as a card rather than as a name in a text field.
+ *
+ * It takes the place of the results list, so the block it sits in is the same
+ * height order as the list it replaced and the archetype and bracket controls
+ * below do not jump up the page when a commander is picked. The card's own box
+ * is reserved by `CardFace` from `presentation.ts`, so the art arriving later
+ * does not move anything either.
+ */
+.start-chosen {
+  display: flex;
+  align-items: flex-start;
+  gap: calc(var(--step) * 2);
+  margin-bottom: 1rem;
+}
+.start-chosen .note {
+  margin: 0;
+}
+.start-chosen strong {
+  color: var(--parchment);
+  font-weight: 600;
 }
 
 /* ------------------------------------------------------ empty search */

@@ -149,6 +149,10 @@ beforeEach(() => {
       ],
     ]),
     prices: new Map([['o1', 1.5]]),
+    // Empty, not absent: the real endpoint returns an entry per requested id
+    // and the workspace holds this in state, so a mock without the map is a
+    // shape the client never actually meets.
+    images: new Map(),
   } satisfies api.Hydrated)
   mocked.basicLands.mockResolvedValue({ items: [] })
 })

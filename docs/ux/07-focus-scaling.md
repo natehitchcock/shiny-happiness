@@ -83,6 +83,22 @@ card-by-card traversal anyway.
 a full card image to render an L1 tile. Preload one level in each direction, so
 zooming feels instant. `content-visibility: auto` on off-screen groups.
 
+The three sizes are **Scryfall's own**, not ours, and there are two of them plus
+"none" rather than three of ours: `art_crop` and `normal` are referenced
+directly from `cards.scryfall.io`
+([ADR-0021](../adr/0021-card-art-from-scryfalls-cdn.md)). Deriving our own sizes
+is `ING-04` and is still gated on ADR-0009 Q4, because resizing "sits close to
+distort". `imageFor(card, level)` in `packages/ui/src/card/presentation.ts` is
+the single implementation of the never-a-full-card-at-L1 rule above; the
+components ask it rather than reaching into `imageUris` themselves.
+
+Every image is `loading="lazy"` and `decoding="async"`, and every frame states
+its box — width and height, or an explicit aspect ratio — before the art lands.
+A deck list is around a hundred images and one that reflows as they stream in is
+unusable while it loads. Nothing fades in: ADR-0009 Q4 forbids blurring and
+colour-shifting card images, and an opacity ramp is close enough to that line to
+need an argument it does not earn.
+
 **Performance budgets** (mid-range Android, throttled 4×):
 - Level transition: 60 fps, no frame > 32 ms
 - L0 with 5,000 pips: initial paint < 300 ms

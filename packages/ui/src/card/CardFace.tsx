@@ -12,7 +12,7 @@
  */
 
 import type { JSX, KeyboardEvent } from 'react'
-import { CARD_ASPECT, HIT_TARGET_MIN, levelSpec } from './presentation.js'
+import { CARD_ASPECT, HIT_TARGET_MIN, imageFor, levelSpec } from './presentation.js'
 import { ComboBadge, IdentityStrip, ManaValue, Price } from './Badges.js'
 import { ManaCost } from './ManaCost.js'
 import { OracleText } from './OracleText.js'
@@ -37,7 +37,7 @@ export const CardFace = ({
   const spec = levelSpec(2)
   const w = width ?? spec.width
   const h = Math.round(w * CARD_ASPECT)
-  const image = card.imageUris?.normal
+  const image = imageFor(card, 2)
 
   const activate = (): void => onActivate?.(card.oracleId)
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -47,18 +47,41 @@ export const CardFace = ({
     }
   }
 
+  /*
+   * A button only when there is something to activate.
+   *
+   * The frame used to claim `role="button"`, `tabIndex={0}` and "Open details."
+   * unconditionally, which is a lie in the two places this component is now
+   * used to SHOW a card rather than to offer one: the preview panel, where the
+   * details are already open around it, and the commander confirmation on the
+   * start screen. A keyboard user tabbing into either of those landed on a
+   * control announced as a button that does nothing when pressed, which is
+   * worse than no control at all.
+   *
+   * Spreading the props rather than writing `role={...}` with an undefined is
+   * deliberate: under `exactOptionalPropertyTypes` an explicit `undefined` is
+   * not the same as an absent attribute, and React renders `tabindex="0"` for a
+   * numeric 0 either way.
+   */
+  const interactive =
+    onActivate === undefined
+      ? {}
+      : {
+          role: 'button',
+          tabIndex: 0,
+          'aria-label': `${card.name}. Open details.`,
+          onClick: activate,
+          onKeyDown,
+        }
+
   return (
     <div className="rt-face" data-selected={selected} style={{ width: w }}>
       <div
         className="rt-face-image"
-        role="button"
-        tabIndex={0}
-        aria-label={`${card.name}. Open details.`}
-        onClick={activate}
-        onKeyDown={onKeyDown}
+        {...interactive}
         style={{ width: w, height: h, minWidth: HIT_TARGET_MIN, minHeight: HIT_TARGET_MIN }}
       >
-        {image === undefined ? (
+        {image === null ? (
           // No printing resolved. The fallback is a real card-shaped panel with
           // the name and type line, not a placeholder graphic — an unresolved
           // card is still a card you may want to accept.
@@ -73,7 +96,10 @@ export const CardFace = ({
             </span>
           </div>
         ) : (
-          <img src={image} alt={card.name} loading="lazy" width={w} height={h} />
+          // The wrapper above already has this exact box, so the art lands into
+          // a space that was reserved for it rather than pushing the badge row
+          // and the actions down as it arrives.
+          <img src={image} alt={card.name} loading="lazy" decoding="async" width={w} height={h} />
         )}
       </div>
 

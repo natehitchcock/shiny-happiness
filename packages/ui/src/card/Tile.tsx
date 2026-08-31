@@ -13,7 +13,7 @@
  */
 
 import type { JSX, KeyboardEvent } from 'react'
-import { ART_CROP_ASPECT, HIT_TARGET_MIN, levelSpec } from './presentation.js'
+import { ART_CROP_ASPECT, HIT_TARGET_MIN, imageFor, levelSpec } from './presentation.js'
 import { ComboBadge, IdentityStrip, ManaValue, RoleDot } from './Badges.js'
 import type { CardView } from './types.js'
 
@@ -29,7 +29,7 @@ export const Tile = ({ card, width, selected = false, onActivate }: TileProps): 
   const spec = levelSpec(1)
   const w = width ?? spec.width
   const artHeight = Math.round(w * ART_CROP_ASPECT)
-  const art = card.imageUris?.artCrop
+  const art = imageFor(card, 1)
 
   const activate = (): void => onActivate?.(card.oracleId)
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -54,14 +54,20 @@ export const Tile = ({ card, width, selected = false, onActivate }: TileProps): 
       onKeyDown={onKeyDown}
       style={{ width: w, minWidth: HIT_TARGET_MIN, minHeight: HIT_TARGET_MIN }}
     >
+      {/* The height is on the FRAME, not only on the image, so the box exists
+          before the art does. A grid of tiles whose art streams in would
+          otherwise reflow the whole list under the reader's cursor. */}
       <div className="rt-tile-art" style={{ height: artHeight }}>
-        {art === undefined ? (
-          // No art yet (ING-04 has not resolved this card, or it is an import
-          // that never will). The name still has to be readable, so the strip
+        {art === null ? (
+          // No art (this card has none on any printing, or it is an import that
+          // never resolved). The name still has to be readable, so the strip
           // below is the fallback rather than a broken-image icon.
           <span className="rt-tile-noart" aria-hidden="true" />
         ) : (
-          <img src={art} alt="" loading="lazy" width={w} height={artHeight} />
+          // `lazy` because a group is 60–120 tiles and most of them are below
+          // the fold; `async` so decoding a card face never blocks the scroll
+          // that brought it into view.
+          <img src={art} alt="" loading="lazy" decoding="async" width={w} height={artHeight} />
         )}
         <ComboBadge degree={card.comboDegree ?? 0} near={card.nearCombosAt1 ?? 0} />
         {/* Over the art, not below the strip: a fourth row at 72 px would cost

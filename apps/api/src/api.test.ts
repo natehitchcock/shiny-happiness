@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { createTestDatabase, databaseUrl, type TestDatabase } from '@roundtable/db/testing'
-import { insertCombos, upsertCards } from '@roundtable/db'
-import type { Card, CardType, Combo, OracleId } from '@roundtable/domain'
+import { getCard, insertCombos, upsertCards, upsertPrintings } from '@roundtable/db'
+import type { Card, CardType, Combo, OracleId, Printing } from '@roundtable/domain'
 import { comboId, oracleId, printingId } from '@roundtable/domain'
 import type { FastifyInstance } from 'fastify'
 import { buildServer } from './server.js'
+import { clearCorpusCache } from './corpus-cache.js'
 
 /**
  * Contract tests for API-01 against doc 10.
@@ -870,6 +871,153 @@ describeDb('API-01 contract', () => {
       })
 
       expect(response.statusCode).toBe(400)
+    })
+  })
+
+  /**
+   * Card art on the wire (ADR-0021).
+   *
+   * The shape under test is that a card's price and its art come from two
+   * DIFFERENT printings on purpose — the cheapest for the price, because that
+   * is what a card costs to acquire, and the default for the image, because
+   * that is which card it is. They disagree for about a third of the real
+   * corpus, so a fixture where they agree would prove nothing.
+   */
+  describe('card art (ADR-0021)', () => {
+    const DEFAULT_ART = 'https://cards.scryfall.io/art_crop/front/9/1/sol-default.jpg?1'
+    const DEFAULT_NORMAL = 'https://cards.scryfall.io/normal/front/9/1/sol-default.jpg?1'
+    const CHEAP_ART = 'https://cards.scryfall.io/art_crop/front/0/0/sol-cheap.jpg?1'
+    const CHEAP_NORMAL = 'https://cards.scryfall.io/normal/front/0/0/sol-cheap.jpg?1'
+
+    beforeAll(async () => {
+      const sol = await getCard(db.pool, SOL)
+      const counter = await getCard(db.pool, COUNTER)
+      const printing = (
+        over: Partial<Printing> & Pick<Printing, 'printingId' | 'oracleId'>,
+      ): Printing => ({
+        setCode: 'tst',
+        setName: 'Test Set',
+        collectorNumber: '1',
+        rarity: 'uncommon',
+        imageUris: { artCrop: '', normal: '' },
+        priceUsd: null,
+        reserved: false,
+        ...over,
+      })
+
+      await upsertPrintings(db.pool, [
+        // The default printing, with art, deliberately NOT the cheapest.
+        printing({
+          printingId: sol!.defaultPrinting!,
+          oracleId: SOL,
+          imageUris: { artCrop: DEFAULT_ART, normal: DEFAULT_NORMAL },
+          priceUsd: 4.5,
+        }),
+        // Cheaper, with different art. If the route reads the cheapest printing
+        // for images the way it does for prices, these URLs come back instead.
+        printing({
+          printingId: printingId(randomUUID()),
+          oracleId: SOL,
+          collectorNumber: '2',
+          imageUris: { artCrop: CHEAP_ART, normal: CHEAP_NORMAL },
+          priceUsd: 0.5,
+        }),
+        // A printing with no art at all — the 501-card case.
+        printing({ printingId: counter!.defaultPrinting!, oracleId: COUNTER, priceUsd: 1 }),
+      ])
+
+      // The facts map is cached per snapshot and these rows did not exist when
+      // an earlier test warmed it. Without this the route answers from a corpus
+      // that predates the fixture, which would pass or fail by test order.
+      clearCorpusCache()
+    }, 30_000)
+
+    afterAll(() => {
+      // Leave nothing warm for whatever runs next in this file.
+      clearCorpusCache()
+    })
+
+    it('returns art beside the cards, never on them', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/cards/batch',
+        payload: { oracleIds: [SOL] },
+      })
+
+      const body = response.json()
+      expect(body.images[SOL]).toEqual({ artCrop: DEFAULT_ART, normal: DEFAULT_NORMAL })
+      // Doc 02 §2.1: a `Card` is oracle identity and carries no printing facts.
+      expect(body.items[0].imageUris).toBeUndefined()
+    })
+
+    it('takes the art from the default printing and the price from the cheapest', async () => {
+      const body = (
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/cards/batch',
+          payload: { oracleIds: [SOL] },
+        })
+      ).json()
+
+      expect(body.images[SOL].normal).toBe(DEFAULT_NORMAL)
+      expect(body.images[SOL].normal).not.toBe(CHEAP_NORMAL)
+      expect(body.prices[SOL]).toBe(0.5)
+    })
+
+    it('says a card has no art rather than leaving it out', async () => {
+      // 501 cards in the real corpus have no art on any printing. A missing key
+      // and "no art" would be the same thing on the wire, and the client would
+      // show a spinner for the second one for ever.
+      const body = (
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/cards/batch',
+          payload: { oracleIds: [COUNTER] },
+        })
+      ).json()
+
+      expect(Object.keys(body.images)).toEqual([COUNTER])
+      expect(body.images[COUNTER]).toEqual({ artCrop: null, normal: null })
+    })
+
+    it('answers for an id that is not a card at all', async () => {
+      // `getCards` drops unknown ids; `images` must still account for every id
+      // asked about, or the two collections disagree about what was requested.
+      const unknown = randomUUID()
+      const body = (
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/cards/batch',
+          payload: { oracleIds: [unknown] },
+        })
+      ).json()
+
+      expect(body.items).toHaveLength(0)
+      expect(body.images[unknown]).toEqual({ artCrop: null, normal: null })
+    })
+
+    it('sends the URLs exactly as Scryfall published them', async () => {
+      // ADR-0021: no rewriting, no proxying, no resizing. A URL pointing
+      // anywhere but Scryfall's own CDN means something has started re-serving
+      // images, which is the `ING-04` conversation that has not happened.
+      const body = (
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/cards/batch',
+          payload: { oracleIds: [SOL] },
+        })
+      ).json()
+
+      expect(body.images[SOL].artCrop).toMatch(/^https:\/\/cards\.scryfall\.io\//)
+      expect(body.images[SOL].normal).toMatch(/^https:\/\/cards\.scryfall\.io\//)
+    })
+
+    it('carries art on the search results too, so the first screen has art', async () => {
+      // The commander picker is the only card surface reached before a deck
+      // exists, and it never calls `/cards/batch`.
+      const body = (await app.inject({ method: 'GET', url: '/api/v1/cards/search?q=sol' })).json()
+
+      expect(body.images[SOL]).toEqual({ artCrop: DEFAULT_ART, normal: DEFAULT_NORMAL })
     })
   })
 })

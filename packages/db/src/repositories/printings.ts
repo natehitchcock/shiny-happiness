@@ -89,7 +89,40 @@ export interface PrintingFacts {
   readonly rarity: string | null
   readonly setCode: string | null
   readonly reserved: boolean
+  /**
+   * Art for this card, from its **default** printing — not from the cheapest
+   * one the fields above describe.
+   *
+   * Two different printings in one record needs saying out loud, so: price,
+   * rarity, set and reserved answer "how do I get this card", and the cheapest
+   * printing is the honest answer to that. The image answers "which card is
+   * this", and the honest answer there is the printing Scryfall itself would
+   * show — `cards.default_printing`. They disagree for 10,042 of the corpus's
+   * 34,492 cards, so picking one for both would be wrong about a third of them
+   * in one direction or the other.
+   *
+   * `null` means no art, and 501 cards really have none on any printing (the
+   * coverage is identical whichever printing is chosen — 33,991 either way, so
+   * this choice costs nothing in reach). The UI primitives draw a readable
+   * text panel for those rather than a broken image.
+   */
+  readonly imageUris: {
+    readonly artCrop: string | null
+    readonly normal: string | null
+  }
 }
+
+/**
+ * Absent art as `null`, whichever way the row spells it.
+ *
+ * `upsertPrintings` writes `null` for "no image", but `toPrinting` reads it back
+ * out as `''` because `Printing.imageUris` is typed as strings — so an empty
+ * string is a spelling of absence that could reach this table from a caller
+ * round-tripping a printing. It has to collapse to `null` here: an `''` handed
+ * to the client becomes `<img src="">`, which resolves to the page URL and
+ * renders a broken image where the no-art fallback should have drawn a name.
+ */
+const imageUrl = (raw: string | null): string | null => (raw === null || raw === '' ? null : raw)
 
 /**
  * The printing-level facts the candidate pool needs, one row per card.
@@ -101,6 +134,16 @@ export interface PrintingFacts {
  *
  * One aggregate query rather than a lookup per card — hydrating printings for
  * 30k candidates individually is the shape that only hurts at real volume.
+ *
+ * The image join is what makes this query cost what it costs: measured against
+ * the real corpus it takes the result from 4.28 MB to 12.05 MB and 149 ms to
+ * 201 ms. That is paid ONCE PER SNAPSHOT, because `cachedPrintingFacts` holds
+ * the map for as long as the corpus is unchanged (see `apps/api/corpus-cache`).
+ * The alternative considered and rejected was fetching art per request for the
+ * ≤500 ids `/cards/batch` asks about: a smaller read, but a recurring one on a
+ * route the client calls at least twice per user action, and a second
+ * per-request database read on a metered database is the shape that took the
+ * deployment down before.
  */
 export const printingFactsForAll = async (pool: Pool): Promise<Map<OracleId, PrintingFacts>> => {
   const { rows } = await pool.query<{
@@ -109,14 +152,28 @@ export const printingFactsForAll = async (pool: Pool): Promise<Map<OracleId, Pri
     rarity: string | null
     set_code: string | null
     reserved: boolean
+    image_art_crop: string | null
+    image_normal: string | null
   }>(
-    `SELECT DISTINCT ON (oracle_id)
-            oracle_id,
-            min(price_usd) OVER (PARTITION BY oracle_id) AS price_usd,
-            bool_or(reserved) OVER (PARTITION BY oracle_id) AS reserved,
-            rarity, set_code
-       FROM printings
-      ORDER BY oracle_id, price_usd NULLS LAST`,
+    // The CTE is the query this used to be, unchanged, so the price/rarity/set
+    // answers cannot have moved. Both joins are LEFT so the row set stays
+    // exactly "one row per card that has a printing" — an inner join to `cards`
+    // would be equivalent today only because of the foreign key, and a row
+    // silently vanishing from this map is a card that reads as unpriced.
+    `WITH cheapest AS (
+       SELECT DISTINCT ON (oracle_id)
+              oracle_id,
+              min(price_usd) OVER (PARTITION BY oracle_id) AS price_usd,
+              bool_or(reserved) OVER (PARTITION BY oracle_id) AS reserved,
+              rarity, set_code
+         FROM printings
+        ORDER BY oracle_id, price_usd NULLS LAST
+     )
+     SELECT ch.oracle_id, ch.price_usd, ch.reserved, ch.rarity, ch.set_code,
+            d.image_art_crop, d.image_normal
+       FROM cheapest ch
+       LEFT JOIN cards c ON c.oracle_id = ch.oracle_id
+       LEFT JOIN printings d ON d.printing_id = c.default_printing`,
   )
   return new Map(
     rows.map((r) => [
@@ -126,6 +183,10 @@ export const printingFactsForAll = async (pool: Pool): Promise<Map<OracleId, Pri
         rarity: r.rarity,
         setCode: r.set_code,
         reserved: r.reserved,
+        imageUris: {
+          artCrop: imageUrl(r.image_art_crop),
+          normal: imageUrl(r.image_normal),
+        },
       },
     ]),
   )
