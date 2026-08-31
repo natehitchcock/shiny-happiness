@@ -1178,6 +1178,17 @@ const useSingleColumn = (): boolean => {
   return narrow
 }
 
+/**
+ * The widest card the preview can draw without overflowing its column.
+ *
+ * `CardFace` sets width AND height inline to reserve the box before the art
+ * loads, so a stylesheet cannot cap it — `max-width` clips the width and leaves
+ * the inline height, which stretches the card. The container has to be measured
+ * and a width it can honour passed in.
+ *
+ * The analysis rail is a resizable column, not a fixed one, so `ResizeObserver`
+ * rather than a breakpoint: dragging the divider has to move the picture too.
+ */
 const Preview = ({
   card,
   detail,
@@ -1209,6 +1220,12 @@ const Preview = ({
   // `detail` is the fallback, not the source: a card reached from somewhere that
   // never hydrated it still previews once its detail lands.
   const shown = card ?? detail
+  // L3 "Detail", not L2 "Card". Doc 07 sizes L2 for "12-24 cards" on screen and
+  // L3 for "one", and this panel shows exactly one — the card being decided
+  // about. It was on L2 and on the wrong half of it: `sheet` is true only on
+  // the narrow single-column layout, so the phone got the 220 px desktop width
+  // and the desktop got the 160 px `mobileWidth`. The picture was smaller on
+  // the bigger screen.
   const shownId = shown?.oracleId ?? null
   const ref = useRef<HTMLElement>(null)
 
@@ -1352,7 +1369,17 @@ const Preview = ({
        */}
       {view.imageUris === undefined ? null : (
         <div className="preview-art">
-          <CardFace card={view} width={sheet ? levelSpec(2).width : levelSpec(2).mobileWidth} />
+          {/*
+            L3 "Detail", not L2 "Card".
+             
+            Doc 07 sizes L2 for "12-24 cards" on screen and L3 for "one", and
+            this panel shows exactly one — the card you are deciding about. It
+            was on L2 and, worse, on the wrong half of it: `sheet` is true only
+            on the narrow single-column layout, so the phone got the 220 px
+            desktop width and the desktop got the 160 px `mobileWidth`. The
+            picture was smaller on the bigger screen.
+          */}
+          <CardFace card={view} width={levelSpec(3).width} />
         </div>
       )}
       {/* Oracle text is the card. Newlines are meaningful — they separate

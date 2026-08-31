@@ -520,6 +520,47 @@ select {
   min-width: 1.8rem;
 }
 
+/*
+ * The whole row selects the card, not just the text.
+ *
+ * `.card-row` has 6px of vertical padding and centres its children, while the
+ * name button had `padding: 0` — so the button was only as tall as its own
+ * line box and the bands above and below it were row background with nothing
+ * clickable on them. The same held for the gaps between the columns. The user's
+ * words: "there is still space close to the top and bottom of the entries
+ * that, when I mouse over them, they don't highlight the text, and when I click
+ * them, they don't select the card."
+ *
+ * A stretched pseudo-element rather than a bigger button: the row also holds
+ * Add, Reject, lock and the price, and a button that literally contained them
+ * would be a control inside a control — invalid, and a keyboard trap. This
+ * leaves the DOM alone and lifts the real controls above the overlay, so the
+ * background selects the card and everything on top of it still does its own
+ * job.
+ */
+.card-row {
+  position: relative;
+}
+
+.card-row .name.as-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+/* Everything that is not the name sits above the overlay and keeps its own
+   click, hover and focus. */
+.card-row > *:not(.name) {
+  position: relative;
+  z-index: 1;
+}
+
+/* Hovering anywhere on the row lights the name, so the target is legible
+   before it is clicked. */
+.card-row:hover .name.as-link {
+  color: var(--brass);
+}
+
 /* A card name is a control: it opens the preview. It must not look like a
    button — the row is dense — but it must behave like one. */
 .as-link {
@@ -624,6 +665,36 @@ select {
   display: flex;
   justify-content: center;
   margin: var(--step) 0;
+  min-width: 0;
+}
+
+/*
+ * The preview card fills its column, up to L3's full size.
+ *
+ * Doc 07 sizes L2 for "12-24 cards" on screen and L3 for "one"; this panel
+ * shows exactly one. It was on L2 and on the wrong half of it — `sheet` is true
+ * only on the narrow single-column layout, so the phone got the 220 px desktop
+ * width and the desktop got the 160 px `mobileWidth`, making the picture
+ * SMALLER on the bigger screen.
+ *
+ * `!important` because `CardFace` sets width AND height inline to reserve the
+ * box before the art loads, and inline styles beat a stylesheet. Overriding
+ * only the width leaves the inline height and stretches the card, so both go.
+ * `aspect-ratio` then restores the proportion the inline height was holding.
+ *
+ * This replaces a ResizeObserver that measured the container and passed a
+ * width: it worked once and never updated, and a layout rule that CSS can state
+ * directly should not need a React hook to enforce it.
+ */
+.preview-art .rt-face {
+  width: 100% !important;
+  max-width: 340px;
+}
+
+.preview-art .rt-face-image {
+  width: 100% !important;
+  height: auto !important;
+  aspect-ratio: 488 / 680;
 }
 
 .preview-head {
