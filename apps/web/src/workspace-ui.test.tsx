@@ -98,6 +98,10 @@ const analysis: api.Analysis = {
 
 const recs = (over: Partial<api.Recommendations> = {}): api.Recommendations => ({
   datasetSnapshotId: null,
+  // Required since semantic emphasis shipped: the deck's emphasised tags and
+  // how many candidates support each. Empty here — these tests are about the
+  // workspace UI, not about focus.
+  emphasis: [],
   groups: [],
   columns: [],
   unavailable: [],
