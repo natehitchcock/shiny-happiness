@@ -1,4 +1,4 @@
-# 24. Impact and efficiency are query fields, and the filter compares the number the column shows
+# 25. Impact and efficiency are query fields, and the filter compares the number the column shows
 
 Date: 2026-08-31
 

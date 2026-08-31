@@ -98,7 +98,7 @@ impact>=6 -is:gamechanger            board-changing cards that stay inside Brack
 
 `impact` and `efficiency` are the two metrics doc 18 puts on every row, and the
 filter compares **the same number the column shows** — no rounding and no
-rescaling happens between the cell and the query (ADR-0024). They are on their
+rescaling happens between the cell and the query (ADR-0025). They are on their
 own scales because they measure different things: impact runs 0–18.48, and
 efficiency is stat points of surplus per mana, so it clusters near 1. Read the
 column, then set the threshold; that is why the number column and a query

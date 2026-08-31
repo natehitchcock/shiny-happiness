@@ -212,7 +212,7 @@ needs no server evaluation, since its number is already on the row.
 column list to the deck yet; the storage, the metrics, the endpoints and the
 `queryColumns` seam are.
 
-**Both metrics are now filterable** ([ADR-0024](adr/0024-impact-and-efficiency-are-query-fields.md)).
+**Both metrics are now filterable** ([ADR-0025](adr/0025-impact-and-efficiency-are-query-fields.md)).
 `impact` and `efficiency` are numeric fields of the candidate query language —
 aliases `imp` and `eff` — so `impact>=6 -t:land` and `eff>=1.5 mv<=3` work in
 the filter box, as a column, and on `/cards/search`, which answers them because

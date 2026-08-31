@@ -390,7 +390,7 @@ contract, and why the web client can adopt persisted columns without any change
 to how it asks for them.
 
 **Both metrics are also query fields** — `impact>=6`, `eff>=1.5` — as of
-[ADR-0024](adr/0024-impact-and-efficiency-are-query-fields.md). That does not
+[ADR-0025](adr/0025-impact-and-efficiency-are-query-fields.md). That does not
 collapse the union: a query column ticks, a metric column shows the number, and
 you need the number to pick the threshold. What it does mean is that
 `{kind:'query', query:'impact>=6'}` is an ordinary column the server evaluates
