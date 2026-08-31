@@ -404,26 +404,14 @@ button {
 }
 
 /*
- * The panel opens DOWNWARD and fits the rail exactly.
+ * There is no `.comp-hint .hint-pop` rule any more.
  *
- * `.analysis-scroll` is an `overflow-y: auto` box, which computes `overflow-x`
- * to `auto` as well — so a 20rem popup anchored to the left of a 230 px rail is
- * clipped, or worse, scrolls the dashboard sideways. Pinned to both edges
- * instead, it can never be wider than the thing it is inside.
- *
- * Downward because the composition list runs down the top of the rail: the
- * default upward direction would put the first role's panel off the top.
+ * It pinned the panel to the rail's two edges and forced it downward, because
+ * `.analysis-scroll` clipped anything wider and the default upward direction
+ * put the first role's panel off the top of the rail. Both reasons are gone:
+ * the panel is a top-layer `popover` that no container clips, and `placeHint`
+ * flips it downward on its own when there is no room above.
  */
-.comp-hint .hint-pop {
-  top: calc(100% + 4px);
-  bottom: auto;
-  left: 0;
-  right: 0;
-  width: auto;
-  max-width: none;
-  max-height: 14rem;
-  overflow-y: auto;
-}
 
 .meter-fill[data-short='true'] {
   background: var(--rust);
@@ -919,21 +907,15 @@ select {
 }
 
 /*
- * The panel hangs from the RIGHT edge of the bar and opens upward.
+ * There is no `.curve-hint .hint-pop` rule any more.
  *
- * Upward because the curve is pinned to the foot of the rail, where there is no
- * room below it. Right-anchored because a bar is about an eighth of the rail
- * wide: a left-anchored panel on bucket 7 would run off the screen edge, while
- * right-anchored it grows leftward across the app, which the rail's
- * `overflow: visible` now allows.
+ * It right-anchored the panel and forced it upward, because a bar is about an
+ * eighth of the rail wide and a left-anchored panel on bucket 7 ran off the
+ * screen. `placeHint` does both now, from measurements rather than from a
+ * guess about which bucket is near which edge — it right-aligns only when a
+ * left-aligned panel would actually overflow, and the curve sits at the foot of
+ * the rail so "above" is already its preferred side.
  */
-.curve-hint .hint-pop {
-  left: auto;
-  right: 0;
-  max-width: 15rem;
-  max-height: 16rem;
-  overflow-y: auto;
-}
 
 /* Anchored to the baseline, rounded only at the data end. */
 /* On-target is the quiet state: it should recede so the eye lands on the
@@ -1287,9 +1269,14 @@ select {
  * `min-height: 0`, and the pinned foot is `flex: 0 0 auto`, so nothing in
  * normal flow can escape this box anyway.
  *
- * What `hidden` DID clip was the two things that are supposed to leave it: the
- * panel a curve bar opens, and the preview, which is now anchored to this
- * rail's left edge and overlays the suggestion feed.
+ * What `hidden` DID clip is the preview, which is anchored to this rail's left
+ * edge (`position: absolute; right: 100%`) and overlays the suggestion feed.
+ * That is still the whole reason for this line.
+ *
+ * It used to also be here for the panel a curve bar opens. That reason is gone
+ * — hint panels are `popover`s in the top layer now, which no ancestor's
+ * `overflow` reaches in either direction — but the preview keeps the rule
+ * standing on its own.
  */
 .region.analysis {
   position: sticky;
@@ -1857,8 +1844,11 @@ select {
 /* The trigger keeps the look of whatever it wraps — it is a button so that the
    keyboard and a screen reader can reach it, not because it should look like
    one. */
+/* No `position: relative`. It was here to make this span the panel's offset
+   parent, and the panel is no longer positioned against it — it is a `popover`
+   in the top layer, placed in viewport coordinates by `placeHint`. Leaving the
+   declaration standing would tell the next reader it is load-bearing. */
 .hint {
-  position: relative;
   display: inline-flex;
 }
 .hint-trigger {
@@ -1875,16 +1865,38 @@ select {
   outline-offset: 2px;
   border-radius: var(--radius);
 }
+/*
+ * The panel is a `popover`, so this box is painted in the TOP LAYER.
+ *
+ * It was `position: absolute` inside the trigger, which meant every ancestor
+ * that scrolls clipped it — and most of these hints live inside
+ * `.analysis-scroll`. In the top layer nothing clips it and nothing can be
+ * stacked above it, so the per-container escapes that used to sit under this
+ * rule (`.comp-hint .hint-pop`, `.curve-hint .hint-pop`) are gone.
+ *
+ * `position: fixed` with `inset: auto` and `margin: 0` overrides the UA's
+ * `[popover]` rules, which centre the box with `inset: 0; margin: auto`.
+ * `left`/`top` are then set inline, in viewport pixels, by `placeHint`.
+ *
+ * `z-index` is not what puts it on top — the top layer is above every stacking
+ * context by definition. It is kept only for the fallback path in a browser
+ * with no Popover API, where this is an ordinary fixed box again.
+ */
 .hint-pop {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
+  position: fixed;
+  inset: auto;
+  margin: 0;
   z-index: 60;
   display: flex;
   flex-direction: column;
   gap: 4px;
   width: max-content;
   max-width: 20rem;
+  /* Generic, because the panels that list cards can be long. This was two
+     per-container rules (14rem on composition, 16rem on the curve) that existed
+     only because those two containers clipped. */
+  max-height: 16rem;
+  overflow-y: auto;
   padding: var(--step);
   background: var(--ink);
   border: 1px solid var(--rule);
