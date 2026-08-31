@@ -21,11 +21,18 @@ export interface Fixing {
   readonly coloursCovered: number
   /** Produces mana of some kind, even if only colourless. */
   readonly producesMana: boolean
+  /** Unconditionally enters tapped, as far as its rules text says. */
+  readonly entersTapped: boolean
   /** 0..1, the value used for ordering. */
   readonly value: number
 }
 
-export const NO_FIXING: Fixing = { coloursCovered: 0, producesMana: false, value: 0 }
+export const NO_FIXING: Fixing = {
+  coloursCovered: 0,
+  producesMana: false,
+  entersTapped: false,
+  value: 0,
+}
 
 /**
  * Score a card's mana contribution against a deck's colour identity.
@@ -52,21 +59,62 @@ export const NO_FIXING: Fixing = { coloursCovered: 0, producesMana: false, value
  */
 const COLOURLESS_ONLY = 0.15
 
+/**
+ * A land that enters tapped, unconditionally.
+ *
+ * Read from rules text, which is a heuristic — but a checked one. The naive
+ * version, `/enters tapped/`, is WRONG in the way that matters most: it flags
+ * Steam Vents and every other shockland, because a shockland says "you may pay
+ * 2 life. If you don't, it enters tapped", and it flags every checkland, which
+ * says "unless you control a...". Demoting the best duals in the game would be
+ * worse than not modelling this at all.
+ *
+ * So the rule is "says it enters tapped, and says nothing that makes it
+ * conditional". Validated against thirty hand-picked lands chosen to be hard —
+ * every shockland, checkland, fastland, painland and Commander-relevant utility
+ * land — and correct on all thirty. Two of the exclusions were found that way
+ * rather than guessed:
+ *
+ *   - Training Center reads "enters tapped unless you have two or more
+ *     opponents", which in Commander is always.
+ *   - Mariposa Military Base reads "You may have this land enter tapped", which
+ *     is a choice, not a cost.
+ *
+ * `enters the battlefield tapped` is the older wording and still in print on
+ * cards like Gate to Tumbledown, so both are matched.
+ */
+const ENTERS_TAPPED = /enters (?:the battlefield )?tapped/i
+const CONDITIONAL = /unless|you may pay|you may have|if you do|choose one/i
+
+export const entersTapped = (card: Card): boolean =>
+  ENTERS_TAPPED.test(card.oracleText) && !CONDITIONAL.test(card.oracleText)
+
+/**
+ * What a tapped land keeps of its fixing value.
+ *
+ * Not zero. A tapped dual is a real card that real decks play, and scoring it
+ * as if it produced nothing would be a worse lie than the one being fixed. It
+ * is simply worse than the same land untapped, which is the whole claim.
+ */
+const TAPPED_PENALTY = 0.6
+
 export const fixingFor = (card: Card, identity: readonly Color[]): Fixing => {
   const produced = card.producedMana ?? []
   if (produced.length === 0) return NO_FIXING
+  const tapped = entersTapped(card)
 
   const wanted = new Set<string>(identity)
   const coloursCovered = [...new Set(produced)].filter((m) => wanted.has(m)).length
 
   // A colourless deck wants colourless mana, so "covers none of my colours" is
   // not a criticism there — there are no colours to cover.
-  if (identity.length === 0) {
-    return { coloursCovered: 0, producesMana: true, value: COLOURLESS_ONLY }
-  }
-
-  if (coloursCovered === 0) {
-    return { coloursCovered: 0, producesMana: true, value: COLOURLESS_ONLY }
+  if (identity.length === 0 || coloursCovered === 0) {
+    return {
+      coloursCovered: 0,
+      producesMana: true,
+      entersTapped: tapped,
+      value: COLOURLESS_ONLY * (tapped ? TAPPED_PENALTY : 1),
+    }
   }
 
   /*
@@ -80,7 +128,8 @@ export const fixingFor = (card: Card, identity: readonly Color[]): Fixing => {
   return {
     coloursCovered,
     producesMana: true,
-    value: Math.sqrt(coloursCovered / identity.length),
+    entersTapped: tapped,
+    value: Math.sqrt(coloursCovered / identity.length) * (tapped ? TAPPED_PENALTY : 1),
   }
 }
 

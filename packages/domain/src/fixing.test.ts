@@ -151,3 +151,67 @@ describe('which cards the term applies to', () => {
     expect(isManaSource(mdfc)).toBe(true)
   })
 })
+
+describe('entering tapped', () => {
+  const izzet: Parameters<typeof fixingFor>[1] = ['R', 'U']
+
+  it('scores a tapped dual below the same dual untapped', () => {
+    const untapped = fixingFor(land({ oracleText: '{T}: Add {U} or {R}.' }), izzet)
+    const tapped = fixingFor(
+      land({ oracleText: 'This land enters tapped. {T}: Add {U} or {R}.' }),
+      izzet,
+    )
+
+    expect(tapped.value).toBeLessThan(untapped.value)
+    expect(tapped.entersTapped).toBe(true)
+    // Not zero. A tapped dual is a real card real decks play; scoring it as
+    // producing nothing would be a worse lie than the one being fixed.
+    expect(tapped.value).toBeGreaterThan(0)
+  })
+
+  it('does not demote a shockland', () => {
+    // The naive `/enters tapped/` flags this, because of the second sentence.
+    // Demoting the best duals in the game would be worse than not modelling
+    // tapped-ness at all.
+    const shock = land({
+      name: 'Steam Vents',
+      oracleText:
+        "As Steam Vents enters, you may pay 2 life. If you don't, it enters tapped. {T}: Add {U} or {R}.",
+    })
+    expect(fixingFor(shock, izzet).entersTapped).toBe(false)
+  })
+
+  it('does not demote a checkland or a fastland', () => {
+    const check = land({
+      oracleText: 'This land enters tapped unless you control an Island or a Mountain.',
+    })
+    const fast = land({
+      oracleText: 'This land enters tapped unless you control two or fewer other lands.',
+    })
+    expect(fixingFor(check, izzet).entersTapped).toBe(false)
+    expect(fixingFor(fast, izzet).entersTapped).toBe(false)
+  })
+
+  it('does not demote a land that only OFFERS to enter tapped', () => {
+    // Mariposa Military Base: a choice, not a cost.
+    const optional = land({
+      oracleText: 'You may have this land enter tapped. If you do, you get two rad counters.',
+    })
+    expect(fixingFor(optional, izzet).entersTapped).toBe(false)
+  })
+
+  it('reads the older wording too', () => {
+    // Still in print — Gate to Tumbledown and friends.
+    const gate = land({ oracleText: 'Gate to Tumbledown enters the battlefield tapped.' })
+    expect(fixingFor(gate, izzet).entersTapped).toBe(true)
+  })
+
+  it('penalises a tapped colourless land as well', () => {
+    const a = fixingFor(land({ producedMana: ['C'], oracleText: '' }), izzet)
+    const b = fixingFor(
+      land({ producedMana: ['C'], oracleText: 'This land enters tapped.' }),
+      izzet,
+    )
+    expect(b.value).toBeLessThan(a.value)
+  })
+})
