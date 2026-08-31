@@ -19,6 +19,7 @@ import { CardFace, ManaCost, OracleText, levelSpec } from '@roundtable/ui'
 import type { CardView, Color } from '@roundtable/ui'
 import type { DeckCommand, SynergyTag } from '@roundtable/domain'
 import { DeckMenu } from './DeckMenu'
+import { Boundary } from './Boundary'
 import { Hint } from './Hint'
 import { DeckWeb } from './deckweb/DeckWeb'
 import { enterDeckWeb, leaveDeckWeb, useDeckWebMode } from './deckweb/route'
@@ -1459,7 +1460,7 @@ const BAROMETERS = [
  * is a rejected PR (AGENTS.md §8), and "0" would be a fabricated rule.
  */
 const gameChangerAllowance = (bracket: api.BracketReport): number | 'unlimited' | null =>
-  bracket.rules?.targetBracket?.gameChangersAllowed ?? bracket.violations[0]?.allowed ?? null
+  bracket.rules?.targetBracket?.gameChangersAllowed ?? bracket.violations?.[0]?.allowed ?? null
 
 /** `Bracket 3 (Upgraded)`, or just `Bracket 3` when the name was not sent. */
 const bracketNoun = (bracket: api.BracketReport): string => {
@@ -1488,9 +1489,12 @@ const BracketChip = ({
   bracket: api.BracketReport
   onOpen: () => void
 }): React.JSX.Element => {
-  const held = bracket.gameChangers.length
+  // `?? []` at every read: these arrive from the wire, where a server that
+  // predates them omits them entirely. Reading `.length` off the absent one
+  // threw and unmounted the whole app rather than just this chip.
+  const held = (bracket.gameChangers ?? []).length
   const allowed = gameChangerAllowance(bracket)
-  const over = bracket.violations.length > 0
+  const over = (bracket.violations ?? []).length > 0
 
   const shown =
     bracket.rules === null
@@ -1558,7 +1562,7 @@ const BracketCheck = ({
   onOpenChange: (open: boolean) => void
   headingRef: React.RefObject<HTMLHeadingElement | null>
 }): React.JSX.Element => {
-  const held = bracket.gameChangers.length
+  const held = (bracket.gameChangers ?? []).length
   const allowed = gameChangerAllowance(bracket)
   const published = bracket.rules?.targetBracket
   const toggleRef = useRef<HTMLButtonElement>(null)
@@ -1591,12 +1595,12 @@ const BracketCheck = ({
           {/* The server's sentence, not one assembled here: it already reads
               "Bracket 3 (Upgraded) allows 3 Game Changers; this deck has 4."
               and re-deriving it would put the arithmetic in two places. */}
-          {bracket.violations.map((v) => (
+          {(bracket.violations ?? []).map((v) => (
             <p className="problem" key={v.flag}>
               {v.message}
             </p>
           ))}
-          {bracket.violations.length === 0 ? (
+          {(bracket.violations ?? []).length === 0 ? (
             <p className="note">
               {allowed === null
                 ? `This deck holds ${plural(held, 'Game Changer')}.`
@@ -1627,7 +1631,7 @@ const BracketCheck = ({
           </button>
           {open ? (
             <ul className="bracket-changers" id="bracket-changers">
-              {bracket.gameChangers.map((id) => (
+              {(bracket.gameChangers ?? []).map((id) => (
                 <li key={id}>
                   <button className="as-link" onClick={() => onInspect(id)}>
                     {cards.get(id)?.name ?? id.slice(0, 8)}
@@ -3842,7 +3846,13 @@ export const Workspace = ({
             publishes a rule for, and opens the panel that says what the other
             four are (doc 03 §3.2). */}
         {analysis?.bracket === undefined ? null : (
-          <BracketChip bracket={analysis.bracket} onOpen={revealBracket} />
+          // Isolated: this chip reads fields a server may not send, and an
+          // unguarded read here used to unmount the entire workspace. The `??`
+          // guards are the fix for that field; the boundary is the fix for the
+          // class, because the next missing field is one nobody has thought of.
+          <Boundary name="The bracket chip">
+            <BracketChip bracket={analysis.bracket} onOpen={revealBracket} />
+          </Boundary>
         )}
         <button className="act" onClick={() => setImporting(true)}>
           Import
@@ -4600,23 +4610,25 @@ export const Workspace = ({
                 </p>
 
                 {analysis.bracket === undefined ? null : (
-                  <BracketCheck
-                    bracket={analysis.bracket}
-                    // The server's own account of what is missing. Looked up by
-                    // key rather than by position — `unavailable` also carries
-                    // data-source entries, and which of them are present varies
-                    // per deck (doc 10 §10.9).
-                    reason={
-                      analysis.unavailable.find((u) => u.key === 'bracket-assessment')?.reason
-                    }
-                    cards={cards}
-                    onInspect={open}
-                    // Open by default while the deck is over its allowance, and
-                    // whatever the user last chose after that.
-                    open={bracketOpen ?? analysis.bracket.violations.length > 0}
-                    onOpenChange={setBracketOpen}
-                    headingRef={bracketHeadingRef}
-                  />
+                  <Boundary name="The bracket check">
+                    <BracketCheck
+                      bracket={analysis.bracket}
+                      // The server's own account of what is missing. Looked up by
+                      // key rather than by position — `unavailable` also carries
+                      // data-source entries, and which of them are present varies
+                      // per deck (doc 10 §10.9).
+                      reason={
+                        analysis.unavailable.find((u) => u.key === 'bracket-assessment')?.reason
+                      }
+                      cards={cards}
+                      onInspect={open}
+                      // Open by default while the deck is over its allowance, and
+                      // whatever the user last chose after that.
+                      open={bracketOpen ?? (analysis.bracket.violations ?? []).length > 0}
+                      onOpenChange={setBracketOpen}
+                      headingRef={bracketHeadingRef}
+                    />
+                  </Boundary>
                 )}
 
                 {analysis.deckCombos.length > 0 ? (

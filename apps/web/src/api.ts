@@ -468,9 +468,18 @@ export interface BracketReport {
    * words, and that sentence is what the panel shows.
    */
   assessed: number | null
-  violations: BracketViolation[]
+  /*
+   * Optional, both of them, because the WIRE is not the type.
+   *
+   * A server from before these fields existed sends them absent, and a
+   * required declaration is a claim about a current server rather than
+   * protection — `bracket.gameChangers.length` on `undefined` threw and took
+   * the whole React tree with it. Declared optional so the compiler makes the
+   * reader handle what can actually arrive.
+   */
+  violations?: BracketViolation[]
   /** The deck's cards on Wizards' Game Changers list, as oracle ids. */
-  gameChangers: string[]
+  gameChangers?: string[]
   rules: {
     sourceUrl: string
     retrievedAt: string

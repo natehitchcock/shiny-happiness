@@ -2512,3 +2512,15 @@ select {
     margin-left: 0;
   }
 }
+
+/* A panel that failed to render says so, in the space it would have used.
+   Rust, because it is a fault — and never the only signal: it says what broke
+   in words. */
+.panel-failed {
+  margin: var(--step) 0;
+  padding: var(--step);
+  border: 1px solid var(--rust);
+  border-radius: var(--radius);
+  color: var(--parchment-dim);
+  font-size: 0.78rem;
+}
