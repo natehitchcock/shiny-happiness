@@ -16,7 +16,10 @@ import {
 // brander shadowed by a local of the same name reads as a bug even when it is
 // not one.
 import { oracleId as asOracleId } from '@roundtable/domain'
-import { CardFace, ManaCost, OracleText, levelSpec } from '@roundtable/ui'
+// `IDENTITY_COLORS` rather than a hex in this file: Magic's five colours are
+// data the design system owns, and a second copy here is how the pie and the
+// mana symbols come to disagree about what blue is.
+import { CardFace, IDENTITY_COLORS, ManaCost, OracleText, levelSpec } from '@roundtable/ui'
 import type { CardView, Color } from '@roundtable/ui'
 import type { DeckCommand, SynergyTag } from '@roundtable/domain'
 import { DeckMenu } from './DeckMenu'
@@ -2040,6 +2043,161 @@ const Breakdown = ({
       ) : null}
       {caveat === null ? null : <span className="hint-line dim">{caveat}</span>}
     </>
+  )
+}
+
+/* ------------------------------------------------------------ colour pie */
+
+/** Full names, for the accessible summary. A lone "W" read aloud is a letter. */
+const COLOR_NAMES: Readonly<Record<string, string>> = {
+  W: 'white',
+  U: 'blue',
+  B: 'black',
+  R: 'red',
+  G: 'green',
+}
+
+/** One slice's wedge, from the centre. Angles in radians, 0 at three o'clock. */
+const wedge = (cx: number, cy: number, r: number, from: number, to: number): string => {
+  const at = (angle: number): string =>
+    `${(cx + r * Math.cos(angle)).toFixed(2)} ${(cy + r * Math.sin(angle)).toFixed(2)}`
+  const large = to - from > Math.PI ? 1 : 0
+  return `M ${String(cx)} ${String(cy)} L ${at(from)} A ${String(r)} ${String(r)} 0 ${String(large)} 1 ${at(to)} Z`
+}
+
+/**
+ * The colour demand of the deck's cards, as a pie.
+ *
+ * WHY A PIE AT ALL. It is a part-to-whole with at most five categories that sum
+ * to a meaningful total, which is the one case a pie answers better than a bar:
+ * "how much of my deck is blue" is a share, not a magnitude. That is the whole
+ * of the justification and it does not generalise — nothing else on this
+ * dashboard should become one.
+ *
+ * WHY THE COLOURS ARE NOT FIXED, AND WHAT IT COSTS.
+ *
+ * `IDENTITY_COLORS` fails a categorical-palette check, and the failures were
+ * measured rather than guessed:
+ *
+ *     [FAIL] Lightness band   #ede2c0 at L 0.913
+ *     [FAIL] Chroma floor     #ede2c0 (0.046), #a274ae (0.099) — read as grey
+ *     [WARN] CVD separation   #a274ae ↔ #2f74c8  ΔE 6.3 (protan)
+ *
+ * They are shipped anyway, because a player looking for their white pips needs
+ * the white slice to be white. Recolouring Magic's own five would fix the
+ * validator and break the chart: the reader's entire prior about what these
+ * colours mean is the thing that makes the picture instant.
+ *
+ * The codebase made this call once before, in `PIP_CVD_NOTE`, and justified it
+ * on the grounds that "L0 is a shape view, not a decision surface". That
+ * justification does NOT extend here — a pie read to decide a mana base is
+ * exactly a decision surface — so the cost is paid the other way the validator
+ * permits, with a secondary encoding that does not depend on hue at all:
+ *
+ *   * every slice is labelled with its colour LETTER and its COUNT, outside the
+ *     wedge where the page's own text contrast applies rather than the slice's;
+ *   * the slices are separated by a stroke in the page background, so adjacent
+ *     wedges have an edge and not just a hue change;
+ *   * the whole figure states every colour and count in its accessible name.
+ *
+ * Read the letters and the chart works with no colour vision at all. The hues
+ * are then a fast path for the readers who have them, which is what a secondary
+ * encoding is for.
+ */
+const ColorPie = ({
+  balance,
+}: {
+  balance: NonNullable<api.Analysis['colorBalance']>
+}): React.JSX.Element => {
+  const slices = (COLORS as readonly string[])
+    .map((c) => ({ color: c, pips: balance.pips[c] ?? 0, sources: balance.sources[c] ?? 0 }))
+    .filter((s) => s.pips > 0)
+  const total = slices.reduce((sum, s) => sum + s.pips, 0)
+
+  if (total === 0) {
+    // A colourless deck is a real answer, and an empty circle is not one.
+    return (
+      <p className="note">
+        No coloured mana symbols yet — the deck is empty, or everything in it is colourless.
+      </p>
+    )
+  }
+
+  const cx = 62
+  const cy = 62
+  const r = 44
+  const summary = slices
+    .map((s) => `${COLOR_NAMES[s.color] ?? s.color} ${String(s.pips)}`)
+    .join(', ')
+
+  let angle = -Math.PI / 2
+  return (
+    <div className="pie-block">
+      <svg
+        className="pie"
+        viewBox="0 0 124 124"
+        role="img"
+        aria-label={`Coloured mana symbols the deck's cards ask for: ${summary}. ${plural(total, 'symbol')} in total.`}
+      >
+        {slices.map((s) => {
+          const from = angle
+          const to = angle + (s.pips / total) * Math.PI * 2
+          angle = to
+          return (
+            // One colour, one slice, and a single-colour deck is a whole
+            // circle: the arc command degenerates at exactly 2π — start and end
+            // point are the same — and would draw nothing at all.
+            slices.length === 1 ? (
+              <circle key={s.color} cx={cx} cy={cy} r={r} fill={IDENTITY_COLORS[s.color]} />
+            ) : (
+              <path
+                key={s.color}
+                d={wedge(cx, cy, r, from, to)}
+                fill={IDENTITY_COLORS[s.color]}
+                /* The gap. In the page's own ground colour rather than a
+                   transparent stroke, so adjacent wedges are separated by an
+                   edge and not only by a hue change — which is the half of the
+                   figure a protan reader is relying on. */
+                stroke="var(--ink)"
+                strokeWidth={2}
+              />
+            )
+          )
+        })}
+      </svg>
+      {/*
+        The letter and the count for every slice, in reading order.
+        Beside the pie rather than on it: at a 230 px rail a thin wedge has no
+        room for text, and text ON a slice inherits that slice's contrast — the
+        white one is L 0.913 and would need a dark glyph while the blue needs a
+        light one. Out here the page's own parchment-on-ink contrast applies to
+        all five.
+      */}
+      <ul className="pie-key">
+        {slices.map((s) => (
+          <li key={s.color}>
+            <span className="pie-swatch" style={{ background: IDENTITY_COLORS[s.color] }} />
+            <span className="pie-letter">{s.color}</span>
+            <span className="pie-count">{s.pips}</span>
+            {/*
+              What the lands do about it.
+              Labelled as DISTINCT LANDS, which is the question the server
+              actually answers: `colorBalance.sources` is counted over
+              `acceptedSet`, a Set of oracle ids, so ten Mountains are one land.
+              Calling it "sources" would have made it a wrong answer to the
+              question a builder is really asking; naming it precisely makes it
+              a right answer to a narrower one, and the gap between the two
+              columns is still the thing worth looking at.
+            */}
+            <span className="pie-sources">{s.sources} lands</span>
+          </li>
+        ))}
+      </ul>
+      <p className="note">
+        Coloured symbols in your cards&rsquo; mana costs, and how many distinct lands make each
+        colour. A repeated basic counts once, here and in every bar above.
+      </p>
+    </div>
   )
 }
 
@@ -5429,6 +5587,20 @@ export const Workspace = ({
                 {hideSettledRoles ? 'Nothing short.' : 'Every role is locked in.'}
               </p>
             ) : null}
+
+            {/* Under the composition bars, because it answers the same shape of
+                question about a different axis: those say how the deck divides
+                by ROLE, this says how it divides by COLOUR. Guarded on the
+                field rather than on `analysis`, so a server from before
+                API-02 renders the panel without it instead of an empty box. */}
+            {analysis?.colorBalance === undefined ? null : (
+              <>
+                <h2 style={{ marginTop: '1.25rem' }}>Mana colours</h2>
+                <Boundary name="The colour pie">
+                  <ColorPie balance={analysis.colorBalance} />
+                </Boundary>
+              </>
+            )}
 
             {analysis !== null ? (
               <>

@@ -1334,6 +1334,80 @@ select {
 
 /* A deck can assemble dozens of combos; they get their own scroller so they
    cannot push everything else out of the rail. */
+/* ------------------------------------------------------------- colour pie */
+
+/*
+ * The pie and its key, side by side while there is room and stacked when there
+ * is not.
+ *
+ * The key is not decoration and is never dropped: it carries the letter and the
+ * count for every slice, which is the secondary encoding that makes this figure
+ * readable without colour vision (see `ColorPie` for the measured validator
+ * failures and why Magic's own colours are shipped anyway).
+ */
+.pie-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--step);
+  margin-bottom: var(--step);
+}
+
+.pie {
+  flex: 0 0 auto;
+  width: 6.5rem;
+  height: 6.5rem;
+}
+
+.pie-key {
+  flex: 1 1 7rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.72rem;
+}
+
+.pie-key li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1.6;
+}
+
+/* A second run at the hue, beside the letter it belongs to, so the key and the
+   chart are matched by position as well as by colour. */
+.pie-swatch {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  /* Against a dark ground the pale colours need no edge, but #2f74c8 and
+     #a274ae do — an 8px mark with no outline reads as a smudge. */
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
+}
+
+.pie-letter {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--parchment);
+  min-width: 0.8rem;
+}
+
+.pie-count {
+  font-family: var(--mono);
+  color: var(--parchment);
+  min-width: 1.4rem;
+  text-align: right;
+}
+
+.pie-sources {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--parchment-dim);
+  white-space: nowrap;
+}
+
 .combo-list {
   max-height: 12rem;
   overflow-y: auto;

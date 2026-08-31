@@ -898,3 +898,125 @@ describe('what is behind a bar', () => {
     expect(document.querySelector('.hint-pop')).toBeNull()
   })
 })
+
+// ------------------------------------------------------------- colour pie
+
+/**
+ * The mana colour pie under the composition bars.
+ *
+ * `analysis.colorBalance` has been on the wire since API-02 and nothing has
+ * ever rendered it. The interesting assertions here are not "a pie appears" —
+ * they are the ones about the SECOND ENCODING, because Magic's own five colours
+ * fail a categorical-palette check and are shipped anyway, and the letters and
+ * counts are the entire reason that is defensible on a decision surface.
+ */
+describe('the mana colour pie', () => {
+  const withBalance = (
+    pips: Record<string, number>,
+    sources: Record<string, number> = {},
+  ): void => {
+    mocked.getAnalysis.mockResolvedValue({
+      ...analysis,
+      colorBalance: {
+        pips: { W: 0, U: 0, B: 0, R: 0, G: 0, ...pips },
+        sources: { W: 0, U: 0, B: 0, R: 0, G: 0, ...sources },
+      },
+    })
+  }
+
+  it('draws a slice per colour the deck actually asks for, and none for the rest', async () => {
+    withBalance({ R: 12, G: 4 })
+    const { container } = render(<Workspace deck={deck} />)
+    await waitFor(() => expect(container.querySelector('.pie')).not.toBeNull())
+
+    expect(container.querySelectorAll('.pie path')).toHaveLength(2)
+    // A colour with no pips is not a zero-width wedge — it is absent.
+    expect([...container.querySelectorAll('.pie-letter')].map((l) => l.textContent)).toEqual([
+      'R',
+      'G',
+    ])
+  })
+
+  it('labels every slice with its letter and its count', async () => {
+    /*
+     * The non-negotiable part. `IDENTITY_COLORS` fails the palette check on
+     * three counts (lightness band, chroma floor, protan separation) and is
+     * shipped unchanged because a player's white pips have to look white. What
+     * pays for that is this: read the letters and the chart works with no
+     * colour vision at all.
+     */
+    withBalance({ W: 3, U: 7 })
+    const { container } = render(<Workspace deck={deck} />)
+    await waitFor(() => expect(container.querySelector('.pie')).not.toBeNull())
+
+    const rows = [...container.querySelectorAll('.pie-key li')].map((li) => li.textContent ?? '')
+    expect(rows[0]).toMatch(/^W3/)
+    expect(rows[1]).toMatch(/^U7/)
+    expect(container.querySelectorAll('.pie-letter')).toHaveLength(2)
+    expect(container.querySelectorAll('.pie-count')).toHaveLength(2)
+  })
+
+  it('separates adjacent wedges with an edge, not only a hue change', async () => {
+    // The other half of the secondary encoding, and the one a protan reader
+    // needs between #a274ae and #2f74c8 (measured ΔE 6.3).
+    withBalance({ U: 5, B: 5 })
+    const { container } = render(<Workspace deck={deck} />)
+    await waitFor(() => expect(container.querySelector('.pie')).not.toBeNull())
+
+    for (const path of container.querySelectorAll('.pie path')) {
+      expect(path.getAttribute('stroke')).toBe('var(--ink)')
+    }
+  })
+
+  it('names every colour and count in the accessible label, in words', async () => {
+    // `role="img"` means the wedges are not read individually, so the whole
+    // figure has to say what it shows — and "W 3" read aloud is two letters.
+    withBalance({ W: 3, G: 9 })
+    render(<Workspace deck={deck} />)
+    const figure = await screen.findByRole('img', { name: /Coloured mana symbols/ })
+    expect(figure.getAttribute('aria-label')).toMatch(/white 3, green 9/)
+    expect(figure.getAttribute('aria-label')).toMatch(/12 symbols in total/)
+  })
+
+  it('draws a mono-colour deck as a whole circle, not a degenerate arc', async () => {
+    // An arc of exactly 2π has the same start and end point, so the path
+    // command draws nothing at all — a mono-red deck would get a blank square.
+    withBalance({ R: 30 })
+    const { container } = render(<Workspace deck={deck} />)
+    await waitFor(() => expect(container.querySelector('.pie')).not.toBeNull())
+
+    expect(container.querySelectorAll('.pie path')).toHaveLength(0)
+    expect(container.querySelectorAll('.pie circle')).toHaveLength(1)
+  })
+
+  it('says a colourless deck is colourless rather than drawing an empty circle', async () => {
+    withBalance({})
+    render(<Workspace deck={deck} />)
+    expect(await screen.findByText(/No coloured mana symbols yet/)).toBeDefined()
+  })
+
+  it('calls the land figure what it is — distinct lands, not sources', async () => {
+    /*
+     * `colorBalance.sources` is counted over `acceptedSet`, a Set of oracle
+     * ids, so ten Mountains are ONE land. Calling that "sources" would be a
+     * wrong answer to the question a builder is actually asking about their
+     * mana base; naming it precisely makes it a right answer to a narrower one.
+     */
+    withBalance({ R: 20 }, { R: 4 })
+    const { container } = render(<Workspace deck={deck} />)
+    await waitFor(() => expect(container.querySelector('.pie')).not.toBeNull())
+
+    expect(container.querySelector('.pie-sources')?.textContent).toBe('4 lands')
+    expect(screen.getByText(/A repeated basic counts once/)).toBeDefined()
+  })
+
+  it('renders nothing at all against a server that does not send the field', async () => {
+    // The wire is not the type. A server from before API-02 sends no
+    // `colorBalance`, and the panel must be absent rather than empty.
+    mocked.getAnalysis.mockResolvedValue(analysis)
+    const { container } = render(<Workspace deck={deck} />)
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+    expect(container.querySelector('.pie')).toBeNull()
+    expect(screen.queryByText('Mana colours')).toBeNull()
+  })
+})
