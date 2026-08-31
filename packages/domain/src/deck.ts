@@ -1,6 +1,7 @@
 import type { ArchetypeKey } from './archetype.js'
 import type { Bracket } from './bracket.js'
 import type { Color } from './card.js'
+import type { DeckColumn } from './columns.js'
 import type { DeckId, OracleId } from './ids.js'
 import type { Role } from './role.js'
 import type { SemanticEmphasis } from './semantic-emphasis.js'
@@ -99,6 +100,34 @@ export interface Deck {
    * undoable in the same queue as "I added a card".
    */
   readonly semanticEmphasis?: SemanticEmphasis
+  /**
+   * The columns this builder wants beside every suggestion (doc 18 §18.7).
+   *
+   * > "any added or removed column should be saved along with the deck - the
+   * > filters are basically part of the deck"
+   *
+   * THE ONE FIELD HERE WHERE ABSENT AND EMPTY ARE DIFFERENT DECKS, and it is
+   * deliberate. `targetOverrides` and `semanticEmphasis` are both `{}`/`[]` when
+   * unset because "has overridden nothing" and "has not overridden anything" are
+   * the same deck. Columns are not: a deck that has never been touched should
+   * show `DEFAULT_COLUMNS`, and a deck whose builder has REMOVED every column
+   * must show none and must not be handed them back on the next page load.
+   *
+   * So `null`/absent means "never set — use `DEFAULT_COLUMNS`" and `[]` means
+   * "deliberately none". Read it as `columnsFor(deck.columns)`; no consumer
+   * should test `length === 0` itself.
+   *
+   * Being nullable is also what lets `DEFAULT_COLUMNS` change later without a
+   * data migration. Stored eagerly, every existing deck would be frozen holding
+   * whichever default list existed the day it was created — the same failure
+   * doc 16 rejected full target snapshots for.
+   *
+   * NOT part of `DeckCommand`, for the same reason a target is not: it is a
+   * property of the deck rather than an operation on its contents, and putting
+   * it through the command batch would make "I added a column" undoable in the
+   * same queue as "I added a card".
+   */
+  readonly columns?: readonly DeckColumn[] | null
   /** Derived from the commanders; cached. */
   readonly colorIdentity: readonly Color[]
   readonly entries: readonly DeckEntry[]

@@ -1,4 +1,11 @@
-import { ARCHETYPES, BRACKETS, COLORS, ROLE_PRECEDENCE, SYNERGY_TAGS } from '@roundtable/domain'
+import {
+  ARCHETYPES,
+  BRACKETS,
+  COLORS,
+  COLUMN_METRICS,
+  ROLE_PRECEDENCE,
+  SYNERGY_TAGS,
+} from '@roundtable/domain'
 import type { ArchetypeKey, Bracket, Color, Origin, Role } from '@roundtable/domain'
 
 /**
@@ -59,6 +66,52 @@ const semanticEmphasis = {
   maxItems: SYNERGY_TAGS.length,
 } as const
 
+/**
+ * The columns saved with a deck (doc 18 §18.7).
+ *
+ * `null` is accepted and means "back to the defaults", the same reading `null`
+ * already has for `targetOverrides` (back to the archetype) and
+ * `semanticEmphasis` (back to no focus). `[]` is a DIFFERENT and equally valid
+ * value meaning "no columns at all" — which is why this is the one deck field
+ * where absent and empty are not the same, and why the storage is nullable.
+ *
+ * `oneOf` rather than one object with every property optional: a column is
+ * either a query or a metric, and a body carrying both `query` and `metric`
+ * must be a 400 rather than a coin toss about which one wins. The metric enum
+ * comes from the domain's own `COLUMN_METRICS`, not a list retyped here.
+ *
+ * `maxItems` is a bound on a value the client replaces wholesale; twelve columns
+ * is already more than fits on any screen the workspace targets, and the
+ * domain parser enforces the same cap on read.
+ */
+const deckColumns = {
+  type: ['array', 'null'],
+  maxItems: 12,
+  items: {
+    type: 'object',
+    oneOf: [
+      {
+        type: 'object',
+        required: ['kind', 'query'],
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'query' },
+          query: { type: 'string', minLength: 1, maxLength: 500 },
+        },
+      },
+      {
+        type: 'object',
+        required: ['kind', 'metric'],
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'metric' },
+          metric: { type: 'string', enum: [...COLUMN_METRICS] },
+        },
+      },
+    ],
+  },
+} as const
+
 export const createDeckBody = {
   type: 'object',
   required: ['name', 'commanders', 'targetBracket', 'archetype'],
@@ -78,6 +131,9 @@ export const createDeckBody = {
     // Accepted at creation because that is when the builder is asked: the start
     // screen offers the commander's own semantics before the deck exists.
     semanticEmphasis,
+    // Accepted at creation so a deck cloned or imported from one that had
+    // columns opens with them, rather than flashing the defaults for one render.
+    columns: deckColumns,
   },
 } as const
 
@@ -149,6 +205,7 @@ export const patchDeckBody = {
     excludeUniversesBeyond: { type: 'boolean' },
     targetOverrides,
     semanticEmphasis,
+    columns: deckColumns,
   },
 } as const
 

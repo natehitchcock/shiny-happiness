@@ -17,6 +17,7 @@ import type {
   Bracket,
   Card,
   Deck,
+  DeckColumn,
   DeckCommand,
   DeckCommandBatch,
   DeckEntry,
@@ -182,6 +183,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
       archetypeSecondary?: ArchetypeKey | null
       excludeUniversesBeyond?: boolean
       semanticEmphasis?: SemanticEmphasis | null
+      columns?: readonly DeckColumn[] | null
     }
     const commanders = body.commanders.map(oracleId)
 
@@ -250,6 +252,16 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
        * tells the builder the same thing without overruling them.
        */
       semanticEmphasis: body.semanticEmphasis ?? [],
+      /*
+       * `?? null`, NOT `?? []`.
+       *
+       * The two are different decks here and nowhere else on this body: null is
+       * "never set — show the defaults", `[]` is "created with no columns".
+       * Collapsing them, as every other field on this endpoint safely does,
+       * would create every deck with its columns already deliberately cleared
+       * and nothing on screen beside the suggestions (doc 18 §18.7).
+       */
+      columns: body.columns ?? null,
     })
     return rep.status(201).send(deck)
   })
@@ -355,6 +367,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
         excludeUniversesBeyond?: boolean
         targetOverrides?: TargetOverrides | null
         semanticEmphasis?: SemanticEmphasis | null
+        columns?: readonly DeckColumn[] | null
       }
 
       /*
@@ -391,6 +404,23 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
       const emphasis =
         'semanticEmphasis' in body ? JSON.stringify(body.semanticEmphasis ?? []) : null
 
+      /*
+       * Columns are replaced wholesale too, and the CASE flag below is why this
+       * one cannot use the COALESCE shape the two above share.
+       *
+       * For `targetOverrides` and `semanticEmphasis` an explicit JSON null is
+       * turned into `'{}'`/`'[]'` here, so the parameter is null exactly when
+       * the key is absent and COALESCE reads "leave it alone". Columns have no
+       * such non-null stand-in: `{"columns": null}` means "back to the
+       * defaults", and the defaults ARE SQL NULL. Written through COALESCE that
+       * request would be indistinguishable from not mentioning columns at all,
+       * and clearing them would silently do nothing — which is the exact trap
+       * doc 16 built the null-means-clear convention to avoid.
+       */
+      const columnsSupplied = 'columns' in body
+      const columns =
+        body.columns === null || body.columns === undefined ? null : JSON.stringify(body.columns)
+
       // COALESCE keeps every unsupplied column as it was. Changing archetype moves
       // targets only — no statement here touches `deck_entries` (doc 14 §14.4).
       const { rowCount } = await pool.query(
@@ -411,6 +441,9 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
          -- is null exactly when the key is absent, because an explicit JSON
          -- null was already turned into '[]'.
          semantic_emphasis   = COALESCE($14::jsonb, semantic_emphasis),
+         -- A CASE flag, not COALESCE: NULL is a MEANINGFUL value for this
+         -- column ("never set — use the defaults"), so it has to be reachable.
+         columns             = CASE WHEN $15::boolean THEN $16::jsonb ELSE columns END,
          updated_at          = now()
        WHERE id = $1 AND deleted_at IS NULL`,
         [
@@ -428,6 +461,8 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
           body.description ?? null,
           overrides,
           emphasis,
+          columnsSupplied,
+          columns,
         ],
       )
       if ((rowCount ?? 0) === 0) return sendProblem(rep, notFound(`No deck with id ${id}`))

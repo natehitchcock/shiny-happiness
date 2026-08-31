@@ -3,6 +3,7 @@ import type {
   Bracket,
   Color,
   Deck,
+  DeckColumn,
   DeckCommand,
   DeckCommandBatch,
   DeckEntry,
@@ -14,7 +15,7 @@ import type {
   Zone,
 } from '@roundtable/domain'
 import type { Pool, PoolClient } from 'pg'
-import { parseSemanticEmphasis, parseTargetOverrides } from '@roundtable/domain'
+import { parseDeckColumns, parseSemanticEmphasis, parseTargetOverrides } from '@roundtable/domain'
 import { withTransaction } from '../client.js'
 
 interface DeckRow {
@@ -34,6 +35,13 @@ interface DeckRow {
   readonly target_overrides: unknown
   /** `jsonb` array of `SynergyTag`. Parsed, never cast — see `toDeck`. */
   readonly semantic_emphasis: unknown
+  /**
+   * `jsonb` array of `DeckColumn`, or NULL for a deck that never set any.
+   *
+   * The only nullable jsonb column on this table, and deliberately so — NULL and
+   * `[]` are different decks here (doc 18 §18.7, migration 0015).
+   */
+  readonly columns: unknown
   readonly version: number
   readonly created_at: Date
   readonly updated_at: Date
@@ -101,6 +109,18 @@ const toDeck = (row: DeckRow, entries: readonly DeckEntry[]): Deck => ({
    * Also covers a hand-built row in a test that predates the column.
    */
   semanticEmphasis: parseSemanticEmphasis(row.semantic_emphasis),
+  /*
+   * Parsed rather than cast, same discipline again — but note what the parser
+   * returns and why it matters here more than on the two columns above.
+   * `parseDeckColumns` gives back `null` for anything it cannot read, and null
+   * means "never set", so a corrupt value returns the deck to its DEFAULT
+   * columns rather than to none at all. Returning `[]` on a bad parse would
+   * silently tell every reader the builder had deliberately removed everything,
+   * which is a claim about their intent that the database has no basis for.
+   *
+   * Also covers a hand-built row in a test that predates the column.
+   */
+  columns: parseDeckColumns(row.columns),
   status: row.status as Deck['status'],
   version: row.version,
   createdAt: row.created_at.toISOString(),
@@ -152,14 +172,26 @@ export interface CreateDeckInput {
    * and any recommendation fetched in it is scored against nothing.
    */
   readonly semanticEmphasis?: SemanticEmphasis
+  /**
+   * The columns to start this deck with (doc 18 §18.7).
+   *
+   * Absent leaves the row NULL, which is "never set" and draws
+   * `DEFAULT_COLUMNS` — NOT the same as passing `[]`, which is a deck created
+   * with no columns at all. Settable at creation for the same reason
+   * `semanticEmphasis` is: a deck cloned or imported from one that had columns
+   * should open with them, and a two-request create would leave a window in
+   * which the deck exists showing the wrong ones.
+   */
+  readonly columns?: readonly DeckColumn[] | null
 }
 
 export const createDeck = async (pool: Pool, input: CreateDeckInput): Promise<Deck> => {
   const { rows } = await pool.query<DeckRow>(
     `INSERT INTO decks (id, owner_id, name, description, commanders, target_bracket, archetype,
                         archetype_secondary, color_identity, exclude_universes_beyond,
-                        semantic_emphasis)
-     VALUES ($1, $2, $3, $4, $5::uuid[], $6, $7, $8, $9::char(1)[], $10, $11::jsonb) RETURNING *`,
+                        semantic_emphasis, columns)
+     VALUES ($1, $2, $3, $4, $5::uuid[], $6, $7, $8, $9::char(1)[], $10, $11::jsonb, $12::jsonb)
+     RETURNING *`,
     [
       input.id,
       input.ownerId,
@@ -174,6 +206,14 @@ export const createDeck = async (pool: Pool, input: CreateDeckInput): Promise<De
       // Normalised through the parser on the way IN as well as out, so the row
       // holds the canonical order and a duplicate tag can never be stored.
       JSON.stringify(parseSemanticEmphasis(input.semanticEmphasis ?? [])),
+      // Normalised through the parser on the way IN as well as out, so the row
+      // holds a canonical, deduplicated list. `null` is written as SQL NULL
+      // rather than as `'null'::jsonb` — the distinction between "never set" and
+      // "deliberately empty" is the whole point of the column, and a JSON null
+      // sitting in it would be a third state nobody has a meaning for.
+      input.columns === null || input.columns === undefined
+        ? null
+        : JSON.stringify(parseDeckColumns(input.columns) ?? []),
     ],
   )
   return toDeck(rows[0]!, [])

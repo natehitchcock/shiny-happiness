@@ -1313,4 +1313,222 @@ describeDb('API-02 contract', () => {
       expect(response.statusCode).toBe(400)
     })
   })
+
+  /**
+   * Columns as deck state, and the two metrics that ship as default columns
+   * (doc 18 §18.7/§18.8).
+   *
+   * The distinction under test throughout is the one no other field on this
+   * endpoint has: `null` and `[]` are DIFFERENT VALUES. Every assertion that
+   * separates them is the feature, not a detail — a builder who removes every
+   * column and gets them back on the next load has not removed anything.
+   */
+  describe('columns saved with the deck', () => {
+    const freshDeck = async (columns?: unknown): Promise<{ id: string }> =>
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/decks',
+          payload: {
+            name: 'Columned',
+            commanders: [KROV],
+            targetBracket: 3,
+            archetype: 'midrange',
+            ...(columns === undefined ? {} : { columns }),
+          },
+        })
+      ).json()
+
+    it('starts null, meaning the client draws the defaults', async () => {
+      const fresh = await freshDeck()
+      const body = await app.inject({ method: 'GET', url: `/api/v1/decks/${fresh.id}` })
+      expect(body.json().columns).toBeNull()
+    })
+
+    it('takes columns at creation', async () => {
+      const fresh = await freshDeck([
+        { kind: 'metric', metric: 'impact' },
+        { kind: 'query', query: 't:creature' },
+      ])
+      const body = await app.inject({ method: 'GET', url: `/api/v1/decks/${fresh.id}` })
+      expect(body.json().columns).toEqual([
+        { kind: 'metric', metric: 'impact' },
+        { kind: 'query', query: 't:creature' },
+      ])
+    })
+
+    it('creates with NO columns when an empty list is sent', async () => {
+      // `?? null` in the handler would be `?? []` on every other field here.
+      const fresh = await freshDeck([])
+      const body = await app.inject({ method: 'GET', url: `/api/v1/decks/${fresh.id}` })
+      expect(body.json().columns).toEqual([])
+    })
+
+    it('replaces the whole list through PATCH', async () => {
+      const fresh = await freshDeck([{ kind: 'metric', metric: 'impact' }])
+      const patched = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { columns: [{ kind: 'query', query: 'mv<=2' }] },
+      })
+      expect(patched.statusCode).toBe(200)
+      expect(patched.json().columns).toEqual([{ kind: 'query', query: 'mv<=2' }])
+    })
+
+    it('removes every column with an empty array, and it STAYS removed', async () => {
+      const fresh = await freshDeck([{ kind: 'metric', metric: 'impact' }])
+      const patched = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { columns: [] },
+      })
+      expect(patched.json().columns).toEqual([])
+      // Re-read, because the failure this guards against is on the NEXT load.
+      const reread = await app.inject({ method: 'GET', url: `/api/v1/decks/${fresh.id}` })
+      expect(reread.json().columns).toEqual([])
+    })
+
+    it('goes back to the defaults with an explicit null', async () => {
+      // `null` means "clear my customisation" here exactly as it does for
+      // targetOverrides and semanticEmphasis — and clearing a column list means
+      // returning to the defaults, which are SQL NULL.
+      const fresh = await freshDeck([{ kind: 'query', query: 'mv<=2' }])
+      const patched = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { columns: null },
+      })
+      expect(patched.statusCode).toBe(200)
+      expect(patched.json().columns).toBeNull()
+    })
+
+    it('leaves the columns alone when the patch does not mention them', async () => {
+      const fresh = await freshDeck([{ kind: 'query', query: 'mv<=2' }])
+      const renamed = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { name: 'Renamed' },
+      })
+      expect(renamed.json().name).toBe('Renamed')
+      expect(renamed.json().columns).toEqual([{ kind: 'query', query: 'mv<=2' }])
+    })
+
+    it('leaves an EMPTIED list alone when the patch does not mention it', async () => {
+      // The case a COALESCE write gets wrong in the other direction: `[]` is not
+      // null, so an unrelated patch must not restore the defaults.
+      const fresh = await freshDeck([])
+      const renamed = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { name: 'Still Bare' },
+      })
+      expect(renamed.json().columns).toEqual([])
+    })
+
+    it('does not disturb the semantic emphasis, which is a separate axis', async () => {
+      const fresh = await freshDeck()
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { semanticEmphasis: ['untap'] },
+      })
+      const patched = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { columns: [{ kind: 'metric', metric: 'efficiency' }] },
+      })
+      expect(patched.json().semanticEmphasis).toEqual(['untap'])
+      expect(patched.json().columns).toEqual([{ kind: 'metric', metric: 'efficiency' }])
+    })
+
+    it('rejects a metric that is not in the vocabulary', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${(await freshDeck()).id}`,
+        payload: { columns: [{ kind: 'metric', metric: 'vibes' }] },
+      })
+      expect(response.statusCode).toBe(400)
+    })
+
+    it('rejects a column that is both a query and a metric', async () => {
+      // `oneOf`, not one object with everything optional: a body carrying both
+      // must be a 400 rather than a coin toss about which one wins.
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${(await freshDeck()).id}`,
+        payload: { columns: [{ kind: 'query', query: 'impact', metric: 'impact' }] },
+      })
+      expect(response.statusCode).toBe(400)
+    })
+  })
+
+  /**
+   * Where the two metrics surface (doc 18 §18.8).
+   *
+   * On the recommendation items and on card detail, so the UI can draw a column
+   * without recomputing and without a second implementation.
+   */
+  describe('impact and efficiency on the wire', () => {
+    it('rides on every recommendation item, beside `reasons` and not inside it', async () => {
+      const body = (
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/decks/${deck.id}/recommendations`,
+          payload: {},
+        })
+      ).json()
+      const items = body.groups.flatMap(
+        (g: { items: { impact?: unknown; efficiency?: unknown; reasons: { kind: string }[] }[] }) =>
+          g.items,
+      )
+      expect(items.length).toBeGreaterThan(0)
+      for (const item of items) {
+        expect(item.impact).toMatchObject({
+          score: expect.any(Number),
+          breadth: expect.any(String),
+          persistence: expect.any(String),
+          stakes: expect.any(String),
+          symmetry: expect.any(String),
+          scales: expect.any(Boolean),
+          fragile: expect.any(Boolean),
+        })
+        expect(item.efficiency).toMatchObject({ score: expect.any(Number) })
+        // P4: every recommendation still stands on a deck-relative reason. A
+        // card-intrinsic metric is not a reason and must never be the only one.
+        expect(item.reasons.length).toBeGreaterThan(0)
+        for (const reason of item.reasons) {
+          expect(reason.kind).not.toBe('impact')
+          expect(reason.kind).not.toBe('efficiency')
+        }
+      }
+    })
+
+    it('rides on card detail', async () => {
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${LAND_DENIAL}` })).json()
+      // Armageddon: "Destroy all lands." Unbounded breadth, one-shot, and it
+      // takes your lands too.
+      expect(body.impact.breadth).toBe('unbounded')
+      expect(body.impact.persistence).toBe('one-shot')
+      expect(body.efficiency.score).toBeGreaterThan(0)
+    })
+
+    it('agrees between the two surfaces for the same card', async () => {
+      // One definition, two readers. Two implementations would eventually
+      // disagree, and the disagreement would be invisible.
+      const detail = (
+        await app.inject({ method: 'GET', url: `/api/v1/cards/${NONLAND_WIPE}` })
+      ).json()
+      const recs = (
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/decks/${deck.id}/recommendations`,
+          payload: {},
+        })
+      ).json()
+      const item = recs.groups
+        .flatMap((g: { items: { oracleId: string; impact: unknown }[] }) => g.items)
+        .find((i: { oracleId: string }) => i.oracleId === NONLAND_WIPE)
+      if (item !== undefined) expect(item.impact).toEqual(detail.impact)
+    })
+  })
 })

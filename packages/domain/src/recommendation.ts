@@ -1,5 +1,7 @@
 import type { BracketFlag } from './bracket.js'
 import type { CompositionDimension, TargetSource } from './composition.js'
+import type { CardEfficiency } from './efficiency.js'
+import type { CardImpact } from './impact.js'
 import type { ComboId, OracleId } from './ids.js'
 import type { SynergyTag } from './synergy.js'
 import type { Role } from './role.js'
@@ -130,4 +132,25 @@ export interface Recommendation {
   readonly fillsRoleDeficit: Role | null
   readonly bracketFlags: readonly BracketFlag[]
   readonly reasons: readonly [Reason, ...Reason[]]
+  /**
+   * How much this card does, and how much of it you get for the mana (doc 18).
+   *
+   * BESIDE `reasons`, NOT INSIDE IT, and the argument is pillar P4 rather than
+   * convenience. A `Reason` answers "why was this card suggested to me, in this
+   * deck, right now"; both of these are card-intrinsic and true of the card in
+   * every deck that has ever existed, so as reasons they would be filler. Worse,
+   * `reasons` is a non-empty tuple BY CONSTRUCTION and that type is the
+   * guarantee behind "a recommendation the user cannot interrogate is a bug"
+   * (AGENTS.md §8) — a reason every card qualifies for would satisfy the type
+   * while hollowing out the guarantee, letting a card be suggested for no
+   * deck-relative reason at all and still typecheck as explained. P4 also asks
+   * for reasons a user can act on, and "this is a high-impact card" has no
+   * setting behind it and nothing to change.
+   *
+   * Optional so adding them is additive (AGENTS.md R2). Absent means "this
+   * build did not compute them", never "this card has none" — every card has
+   * both, `cardImpact` and `cardEfficiency` are total.
+   */
+  readonly impact?: CardImpact
+  readonly efficiency?: CardEfficiency
 }

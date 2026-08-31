@@ -19,7 +19,15 @@ import type {
   QueryField,
   QueryNode,
 } from '@roundtable/domain'
-import { COLORS, isOk, matchesQuery, oracleId, parseQuery } from '@roundtable/domain'
+import {
+  COLORS,
+  cardEfficiency,
+  cardImpact,
+  isOk,
+  matchesQuery,
+  oracleId,
+  parseQuery,
+} from '@roundtable/domain'
 import { badRequest, notFound, sendProblem } from '../errors.js'
 import { cardBatchBody, cardSearchQuery, oracleIdParams } from '../schemas.js'
 
@@ -414,6 +422,18 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
       pieces: combo.pieces.map((oracle) => ({ oracleId: oracle, name: names.get(oracle) ?? null })),
     }))
 
-    return { ...card, printings, combos: withNames }
+    /*
+     * The two card-intrinsic metrics ride on card detail as well as on every
+     * recommendation (doc 18 §18.8), so the preview panel can show them without
+     * a second request and without a second implementation. They are pure
+     * functions of the card, so this adds no query and no cache.
+     */
+    return {
+      ...card,
+      printings,
+      combos: withNames,
+      impact: cardImpact(card),
+      efficiency: cardEfficiency(card),
+    }
   })
 }

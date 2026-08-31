@@ -25,7 +25,10 @@ GET /api/v1/cards/search?q=&colors=&limit=&cursor=
     q uses Scryfall-like syntax; parsing lives in packages/domain.
 
 GET /api/v1/cards/:oracleId
-    → Card & { printings: Printing[], combos: Combo[], stats?: CardStats }
+    → Card & { printings: Printing[], combos: Combo[], stats?: CardStats,
+               impact: CardImpact, efficiency: CardEfficiency }
+    impact and efficiency are card-intrinsic (doc 18) and computed from the
+    card the response already carries, so they add no query and no cache.
 
 POST /api/v1/cards/batch   { oracleIds: OracleId[] }
     → { items: Card[], prices: PriceMap, images: ImageMap }
@@ -61,7 +64,8 @@ the page it returns, not for everything the scan touched.
 
 ```
 POST   /api/v1/decks     { name, commanders, targetBracket, archetype,
-                           archetypeSecondary?, semanticEmphasis? }     → Deck
+                           archetypeSecondary?, semanticEmphasis?,
+                           columns? }                                   → Deck
        semanticEmphasis is accepted at CREATION because that is when the
        builder is asked: the start screen offers the chosen commander's own
        semantics before the deck exists. It is not validated against the
@@ -70,7 +74,8 @@ POST   /api/v1/decks     { name, commanders, targetBracket, archetype,
 GET    /api/v1/decks/:id                                                → Deck
 PATCH  /api/v1/decks/:id { name?, targetBracket?, archetype?,
                            archetypeSecondary?, budget?, status?,
-                           targetOverrides?, semanticEmphasis? }        → Deck
+                           targetOverrides?, semanticEmphasis?,
+                           columns? }                                   → Deck
        Changing archetype moves targets only — it never adds or removes a
        card (doc 14 §14.4), and it does NOT clear targetOverrides
        (doc 16 §16.9).
@@ -86,6 +91,15 @@ PATCH  /api/v1/decks/:id { name?, targetBracket?, archetype?,
        representable. Members must be SynergyTags; an unknown one is a 400.
        Stored and returned in canonical `SYNERGY_TAGS` order, not click
        order, so the same set always serialises identically (doc 05).
+       columns is `DeckColumn[] | null` and is THE ONE FIELD ON THIS BODY
+       WHERE NULL AND [] DIFFER (doc 18 §18.7). A column is either
+       { kind: 'query', query } or { kind: 'metric', metric } — the tag is
+       what stops a builder who searches for the word `impact` getting the
+       impact metric instead. null (or absent, on a new deck) means "never
+       set: draw DEFAULT_COLUMNS", which is what `null` means on the two
+       fields above too — clear my customisation. [] means "I removed them
+       all", and it must survive: columns that come back after being cleared
+       have not been cleared. Replaced wholesale, like the two above.
 DELETE /api/v1/decks/:id                       soft delete, 30-day recovery
 POST   /api/v1/decks/:id/duplicate  { name? }  → Deck   full copy: entries,
                                                         origins, exclusions, locks
@@ -189,6 +203,7 @@ POST /api/v1/decks/:id/recommendations
     groups?: CandidateGroupKey[],   // omit for all
     limitPerGroup?: number,         // default 60
     query?: string,                 // candidate query, doc 13
+    columns?: string[],             // query columns only, doc 18 §18.7
     weights?: Partial<ScoringWeights>
   }
   →
@@ -225,6 +240,19 @@ right.
 
 `unavailable` is how degradation is communicated (doc 05 §5.3) — a group that
 could not be computed is reported, never silently omitted.
+
+**Every `Recommendation` carries `impact` and `efficiency`** (doc 18 §18.8).
+They are card-intrinsic, so they are the same in every deck, and they sit
+BESIDE `reasons` rather than inside it: a `Reason` answers "why was this
+suggested to *me*", and a claim that is true of the card in every deck that has
+ever existed answers nothing about the suggestion. `reasons` stays a non-empty
+tuple of deck-relative claims, which is what pillar P4's guarantee actually is.
+
+**`columns` on the request carries QUERY columns only.** A deck's saved columns
+are a mixed list of query and metric columns (doc 18 §18.7), but a metric column
+needs no server evaluation — its number is already on the row — so the client
+sends `queryColumns(deck.columns)` and reads the metrics off the items. The
+response's `columns: [{ query, matched }]` is unchanged.
 
 `emphasis` is the same discipline one level down. Emphasis reorders and **never
 filters**, so a deck that emphasises a tag nothing in its colours supports gets

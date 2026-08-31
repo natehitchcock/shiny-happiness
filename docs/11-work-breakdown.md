@@ -154,6 +154,43 @@ synergy.
 **The UI half is not built.** Nothing renders the start-screen prompt or the
 chips above the commander yet; the storage, scoring, reasons and endpoints are.
 
+**Every card now says how big it is and what it costs you.**
+[Doc 18](18-card-impact-and-efficiency.md) is built: two CARD-INTRINSIC metrics,
+`impact` (breadth × persistence × stakes, discounted for symmetry) and
+`efficiency` (surplus stat points per mana), on every recommendation item and on
+card detail. Deck-relative impact was offered and declined — the deck already
+has three deck-relative numbers per row — and the known cost is stated rather
+than patched: Sol Ring scores 0.68 and Rhystic Study 0.81, which was accepted
+before the model was built.
+
+The fair rate is **measured, not asserted**. 339 commander-legal vanilla
+creatures say a four-drop's body is 6.78 power-plus-toughness where the folk
+"2/2 for 2" rule predicts 8, and the gap between that row and all creatures is
+the format's own price of text — one impact point buys 0.4484 stat points.
+`packages/domain/src/efficiency/baseline.data.json` is **generated** from the
+corpus by `pnpm --filter @roundtable/ingest baseline` (read-only, not part of
+the scheduled worker), so power creep updates it instead of quietly invalidating
+a frozen constant.
+
+The scoped formula `(P+T + r × impact) / MV` was built, measured and REJECTED:
+it rates Grizzly Bears 2.00 against Wrath of God 0.69, because it adds an
+absolute body to a marginal text price. Both terms are surpluses as shipped —
+doc 18 §18.6 and §18.10.
+
+**Columns are deck state.** "The filters are basically part of the deck."
+`Deck.columns` is a list of `{ kind: 'query', query } | { kind: 'metric',
+metric }`, and the two metrics ship as ordinary removable columns present by
+default. Migration `0015` adds `decks.columns jsonb` — **nullable, deliberately
+unlike 0013 and 0014**, because NULL ("never set: draw the defaults") and `[]`
+("I removed them all") are different decks here, and a builder whose cleared
+columns come back has not cleared anything. No ADR: every contract change is a
+new optional field. The recommendations request is unchanged — a metric column
+needs no server evaluation, since its number is already on the row.
+
+**The UI half is not built.** Nothing renders a metric column or persists the
+column list to the deck yet; the storage, the metrics, the endpoints and the
+`queryColumns` seam are.
+
 **The deck is a picture now, at `#web`.** [Doc 17](17-deck-web.md) is built: a
 second mode, entered from the masthead, that replaces everything below it with
 one node per card — the art crop — and one line per relationship. It makes **no

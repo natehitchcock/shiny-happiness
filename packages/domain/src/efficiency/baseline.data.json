@@ -1,0 +1,120 @@
+{
+  "$comment": [
+    "GENERATED. Do not edit by hand — run `pnpm --filter @roundtable/ingest baseline`",
+    "against a corpus database and commit what it writes (doc 18 §18.6).",
+    "",
+    "What a mana value buys before any rules text, measured from the only cards",
+    "whose whole contribution is their body: commander-legal creatures with",
+    "literally no oracle text. And the rate at which the format trades stat",
+    "points for text, measured as the gap between those cards and all creatures.",
+    "",
+    "Regenerated rather than frozen in TypeScript because power creep is real",
+    "and continuing: a constant written today is a lie in eighteen months with",
+    "nothing to make it fail. The sample counts are carried so a reader can see",
+    "which rows are thin rather than trusting all of them equally.",
+    "",
+    "`statPointsPerImpactPoint` is defined against the impact model in",
+    "`impact.ts` — the generator imports `cardImpact` rather than reimplementing",
+    "it, because two copies would drift the day either changed."
+  ],
+  "generatedAt": "2026-08-31",
+  "corpus": {
+    "commanderLegal": 31782,
+    "vanillaCreatures": 339
+  },
+  "vanillaStatlineByManaValue": {
+    "0": {
+      "n": 5,
+      "statline": 1.6
+    },
+    "1": {
+      "n": 29,
+      "statline": 2.966
+    },
+    "2": {
+      "n": 75,
+      "statline": 4.04
+    },
+    "3": {
+      "n": 66,
+      "statline": 5.303
+    },
+    "4": {
+      "n": 64,
+      "statline": 6.781
+    },
+    "5": {
+      "n": 60,
+      "statline": 9.083
+    },
+    "6": {
+      "n": 25,
+      "statline": 11.8
+    },
+    "7": {
+      "n": 13,
+      "statline": 12.077
+    },
+    "8": {
+      "n": 2,
+      "statline": 15.5
+    }
+  },
+  "vanillaStatlineFit": {
+    "slope": 1.6993,
+    "intercept": 0.5414,
+    "n": 319,
+    "overManaValues": [1, 6]
+  },
+  "statPointsPerImpactPoint": 0.4484,
+  "exchangeRateByManaValue": [
+    {
+      "manaValue": 1,
+      "creatures": 1193,
+      "vanilla": 2.97,
+      "all": 2.34,
+      "gap": 0.62,
+      "meanImpact": 1.692
+    },
+    {
+      "manaValue": 2,
+      "creatures": 3459,
+      "vanilla": 4.04,
+      "all": 3.4,
+      "gap": 0.64,
+      "meanImpact": 2.121
+    },
+    {
+      "manaValue": 3,
+      "creatures": 4344,
+      "vanilla": 5.3,
+      "all": 4.48,
+      "gap": 0.82,
+      "meanImpact": 2.538
+    },
+    {
+      "manaValue": 4,
+      "creatures": 3756,
+      "vanilla": 6.78,
+      "all": 5.81,
+      "gap": 0.97,
+      "meanImpact": 2.824
+    },
+    {
+      "manaValue": 5,
+      "creatures": 2467,
+      "vanilla": 9.08,
+      "all": 7.29,
+      "gap": 1.79,
+      "meanImpact": 2.836
+    },
+    {
+      "manaValue": 6,
+      "creatures": 1299,
+      "vanilla": 11.8,
+      "all": 9.05,
+      "gap": 2.75,
+      "meanImpact": 2.926
+    }
+  ]
+}

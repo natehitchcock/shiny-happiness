@@ -27,7 +27,9 @@ import {
   curveTarget,
   type CurveTarget,
 } from './curve.js'
+import { cardEfficiency } from './efficiency.js'
 import type { OracleId } from './ids.js'
+import { cardImpact } from './impact.js'
 import { matchesQuery, type AnnotatedCandidate } from './query/evaluate.js'
 import type { QueryNode } from './query/ast.js'
 import type { CandidateGroupKey, Reason, Recommendation } from './recommendation.js'
@@ -502,6 +504,15 @@ const toRecommendation = (s: Scratch): Recommendation => {
       s.deficit !== null && s.deficit.dimension.kind === 'role' ? s.deficit.dimension.role : null,
     bracketFlags: s.pooled.bracketFlags,
     reasons: [first, ...rest],
+    /*
+     * Computed here rather than by each surface, so the column, the card
+     * detail panel and the search results cannot disagree about a card (doc 18
+     * §18.8). Only for the items that actually ship — this runs on the sliced
+     * group members, not on the whole pool, so it costs a few hundred calls per
+     * request rather than thirty thousand.
+     */
+    efficiency: cardEfficiency(s.pooled.card),
+    impact: cardImpact(s.pooled.card),
   }
 }
 

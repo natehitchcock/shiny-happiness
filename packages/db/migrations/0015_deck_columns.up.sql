@@ -1,0 +1,53 @@
+-- The columns a deck is judged in (doc 18 §18.7).
+--
+-- "any added or removed column should be saved along with the deck - the
+-- filters are basically part of the deck". They lived in React state and died
+-- with the page; this is where they live now.
+--
+-- A JSON ARRAY OF TAGGED OBJECTS. Shape:
+--
+--   [{"kind": "metric", "metric": "impact"},
+--    {"kind": "metric", "metric": "efficiency"},
+--    {"kind": "query",  "query": "t:creature mv<=3"}]
+--
+-- A column is EITHER a user query string OR a named metric, and the tag is what
+-- keeps the two apart. Rejected alternative: `text[]` of query strings with the
+-- metrics encoded as reserved words — it works right up until a builder types
+-- `impact` as an actual oracle search and their column silently becomes
+-- something else.
+--
+-- NULLABLE, WITH NO DEFAULT — and this is the one place this column deliberately
+-- diverges from 0013 (`target_overrides`) and 0014 (`semantic_emphasis`), which
+-- are both NOT NULL DEFAULT on the argument that "has overridden nothing" and
+-- "has not overridden anything" are the same deck. For columns they are not:
+--
+--   NULL  = never set. Draw `DEFAULT_COLUMNS` (impact and efficiency).
+--   '[]'  = the builder removed every column. Draw none, and do NOT hand them
+--           back on the next page load — a customisation that undoes itself is
+--           the same trap doc 16 §16.5 exists to avoid, in the direction that
+--           actually bites here.
+--
+-- Nullable is also what lets the default list change later without a data
+-- migration. Under NOT NULL DEFAULT '[...]' every existing deck would be frozen
+-- holding whichever default existed the day it was created, silently and
+-- forever — the failure doc 16 rejected full target snapshots for.
+--
+-- `PATCH /decks/:id` with `"columns": null` therefore means "back to the
+-- defaults", which is exactly what null already means for `targetOverrides`
+-- (back to the archetype) and `semanticEmphasis` (back to no focus): clear my
+-- customisation. All three read the same way even though only this one is
+-- nullable.
+--
+-- Rejected alternative: a `deck_columns` side table, one row per column with an
+-- ordering integer. It would let the database enforce the order and make
+-- removing a column a DELETE. It was rejected because the whole value is at most
+-- a dozen short objects read with the deck row on every request, because a
+-- reorder would become a rewrite of every row's position, and because "the
+-- builder removed all of them" would then be zero rows — indistinguishable from
+-- "never set", which is the one distinction this column exists to keep.
+ALTER TABLE decks
+  ADD COLUMN columns jsonb;
+
+-- No index, for the same reason 0013 and 0014 have none: the column is never a
+-- search key. It is read with the deck row it sits on and written by that deck's
+-- own POST or PATCH.

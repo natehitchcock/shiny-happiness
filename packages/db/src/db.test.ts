@@ -9,7 +9,15 @@ import type {
   Printing,
   PrintingId,
 } from '@roundtable/domain'
-import { buildComboIndex, comboDegree, comboId, deckId, printingId } from '@roundtable/domain'
+import {
+  DEFAULT_COLUMNS,
+  buildComboIndex,
+  columnsFor,
+  comboDegree,
+  comboId,
+  deckId,
+  printingId,
+} from '@roundtable/domain'
 import {
   appliedMigrations,
   loadMigrations,
@@ -1176,6 +1184,159 @@ describeDb('packages/db against real PostgreSQL', () => {
         await expect(
           db.pool.query('UPDATE decks SET semantic_emphasis = NULL WHERE id = $1', [id]),
         ).rejects.toThrow(/null value|not-null/i)
+      })
+    })
+
+    /**
+     * The columns saved with a deck (doc 18 §18.7, migration 0015).
+     *
+     * Both write paths again — `createDeck`'s INSERT names the column and
+     * normalises through the parser, `PATCH /decks/:id` writes it with a CASE
+     * flag — and one thing neither of the two columns above has to test: NULL is
+     * a MEANINGFUL value here and `[]` is a different one. Every assertion below
+     * that distinguishes them is the point of the column, not a detail.
+     */
+    describe('columns', () => {
+      it('is null on a freshly inserted deck that names none', async () => {
+        // The INSERT path with the field absent. Null, not `[]`: the deck has
+        // never said anything, so it draws `DEFAULT_COLUMNS`.
+        const fresh = deckId(randomUUID())
+        await createDeck(db.pool, {
+          id: fresh,
+          ownerId: owner,
+          name: 'Fresh',
+          commanders: [uuid()],
+          targetBracket: 3,
+          archetype: 'midrange',
+          colorIdentity: ['U'],
+        })
+        const deck = await getDeck(db.pool, fresh)
+        expect(deck?.columns).toBeNull()
+        expect(columnsFor(deck?.columns)).toEqual(DEFAULT_COLUMNS)
+      })
+
+      it('stores columns given at creation, through the INSERT path', async () => {
+        const fresh = deckId(randomUUID())
+        await createDeck(db.pool, {
+          id: fresh,
+          ownerId: owner,
+          name: 'Cloned',
+          commanders: [uuid()],
+          targetBracket: 3,
+          archetype: 'midrange',
+          colorIdentity: ['U'],
+          columns: [
+            { kind: 'query', query: 't:creature' },
+            { kind: 'metric', metric: 'efficiency' },
+          ],
+        })
+        expect((await getDeck(db.pool, fresh))?.columns).toEqual([
+          { kind: 'query', query: 't:creature' },
+          { kind: 'metric', metric: 'efficiency' },
+        ])
+      })
+
+      it('stores an EMPTY list at creation as empty, not as null', async () => {
+        // "Created with no columns" is a real request and must not be silently
+        // turned into "never set", which would hand the deck the defaults.
+        const fresh = deckId(randomUUID())
+        await createDeck(db.pool, {
+          id: fresh,
+          ownerId: owner,
+          name: 'Bare',
+          commanders: [uuid()],
+          targetBracket: 3,
+          archetype: 'midrange',
+          colorIdentity: ['U'],
+          columns: [],
+        })
+        const deck = await getDeck(db.pool, fresh)
+        expect(deck?.columns).toEqual([])
+        expect(columnsFor(deck?.columns)).toEqual([])
+      })
+
+      it('normalises duplicates and unknown metrics on the way in', async () => {
+        const fresh = deckId(randomUUID())
+        await createDeck(db.pool, {
+          id: fresh,
+          ownerId: owner,
+          name: 'Noisy',
+          commanders: [uuid()],
+          targetBracket: 3,
+          archetype: 'midrange',
+          colorIdentity: ['U'],
+          columns: [
+            { kind: 'metric', metric: 'impact' },
+            { kind: 'metric', metric: 'impact' },
+            { kind: 'metric', metric: 'not-a-metric' },
+          ] as never,
+        })
+        expect((await getDeck(db.pool, fresh))?.columns).toEqual([
+          { kind: 'metric', metric: 'impact' },
+        ])
+        /*
+         * And the ROW itself is canonical, not just what `getDeck` hands back.
+         *
+         * Read straight out of the database rather than through `toDeck`,
+         * because `toDeck` parses too — so an unparsed INSERT would look
+         * identical through the repository and the only place the difference is
+         * visible is here. It matters because the row is what a migration, a
+         * dashboard or a future reader sees, and a stored duplicate is a stored
+         * duplicate whatever this build happens to filter on the way out.
+         */
+        const { rows } = await db.pool.query<{ columns: unknown }>(
+          'SELECT columns FROM decks WHERE id = $1',
+          [fresh],
+        )
+        expect(rows[0]?.columns).toEqual([{ kind: 'metric', metric: 'impact' }])
+      })
+
+      it('round-trips columns through the UPDATE path', async () => {
+        await db.pool.query('UPDATE decks SET columns = $2::jsonb WHERE id = $1', [
+          id,
+          JSON.stringify([{ kind: 'query', query: 'mv<=2' }]),
+        ])
+        expect((await getDeck(db.pool, id))?.columns).toEqual([{ kind: 'query', query: 'mv<=2' }])
+      })
+
+      it('keeps an emptied list emptied through the UPDATE path', async () => {
+        // The statement `PATCH … {"columns": []}` issues. If this came back as
+        // null the builder's cleared columns would reappear on the next load —
+        // the exact failure the nullable column exists to prevent.
+        await db.pool.query("UPDATE decks SET columns = '[]'::jsonb WHERE id = $1", [id])
+        expect((await getDeck(db.pool, id))?.columns).toEqual([])
+      })
+
+      it('accepts a SQL null, which is how a builder gets back to the defaults', async () => {
+        // The opposite of `target_overrides` and `semantic_emphasis`, which both
+        // reject one. Here it is the statement `PATCH … {"columns": null}`
+        // issues, and it must be reachable.
+        await db.pool.query('UPDATE decks SET columns = $2::jsonb WHERE id = $1', [
+          id,
+          JSON.stringify([{ kind: 'query', query: 'mv<=2' }]),
+        ])
+        await db.pool.query('UPDATE decks SET columns = NULL WHERE id = $1', [id])
+        const deck = await getDeck(db.pool, id)
+        expect(deck?.columns).toBeNull()
+        expect(columnsFor(deck?.columns)).toEqual(DEFAULT_COLUMNS)
+      })
+
+      it('survives a malformed row rather than poisoning the deck', async () => {
+        await db.pool.query('UPDATE decks SET columns = $2::jsonb WHERE id = $1', [
+          id,
+          JSON.stringify([{ kind: 'metric', metric: 'from-a-newer-build' }, { kind: 'query' }]),
+        ])
+        expect((await getDeck(db.pool, id))?.columns).toEqual([])
+      })
+
+      it('reads a non-array jsonb as never set, so the deck falls back to the defaults', async () => {
+        // Not as `[]`. A corrupt value must not be read as a claim about the
+        // builder's intent.
+        await db.pool.query('UPDATE decks SET columns = $2::jsonb WHERE id = $1', [
+          id,
+          JSON.stringify({ impact: true }),
+        ])
+        expect((await getDeck(db.pool, id))?.columns).toBeNull()
       })
     })
   })
