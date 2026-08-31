@@ -151,8 +151,27 @@ opponent-discard cards led by `Tinybones, Bauble Burglar` and `Torment of
 Hailfire`. Each of them explains itself as *emphasised* rather than as ordinary
 synergy.
 
-**The UI half is not built.** Nothing renders the start-screen prompt or the
-chips above the commander yet; the storage, scoring, reasons and endpoints are.
+**The UI half is built too.** Choosing a commander on the start screen now asks
+"What is this deck about?" and offers that commander's own semantics, both
+directions — a PROMPT and not a gate, so "Start building" stays enabled with
+nothing picked and an unanswered prompt sends no `semanticEmphasis` at all. The
+picks ride along with the create, because a deck created and then PATCHed would
+score its first page of suggestions against no focus. A **Focus** block sits
+directly above the Commander section of the deck rail, naming each tag with its
+`supporting` count, carrying a Remove button per tag, and holding the "Add a
+focus" disclosure that is the way back in for someone who skipped the prompt or
+who changes direction at forty cards. Every tag chip in a card's Semantics panel
+carries its own ✧/✦ toggle beside it — a separate control, because the chip's
+click already belongs to its hint, which is the only way a touch device can read
+that explanation.
+
+Writes are **awaited, never optimistic**: the chip carries a count only the
+server can compute and the visible consequence is the suggestion ORDER, so
+`deck` is only ever written from a response and a failed PATCH cannot leave a
+chip showing a focus the server does not have — it says
+"Could not save the focus — … Nothing changed." instead. `supporting: 0` reads
+"Nothing in your colours supports this yet — your suggestions are unchanged", in
+the ordinary note style: not an error, because nothing is broken.
 
 **Every card now says how big it is and what it costs you.**
 [Doc 18](18-card-impact-and-efficiency.md) is built: two CARD-INTRINSIC metrics,

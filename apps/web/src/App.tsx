@@ -489,14 +489,29 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
     case 'keyword-synergy': {
       // Said as a mechanism, not a score: "why" is what P4 asks the reason for.
       const tag = (r.tag ?? '').replace(/-/g, ' ')
+      /*
+       * "your X" and "your EMPHASISED X" are different claims (P4).
+       *
+       * A card that rose because the builder declared a focus is being
+       * suggested on their authority, not on a synergy the deck already had —
+       * the same distinction `fills-deficit` draws between the archetype's gap
+       * and a target the builder typed. Without the word, the one thing they
+       * can change about this suggestion is invisible in the sentence
+       * explaining it.
+       *
+       * The word goes on the POSSESSIVE rather than being appended as a
+       * suffix ("benefits from your discard (emphasised)"), because it is an
+       * adjective on the deck's property and not a footnote about the row.
+       */
+      const yours = r.emphasised === true ? `your emphasised ${tag}` : `your ${tag}`
       // Three directions, three different claims. 'theme' is the weak one —
       // the card wants what other cards in the deck want — and it says so
       // rather than borrowing the language of an enable.
       return r.direction === 'payoff'
-        ? `benefits from your ${tag}`
+        ? `benefits from ${yours}`
         : r.direction === 'theme'
-          ? `shares your ${tag} theme`
-          : `enables your ${tag}`
+          ? `shares ${yours} theme`
+          : `enables ${yours}`
     }
     case 'mana-fixing': {
       // The whole point of the reason: for a land, "fills a gap" is true of
@@ -798,6 +813,33 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
   const [noUB, setNoUB] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * The semantics the builder picked off this commander, before the deck exists.
+   *
+   * Local state and nothing else: there is no deck to PATCH yet, so this rides
+   * along with the create (see `api.createDeck`). A deck created and then
+   * PATCHed would score its very first page of suggestions against no focus at
+   * all, which is the one page the prompt exists to shape.
+   *
+   * Cleared whenever the commander changes — see the search box's `onChange`.
+   * These are claims about THAT legend's semantics, and silently carrying
+   * `opponent-discard` from Tergrid onto Krenko would emphasise a tag the new
+   * commander does not have and nobody chose.
+   */
+  const [emphasis, setEmphasis] = useState<readonly string[]>([])
+
+  /**
+   * The commander's own semantics, both directions, deduplicated.
+   *
+   * Both directions because the deck can be about either half: a Tergrid deck
+   * is about opponents sacrificing (what she causes) or about their discarding
+   * (what she pays off), and offering only one of the two would decide that
+   * question for the builder. Deduplicated because a card that both causes and
+   * benefits from the same event would otherwise offer it twice, and the second
+   * chip would be a control that does nothing new.
+   */
+  const commanderTags =
+    chosen === null ? [] : [...new Set([...chosen.synergyProduces, ...chosen.synergyWants])]
 
   /*
    * No countdown here. The commander search is committed by Enter or by the
@@ -891,6 +933,15 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
         targetBracket: bracket,
         archetype,
         excludeUniversesBeyond: noUB,
+        /*
+         * Omitted entirely when nothing was picked, rather than sent as `[]`.
+         *
+         * The two mean the same thing to the server, but the body is what a
+         * request log shows: an absent key reads as "was not asked for", which
+         * is the truth about a builder who skipped the prompt. Sending `[]`
+         * would record a deliberate "no focus" they never expressed.
+         */
+        ...(emphasis.length === 0 ? {} : { semanticEmphasis: emphasis }),
       })
       .then(onCreated)
       .catch((e: unknown) => {
@@ -926,6 +977,8 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
               placeholder="Search cards that can lead a deck…"
               onChange={(e) => {
                 setChosen(null)
+                // The picks below were about the commander being replaced.
+                setEmphasis([])
                 setTerm(e.target.value)
               }}
               onKeyDown={(e) => {
@@ -995,12 +1048,54 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
            * No `onActivate`: there is nothing to open here, so the frame is not
            * a button and does not take focus.
            */
-          <div className="start-chosen">
-            <CardFace card={cardView(chosen, undefined, resultImages.get(chosen.oracleId))} />
-            <p className="note">
-              Building around <strong>{chosen.name}</strong>. Search again to change it.
-            </p>
-          </div>
+          <>
+            <div className="start-chosen">
+              <CardFace card={cardView(chosen, undefined, resultImages.get(chosen.oracleId))} />
+              <p className="note">
+                Building around <strong>{chosen.name}</strong>. Search again to change it.
+              </p>
+            </div>
+
+            {/*
+             * The focus prompt, asked HERE — after the commander is settled and
+             * before the deck exists.
+             *
+             * A prompt, not a gate. "Start building" stays enabled with nothing
+             * picked, there is no skip button to press (a skip button would
+             * make choosing nothing feel like a refusal rather than an answer),
+             * and the same question is reachable from the deck rail afterwards.
+             * A modal was rejected for the same reason: this is one more thing
+             * on a page that already asks three, not a decision to block on.
+             *
+             * A SIBLING of `.start-chosen`, not a child. That element is a flex
+             * ROW holding the card beside its caption, so a third child would
+             * squeeze both into a column a few words wide — measured in a
+             * browser before this was moved out.
+             */}
+            <section className="start-emphasis" aria-label="Semantic focus">
+              <h3>What is this deck about?</h3>
+              <p className="note">
+                Optional. Pick any of {chosen.name}’s semantics and cards supporting them are ranked
+                higher. It only reorders your suggestions — nothing is ever hidden — and you can
+                change it at any point while building.
+              </p>
+              <EmphasisChoice
+                tags={commanderTags}
+                selected={emphasis}
+                onToggle={(tag) =>
+                  setEmphasis((current) =>
+                    current.includes(tag)
+                      ? current.filter((t) => t !== tag)
+                      : // Appended, not sorted: the server puts the set into
+                        // canonical order on the way in (`parseSemanticEmphasis`),
+                        // so re-sorting here would be a second opinion about an
+                        // order that carries no meaning anyway.
+                        [...current, tag],
+                  )
+                }
+              />
+            </section>
+          </>
         )}
 
         <div className="row">
@@ -1076,63 +1171,224 @@ interface DeckLine {
  * is how "a creature dying" here becomes "creature death" there.
  */
 
+/**
+ * How a control offers to make a semantic the deck's focus.
+ *
+ * Filled star for emphasised, hollow for not, exactly as the deck rail's lock
+ * uses ◆/◇ — this app already teaches "filled means you decided this", and a
+ * second visual language for the same idea is one more thing to learn.
+ *
+ * Never colour alone (P1): the glyph changes shape, `aria-pressed` carries the
+ * state to a screen reader, and the stylesheet draws a brass border on top of
+ * both.
+ */
+const EMPHASIS_ON = '✦'
+const EMPHASIS_OFF = '✧'
+
+/**
+ * The button that makes one semantic a focus, or takes it off again.
+ *
+ * A TOGGLE with a stable name, not two buttons and not a name that flips with
+ * the state. "Emphasise opponents discarding" plus `aria-pressed` is the ARIA
+ * pattern for this; a label that read "Stop emphasising…" when pressed would
+ * announce the state twice and disagree with itself the moment a screen reader
+ * read the pressed state first.
+ *
+ * `busy` disables it while the write is in flight rather than hiding it: a
+ * control that vanishes mid-click loses the focus ring the keyboard user was
+ * standing on.
+ */
+const EmphasisToggle = ({
+  tag,
+  emphasised,
+  onToggle,
+  busy,
+  className,
+}: {
+  tag: string
+  emphasised: boolean
+  onToggle: (tag: string) => void
+  busy: boolean
+  className: string
+}): React.JSX.Element => (
+  <button
+    type="button"
+    className={className}
+    data-emphasised={emphasised}
+    aria-pressed={emphasised}
+    aria-label={`Emphasise ${readable(tag)}`}
+    disabled={busy}
+    title={
+      emphasised
+        ? `Emphasised — cards that support ${readable(tag)} are ranked higher. Press again to drop it.`
+        : `Make ${readable(tag)} a focus for this deck, ranking cards that support it higher. Nothing is hidden either way.`
+    }
+    onClick={() => onToggle(tag)}
+  >
+    {emphasised ? EMPHASIS_ON : EMPHASIS_OFF}
+  </button>
+)
+
+/**
+ * A set of semantics offered as toggles.
+ *
+ * One component for the start screen's prompt and the workspace's "Add a
+ * focus", because they ask the identical question at two moments. Two bespoke
+ * lists is how the start screen comes to offer `produces` only while the
+ * workspace offers both directions, and neither reader ever finds out.
+ */
+const EmphasisChoice = ({
+  tags,
+  selected,
+  onToggle,
+  busy = false,
+}: {
+  tags: readonly string[]
+  selected: readonly string[]
+  onToggle: (tag: string) => void
+  busy?: boolean
+}): React.JSX.Element => {
+  if (tags.length === 0) {
+    // Half the corpus derives no tags at all (ADR-0013), and a heading over an
+    // empty row would read as "this card is about nothing".
+    return (
+      <p className="note">
+        No semantics derived for this card. Our rules-text reading misses about half of Magic, so
+        this is a gap in what we can see — you can still focus a semantic from any other card.
+      </p>
+    )
+  }
+  return (
+    <p className="tags emphasis-choice">
+      {tags.map((tag) => (
+        <span className="emphasis-option" key={tag}>
+          <EmphasisToggle
+            tag={tag}
+            emphasised={selected.includes(tag)}
+            onToggle={onToggle}
+            busy={busy}
+            className="act emphasise"
+          />
+          <span className="tag" data-emphasised={selected.includes(tag)}>
+            {readable(tag)}
+          </span>
+        </span>
+      ))}
+    </p>
+  )
+}
+
 const TagChip = ({
   tag,
   direction,
+  emphasised,
+  onToggleEmphasis,
+  emphasisBusy = false,
 }: {
   tag: string
   direction: 'produces' | 'wants'
+  /** Whether the deck currently emphasises this tag. */
+  emphasised?: boolean
+  /**
+   * Absent where there is no deck to focus — the chip is then a label only.
+   *
+   * The gesture is a SEPARATE button beside the chip, not the chip itself. The
+   * chip is already a `Hint` trigger and its click is spoken for: clicking it
+   * pins the explanation open, which is the only way a touch device can read
+   * that explanation at all. Taking that click for emphasis would have traded
+   * one feature for another, and silently.
+   */
+  onToggleEmphasis?: (tag: string) => void
+  emphasisBusy?: boolean
 }): React.JSX.Element => {
   const partners = interactsWith(tag as SynergyTag)
   const opposite = direction === 'produces' ? 'wants' : 'produces'
   return (
-    <Hint
-      className="tag-hint"
-      content={
-        <>
-          <strong>{readable(tag)}</strong>
-          <span className="hint-line">
-            {direction === 'produces'
-              ? `This card causes it. It pairs with cards that benefit from ${readable(tag)}.`
-              : `This card benefits from ${readable(tag)}. It pairs with cards that cause it.`}
-          </span>
-          {partners.length === 0 ? null : (
+    <span className="tag-chip" data-emphasised={emphasised === true}>
+      <Hint
+        className="tag-hint"
+        content={
+          <>
+            <strong>{readable(tag)}</strong>
             <span className="hint-line">
-              Benefits, and benefits from: {partners.map(readable).join(', ')}.
+              {direction === 'produces'
+                ? `This card causes it. It pairs with cards that benefit from ${readable(tag)}.`
+                : `This card benefits from ${readable(tag)}. It pairs with cards that cause it.`}
             </span>
-          )}
-          {/* The tag is a filter field as well as a label, and nothing else on
+            {partners.length === 0 ? null : (
+              <span className="hint-line">
+                Benefits, and benefits from: {partners.map(readable).join(', ')}.
+              </span>
+            )}
+            {/* The tag is a filter field as well as a label, and nothing else on
               screen says so. Both spellings are given because both work, and
               because `tag:` — either side — is usually what someone reading a
               chip actually wants. */}
-          <span className="hint-line">
-            Filter by it:{' '}
-            <code>
-              {direction}:{tag}
-            </code>
-            , or <code>tag:{tag}</code> for cards on either side.
-          </span>
-          <span className="hint-line dim">
-            Derived from the rules text, so it is sometimes wrong — {opposite} is the other half of
-            the same question.
-          </span>
-        </>
-      }
-    >
-      <span className="tag" data-direction={direction}>
-        {tag.replace(/-/g, ' ')}
-      </span>
-    </Hint>
+            <span className="hint-line">
+              Filter by it:{' '}
+              <code>
+                {direction}:{tag}
+              </code>
+              , or <code>tag:{tag}</code> for cards on either side.
+            </span>
+            {/* Copy only — the button is beside the chip, and a reader who has
+              opened this panel is exactly the reader deciding whether the
+              deck is about this. */}
+            {onToggleEmphasis === undefined ? null : (
+              <span className="hint-line">
+                {emphasised === true
+                  ? `${EMPHASIS_ON} is on: this deck is focused on ${readable(tag)}, so cards supporting it rank higher. Nothing is hidden by it.`
+                  : `Press ${EMPHASIS_OFF} beside the chip to make this deck about ${readable(tag)}. It reorders your suggestions and hides nothing.`}
+              </span>
+            )}
+            <span className="hint-line dim">
+              Derived from the rules text, so it is sometimes wrong — {opposite} is the other half
+              of the same question.
+            </span>
+          </>
+        }
+      >
+        <span className="tag" data-direction={direction}>
+          {tag.replace(/-/g, ' ')}
+        </span>
+      </Hint>
+      {onToggleEmphasis === undefined ? null : (
+        <EmphasisToggle
+          tag={tag}
+          emphasised={emphasised === true}
+          onToggle={onToggleEmphasis}
+          busy={emphasisBusy}
+          className="act emphasise"
+        />
+      )}
+    </span>
   )
 }
 
 const Semantics = ({
   produces,
   wants,
+  emphasis = [],
+  onToggleEmphasis,
+  emphasisBusy = false,
 }: {
   produces: readonly string[]
   wants: readonly string[]
+  /** The DECK's emphasis, not this card's — a chip is pressed iff the deck is about it. */
+  emphasis?: readonly string[]
+  onToggleEmphasis?: (tag: string) => void
+  emphasisBusy?: boolean
 }): React.JSX.Element => {
+  const chip = (t: string, direction: 'produces' | 'wants'): React.JSX.Element => (
+    <TagChip
+      key={t}
+      tag={t}
+      direction={direction}
+      emphasised={emphasis.includes(t)}
+      emphasisBusy={emphasisBusy}
+      {...(onToggleEmphasis === undefined ? {} : { onToggleEmphasis })}
+    />
+  )
   if (produces.length === 0 && wants.length === 0) {
     // Half the corpus derives no tags at all (ADR-0013). Saying so beats an
     // empty heading, which would read as "this card interacts with nothing".
@@ -1152,20 +1408,133 @@ const Semantics = ({
       {produces.length > 0 ? (
         <p className="tags">
           <span className="tags-label">Causes</span>
-          {produces.map((t) => (
-            <TagChip key={t} tag={t} direction="produces" />
-          ))}
+          {produces.map((t) => chip(t, 'produces'))}
         </p>
       ) : null}
       {wants.length > 0 ? (
         <p className="tags">
           <span className="tags-label">Benefits from</span>
-          {wants.map((t) => (
-            <TagChip key={t} tag={t} direction="wants" />
-          ))}
+          {wants.map((t) => chip(t, 'wants'))}
         </p>
       ) : null}
     </>
+  )
+}
+
+/**
+ * How much of the candidate pool supports one emphasised tag, in words.
+ *
+ * `undefined` — no recompute has reported on this tag yet — is NOT zero, and
+ * the difference is the entire point of the sentence: "nothing supports this"
+ * is a finding, and printing it about a tag nobody has counted yet would be a
+ * finding invented from an absence.
+ */
+const supportText = (supporting: number | undefined): string => {
+  if (supporting === undefined) return 'counting…'
+  /*
+   * Not an error, not a warning, and deliberately not red.
+   *
+   * The emphasis reorders and never filters, so a tag nothing supports leaves
+   * the suggestions exactly as they were. There is nothing broken to report —
+   * the honest statement is what was looked for and what was found, which is
+   * also the sentence that tells the builder to try a different tag.
+   */
+  if (supporting === 0)
+    return 'Nothing in your colours supports this yet — your suggestions are unchanged'
+  return `${plural(supporting, 'card')} support${supporting === 1 ? 's' : ''} this`
+}
+
+/**
+ * The deck's focus, above the commander (the user's own placement).
+ *
+ * Three jobs in one small block, and each is half of the request: it SHOWS
+ * what the deck is about, it takes a focus OFF, and it is the way back into
+ * the prompt for someone who skipped it at the start screen or who changed
+ * direction at forty cards.
+ *
+ * The "add" list is a disclosure rather than a permanently open row of the
+ * commander's tags: once a focus is chosen the panel's job is to report it, and
+ * a row of unpressed toggles under a chosen focus reads like a question still
+ * being asked.
+ */
+const FocusPanel = ({
+  emphasis,
+  report,
+  commanderTags,
+  busy,
+  onToggle,
+  adding,
+  onAdding,
+}: {
+  emphasis: readonly string[]
+  report: readonly { tag: string; supporting: number }[]
+  /** The candidate set, exactly as the start screen offered it. */
+  commanderTags: readonly string[]
+  busy: boolean
+  onToggle: (tag: string) => void
+  adding: boolean
+  onAdding: (open: boolean) => void
+}): React.JSX.Element => {
+  const supporting = new Map(report.map((e) => [e.tag, e.supporting]))
+  return (
+    <section className="focus" aria-label="Semantic focus">
+      <h3>Focus</h3>
+      {emphasis.length === 0 ? (
+        <p className="note">
+          No focus yet. Emphasise a semantic and cards that support it are ranked higher — it only
+          reorders your suggestions and never hides anything.
+        </p>
+      ) : (
+        <>
+          <ul className="focus-list">
+            {emphasis.map((tag) => (
+              <li className="focus-item" key={tag}>
+                <span className="tag" data-emphasised="true">
+                  {EMPHASIS_ON} {readable(tag)}
+                </span>
+                <span className="note focus-support">{supportText(supporting.get(tag))}</span>
+                <button
+                  type="button"
+                  className="act"
+                  disabled={busy}
+                  aria-label={`Remove ${readable(tag)} from this deck's focus`}
+                  title={`Stop emphasising ${readable(tag)}`}
+                  onClick={() => onToggle(tag)}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="note dim">
+            Emphasis reorders your suggestions. It never hides a card, so nothing disappears because
+            of a focus.
+          </p>
+        </>
+      )}
+      <button
+        type="button"
+        className="act"
+        aria-expanded={adding}
+        onClick={() => onAdding(!adding)}
+      >
+        {adding ? 'Done' : 'Add a focus'}
+      </button>
+      {adding ? (
+        <>
+          <p className="note">
+            Your commander’s semantics. Any semantic on any card can be emphasised too — open a card
+            and use the {EMPHASIS_OFF} beside its tags.
+          </p>
+          <EmphasisChoice
+            tags={commanderTags}
+            selected={emphasis}
+            onToggle={onToggle}
+            busy={busy}
+          />
+        </>
+      ) : null}
+    </section>
   )
 }
 
@@ -1382,6 +1751,9 @@ const Preview = ({
   lockedIds,
   cards,
   sheet,
+  emphasis,
+  onToggleEmphasis,
+  emphasisBusy,
 }: {
   /** The hydrated card, already in memory. Everything readable comes from here. */
   card: api.Card | undefined
@@ -1399,6 +1771,11 @@ const Preview = ({
    * rather than the top of the right-hand rail.
    */
   sheet: boolean
+  /** The deck's emphasised tags, so a chip can show whether it is one of them. */
+  emphasis: readonly string[]
+  onToggleEmphasis: (tag: string) => void
+  /** A focus write is in flight, so the toggles are held rather than removed. */
+  emphasisBusy: boolean
 }): React.JSX.Element | null => {
   // `detail` is the fallback, not the source: a card reached from somewhere that
   // never hydrated it still previews once its detail lands.
@@ -1620,7 +1997,13 @@ const Preview = ({
         <Works detail={detail} accepted={accepted} lockedIds={lockedIds} cards={cards} />
       )}
 
-      <Semantics produces={shown.synergyProduces} wants={shown.synergyWants} />
+      <Semantics
+        produces={shown.synergyProduces}
+        wants={shown.synergyWants}
+        emphasis={emphasis}
+        onToggleEmphasis={onToggleEmphasis}
+        emphasisBusy={emphasisBusy}
+      />
     </aside>
   )
 }
@@ -3294,6 +3677,30 @@ export const Workspace = ({
   const webMode = useDeckWebMode()
   const [groups, setGroups] = useState<api.Group[]>([])
   const [unavailable, setUnavailable] = useState<api.Unavailable[]>([])
+  /**
+   * The server's account of the emphasis: each tag and how much supports it.
+   *
+   * Kept separate from `deck.semanticEmphasis` because they answer different
+   * questions and can honestly disagree for a moment. The DECK says which tags
+   * are emphasised — that is the value that was saved, and the chips are drawn
+   * from it. This says how many eligible candidates carry each one, and it is a
+   * property of the last recompute. Between a save and the recompute that
+   * follows, a chip therefore shows its tag with no count rather than the count
+   * from the emphasis before it, which would be a number about a different
+   * question.
+   *
+   * `supporting: 0` is the whole reason the server sends this (doc 11): the
+   * emphasis never filters, so a tag nothing in the deck's colours supports
+   * returns an entirely normal list, and without this line there is nothing on
+   * screen that separates that from a focus that worked.
+   */
+  const [emphasisReport, setEmphasisReport] = useState<
+    readonly { tag: string; supporting: number }[]
+  >([])
+  /** A focus write is in flight. Holds the toggles rather than hiding them. */
+  const [emphasisSaving, setEmphasisSaving] = useState(false)
+  /** Whether the "add a focus" list is open — the way back into the prompt. */
+  const [addingFocus, setAddingFocus] = useState(false)
   const [analysis, setAnalysis] = useState<api.Analysis | null>(null)
   const [cards, setCards] = useState<Map<string, api.Card>>(new Map())
   const [prices, setPrices] = useState<Map<string, number | null>>(new Map())
@@ -3761,6 +4168,11 @@ export const Workspace = ({
       setDeck(withPendingLocks(freshest))
       setGroups(r.recs.groups)
       setUnavailable(r.recs.unavailable)
+      // `?? []` because a server from before semantic emphasis does not send
+      // this, and the focus panel must then draw the tags with no counts rather
+      // than crash on a property of undefined — the same reading `images` and
+      // `bracket` already get.
+      setEmphasisReport(r.recs.emphasis ?? [])
       setAnalysis(r.analysis)
       setQueryError(r.recs.query.errors[0]?.message ?? null)
       /*
@@ -4133,6 +4545,88 @@ export const Workspace = ({
       })
       .catch(() => undefined)
   }
+
+  /** The tags this deck is about, as the server last confirmed them. */
+  const emphasis = deck.semanticEmphasis ?? []
+
+  /**
+   * The candidate set the focus panel offers, from the commanders' own tags.
+   *
+   * The same set the start screen offered, from the same field, so someone who
+   * skipped the prompt and comes back to it later meets the identical list —
+   * and both directions, for the reason the start screen gives. Read from the
+   * hydrated cards, which already hold every commander (the recompute hydrates
+   * `current.commanders` first), so this costs no request.
+   */
+  const commanderTags = useMemo(() => {
+    const tags = new Set<string>()
+    for (const id of deck.commanders) {
+      const commander = cards.get(id)
+      if (commander === undefined) continue
+      for (const t of commander.synergyProduces) tags.add(t)
+      for (const t of commander.synergyWants) tags.add(t)
+    }
+    return [...tags]
+  }, [deck.commanders, cards])
+
+  /**
+   * Save a new emphasis. AWAITED, deliberately not optimistic.
+   *
+   * The rejected alternative was the one the rest of this file uses for card
+   * clicks: paint the chip immediately, roll it back if the write fails. Three
+   * reasons it is wrong here, in order of weight.
+   *
+   * First, the chip is not just a name — it carries `supporting`, which only
+   * the server can compute. An optimistic chip would appear with no count and
+   * then grow one, so the fast path shows a half-drawn claim and the failure
+   * path shows a claim that was never true. Second, the visible consequence of
+   * a focus is the SUGGESTION ORDER, and that cannot be faked on the client at
+   * all; the round trip is the feature, not an implementation detail to hide.
+   * Third, this is a rare, deliberate act — a builder emphasises a tag once and
+   * then builds for an hour — so the latency it costs is paid once, unlike an
+   * accept, which is clicked ninety-nine times and is why that path IS
+   * optimistic.
+   *
+   * The rule that mattered most: a failed PATCH must never leave a chip showing
+   * a focus the server does not have. Awaiting makes that true by construction
+   * rather than by remembering to roll back — `deck` is only ever written from
+   * a response, so there is no state that can survive a failure.
+   *
+   * The wait is not silent: the toggles disable while it is in flight, and the
+   * masthead's progress bar covers the recompute that follows.
+   */
+  const saveEmphasis = (next: readonly string[]): void => {
+    setEmphasisSaving(true)
+    void api
+      .patchDeck(deck.id, { semanticEmphasis: next })
+      .then((d) => {
+        // Same reason `setDeckOption` does this: the refresh below reads
+        // `serverDeckRef` for the deck it applies, and a stale ref would write
+        // the old emphasis straight back over the new one.
+        serverDeckRef.current = d
+        setDeck(withPendingLocks(d))
+        /*
+         * The counts on screen belong to the emphasis that has just been
+         * replaced, so they are dropped rather than left to describe a
+         * question nobody asked. The refresh below fills them in again.
+         */
+        setEmphasisReport([])
+        pipeline.refresh()
+      })
+      .catch((e: unknown) => {
+        // Surfaced, never swallowed. `setDeckOption` swallows its errors, which
+        // is survivable for a checkbox that shows its own state; here the only
+        // evidence of a failure would be a chip that quietly never appeared.
+        setNotice(
+          `Could not save the focus — ${e instanceof Error ? e.message : 'the server did not answer'}. Nothing changed.`,
+        )
+      })
+      .finally(() => setEmphasisSaving(false))
+  }
+
+  /** Add or remove one tag. The array is always sent whole (doc 10). */
+  const toggleEmphasis = (tag: string): void =>
+    saveEmphasis(emphasis.includes(tag) ? emphasis.filter((t) => t !== tag) : [...emphasis, tag])
 
   /**
    * Export the deck as plain text, formatted by the DOMAIN's own formatter.
@@ -4873,6 +5367,22 @@ export const Workspace = ({
               title="A card that completes a combo often has no derived synergy, and vice versa — so a single fault is usually not a signal."
             />
           </label>
+
+          {/* "The semantic emphasis should be displayed above my commander" —
+              literally that. The commander is the first section below, so this
+              sits immediately over its heading rather than in the masthead or
+              the analysis rail, both of which are further from the card the
+              focus is about. */}
+          <FocusPanel
+            emphasis={emphasis}
+            report={emphasisReport}
+            commanderTags={commanderTags}
+            busy={emphasisSaving}
+            onToggle={toggleEmphasis}
+            adding={addingFocus}
+            onAdding={setAddingFocus}
+          />
+
           {sections.map((section) => (
             <div className="deck-section" key={section.key}>
               <h3>
@@ -5523,6 +6033,9 @@ export const Workspace = ({
             lockedIds={lockedIds}
             cards={cards}
             sheet={singleColumn}
+            emphasis={emphasis}
+            onToggleEmphasis={toggleEmphasis}
+            emphasisBusy={emphasisSaving}
           />
           <div className="analysis-scroll">
             <h2 style={{ marginTop: '1.25rem' }}>
