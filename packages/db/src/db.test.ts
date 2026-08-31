@@ -1,8 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import type { Card, Combo, DeckId, OracleId } from '@roundtable/domain'
+import type { Card, Combo, DeckCommand, DeckId, OracleId } from '@roundtable/domain'
 import { buildComboIndex, comboDegree, comboId, deckId } from '@roundtable/domain'
-import { loadMigrations, migrateDown, migrateUp } from './index.js'
+import {
+  appliedMigrations,
+  loadMigrations,
+  migrateDown,
+  migrateUp,
+  migrationVersions,
+} from './index.js'
 import {
   combosContaining,
   combosInIdentity,
@@ -17,7 +23,9 @@ import {
   upsertCards,
 } from './repositories/cards.js'
 import {
+  appendCommandLog,
   applyBatch,
+  commandsSince,
   createDeck,
   getDeck,
   listDeckSummaries,
@@ -123,6 +131,75 @@ describeDb('packages/db against real PostgreSQL', () => {
     it('is idempotent — a second up applies nothing', async () => {
       const applied = await migrateUp(db.pool, await loadMigrations(MIGRATIONS_DIR))
       expect(applied).toEqual([])
+    })
+
+    it('created the command log API-06 reads `since` from', async () => {
+      const { rows } = await db.pool.query<{ table_name: string }>(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+      )
+      expect(rows.map((r) => r.table_name)).toContain('deck_command_log')
+    })
+
+    /** What `GET /api/v1/health` reports (see `apps/api/src/routes/health.ts`). */
+    describe('reporting what is applied', () => {
+      it('lists the shipped versions in order, without reading their SQL', async () => {
+        const versions = await migrationVersions(MIGRATIONS_DIR)
+
+        expect(versions).toContain('0001_initial')
+        expect(versions).toContain('0012_deck_command_log')
+        expect([...versions].sort()).toEqual(versions)
+        // One entry per migration, not one per `.up.sql`/`.down.sql` file.
+        expect(new Set(versions).size).toBe(versions.length)
+      })
+
+      it('reports every shipped version as applied on a migrated database', async () => {
+        const applied = await appliedMigrations(db.pool)
+
+        expect(applied).toEqual(await migrationVersions(MIGRATIONS_DIR))
+      })
+
+      /*
+       * The failure this whole endpoint exists for: production four migrations
+       * behind, serving nulls rather than errors. `appliedMigrations` must
+       * report the shortfall rather than the head it wishes it had.
+       */
+      it('reports a database that is behind as missing exactly those versions', async () => {
+        const scratch = await createTestDatabase('behind')
+        try {
+          const migrations = await loadMigrations(MIGRATIONS_DIR)
+          await migrateDown(scratch.pool, migrations, 4)
+
+          const applied = await appliedMigrations(scratch.pool)
+          const shipped = await migrationVersions(MIGRATIONS_DIR)
+          const pending = shipped.filter((v) => !new Set(applied).has(v))
+
+          expect(pending).toEqual(shipped.slice(-4))
+        } finally {
+          await scratch.drop()
+        }
+      }, 60_000)
+
+      /*
+       * Returns null instead of raising, and — the part that matters — does NOT
+       * create the table. A health check that performs DDL changes the answer
+       * it was asked for.
+       */
+      it('answers null for a database with no schema, without creating one', async () => {
+        const scratch = await createTestDatabase('unmigrated')
+        try {
+          await migrateDown(scratch.pool, await loadMigrations(MIGRATIONS_DIR), 99)
+          await scratch.pool.query('DROP TABLE schema_migrations')
+
+          expect(await appliedMigrations(scratch.pool)).toBeNull()
+
+          const { rows } = await scratch.pool.query(
+            "SELECT to_regclass('public.schema_migrations') AS t",
+          )
+          expect(rows[0]).toEqual({ t: null })
+        } finally {
+          await scratch.drop()
+        }
+      }, 60_000)
     })
   })
 
@@ -810,6 +887,164 @@ describeDb('packages/db against real PostgreSQL', () => {
       expect(winners).toHaveLength(1)
       expect([a, b].filter((r) => r.kind === 'stale')).toHaveLength(1)
       expect((await getDeck(db.pool, id))!.version).toBe(start + 1)
+    })
+  })
+
+  /**
+   * The per-deck command log that makes a 409 replayable (API-06, doc 12 §12.7).
+   */
+  describe('deck command log', () => {
+    const owner = randomUUID()
+    const AT = '2026-08-30T12:00:00.000Z'
+
+    /** Not every command names a card, so the union has to be narrowed. */
+    const oracleIdsOf = (since: { batches: readonly { commands: readonly DeckCommand[] }[] }) =>
+      since.batches.flatMap((b) => b.commands.flatMap((c) => ('oracleId' in c ? [c.oracleId] : [])))
+
+    /** A deck plus `count` logged batches, one card accepted per batch. */
+    const deckWithHistory = async (count: number): Promise<{ id: DeckId; ids: OracleId[] }> => {
+      const id = deckId(randomUUID())
+      await createDeck(db.pool, {
+        id,
+        ownerId: owner,
+        name: 'Logged',
+        commanders: [],
+        targetBracket: 2,
+        archetype: 'midrange',
+        colorIdentity: [],
+      })
+      const ids: OracleId[] = []
+      for (let n = 0; n < count; n += 1) {
+        const oracle = uuid()
+        ids.push(oracle)
+        const version = 1 + n
+        const outcome = await applyBatch(db.pool, id, version, async (client) => {
+          await appendCommandLog(
+            client,
+            id,
+            version + 1,
+            [{ type: 'accept', oracleId: oracle, origin: 'manual' }],
+            AT,
+          )
+        })
+        expect(outcome.kind).toBe('applied')
+      }
+      return { id, ids }
+    }
+
+    it('reports the commands after the client’s version, oldest first', async () => {
+      const { id, ids } = await deckWithHistory(3)
+
+      const since = await commandsSince(db.pool, id, 1, 4)
+
+      expect(since.complete).toBe(true)
+      expect(since.batches.map((b) => b.version)).toEqual([2, 3, 4])
+      expect(oracleIdsOf(since)).toEqual(ids)
+      expect(since.batches[0]?.appliedAt).toBe(AT)
+    })
+
+    it('excludes the client’s own version — `since` is what it has NOT seen', async () => {
+      const { id, ids } = await deckWithHistory(3)
+
+      const since = await commandsSince(db.pool, id, 3, 4)
+
+      expect(since.complete).toBe(true)
+      expect(since.batches).toHaveLength(1)
+      expect(oracleIdsOf(since)).toEqual([ids[2]])
+    })
+
+    it('is complete and empty when the client is already current', async () => {
+      const { id } = await deckWithHistory(2)
+
+      const since = await commandsSince(db.pool, id, 3, 3)
+
+      expect(since).toEqual({ batches: [], complete: true })
+    })
+
+    /*
+     * The dangerous case. A deck edited before this table existed has version
+     * bumps with no log rows, and an empty `since` there means "I cannot tell
+     * you", not "nothing happened". A client that could not tell the two apart
+     * would rebase against a history it never saw.
+     */
+    it('is INCOMPLETE when the log does not reach back to the client’s version', async () => {
+      const { id } = await deckWithHistory(2)
+      // Simulate the pre-API-06 rows: drop the oldest batch from the log.
+      await db.pool.query('DELETE FROM deck_command_log WHERE deck_id = $1 AND version = 2', [id])
+
+      const since = await commandsSince(db.pool, id, 1, 3)
+
+      expect(since.batches).toHaveLength(1)
+      expect(since.complete).toBe(false)
+    })
+
+    it('is INCOMPLETE when a version in the middle of the gap has no log row', async () => {
+      const { id } = await deckWithHistory(3)
+      await db.pool.query('DELETE FROM deck_command_log WHERE deck_id = $1 AND version = 3', [id])
+
+      const since = await commandsSince(db.pool, id, 1, 4)
+
+      expect(since.complete).toBe(false)
+    })
+
+    it('is INCOMPLETE when the gap is longer than the limit', async () => {
+      const { id } = await deckWithHistory(3)
+
+      const since = await commandsSince(db.pool, id, 1, 4, { limit: 2 })
+
+      expect(since.batches).toHaveLength(2)
+      expect(since.complete).toBe(false)
+    })
+
+    it('reports a client claiming to be AHEAD of the server as incomplete, not empty', async () => {
+      const { id } = await deckWithHistory(1)
+
+      expect(await commandsSince(db.pool, id, 9, 2)).toEqual({ batches: [], complete: false })
+    })
+
+    it('keeps one deck’s history out of another’s', async () => {
+      const a = await deckWithHistory(2)
+      const b = await deckWithHistory(2)
+
+      const since = await commandsSince(db.pool, a.id, 1, 3)
+
+      expect(oracleIdsOf(since)).toEqual(a.ids)
+      expect(oracleIdsOf(since)).not.toContain(b.ids[0])
+    })
+
+    it('refuses two batches claiming the same version', async () => {
+      const { id } = await deckWithHistory(1)
+
+      await expect(
+        applyBatch(db.pool, id, 2, async (client) => {
+          await appendCommandLog(client, id, 2, [], AT)
+        }),
+      ).rejects.toThrow()
+    })
+
+    it('goes with the deck when the deck is deleted', async () => {
+      const { id } = await deckWithHistory(1)
+
+      await db.pool.query('DELETE FROM decks WHERE id = $1', [id])
+
+      const { rows } = await db.pool.query('SELECT 1 FROM deck_command_log WHERE deck_id = $1', [
+        id,
+      ])
+      expect(rows).toHaveLength(0)
+    })
+
+    it('rolls the log back with the batch it describes', async () => {
+      const { id } = await deckWithHistory(1)
+
+      await expect(
+        applyBatch(db.pool, id, 2, async (client) => {
+          await appendCommandLog(client, id, 3, [], AT)
+          throw new Error('boom')
+        }),
+      ).rejects.toThrow('boom')
+
+      const since = await commandsSince(db.pool, id, 1, 2)
+      expect(since.batches.map((b) => b.version)).toEqual([2])
     })
   })
 

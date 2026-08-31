@@ -5,6 +5,7 @@ import { registerCardRoutes } from './routes/cards.js'
 import { registerDeckRoutes } from './routes/decks.js'
 import { registerRecommendationRoutes } from './routes/recommendations.js'
 import { registerAnalysisRoutes } from './routes/analysis.js'
+import { registerHealthRoutes } from './routes/health.js'
 
 export interface ServerOptions {
   readonly pool: Pool
@@ -71,6 +72,11 @@ export const buildServer = async (options: ServerOptions): Promise<FastifyInstan
     }),
   )
 
+  // Registered first so it stays reachable even if a later registration is
+  // what is broken — a health check that only works on a healthy server is not
+  // one. Like the others it names its own `/api/v1/...` path; there is no
+  // prefix to inherit.
+  registerHealthRoutes(app, options.pool)
   registerCardRoutes(app, options.pool)
   registerDeckRoutes(app, options.pool)
   registerRecommendationRoutes(app, options.pool)

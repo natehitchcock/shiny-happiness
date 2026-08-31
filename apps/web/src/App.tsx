@@ -2,9 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import * as api from './api'
 import { usePipeline, type Phase } from './pipeline'
 import { AUTO_QUERY_MS, useAutoQuery } from './autoquery'
-import { dimensionKeysOf, formatDecklist, interactsWith } from '@roundtable/domain'
+import { dimensionKeysOf, formatDecklist, interactsWith, rebaseCommands } from '@roundtable/domain'
+// Aliased: `oracleId` is a parameter name a dozen times in this file, and a
+// brander shadowed by a local of the same name reads as a bug even when it is
+// not one.
+import { oracleId as asOracleId } from '@roundtable/domain'
 import { ManaCost, OracleText } from '@roundtable/ui'
-import type { SynergyTag } from '@roundtable/domain'
+import type { DeckCommand, SynergyTag } from '@roundtable/domain'
 import { DeckMenu } from './DeckMenu'
 import { Hint } from './Hint'
 import type { Card } from './api'
@@ -1807,12 +1811,12 @@ export const Workspace = ({
      * Only transient failures. A 400 will not become a 200 by being repeated,
      * and a 409 is handled separately — it needs a new version, not patience.
      */
-    const wire = (c: PendingCommand): Parameters<typeof api.sendCommands>[1][number] =>
+    const wire = (c: PendingCommand): DeckCommand =>
       c.type === 'accept'
-        ? { type: 'accept', oracleId: c.oracleId, origin: 'manual' }
+        ? { type: 'accept', oracleId: asOracleId(c.oracleId), origin: 'manual' }
         : c.type === 'lock'
-          ? { type: 'lock', oracleId: c.oracleId, locked: c.locked ?? true }
-          : { type: c.type, oracleId: c.oracleId }
+          ? { type: 'lock', oracleId: asOracleId(c.oracleId), locked: c.locked ?? true }
+          : { type: c.type, oracleId: asOracleId(c.oracleId) }
 
     // Commands first, as ONE batch — four accepts are one round trip, and one
     // atomic unit the server can reject or apply as a whole (doc 10 §10.3).
@@ -1823,12 +1827,44 @@ export const Workspace = ({
         current = result.deck
       } catch (error) {
         // A 409 means only that our version is behind — the clicks are still
-        // valid. Re-read the deck and send them once more, rather than dropping
-        // work the user did and making them click it again.
+        // valid. Re-read the deck and send them again, rather than dropping
+        // work the user did and making them click it a second time.
         if (!(error instanceof api.ApiError) || error.status !== 409) throw error
+        const conflict = error.body as api.CommandConflict | null
         const fresh = await api.getDeck(current.id)
-        const result = await sendWithRetry(fresh.id, body, fresh.version)
-        current = result.deck
+
+        /*
+         * Rebase rather than re-send blindly (API-06, doc 12 §12.7).
+         *
+         * `since` is what the server accepted while we were behind. Without it
+         * this could only re-send the same batch and hope: a card another
+         * client had just excluded came back with no record, and a card it had
+         * just added came back as a spurious `not-singleton` the user never
+         * caused. `rebaseCommands` drops only the commands whose intent is
+         * ALREADY TRUE — which is not discarding a user action, because the
+         * state they asked for exists — and replays everything else, conflicts
+         * included, since our intent is the more recent one.
+         *
+         * `sinceComplete === false` means the log does not cover the gap, so
+         * `since` is a partial account of it. Rebasing against a partial
+         * account is worse than not rebasing at all: it would drop a command
+         * on the strength of history it cannot see. In that case fall back to
+         * the old behaviour and re-send everything — the server still judges
+         * each command, so the outcome is no worse than it was before API-06.
+         */
+        const rebased =
+          conflict?.sinceComplete === true
+            ? rebaseCommands(body, conflict.since)
+            : { replay: body, superseded: [], overrides: [] }
+
+        if (rebased.replay.length === 0) {
+          // Everything we queued had already happened. Sending an empty batch
+          // would be a round trip that can only answer "nothing to do".
+          current = fresh
+        } else {
+          const result = await sendWithRetry(fresh.id, rebased.replay, fresh.version)
+          current = result.deck
+        }
       }
       serverDeckRef.current = current
     }
@@ -2005,7 +2041,11 @@ export const Workspace = ({
       })
     }
 
-    void sendWithRetry(before.id, [{ type: 'lock', oracleId, locked }], before.version)
+    void sendWithRetry(
+      before.id,
+      [{ type: 'lock', oracleId: asOracleId(oracleId), locked }],
+      before.version,
+    )
       .then((r) => {
         finish()
         serverDeckRef.current = r.deck

@@ -83,6 +83,189 @@ export interface RejectedCommand {
   readonly reason: RejectionReason
 }
 
+/**
+ * One accepted batch, as the server recorded it (doc 12 §12.7).
+ *
+ * `version` is the version the deck REACHED, so a client holding version 4 has
+ * not seen any batch whose `version` is greater than 4.
+ *
+ * `appliedAt` is here because doc 12 §12.7 resolves a genuine conflict by "the
+ * more recent user intent by wall-clock timestamp", and that comparison is
+ * impossible against a bare command list. A live client never needs it — every
+ * batch in `since` is by definition already committed when its own request is
+ * sent — but an offline queue drained hours later does: a command typed at
+ * 09:00 and sent at 17:00 is NOT more recent than a foreign one from 12:00.
+ * That is `WEB-15`'s case, and shipping the timestamp with the log now is what
+ * stops `WEB-15` having to change this contract again.
+ */
+export interface DeckCommandBatch {
+  readonly version: number
+  /** ISO 8601. The instant the server applied the batch. */
+  readonly appliedAt: string
+  readonly commands: readonly DeckCommand[]
+}
+
+/** Why replaying a queued command would achieve nothing. */
+export type SupersededReason =
+  /** Someone else already excluded it; replaying earns `already-excluded`. */
+  | 'already-excluded'
+  /** It is no longer excluded, so `restore` earns `not-excluded`. */
+  | 'not-excluded'
+  /** Every copy went with someone else's exclusion; `remove` earns `not-in-deck`. */
+  | 'no-copies-left'
+  /** Someone else set the same lock state or the same roles. A true no-op. */
+  | 'already-set'
+
+export interface SupersededCommand {
+  readonly command: DeckCommand
+  readonly reason: SupersededReason
+  /** The foreign command that already achieved it. */
+  readonly by: DeckCommand
+}
+
+export interface OverriddenCommand {
+  readonly command: DeckCommand
+  /** The foreign command this one reverses. */
+  readonly by: DeckCommand
+}
+
+export interface RebaseOutcome {
+  /** What to re-send, in the original order. Includes every override. */
+  readonly replay: readonly DeckCommand[]
+  /** Dropped: what the user asked for is already true. */
+  readonly superseded: readonly SupersededCommand[]
+  /** Replayed, but they reverse a foreign edit — the caller must not hide it. */
+  readonly overrides: readonly OverriddenCommand[]
+}
+
+/** The last command in `since` that touched this card, or undefined. */
+const lastTouching = (since: readonly DeckCommand[], id: OracleId): DeckCommand | undefined => {
+  for (let i = since.length - 1; i >= 0; i -= 1) {
+    const command = since[i]!
+    if ('oracleId' in command && command.oracleId === id) return command
+  }
+  return undefined
+}
+
+const sameRoles = (a: readonly Role[], b: readonly Role[]): boolean =>
+  a.length === b.length && a.every((role, i) => role === b[i])
+
+/**
+ * Rebase a queued batch onto the commands the server accepted while we were
+ * behind — the client half of a `409` (doc 12 §12.7).
+ *
+ * Pure, and in the domain rather than in `apps/web`, for the reason the rest of
+ * this file is: the server decides what `since` means and the client decides
+ * what to do about it, and two spellings of "did this already happen?" is
+ * exactly how a replay comes to disagree with the state it is replaying onto.
+ *
+ * It drops ONLY commands whose intent is already true. That is not discarding a
+ * user action (doc 12: "never silently discard a user action") — the state the
+ * user asked for exists; re-sending would earn a rejection that reads as "your
+ * click failed" for a click that in fact succeeded, just not from here.
+ *
+ * Everything else is replayed, including the genuine conflicts, which are
+ * reported separately in `overrides` so the caller can say so. Resolving those
+ * by timestamp needs `DeckCommandBatch.appliedAt` and the queue's own clock;
+ * this function deliberately does not have a clock (AGENTS.md R1) and so does
+ * not decide it. A live client's own intent is always the newer one.
+ *
+ * Rejected alternative: also drop a queued `accept` when `since` accepted the
+ * same card. It is the most tempting rule and it is wrong — a deck legitimately
+ * holds 34 Mountains, and this function has no card data with which to tell a
+ * basic land from a singleton. Dropping the accept would silently lose a real
+ * copy; replaying it earns an honest `not-singleton` for the cards where that
+ * is the truth.
+ */
+export const rebaseCommands = (
+  queued: readonly DeckCommand[],
+  since: readonly DeckCommand[],
+): RebaseOutcome => {
+  const replay: DeckCommand[] = []
+  const superseded: SupersededCommand[] = []
+  const overrides: OverriddenCommand[] = []
+
+  for (const command of queued) {
+    // A core-package command names a bracket, not a card, so nothing in `since`
+    // can be about "the same card". Replay it and let the server judge it.
+    if (!('oracleId' in command)) {
+      replay.push(command)
+      continue
+    }
+
+    const by = lastTouching(since, command.oracleId)
+    if (by === undefined) {
+      replay.push(command)
+      continue
+    }
+
+    const drop = (reason: SupersededReason): void => {
+      superseded.push({ command, reason, by })
+    }
+
+    switch (command.type) {
+      case 'exclude':
+        if (by.type === 'exclude') drop('already-excluded')
+        else {
+          if (by.type === 'accept') overrides.push({ command, by })
+          replay.push(command)
+        }
+        continue
+
+      case 'restore':
+        // `restore` means excluded -> absent. If the card is not excluded any
+        // more, whoever restored it got there first.
+        if (by.type === 'exclude') {
+          overrides.push({ command, by })
+          replay.push(command)
+        } else drop('not-excluded')
+        continue
+
+      case 'remove':
+        // `exclude` takes every accepted copy, so there is nothing left to
+        // remove one of.
+        if (by.type === 'exclude') drop('no-copies-left')
+        else {
+          if (by.type === 'accept') overrides.push({ command, by })
+          replay.push(command)
+        }
+        continue
+
+      case 'lock':
+        if (by.type === 'lock') {
+          if (by.locked === command.locked) drop('already-set')
+          else {
+            overrides.push({ command, by })
+            replay.push(command)
+          }
+        } else replay.push(command)
+        continue
+
+      case 'setRole':
+        if (by.type === 'setRole' && sameRoles(by.roles, command.roles)) drop('already-set')
+        else {
+          if (by.type === 'setRole') overrides.push({ command, by })
+          replay.push(command)
+        }
+        continue
+
+      case 'accept':
+        // Never dropped — see the rejected alternative above. It IS a conflict
+        // when the other client excluded the card: that is doc 12 §12.7's own
+        // example, and pillar P6 does not bind the user, so the accept applies
+        // and clears the exclusion. Reported, not hidden.
+        if (by.type === 'exclude') overrides.push({ command, by })
+        replay.push(command)
+        continue
+
+      default:
+        return assertNever(command, 'rebaseCommands')
+    }
+  }
+
+  return { replay, superseded, overrides }
+}
+
 export interface CommandContext {
   readonly cards: ReadonlyMap<OracleId, Card>
   /** Injected: the domain is pure and may not read the clock (AGENTS.md R1). */

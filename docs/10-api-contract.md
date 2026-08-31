@@ -94,9 +94,32 @@ is ~24 changes and must be a single undoable, atomic unit (doc 06 §6.6).
 POST /api/v1/decks/:id/commands
   { commands: DeckCommand[], idempotencyKey: string, baseVersion: number }
   → 200 { deck: Deck, applied: DeckCommand[], rejected: RejectedCommand[] }
-  → 409 { deck: Deck, since: DeckCommand[] }   baseVersion is stale; the client
-        replays its queue against `deck` and re-sends (doc 12 §12.7)
+  → 409 { deck: Deck,
+          since: DeckCommand[],              // what was accepted after baseVersion
+          sinceBatches?: DeckCommandBatch[], // the same, grouped by version
+          sinceComplete?: boolean            // false ⇒ refetch, do not replay
+        }
+        baseVersion is stale; the client rebases its queue onto `since` and
+        re-sends (doc 12 §12.7)
 
+type DeckCommandBatch = { version: number, appliedAt: string, commands: DeckCommand[] }
+```
+
+`since` is flat and ordered oldest-first — the applied commands only, never the
+rejected ones. `sinceBatches` is that same data grouped as the server applied
+it, one entry per version, each carrying the wall clock doc 12 §12.7's conflict
+rule compares against; a bare `DeckCommand` has no timestamp, which is the gap
+it closes.
+
+**`sinceComplete` must not be ignored.** `false` means the log does not cover
+the whole gap between `baseVersion` and `deck.version`, so `since` is a partial
+account of it and the client must refetch rather than rebase — dropping a queued
+command on the strength of history the server could not supply would drop work
+the user did. Absent reads the same as `false`. Both new fields are optional so
+a client written against the earlier contract still typechecks; the server
+always sends them (ADR-0018).
+
+```
 type DeckCommand =
   | { type: 'accept';   oracleId; origin: Origin; lock?: boolean }
   | { type: 'remove';   oracleId }          // one copy; still suggestible
@@ -265,6 +288,38 @@ seen what will happen** (doc 15 §15.3). `unresolved` and `illegal` never block 
 they are reported for in-place fixing, and `previouslyExcluded` exists so a merge
 cannot silently resurrect a card the user removed (P6).
 
+## 10.7a Health
+
+```
+GET /api/v1/health
+  → 200 { status: 'ok' | 'degraded',
+          schema:   { applied: string | null, expected: string | null,
+                      pending: string[], upToDate: boolean, detail?: string },
+          corpus:   { loaded: boolean, snapshotId: string | null,
+                      cardCount: number | null, comboCount: number | null,
+                      ingestedAt: string | null },
+          database: { reachable: true } }
+  → 503 the same document, with status: 'unavailable' and
+        database: { reachable: false, code?: string, detail?: string }
+```
+
+What a deployment is actually running (ADR-0019). It exists because a schema
+four migrations behind serves **nulls, not errors** — creatures with no power or
+toughness, fuzzy search matching nothing — and nothing else the API serves names
+that cause.
+
+- `503` only when the database is unreachable, so a monitor can alert on it.
+  `degraded` — behind on migrations, or no corpus loaded — is a `200`, because
+  the deployment is serving and pulling it out of a load balancer would be worse
+  than the missing migration. Assert on `upToDate`, not on the status code.
+- **Deliberately not RFC 9457**, unlike every other error here (§10.1): a
+  problem document would replace the body, and on this endpoint the body *is*
+  the diagnosis. The shape is identical in all three states.
+- Cheap enough to poll: three trivial queries, no corpus read, no cache.
+- Never carries a connection string, a host, a user name or a driver message —
+  only a short driver `code` and the *names* of the Postgres-ish environment
+  variables that are set.
+
 ## 10.8 Rate limiting and errors
 
 - Per-user limits on recommendation generation (it is the expensive endpoint);
@@ -283,11 +338,13 @@ as if it described running code.
 endpoints and the batched command endpoint. It diverges in five places, each a
 dependency that has not shipped rather than a disagreement with the contract:
 
-1. **`409` returns an empty `since`.** The response carries the current `deck`,
-   which is enough for a client to refetch and rebuild, but not the incremental
-   command list §10.3 specifies. `since` needs an ordered per-deck command log
-   keyed by version, and no table provides one. **`API-06` owns this** — it is
-   listed there as "optimistic concurrency: `baseVersion`, `409` with `since`".
+1. ~~**`409` returns an empty `since`.**~~ **Closed by `API-06`.** Migration
+   `0012` adds `deck_command_log`, the ordered per-deck log keyed by version
+   this needed, and the `409` now carries the real `since` plus `sinceBatches`
+   and `sinceComplete` (§10.3, ADR-0018). One thing to know: a deck that was
+   edited before `0012` has version bumps with no log rows, and reports
+   `sinceComplete: false` until its history catches up — which degrades to the
+   old refetch-and-rebuild behaviour rather than to a wrong one.
 
 2. **`applyCorePackage` and `removeCorePackage` are always rejected**, with
    `reason.kind = 'unsupported'` naming the blocking task. Core packages need

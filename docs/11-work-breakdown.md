@@ -46,6 +46,12 @@ No Docker? Any PostgreSQL 16 works. The third session used the EDB portable
 binaries (`initdb` into a user directory, `pg_ctl -o "-p 5433"`) — no
 administrator rights, no service.
 
+**Is a deployment current?** `GET /api/v1/health` says so without credentials —
+the applied migration head, anything unapplied, and whether a corpus snapshot is
+live ([ADR-0019](adr/0019-health-endpoint-reports-the-applied-schema.md)). It
+exists because production ran four migrations behind for weeks and never
+returned an error; see DEPLOYING.md.
+
 **Verify:**
 
 ```bash
@@ -64,7 +70,7 @@ API-02 performance test seeds a 20,000-card corpus and takes ~40 s.
 | `WEB-01` proper | The slice is one deck in localStorage with no offline queue, no optimistic mutation and no reconcile. Everything in WEB-02..24 assumes those exist. |
 | `LEGAL-01` (name clearance) | **Lotus Wizard** needs checking before it goes on a domain. Now urgent rather than cheap-and-later: the Vercel config is written. |
 | `DATA-05` | The last unanswered terms question. Until the bracket rules are populated, `analysis.bracket.assessed` is honestly null and core packages cannot be built. Scryfall now exposes a `game_changer` boolean on card records, which may answer half of it. |
-| `API-06` | `409` returns the current deck with an empty `since`; the client can refetch but not replay. |
+| `API-06` (remainder) | The `409` half is done — `since` is real (migration `0012`, [ADR-0018](adr/0018-deck-command-log-makes-409-replayable.md)) and the client rebases onto it instead of re-sending blindly. What is left in the task's scope is the **workspace-state endpoint** of doc 12 §12.6: `PUT /decks/:id/workspace` does not exist and nothing persists `WorkspaceState`, so "return where you left" does not hold across devices. |
 
 **`DATA-05` is the only third-party question left.** `DATA-01` and `DATA-02` are
 answered ([ADR-0009](adr/0009-scryfall-terms.md), [ADR-0010](adr/0010-spellbook-terms.md)):
@@ -167,7 +173,8 @@ against their interfaces; nothing depending on an unanswered question ships.
 | `API-03` | Auth, per-user rate limiting, deck ownership                                                                        | API-01                 | No deck readable cross-user; 429 with `Retry-After`                                                                                                                                     |
 | `API-04` | Import preview/commit and export endpoints (doc 10 §10.7)                                                           | DOM-07                 | Preview applies nothing; `illegal` and `previouslyExcluded` populated; round-trip export JSON → import → identical deck incl. origins, exclusions, locks, tags, archetype and snapshots |
 | `API-05` | Deck library: list/filter/sort, `recent`, duplicate, archive, soft delete (doc 12 §12.2–12.4)                       | API-01                 | `DeckSummary` projection never loads entries; duplicate copies exclusions and locks                                                                                                     |
-| `API-06` | Optimistic concurrency: `baseVersion`, `409` with `since`, workspace-state endpoint (doc 12 §12.6–12.7)             | API-01                 | Concurrent-edit test from two clients converges without data loss                                                                                                                       |
+| `API-06` | ⬛ **Mostly done.** `409` now carries a real `since` from `deck_command_log` (migration `0012`), plus `sinceBatches` and `sinceComplete`; `rebaseCommands` in `packages/domain` is the client half and `apps/web` uses it. **The workspace-state endpoint (§12.6) is still not built** — nothing writes `WorkspaceState` and `PUT /decks/:id/workspace` does not exist | API-01 | ✅ Two- and three-client convergence tests against a real Postgres, plus the case that used to lose information: a client can now tell "someone already did this" from "this was refused". See [ADR-0018](adr/0018-deck-command-log-makes-409-replayable.md) |
+| `API-10` | `GET /api/v1/health`: applied migration head, pending migrations, corpus liveness | API-01 | ✅ **Done.** Three queries, no corpus read, never echoes a connection string; `503` only when the database is unreachable, `200`+`degraded` when the schema is behind. [ADR-0019](adr/0019-health-endpoint-reports-the-applied-schema.md) |
 | `API-07` | Snapshots: auto before bulk ops, manual, restore (doc 12 §12.8)                                                     | API-01                 | Restore is itself undoable; retention enforced                                                                                                                                          |
 | `API-08` | Query validate/suggest endpoints, corpus histograms for autocomplete counts (doc 10 §10.4)                          | API-02, DOM-08         | Suggest p95 < 40 ms; counts served from precomputed histograms                                                                                                                          |
 | `API-09` | Archetype endpoints incl. per-commander suggestion with `source`, and archetype on deck create/patch (doc 10 §10.6) | API-01, DOM-09 | `source: 'default'` returned honestly when no statistics exist — which is **every** case until the project's own corpus is large enough ([ADR-0008](adr/0008-drop-edhrec.md)) |

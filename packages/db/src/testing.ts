@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { Pool } from 'pg'
-import { loadMigrations, migrateUp } from './migrate.js'
+import { MIGRATIONS_DIR, loadMigrations, migrateUp } from './migrate.js'
 
 /**
  * Integration-test harness.
@@ -17,7 +15,8 @@ import { loadMigrations, migrateUp } from './migrate.js'
  * so files can run in parallel without seeing each other's rows.
  */
 
-export const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations')
+/** Re-exported so the tests that already import it from here keep working. */
+export { MIGRATIONS_DIR }
 
 export const databaseUrl = (): string | null => {
   const url = process.env['DATABASE_URL']
