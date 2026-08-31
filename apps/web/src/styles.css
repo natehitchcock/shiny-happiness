@@ -1589,6 +1589,51 @@ select {
 }
 
 /*
+ * The field reference, at the end of the bar.
+ *
+ * Centred against a row of full-height controls rather than sitting on the text
+ * baseline — the `?` is 13 px and the input is not, so `align-items: stretch`
+ * on the bar would otherwise leave it a stretched, empty column.
+ */
+.filter-help {
+  flex: 0 0 auto;
+  align-items: center;
+}
+.filter-help .hint-trigger {
+  cursor: pointer;
+}
+/*
+ * Opens DOWN and to the LEFT, which is the opposite of every other hint on both
+ * axes. Both flips were seen going wrong in the browser, not guessed:
+ *
+ *   down — `.hint-pop` defaults to `bottom: 100%`, and the filter bar sits a
+ *     few rows below the top of its region, so the default put the first third
+ *     of the field list above the viewport where it could not be scrolled to.
+ *   left — this is the last control in the bar, so growing rightwards from
+ *     `left: 0` runs a 20rem panel off the right edge at 360 px.
+ *
+ * Scoped to this one hint, the way `.comp-hint` and `.curve-hint` already scope
+ * theirs; the shared rule is untouched.
+ */
+.filter-help .hint-pop {
+  top: calc(100% + 6px);
+  bottom: auto;
+  left: auto;
+  right: 0;
+  /*
+   * Long enough that a field and its explanation stay on one line, but never
+   * wider than the screen: 26rem is 416 px and the smallest supported viewport
+   * is 360 px, so the flat `max-width: 26rem` this started as put the panel off
+   * the edge of a phone — the exact failure the `right: 0` above exists to
+   * avoid, reintroduced one line later.
+   */
+  max-width: min(26rem, calc(100vw - 2rem));
+}
+.filter-help .hint-pop code {
+  color: var(--brass);
+}
+
+/*
  * Two layouts, one component.
  *
  * `data-aligned="true"` is the real one: each chip is absolutely positioned so

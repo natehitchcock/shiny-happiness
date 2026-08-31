@@ -389,6 +389,22 @@ That is why persisting the union did not force a change to the recommendations
 contract, and why the web client can adopt persisted columns without any change
 to how it asks for them.
 
+**Both metrics are also query fields** — `impact>=6`, `eff>=1.5` — as of
+[ADR-0024](adr/0024-impact-and-efficiency-are-query-fields.md). That does not
+collapse the union: a query column ticks, a metric column shows the number, and
+you need the number to pick the threshold. What it does mean is that
+`{kind:'query', query:'impact>=6'}` is an ordinary column the server evaluates
+like any other, and that it is evaluated against `item.impact.score` — the very
+number the metric column draws — so a ticked row can never contradict its own
+cell.
+
+**The filter compares the raw score, never a display-rounded one.** `cardImpact`
+and `cardEfficiency` already quantise to three decimals, so there is one number
+per card per metric and both sides read it. A renderer that rounds for display
+must move that rounding into `impact.ts`, where the predicate reads it too;
+rounding in the renderer alone would make `impact>=6.2` keep a row whose cell
+says 6.1.
+
 ## 18.8 Where the numbers appear — and why not in `reasons`
 
 Both metrics ride on **every recommendation item** and on **card detail**, so no

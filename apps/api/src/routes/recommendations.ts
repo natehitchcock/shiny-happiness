@@ -151,6 +151,25 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
               toughness: pooled.toughness,
               reserved: pooled.reserved,
               group: group.key,
+              /*
+               * Read off the ITEM, not recomputed from the card.
+               *
+               * This is the whole of "the filter agrees with the column": the
+               * numbers the client draws in the impact and efficiency cells are
+               * `item.impact.score` and `item.efficiency.score`, and a column
+               * of `impact>=6` ticks exactly the rows whose own cell says 6 or
+               * more, by construction rather than by two implementations
+               * happening to match.
+               *
+               * The `?? 0` is unreachable — `recommend` sets both on every item
+               * — but the fields are optional on `Recommendation` (AGENTS.md
+               * R2 made them additive), so the type needs an answer. Zero is
+               * the honest one: it is what a card with no rules text scores, so
+               * a build that somehow omitted them would drop out of `impact>=6`
+               * rather than silently pass it.
+               */
+              impact: item.impact?.score ?? 0,
+              efficiency: item.efficiency?.score ?? 0,
             }
             if (matchesQuery(ast, candidate)) matched.push(item.oracleId)
           }

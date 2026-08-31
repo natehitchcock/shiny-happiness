@@ -25,6 +25,29 @@ export interface AnnotatedCandidate {
   readonly toughness: number | null
   readonly reserved: boolean
   readonly group: string | null
+  /**
+   * `cardImpact(card).score` — the number, not the breakdown.
+   *
+   * ANNOTATED, NOT COMPUTED HERE, and that is a rule rather than a preference.
+   * `cardImpact` is a text classifier over the oracle text; running it inside
+   * the predicate would run it once per card PER TERM, and it would put a
+   * classifier inside a function whose whole contract is that the annotation
+   * already happened. The caller computes it once and hands it over, exactly as
+   * it does for `comboDegree`.
+   *
+   * It is the SAME NUMBER the client draws — `Recommendation.impact.score` —
+   * carried across unrounded and unrescaled. Both scores arrive already
+   * quantised to three decimals by `impact.ts` and `efficiency.ts`, so the
+   * value here and the value on the wire are bit-identical and a row can never
+   * contradict its own cell. Rejected: re-rounding to a display precision, both
+   * because no renderer has picked one yet and because choosing here would bake
+   * in a disagreement the moment a renderer chose differently. Whoever builds
+   * the metric column must draw `score` itself; if it ever rounds for display,
+   * that rounding belongs in `impact.ts` where BOTH sides read it.
+   */
+  readonly impact: number
+  /** `cardEfficiency(card).score`. Same rule, same reasoning, smaller scale. */
+  readonly efficiency: number
 }
 
 const RARITY_ORDER: Readonly<Record<string, number>> = {
@@ -161,6 +184,17 @@ const evaluateTerm = (
       return compareNumbers(candidate.comboDegree, op, Number(value))
     case 'near':
       return compareNumbers(candidate.nearCombosAt1, op, Number(value))
+    /*
+     * The two card-intrinsic metrics (doc 18). Unlike `price`, `power` and
+     * `toughness` these are never null — `cardImpact` and `cardEfficiency` are
+     * total, and a card with no rules text scores a real 0 rather than an
+     * absent one — so there is no "no data" branch to get wrong and `impact=0`
+     * is an answerable question about vanilla creatures.
+     */
+    case 'impact':
+      return compareNumbers(candidate.impact, op, Number(value))
+    case 'efficiency':
+      return compareNumbers(candidate.efficiency, op, Number(value))
     case 'role':
       return candidate.roles.some((r) => r === value.toLowerCase())
     case 'flag':

@@ -189,6 +189,19 @@ const toAnnotated = (s: Scratch): AnnotatedCandidate => ({
   toughness: s.pooled.toughness,
   reserved: s.pooled.reserved,
   group: null,
+  /*
+   * The same two calls the emitted item makes, so `impact>=6` keeps exactly the
+   * rows whose impact cell reads 6 or more.
+   *
+   * Computed here rather than threaded down from `Scratch` because the filter
+   * runs over the WHOLE eligible pool while the emitted items are only the
+   * sliced group members — there is no shared point earlier that has both. Both
+   * functions are pure and total, so the two calls cannot disagree; the cost is
+   * one extra classifier pass over the pool, and only when a query names one of
+   * these fields is the filter run at all.
+   */
+  impact: cardImpact(s.pooled.card).score,
+  efficiency: cardEfficiency(s.pooled.card).score,
 })
 
 const dimensionLabel = (dimension: CompositionDimension): string =>
@@ -238,7 +251,26 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       score: 0,
       reasons: [],
     }
-    scratch.push({ ...s, matchesFilter: matchesQuery(input.query, toAnnotated(s)) })
+    /*
+     * No query, no annotation.
+     *
+     * `matchesQuery(null, …)` is true for everything, so the annotation was
+     * always thrown away on the unfiltered path — free when it was a dozen
+     * field copies, not free now that it runs the impact classifier twice per
+     * card over a pool that is the whole colour identity. The unfiltered path
+     * is the common one and this makes it cheaper than it was.
+     *
+     * The filtered path pays roughly 6 µs a card whether or not the query names
+     * a metric. Rejected: walking the AST first and only computing the metrics
+     * when `impact` or `efficiency` appear in it. It would save that on most
+     * queries and it would leave a zero sitting in a field that reads as a real
+     * score, which is one refactor away from a card being filtered against a
+     * number nobody computed.
+     */
+    scratch.push({
+      ...s,
+      matchesFilter: input.query === null || matchesQuery(input.query, toAnnotated(s)),
+    })
   }
 
   // ---- group assignment (doc 05 §5.3): first group a card qualifies for ----

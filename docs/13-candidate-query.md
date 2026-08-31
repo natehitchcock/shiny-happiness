@@ -73,6 +73,8 @@ A **bareword** with no field matches the card name, substring, case-insensitive.
 | `produces` | `causes` | `:` | A mechanical synergy tag the card CAUSES — `produces:artifact-etb` |
 | `wants` | `benefits` | `:` | A tag the card BENEFITS FROM — `wants:creature-death` |
 | `tag` | `synergy` | `:` | Either side — `tag:treasure` |
+| `impact` | `imp` | numeric | **How much the card does** (doc 18 §18.2), 0–18.48 — `impact>=6` |
+| `efficiency` | `eff` | numeric | **What you get per mana** (doc 18 §18.6), a small ratio — `eff>=1.5` |
 
 `is:` predicates: `permanent`, `spell`, `creature`, `land`, `vanilla`, `modal`,
 `dfc`, `split`, `adventure`, `reserved`, `gamechanger`, `reprint`, `firstprint`.
@@ -89,7 +91,18 @@ o:~ t:enchantment                    enchantments that reference themselves
 near>=2 -t:land                      pairs worth adding together
 tag:artifact-etb mv<=3               cheap cards on either side of artifact ETBs
 wants:creature-death -produces:creature-death   drains with nothing to feed them
+impact>=6 -t:land                    the heavy hitters, lands excluded
+eff>=1.5 mv<=3                       cheap cards that punch above their cost
+impact>=6 -is:gamechanger            board-changing cards that stay inside Bracket 3
 ```
+
+`impact` and `efficiency` are the two metrics doc 18 puts on every row, and the
+filter compares **the same number the column shows** — no rounding and no
+rescaling happens between the cell and the query (ADR-0024). They are on their
+own scales because they measure different things: impact runs 0–18.48, and
+efficiency is stat points of surplus per mana, so it clusters near 1. Read the
+column, then set the threshold; that is why the number column and a query
+column are different things and both exist.
 
 `produces`, `wants` and `tag` accept the spelling shown on the chip as well as
 the internal one: `tag:"artifact etb"` and `tag:artifact-etb` are the same query.
