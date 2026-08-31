@@ -673,6 +673,125 @@ select {
 }
 
 /*
+ * Wider than 1320px the panel stops covering the feed and becomes a column.
+ *
+ * The overlay above was built deliberately and its reasoning still holds when
+ * there is no room for a fourth column. What it costs when there IS room is the
+ * defect being fixed here: while you read a card's details the panel sits over
+ * the Add and Reject buttons of the very rows you are reading, so you cannot act
+ * on what you have just read. The user's words: "when there is space, make the
+ * detail pane its own column and shrink the suggestions pane so you can still
+ * see Add/Reject while viewing the details."
+ *
+ * WHY 1320px. Arithmetic, not taste, and every floor in it was measured in
+ * Chrome on a real 86-card deck rather than read off a `minmax`:
+ *
+ *   deck rail        310px   the width its row stops overflowing at
+ *   suggestions      400px   the width its name stops being crushed at
+ *   detail           336px   21rem, the width the panel already is
+ *   analysis rail    230px   the shipped floor; measured clean at it
+ *   three 1px rules    3px
+ *   ------------------------
+ *                   1279px   of layout viewport
+ *
+ * The FEED's 400px, because the obvious candidate is wrong. The container
+ * queries above drop the price at a 320px row box and the mana cost at 250px,
+ * and both were set for the deck rail's rows. A suggestion row carries more: a
+ * combo-degree hint, a name with a type line under it, the mana cost, the price,
+ * Add and Reject. Measured, that row needs a 400px column before
+ * `.card-row .name` stops being squeezed past its 5rem floor — at 390px the name
+ * button is 80px wide inside a 62px cell and starts running under the mana
+ * column. A row whose name is two characters wide is not a usable column no
+ * matter what else it still shows, so the floor is the name's and not the price
+ * query's 353px.
+ *
+ * The DECK rail's 310px, which is why this track does NOT keep the grid's
+ * `minmax(230px, 1fr)` here. At 230px the deck row's Remove button finishes 58px
+ * OUTSIDE the column, on top of the feed; measured, the spill reaches zero at
+ * 310px. The cause is a live defect in the row and not in this grid: the
+ * `@container (max-width: 250px)` rule that is supposed to drop the mana column
+ * on a cramped rail is dead, because `.card-row .mana { display: flex }` is
+ * declared later at equal specificity and wins. That belongs to whoever owns the
+ * row, but a threshold derived from a floor the rail cannot actually hold would
+ * be a number that only looked derived, so the four-column layout asks for the
+ * width the rail really needs. It is also why the deck rail is never worse inside
+ * this layout than it is outside it.
+ *
+ * Then the scrollbar. Chrome resolves a media query against `innerWidth`, which
+ * on Windows includes the classic scrollbar the layout viewport never gets —
+ * measured on the running app at `clientWidth` 2545 while `(min-width: 2546px)`
+ * matched. That is +15 to +17px depending on the user's setting. 1279 + 17 =
+ * 1296, rounded up to 1320 so a wider scrollbar or a sub-pixel track cannot land
+ * a column exactly on its floor.
+ *
+ * WHY THE COLUMN COMES AND GOES. The alternative — reserving the track
+ * permanently above the threshold — was rejected: it takes 336px away from the
+ * feed at every moment to hold a space for a panel that is closed most of the
+ * time, which is the opposite of getting value out of the space. The price of
+ * the choice made here is that the feed reflows when a card is clicked, and the
+ * threshold is what bounds that: at 1320px the feed goes from 711px to 426px,
+ * and BOTH are above the 353px at which the price column would drop. The rows
+ * re-truncate their names; no column appears or disappears. That is the whole
+ * reason the feed's floor had to be the name's.
+ *
+ * No transition on the track. `grid-template-columns` does animate, and the
+ * displacement would be easier to follow if it did — but the feed is several
+ * hundred rows and relaying all of them out every frame is a worse experience
+ * than the jump.
+ *
+ * The panel keeps its 21rem at every width, so dragging a window across this
+ * threshold with a card open moves the panel without re-wrapping a word inside
+ * it.
+ */
+@media (min-width: 1320px) {
+  .workspace[data-detail='open'] {
+    grid-template-columns: minmax(310px, 1fr) minmax(0, 2.4fr) 21rem minmax(230px, 1fr);
+  }
+
+  /*
+   * The rail is placed, not left to the auto-placement cursor. Three regions
+   * into four tracks fill 1, 2 and 3 — which would put the analysis rail in the
+   * detail's slot and open the reserved column at the far right, behind nothing.
+   */
+  .workspace[data-detail='open'] > .region.analysis {
+    grid-column: 4;
+  }
+
+  /*
+   * The panel lands ON the reserved track, not near it.
+   *
+   * `right: calc(100% + 1px)` puts its right edge on the rule between the two
+   * columns: `100%` is the analysis rail's own padding box, so this holds
+   * however the grid rounds the fractional tracks, and `1px` is the gap. The
+   * width is the track's width, so the two edges coincide.
+   *
+   * Stretched top to bottom because the track has no element in it. `.workspace`
+   * paints `--rule` and each region paints `--ink` over its own track, so any
+   * part of the reserved column the panel does not cover shows as a slab of rule
+   * colour — and the workspace is thousands of pixels tall on a real deck. The
+   * panel is the column's background as well as its content. `max-height` has to
+   * go with it: an over-constrained box drops `bottom`, which would leave a bare
+   * strip at the foot of the column.
+   *
+   * The shadow goes too. It was what said "on top of"; beside is not on top of,
+   * and a shadow on a column makes it look like it has come loose. The radius
+   * goes for the same reason — a rounded corner here shows rule colour through
+   * the notch.
+   */
+  .workspace[data-detail='open'] .preview {
+    top: 0;
+    right: calc(100% + 1px);
+    bottom: 0;
+    margin-right: 0;
+    width: 21rem;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+/*
  * On one column the preview is a bottom sheet, not the top of the rail.
  *
  * The defect: `.workspace` collapses to `1fr` below 900px, which puts the

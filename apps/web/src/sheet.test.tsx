@@ -348,6 +348,120 @@ describe('crossing the breakpoint with a card open', () => {
 })
 
 /*
+ * The grid reserves a fourth column for the panel on a wide screen, and a grid
+ * is a PARENT of the panel — CSS has no way to ask whether a descendant is
+ * rendered. So the workspace has to say it out loud.
+ *
+ * What the attribute means is the whole risk. It must track the panel and not
+ * the click: one that ran ahead of the panel would open an empty 21rem column
+ * and hold it open while a request was in flight, and one that lagged would
+ * leave the panel overlaying a feed that had already made room for it.
+ */
+describe('the workspace tells the grid when a detail is open', () => {
+  const workspace = (): HTMLElement => document.querySelector('.workspace') as HTMLElement
+  const panel = (): HTMLElement | null => document.querySelector('.preview')
+  /** The invariant, checked at every step rather than only at the ends. */
+  const inStep = (): void => {
+    expect(workspace().dataset['detail']).toBe(panel() === null ? 'closed' : 'open')
+  }
+
+  it('says closed with nothing selected, open with a card, and closed again', async () => {
+    await mount()
+    expect(workspace().dataset['detail']).toBe('closed')
+    inStep()
+
+    await tapPreview('Krenko, Mob Boss')
+    await screen.findByLabelText('Krenko, Mob Boss details')
+    expect(workspace().dataset['detail']).toBe('open')
+    inStep()
+
+    await act(async () => {
+      screen.getByLabelText('Close preview').click()
+    })
+    await waitFor(() => expect(screen.queryByLabelText('Krenko, Mob Boss details')).toBeNull())
+    expect(workspace().dataset['detail']).toBe('closed')
+    inStep()
+  })
+
+  it('stays in step across the single-column breakpoint', async () => {
+    /*
+     * The attribute is inert below the breakpoint — the four-column rules are
+     * in a `min-width` block the sheet's viewport cannot match — but it must not
+     * LIE. A value left stale by a rotate would reserve a column the moment the
+     * window was widened again, with or without a panel to put in it.
+     */
+    await setNarrow(true)
+    await mount()
+    await tapPreview('Krenko, Mob Boss')
+    await screen.findByRole('dialog', { name: 'Krenko, Mob Boss details' })
+    inStep()
+
+    await setNarrow(false)
+    inStep()
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+    await waitFor(() => expect(screen.queryByLabelText('Krenko, Mob Boss details')).toBeNull())
+    inStep()
+  })
+
+  it('waits for the panel rather than opening a column on the click', async () => {
+    /*
+     * The one route where the click and the panel are not the same moment.
+     *
+     * `open` sets `inspect` and only then asks for the detail. For a card in the
+     * deck or the feed that gap is invisible — the hydration maps already hold
+     * it and the panel renders in the same commit. A card reached from "Cards
+     * named like…" came from `searchCards`, which hydrates nothing, so it has no
+     * entry in either map and previews only once `/cards/{id}` lands.
+     *
+     * Key the grid on `inspect` and this is a 21rem column that opens empty and
+     * stays empty for the length of a round trip, on a page where every row to
+     * its left has just jumped sideways to make room for nothing.
+     */
+    const stranger = card('o9', 'Shivan Dragon')
+    mocked.searchCards.mockResolvedValue({ items: [stranger] } as unknown as Awaited<
+      ReturnType<typeof api.searchCards>
+    >)
+    let land: (() => void) | null = null
+    mocked.getCardDetail.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          land = () => resolve({ ...stranger, printings: [], combos: [] } as api.CardDetail)
+        }),
+    )
+
+    await mount()
+    const box = screen.getByLabelText('Filter suggestions') as HTMLInputElement
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+    await act(async () => {
+      setter?.call(box, 'Shivan Dragon')
+      box.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    // The name-match list follows the committed query, not the draft.
+    await act(async () => screen.getByLabelText(/^Run this filter/).click())
+
+    const opener = await screen.findByLabelText('Preview Shivan Dragon')
+    await act(async () => {
+      opener.click()
+    })
+
+    // Clicked, requested, and nothing to show yet: the grid must not have moved.
+    expect(document.querySelector('.preview')).toBeNull()
+    expect(workspace().dataset['detail']).toBe('closed')
+    inStep()
+
+    await act(async () => {
+      land?.()
+    })
+    await screen.findByLabelText('Shivan Dragon details')
+    expect(workspace().dataset['detail']).toBe('open')
+    inStep()
+  })
+})
+
+/*
  * The stylesheet half.
  *
  * `App.tsx` moves focus into the panel whenever `matchMedia(SINGLE_COLUMN)`
