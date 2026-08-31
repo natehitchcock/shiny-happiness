@@ -677,11 +677,16 @@ const Node = ({
         /*
          * The answer to doc 17 §17.10 question 2.
          *
-         * 501 cards in the corpus have no art on any printing, so this is not a
-         * rare path — a 100-card deck has roughly a 78% chance of containing
-         * one. The worry in the scope note was that a text tile among ninety-
-         * nine pictures would be the ONLY readable node and would therefore
-         * read as emphasis. It is answered by levelling the others up rather
+         * A node whose printing has no resolved art. The worry in the scope
+         * note was that a text tile among ninety-nine pictures would be the
+         * ONLY readable node and would therefore read as emphasis.
+         *
+         * When that note was written the path was common — 501 cards had no
+         * art, giving a 100-card deck roughly a 78% chance of hitting it. It is
+         * now rare rather than gone: the 501 were a mapper defect on
+         * double-faced layouts and coverage is 34,492 of 34,492 (doc 17 §17.2),
+         * but an unresolved printing is still something the API can send and
+         * the answer below is what keeps it from looking like a mistake. It is answered by levelling the others up rather
          * than this one down: every node carries its name in `aria-label`, in a
          * `<title>`, and in the details panel on hover or focus, so the arted
          * cards are labelled too and this one is not the exception. Drawn in

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
+import { cardDetail, hydrateCards } from './cardcache'
 import { usePipeline, type Phase } from './pipeline'
 import { AUTO_QUERY_MS, useAutoQuery } from './autoquery'
 import {
@@ -52,7 +53,8 @@ const usd = (value: number | null | undefined): string =>
  * the API is neither a URL nor the absence the primitives test for, and
  * `<img src={null}>` draws a broken image exactly where the no-art fallback was
  * meant to draw a readable panel. A card with neither asset collapses to
- * `undefined` outright, which is the shape the 501 art-less cards take.
+ * `undefined` outright, which is the shape a card whose printing has no
+ * resolved art takes.
  *
  * Here rather than in `api.ts` because it is a view-model mapping, not part of
  * the HTTP seam — `api.ts` is where the wire types live and this is where they
@@ -1194,7 +1196,7 @@ const Preview = ({
   /** Printings and combos. Arrives second; the panel does not wait for it. */
   detail: api.CardDetail | null
   price: number | null | undefined
-  /** Art for the default printing. Absent for the 501 cards that have none. */
+  /** Art for the default printing. Absent when it has none resolved. */
   images: api.ImageUris | undefined
   onClose: () => void
   accepted: ReadonlySet<string>
@@ -1272,9 +1274,9 @@ const Preview = ({
    */
   const printings = detail?.printings ?? []
   // `viewImageUris` is the test for "is there art here at all": a hydrated
-  // entry with both members null is one of the 501 art-less cards, and falling
-  // through to the printings is what gives those cards a picture when a
-  // non-default printing has one.
+  // entry with both members null is a card whose DEFAULT printing has no
+  // resolved art, and falling through to the printings is what gives it a
+  // picture when a non-default printing has one.
   const art = viewImageUris(images) === undefined ? artFromPrintings(printings) : images
   const shownPrice = price ?? cheapestPrinting(printings)
   // Built once and read twice — the face draws from it, and the note line asks
@@ -2790,6 +2792,15 @@ export const Workspace = ({
    * one or it will be arguing with a version that moved on.
    */
   const serverDeckRef = useRef<api.Deck | null>(null)
+  /**
+   * The dataset snapshot the last recommendations answer described.
+   *
+   * The client-side card cache is keyed on it (`cardcache.ts`), and two callers
+   * need it without issuing a request that carries it: the preview, and the
+   * expand button's follow-up hydrate. A ref rather than state because reading
+   * it must not cause a render and it is written inside `load`.
+   */
+  const snapshotRef = useRef<string | null>(null)
   /** The suggestions region, so the column legend can find the columns in it. */
   const suggestionsRef = useRef<HTMLElement>(null)
   /** The filter box — the last resort for focus when the feed empties out. */
@@ -2940,6 +2951,16 @@ export const Workspace = ({
       }),
       api.getAnalysis(current.id),
     ])
+    /*
+     * The corpus version this answer describes, kept for the paths that have no
+     * `Recommendations` of their own: the preview's card detail and the expand
+     * button's own hydrate. If an ingest lands between this and one of those,
+     * the worst case is that data from the NEW snapshot is briefly filed under
+     * the old one — and the next recompute passes the new id, which drops it.
+     * Never the reverse, so nothing older than the screen can be served.
+     */
+    snapshotRef.current = recs.datasetSnapshotId
+
     // Expansions are re-asked against the deck the recompute just produced, so
     // every row on screen describes the same deck. One extra request, and only
     // when the user has actually expanded something.
@@ -2950,12 +2971,26 @@ export const Workspace = ({
       columnsRef.current,
     )
 
-    const hydrated = await api.hydrate([
-      ...current.commanders,
-      ...current.entries.map((e) => e.oracleId),
-      ...recs.groups.flatMap((g) => g.items.map((i) => i.oracleId)),
-      ...[...extra.values()].flatMap((items) => items.map((i) => i.oracleId)),
-    ])
+    /*
+     * Only the cards this client has never seen actually cross the wire.
+     *
+     * The list below is the whole page — commanders, every deck entry, every
+     * suggestion, every expanded row — and it is rebuilt on EVERY recompute:
+     * every accept, every reject, every filter change, every auto-query tick.
+     * Sent straight to `api.hydrate` it re-downloaded a 99-card deck's names,
+     * oracle text and art each time, to be told the same thing. The cache
+     * filters it against what is already held at this dataset snapshot, so a
+     * page nothing has changed on asks for nothing at all.
+     */
+    const hydrated = await hydrateCards(
+      [
+        ...current.commanders,
+        ...current.entries.map((e) => e.oracleId),
+        ...recs.groups.flatMap((g) => g.items.map((i) => i.oracleId)),
+        ...[...extra.values()].flatMap((items) => items.map((i) => i.oracleId)),
+      ],
+      recs.datasetSnapshotId,
+    )
     return { deck: current, recs, analysis: ana, hydrated, extra }
   }, [])
 
@@ -3014,6 +3049,16 @@ export const Workspace = ({
       setUnavailable(r.recs.unavailable)
       setAnalysis(r.analysis)
       setQueryError(r.recs.query.errors[0]?.message ?? null)
+      /*
+       * A plain set, and it is still an accumulate.
+       *
+       * `hydrateCards` returns everything the cache holds, not just what this
+       * run asked about, so writing the maps through keeps every card hydrated
+       * earlier in the session — and drops them all in the one case that
+       * matters, when the dataset snapshot moves. Merging here instead would
+       * put that rule in a second place, and the copy that forgot it would be
+       * the one rendering yesterday's oracle text after an ingest.
+       */
       setCards(r.hydrated.cards)
       setPrices(r.hydrated.prices)
       setImages(r.hydrated.images)
@@ -3385,8 +3430,12 @@ export const Workspace = ({
     previewOpener.current = active instanceof HTMLElement ? active : null
     setInspect(oracleId)
     setDetail(null)
-    void api
-      .getCardDetail(oracleId)
+    // Through the cache: printings and combos are corpus data like everything
+    // else, and clicking along a row of suggestions and back re-asked for each
+    // one. This is the only combo payload that IS its own request — the ones on
+    // a recommendation and on the analysis already ride inside responses the
+    // app fetches anyway.
+    void cardDetail(oracleId, snapshotRef.current)
       .then((d) => {
         // Ignore a response for a card the user has already navigated away
         // from — two quick clicks otherwise race, and the loser wins.
@@ -3649,7 +3698,16 @@ export const Workspace = ({
         const items = fetched.get(key) ?? []
         // These are cards nothing has hydrated, so their rows would read
         // "Loading…" for good — no later recompute asks for them by name.
-        const hydrated = await api.hydrate(items.map((i) => i.oracleId))
+        // Through the cache: an expansion re-opened after a recompute is the
+        // commonest case there is, and it should cost nothing the second time.
+        const hydrated = await hydrateCards(
+          items.map((i) => i.oracleId),
+          snapshotRef.current,
+        )
+        // Merged, not written through, because this path is also taken when
+        // the snapshot is null — the corpus has never been ingested, nothing is
+        // cacheable, and `hydrateCards` then returns ONLY these rows. Writing
+        // that through would blank the deck.
         setCards((current) => new Map([...current, ...hydrated.cards]))
         setPrices((current) => new Map([...current, ...hydrated.prices]))
         setImages((current) => new Map([...current, ...hydrated.images]))

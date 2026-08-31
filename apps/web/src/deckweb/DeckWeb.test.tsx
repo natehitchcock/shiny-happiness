@@ -38,7 +38,9 @@ const IMAGES = new Map([
   ['outlet', { artCrop: ART, normal: NORMAL }],
   ['drain', { artCrop: ART, normal: NORMAL }],
   ['boss', { artCrop: ART, normal: NORMAL }],
-  // The 501-card case: no art on any printing. An answer, not a gap.
+  // A printing with no resolved art — an answer, not a gap. 501 real cards
+  // took this path until the double-faced art fix (doc 17 §17.2); the wire can
+  // still say it, so the graph still has to draw it.
   ['swamp', { artCrop: null, normal: null }],
 ])
 
