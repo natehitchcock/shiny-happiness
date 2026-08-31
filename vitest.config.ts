@@ -39,6 +39,10 @@ const DATABASE_SUITES = [
   'apps/api/src/recommendations.perf.test.ts',
   'apps/ingest/src/scryfall-ingest.test.ts',
   'packages/db/src/db.test.ts',
+  // Not a database suite itself — it is the guard that fails when they were
+  // skipped — but it belongs in the same project so it cannot run in a worker
+  // that sees a different environment from the suites it is speaking for.
+  'packages/db/src/database-required.test.ts',
 ]
 
 const shared = {

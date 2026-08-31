@@ -87,9 +87,28 @@ describe('comboDegree', () => {
     expect(comboDegree(index, setOf('A'), card('X'))).toBe(0)
   })
 
-  it('counts a one-card combo as completed', () => {
+  it('does not count a one-card combo — it says nothing about this deck', () => {
+    /*
+     * This test used to assert the opposite, and the opposite was the bug.
+     *
+     * Commander Spellbook carries seven single-piece combos: the card plus a
+     * BOARD state — "you control at least eight lands", "the persist creature
+     * is your Ring-bearer". The other requirements are conditions, not cards
+     * you hold.
+     *
+     * Degree asks "how many combos would adding this card complete, given what
+     * the deck already has". With no other pieces the answer is trivially "all
+     * of them", for every deck ever built, which is why Hullbreaker Horror
+     * reported "completes 2 combos" to a Y'shtola deck holding nothing but its
+     * commander — while its own detail pane correctly showed no combos
+     * assembled. The badge and the panel disagreed because only one of them was
+     * counting the deck.
+     */
     const index = buildComboIndex([combo('solo', ['X'])])
-    expect(comboDegree(index, setOf(), card('X'))).toBe(1)
+    expect(comboDegree(index, setOf(), card('X'))).toBe(0)
+    // Nor does holding other cards make it true: there is still no piece of
+    // this combo that the deck contributed.
+    expect(comboDegree(index, setOf('A', 'B'), card('X'))).toBe(0)
   })
 
   it('is zero for a card in no combo', () => {
@@ -107,10 +126,11 @@ describe('comboDegree', () => {
     expect(comboDegree(index, setOf('A', 'B'), card('X'))).toBe(0)
   })
 
-  it('is zero against an empty accepted set unless the combo is one card', () => {
+  it('is zero against an empty accepted set', () => {
+    // Nothing is completed by a deck that holds nothing — including, since the
+    // fix above, a combo whose only piece is the candidate itself.
     const index = buildComboIndex([combo('c1', ['X', 'A']), combo('solo', ['X'])])
-    expect(comboDegree(index, setOf(), card('X'))).toBe(1)
-    expect(completedCombos(index, setOf(), card('X'))).toEqual([comboId('solo')])
+    expect(comboDegree(index, setOf(), card('X'))).toBe(0)
   })
 
   // ---- The distinctness rule (doc 02 §2.3). This is the definition the whole

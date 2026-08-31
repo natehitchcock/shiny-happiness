@@ -123,6 +123,28 @@ export const annotateCombos = (
   const near = new Map<number, ComboId[]>()
 
   for (const combo of combosContaining(index, candidate)) {
+    /*
+     * A combo of ONE card says nothing about this deck.
+     *
+     * Commander Spellbook carries seven of them: the card plus a BOARD state
+     * — "you control at least eight lands", "the persist creature is your
+     * Ring-bearer", "one of the affinity permanents is on the battlefield".
+     * The other pieces are conditions, not cards you hold.
+     *
+     * Degree asks "how many combos would adding this card complete, given what
+     * the deck already has", and with no other pieces the answer is trivially
+     * "all of them" for every deck ever built. Hullbreaker Horror reported
+     * "completes 2 combos" for a Y'shtola deck holding nothing but its
+     * commander, while its own detail pane correctly showed no combos
+     * assembled — the badge and the panel disagreeing because only one of them
+     * was counting the deck.
+     *
+     * Skipped rather than dropped at ingest: the record is true, it is simply
+     * not an answer to this question. A surface that wants to say "this card is
+     * a combo on its own" can still read it.
+     */
+    if (combo.pieces.length < 2) continue
+
     const missing = missingCount(combo, accepted, candidate)
     if (missing === 0) {
       completed.push(combo.id)
