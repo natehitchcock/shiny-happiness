@@ -56,6 +56,20 @@ export const ManaSymbolMark = ({ symbol }: { readonly symbol: ManaSymbol }): JSX
       </span>
     )
   }
+  /*
+   * The `//` of a split cost: text, like an unreadable fragment, but NOT
+   * flagged like one. Its own class rather than `.rt-sym-raw` because that box
+   * is drawn in the alarm colour to mean "this app met a symbol it does not
+   * know", and this one it knows. Falling through to the disc below would draw
+   * "//" inside a circle, which is not how any card prints it.
+   */
+  if (symbol.kind === 'separator') {
+    return (
+      <span className="rt-sym-sep" aria-hidden="true">
+        {symbol.raw}
+      </span>
+    )
+  }
   // Two marks sit in the two halves of a split disc; one is centred. `fills` is
   // indexed separately because a Phyrexian symbol has one mark over two fills.
   const split = symbol.marks.length === 2

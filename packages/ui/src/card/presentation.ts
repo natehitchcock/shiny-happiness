@@ -104,7 +104,10 @@ export const ART_CROP_ASPECT = 457 / 626
  * nothing different about any of them:
  *
  *   - the level draws no image at all (L0)
- *   - the card has no art — 501 in the real corpus have none on any printing
+ *   - the card has no art on its default printing — 501 in the real corpus had
+ *     none until the double-faced art fix in `packages/clients`, and the state
+ *     itself outlives that count: a printing whose art has not been resolved is
+ *     null on the wire by design (doc 10)
  *   - the URL came back as an empty string
  *
  * That last one is not hypothetical. The database layer stores absent art as

@@ -1,7 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import type { Card, Combo, DeckCommand, DeckId, OracleId } from '@roundtable/domain'
-import { buildComboIndex, comboDegree, comboId, deckId } from '@roundtable/domain'
+import type {
+  Card,
+  Combo,
+  DeckCommand,
+  DeckId,
+  OracleId,
+  Printing,
+  PrintingId,
+} from '@roundtable/domain'
+import { buildComboIndex, comboDegree, comboId, deckId, printingId } from '@roundtable/domain'
 import {
   appliedMigrations,
   loadMigrations,
@@ -37,6 +45,7 @@ import {
   setEntryStandalone,
   softDeleteDeck,
 } from './repositories/decks.js'
+import { printingFactsForAll, printingsFor, upsertPrintings } from './repositories/printings.js'
 import { createTestDatabase, databaseUrl, MIGRATIONS_DIR, type TestDatabase } from './testing.js'
 
 const url = databaseUrl()
@@ -552,6 +561,106 @@ describeDb('packages/db against real PostgreSQL', () => {
     it('handles an empty batch without a query', async () => {
       expect(await getCards(db.pool, [])).toEqual([])
       expect(await upsertCards(db.pool, [])).toBe(0)
+    })
+  })
+
+  /*
+   * Printings, and the column a corrected ingest has to actually reach.
+   *
+   * The Scryfall mapper read art only from the top level of a card record, so
+   * every transform and modal-DFC printing ingested with none — 1,393 rows,
+   * leaving 501 cards with no art on their default printing. That fix lives in
+   * `packages/clients`, but it reaches a player only through this table, and
+   * the re-ingest carrying it meets 110,577 rows that already exist. Every
+   * corrected URL therefore arrives through ON CONFLICT DO UPDATE and not
+   * through the INSERT, which is the half that a test written the obvious way
+   * never touches.
+   */
+  describe('printings', () => {
+    const ART = 'https://cards.scryfall.io/art_crop/front/1/1/fable.jpg?1'
+    const NORMAL = 'https://cards.scryfall.io/normal/front/1/1/fable.jpg?1'
+
+    const printing = (
+      oracleId: OracleId,
+      over: Partial<Printing> = {},
+    ): Printing & { printingId: PrintingId } => ({
+      printingId: printingId(randomUUID()),
+      oracleId,
+      setCode: 'neo',
+      setName: 'Kamigawa: Neon Dynasty',
+      collectorNumber: '1',
+      rarity: 'rare',
+      imageUris: { artCrop: '', normal: '' },
+      priceUsd: null,
+      reserved: false,
+      ...over,
+    })
+
+    const owner = async (name: string): Promise<OracleId> => {
+      const c = card(name)
+      await upsertCards(db.pool, [c])
+      return c.oracleId
+    }
+
+    it('writes art on insert', async () => {
+      const id = await owner('Fable of the Mirror-Breaker // Reflection of Kiki-Jiki')
+      await upsertPrintings(db.pool, [
+        printing(id, { imageUris: { artCrop: ART, normal: NORMAL } }),
+      ])
+
+      const [back] = await printingsFor(db.pool, id)
+      expect(back?.imageUris).toEqual({ artCrop: ART, normal: NORMAL })
+    })
+
+    it('replaces the art of a printing already in the corpus', async () => {
+      // The path the re-ingest takes for all 1,393 broken rows: they exist,
+      // with NULL art, and the corrected URL has to survive ON CONFLICT DO
+      // UPDATE. Drop either image column from that clause and this is the only
+      // test that notices — the insert above stays green while production
+      // keeps every one of its blank cards.
+      const id = await owner('Treasure Map // Treasure Cove')
+      const before = printing(id)
+      await upsertPrintings(db.pool, [before])
+      expect((await printingsFor(db.pool, id))[0]?.imageUris.normal).toBe('')
+
+      await upsertPrintings(db.pool, [{ ...before, imageUris: { artCrop: ART, normal: NORMAL } }])
+
+      const [after] = await printingsFor(db.pool, id)
+      expect(after?.printingId).toBe(before.printingId)
+      expect(after?.imageUris).toEqual({ artCrop: ART, normal: NORMAL })
+    })
+
+    it('stores absent art as NULL rather than as an empty string', async () => {
+      // `''` reaching an `<img src>` resolves against the page URL and draws a
+      // broken image exactly where the no-art panel should have drawn a name.
+      // NULL in the column is what lets a query ask "which cards have no art".
+      const id = await owner('A Card With No Art')
+      await upsertPrintings(db.pool, [printing(id)])
+
+      const { rows } = await db.pool.query<{ image_normal: string | null }>(
+        'SELECT image_normal FROM printings WHERE oracle_id = $1',
+        [id],
+      )
+      expect(rows[0]?.image_normal).toBeNull()
+    })
+
+    it('serves the default printing’s art to the candidate pool', async () => {
+      // `printingFactsForAll` is what the API reads, and it joins art through
+      // `cards.default_printing` rather than through the cheapest printing. The
+      // 501 cards were blank at exactly this seam.
+      const c = card('Delver of Secrets // Insectile Aberration')
+      const id = printingId(randomUUID())
+      await upsertCards(db.pool, [{ ...c, defaultPrinting: id }])
+      await upsertPrintings(db.pool, [
+        { ...printing(c.oracleId), printingId: id, imageUris: { artCrop: ART, normal: NORMAL } },
+      ])
+
+      const facts = await printingFactsForAll(db.pool)
+      expect(facts.get(c.oracleId)?.imageUris).toEqual({ artCrop: ART, normal: NORMAL })
+    })
+
+    it('handles an empty batch without a query', async () => {
+      expect(await upsertPrintings(db.pool, [])).toBe(0)
     })
   })
 

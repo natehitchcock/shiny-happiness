@@ -101,10 +101,14 @@ export interface PrintingFacts {
    * 34,492 cards, so picking one for both would be wrong about a third of them
    * in one direction or the other.
    *
-   * `null` means no art, and 501 cards really have none on any printing (the
-   * coverage is identical whichever printing is chosen — 33,991 either way, so
-   * this choice costs nothing in reach). The UI primitives draw a readable
-   * text panel for those rather than a broken image.
+   * `null` means no art. That was 501 cards until the double-faced art fix in
+   * `packages/clients/src/scryfall.ts` — every one of them a `transform` or
+   * `modal_dfc` card whose images the mapper read from the wrong place, not a
+   * card Scryfall has no picture of — and the next ingest takes it to none. The
+   * choice of printing was never what cost the reach: coverage was 33,991
+   * either way. The null stays because an unresolved printing is a real state,
+   * and the UI primitives draw a readable text panel for it rather than a
+   * broken image.
    */
   readonly imageUris: {
     readonly artCrop: string | null

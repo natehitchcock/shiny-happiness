@@ -147,9 +147,11 @@ interface ImageUris {
  *
  * Every id the caller asked about gets an entry, exactly as `prices` does. A
  * missing key and a card with no art would otherwise be the same thing on the
- * wire, and they are not: 501 cards genuinely have no art on any printing, and
- * a client that cannot tell that from "not loaded yet" will show a spinner
- * forever.
+ * wire, and they are not: a client that cannot tell "there is none" from "not
+ * loaded yet" will show a spinner forever. The art-less case was 501 cards
+ * until the double-faced art fix in `packages/clients` (a mapping defect, not
+ * a gap in Scryfall's pictures); the distinction it forced is still the
+ * contract, because an unresolved printing is a real state.
  */
 const NO_IMAGES: ImageUris = { artCrop: null, normal: null }
 

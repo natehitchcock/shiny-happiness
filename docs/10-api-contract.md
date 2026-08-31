@@ -43,9 +43,15 @@ ImageMap = Record<OracleId, { artCrop: string | null; normal: string | null }>
 ```
 
 Both maps carry an entry for **every id the caller asked about**, including ids
-the corpus does not know and cards that genuinely have no art — 501 of them.
-A missing key and a null value would otherwise be the same thing on the wire,
-and "not loaded yet" is a different answer from "there is none".
+the corpus does not know and cards whose default printing has no art URL. A
+missing key and a null value would otherwise be the same thing on the wire, and
+"not loaded yet" is a different answer from "there is none".
+
+The art-less case was 501 cards until the double-faced art fix, which was a
+mapping defect rather than a gap in Scryfall's pictures (doc 17 §17.2); after
+the next ingest it is none. The null stays in the contract regardless — a
+printing whose art has not been resolved is a real state, and collapsing it into
+an absent key is what put a broken image on screen before.
 
 The image URLs are Scryfall's own CDN, sent through unaltered
 ([ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md)). `search` returns art for

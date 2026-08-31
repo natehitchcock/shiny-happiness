@@ -138,6 +138,57 @@ describe('parseManaCost — the awkward ones', () => {
   })
 })
 
+describe('the // between the two halves of a split cost', () => {
+  it('reads it as a separator rather than as an unreadable fragment', () => {
+    // Scryfall writes it BARE, outside any braces — `/symbology` has no entry
+    // for it — so it arrives on the loose-text path that used to end in
+    // `unknown`. Measured against the real corpus it is the only loose fragment
+    // there is: 361 of 361, across 356 cards.
+    const parsed = parseManaCost('{1}{R} // {1}{U}')
+
+    expect(parsed.map((s) => s.kind)).toEqual(['generic', 'color', 'separator', 'generic', 'color'])
+    expect(parsed[2]).toMatchObject({ raw: '//', kind: 'separator', fills: [], marks: [] })
+  })
+
+  it('announces Fire // Ice as two costs, not as an error', () => {
+    // The defect, verbatim: `mana cost 1 generic, red, unreadable //, 1 generic,
+    // blue`. Every split card in the corpus read like that.
+    expect(manaCostLabel(parseManaCost('{1}{R} // {1}{U}'))).toBe(
+      'mana cost 1 generic, red or 1 generic, blue',
+    )
+  })
+
+  it('puts no comma either side of it, because it joins rather than lists', () => {
+    // `, or,` would announce the word as one more item in the cost.
+    const label = manaCostLabel(parseManaCost('{1}{R} // {1}{U}'))
+    expect(label).not.toContain(', or,')
+    expect(label).not.toContain('or,')
+  })
+
+  it('reads it without the spaces, which is the same cost', () => {
+    expect(kinds('{1}{R}//{1}{U}')).toEqual(['generic', 'color', 'separator', 'generic', 'color'])
+  })
+
+  it('does not make the unknown path forgiving on the way past', () => {
+    // The guard on the above: `//` became known by being matched EXACTLY, not
+    // by loose text being waved through. One slash, three slashes and prose all
+    // still say they cannot be read.
+    expect(parseManaCost('{1} / {G}')[1]).toMatchObject({ kind: 'unknown', raw: '/' })
+    expect(parseManaCost('{1} /// {G}')[1]).toMatchObject({ kind: 'unknown', raw: '///' })
+    expect(parseManaCost('{1} // and {G}')[1]).toMatchObject({ kind: 'unknown', raw: '// and' })
+    expect(manaCostLabel(parseManaCost('{2}{ZZZ9}{R}'))).toBe(
+      'mana cost 2 generic, unreadable {ZZZ9}, red',
+    )
+  })
+
+  it('leaves a braced {//} unknown, because Scryfall never writes one', () => {
+    // Checked against `/symbology` on 2026-08-31: the published list is {T}
+    // through {D} and contains no slash pair. A token spelled that way is
+    // something we have not met, and must say so.
+    expect(only('{//}').kind).toBe('unknown')
+  })
+})
+
 describe('parseManaCost — what it cannot read', () => {
   it('keeps an unrecognised token instead of dropping it', () => {
     // The rule: a cost the user cannot read is worse than shorthand, but a cost

@@ -51,16 +51,25 @@ free — because the whole deck is legal only by reference to them.
 
 ### Art coverage, measured
 
-| | count |
-| --- | --- |
-| Oracle cards in the corpus | 34,492 |
-| …with a default printing | 34,492 |
-| …whose default printing has an `image_art_crop` | 33,991 (98.5%) |
+| | count | after the double-faced art fix |
+| --- | --- | --- |
+| Oracle cards in the corpus | 34,492 | 34,492 |
+| …with a default printing | 34,492 | 34,492 |
+| …whose default printing has an `image_art_crop` | 33,991 (98.5%) | 34,492 (100%) |
 
-The remaining **501** cards have a printing and no art URL. They are not an edge
-case to ignore: a deck of 100 has roughly a 78% chance of containing at least
-one. `CardFace` already renders a named, arted-less fallback tile and is tested
-for it — the web uses the same component rather than inventing a second answer.
+The 501 were **not** cards Scryfall has no picture of. Every one of them was a
+`transform` or `modal_dfc` card whose art the Scryfall mapper failed to read,
+because those layouts carry `image_uris` on `card_faces[]` rather than on the
+card (see `faceImages` in `packages/clients/src/scryfall.ts`). Checked against
+the raw Scryfall record for all 501 on 2026-08-31: all 501 carry both `normal`
+and `art_crop` on their front face, so the next ingest recovers every one.
+
+The art-less path is therefore no longer something a real card is expected to
+take, and it still must not be removed: a printing whose art has not been
+resolved yet is `null` on the wire by design (doc 10), and a client that cannot
+draw that case draws a broken image instead. `CardFace` renders a named,
+art-less fallback tile and is tested for it — the web uses the same component
+rather than inventing a second answer.
 
 ### The gap: art did not reach the client — closed
 
@@ -385,10 +394,12 @@ categorical hues into one lightness band, and two is a strictly easier problem.
 ### 2. What is the node for a card with no art? — **The same box, quieter, and every other node gets a name too.**
 
 The worry was right and the framing was the trap. In a graph of ninety-nine
-pictures, one tile with words on it *is* emphasis, and 501 cards in the corpus
-take that path — a 100-card deck has roughly a 78% chance of containing one. The
-fix is not to make the fallback quieter than legibility allows. It is to notice
-that the inversion comes from the *other* ninety-nine having no text at all.
+pictures, one tile with words on it *is* emphasis. When this was written 501
+cards in the corpus took that path — a 100-card deck had roughly a 78% chance of
+containing one; §17.2 records why that number is now zero, and why the path
+stays. The fix is not to make the fallback quieter than legibility allows. It is
+to notice that the inversion comes from the *other* ninety-nine having no text
+at all.
 
 So: **every node carries its name**, in `aria-label`, in an SVG `<title>` the
 browser shows on hover, and in the details panel on hover or focus. The art-less
