@@ -2202,6 +2202,7 @@ select {
 .bracket-source a {
   color: var(--parchment);
   text-decoration: underline;
+}
 
 /* -------------------------------------------------------------- deck web */
 

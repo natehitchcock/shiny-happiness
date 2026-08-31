@@ -240,3 +240,42 @@ describe('a deck row never loses the card name', () => {
     expect(Number(mana?.[1])).toBeLessThan(Number(cash?.[1]))
   })
 })
+
+describe('the stylesheet parses', () => {
+  /*
+   * A merge dropped one `}` from `.bracket-source a` and `pnpm build` failed
+   * with `Unclosed block` — the whole web app was unbuildable on `main`, and
+   * every other check stayed green: `tsc` does not read CSS, `eslint` does not
+   * read CSS, and the test suite imports this file as TEXT rather than parsing
+   * it. The build was the only thing that knew, and its output had been piped
+   * away.
+   *
+   * Counting braces is not a CSS parser, but it catches the failure that
+   * actually happened, in the suite rather than in a deploy.
+   */
+  const stripped = (path: string): string =>
+    readFileSync(path, 'utf8')
+      // Comments first: this file's own comments contain braces.
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      // Then quoted strings, which may hold a lone brace in `content:` or a URL.
+      .replace(/"[^"]*"|'[^']*'/g, '')
+
+  const sheets = [
+    join(here, 'styles.css'),
+    join(here, '..', '..', '..', 'packages', 'ui', 'src', 'card', 'card.css'),
+  ]
+
+  it.each(sheets)('has balanced braces: %s', (path) => {
+    const text = stripped(path)
+    const open = (text.match(/\{/g) ?? []).length
+    const close = (text.match(/\}/g) ?? []).length
+    expect({ file: path, open, close }).toEqual({ file: path, open: close, close })
+  })
+
+  it('never leaves a rule open at the end of a section', () => {
+    // The exact shape of the bug: a declaration, then a blank line, then a
+    // comment banner — with no `}` in between.
+    const text = stripped(join(here, 'styles.css'))
+    expect(text).not.toMatch(/:[^;{}]+;\s*\n\s*\n\s*[.#@a-zA-Z][^{}\n]*\{/)
+  })
+})
