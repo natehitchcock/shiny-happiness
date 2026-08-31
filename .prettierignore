@@ -8,3 +8,13 @@ design/
 # Docs are hand-written prose. Prettier's markdown opinions (emphasis style,
 # table padding) create review churn without improving anything.
 *.md
+
+# Recorded API fixtures are transcripts, not source.
+#
+# Prettier reindents `spellbook-variants-sample.json` from 1-space to 2-space,
+# which is ~5,600 lines of diff with identical content — and it came back every
+# time anyone ran `pnpm format`, so it landed in unrelated commits and made
+# every merge involving it a conflict. Two agents hit it on the same day. A
+# fixture's job is to be byte-for-byte what the API returned; reformatting it
+# serves nobody and quietly weakens that claim.
+packages/clients/fixtures/
