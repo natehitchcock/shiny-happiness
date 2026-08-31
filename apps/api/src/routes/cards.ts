@@ -5,11 +5,12 @@ import {
   getCard,
   getCards,
   listCardsAfter,
-  printingFactsForAll,
+  liveSnapshotId,
   printingsFor,
   searchCardsByName,
   type PrintingFacts,
 } from '@roundtable/db'
+import { cachedPrintingFacts } from '../corpus-cache.js'
 import type { AnnotatedCandidate, Card, Color, QueryField, QueryNode } from '@roundtable/domain'
 import { COLORS, isOk, matchesQuery, oracleId, parseQuery } from '@roundtable/domain'
 import { badRequest, notFound, sendProblem } from '../errors.js'
@@ -212,7 +213,7 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
         return sendProblem(rep, badRequest('cursor is not a cursor this endpoint issued'))
       }
 
-      const facts = await printingFactsForAll(pool)
+      const facts = await cachedPrintingFacts(pool, await liveSnapshotId(pool))
       const colorIdentity = parseColors(colors)
       if (colorIdentity === null) {
         return sendProblem(rep, badRequest('colors must be a string of WUBRG letters', { colors }))
@@ -297,7 +298,14 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
   app.post('/api/v1/cards/batch', { schema: { body: cardBatchBody } }, async (req) => {
     const { oracleIds } = req.body as { oracleIds: string[] }
     const ids = oracleIds.map(oracleId)
-    const [items, facts] = await Promise.all([getCards(pool, ids), printingFactsForAll(pool)])
+    // `/cards/batch` is how the client hydrates names after EVERY recompute, so
+    // the uncached facts map ran at least twice per user action for 1.9 MB a
+    // time. The snapshot read is one small row and is what makes it cacheable.
+    const snapshotId = await liveSnapshotId(pool)
+    const [items, facts] = await Promise.all([
+      getCards(pool, ids),
+      cachedPrintingFacts(pool, snapshotId),
+    ])
 
     // Prices ride ALONGSIDE the cards rather than on them. `Card` is oracle
     // identity and deliberately carries no price (doc 02) — a price belongs to a

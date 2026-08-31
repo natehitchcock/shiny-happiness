@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Pool } from 'pg'
 import type { Combo } from '@roundtable/domain'
 import { comboId } from '@roundtable/domain'
-import { cachedCombosInIdentity, clearComboCache } from './combo-cache.js'
+import {
+  cachedCombosInIdentity,
+  cachedEligibleCards,
+  cachedPrintingFacts,
+  clearCorpusCache,
+} from './corpus-cache.js'
 
 /**
  * The cache that keeps a warm instance from re-reading the combo table.
@@ -13,9 +18,15 @@ import { cachedCombosInIdentity, clearComboCache } from './combo-cache.js'
  * requests and took the deployment down, so "how many times does this read"
  * is the behaviour under test, not an implementation detail.
  */
-vi.mock('@roundtable/db', () => ({ combosInIdentity: vi.fn() }))
-const { combosInIdentity } = await import('@roundtable/db')
+vi.mock('@roundtable/db', () => ({
+  combosInIdentity: vi.fn(),
+  findEligibleCards: vi.fn(),
+  printingFactsForAll: vi.fn(),
+}))
+const { combosInIdentity, findEligibleCards, printingFactsForAll } = await import('@roundtable/db')
 const fetchCombos = vi.mocked(combosInIdentity)
+const fetchCards = vi.mocked(findEligibleCards)
+const fetchFacts = vi.mocked(printingFactsForAll)
 
 const pool = {} as Pool
 
@@ -29,9 +40,13 @@ const combo = (id: string): Combo => ({
 })
 
 beforeEach(() => {
-  clearComboCache()
+  clearCorpusCache()
   fetchCombos.mockReset()
+  fetchCards.mockReset()
+  fetchFacts.mockReset()
   fetchCombos.mockResolvedValue([combo('c1')])
+  fetchCards.mockResolvedValue([])
+  fetchFacts.mockResolvedValue(new Map())
 })
 
 describe('reading the combo set', () => {
@@ -153,5 +168,66 @@ describe('what invalidates it', () => {
     const after = await cachedCombosInIdentity(pool, ['R'], 'snap-1')
 
     expect(after.map((c) => c.id)).toEqual(['c2'])
+  })
+})
+
+describe('the candidate pool', () => {
+  it('reads once for a whole session on one deck', async () => {
+    for (let i = 0; i < 40; i += 1) await cachedEligibleCards(pool, ['R'], false, 'snap-1')
+    expect(fetchCards).toHaveBeenCalledTimes(1)
+  })
+
+  it('holds a separate pool per Universes Beyond setting', async () => {
+    // Unlike colour identity, this one IS a deck option the user can toggle
+    // mid-session (ADR-0011), and the two pools genuinely differ — serving one
+    // for the other would show cards the user asked not to see.
+    await cachedEligibleCards(pool, ['R'], false, 'snap-1')
+    await cachedEligibleCards(pool, ['R'], true, 'snap-1')
+    expect(fetchCards).toHaveBeenCalledTimes(2)
+
+    await cachedEligibleCards(pool, ['R'], false, 'snap-1')
+    await cachedEligibleCards(pool, ['R'], true, 'snap-1')
+    expect(fetchCards).toHaveBeenCalledTimes(2)
+  })
+
+  it('passes the setting through to the query', async () => {
+    await cachedEligibleCards(pool, ['R', 'W'], true, 'snap-1')
+    expect(fetchCards).toHaveBeenCalledWith(pool, ['R', 'W'], { excludeUniversesBeyond: true })
+  })
+
+  it("does not hand out the combo cache's rows", async () => {
+    // Three caches, one implementation. The failure this rules out is the cheap
+    // version of that — one shared Map — where an identity key that had already
+    // been used for combos would serve combos to the pool. Asserted on the DATA
+    // rather than on call counts, because call counts pass either way when the
+    // two happen to use different key shapes.
+    fetchCards.mockResolvedValue([{ oracleId: 'card-1' } as never])
+
+    const first = await cachedCombosInIdentity(pool, ['R'], 'snap-1')
+    const second = await cachedEligibleCards(pool, ['R'], false, 'snap-1')
+
+    expect(first.map((c) => c.id)).toEqual(['c1'])
+    expect(second).toEqual([{ oracleId: 'card-1' }])
+  })
+})
+
+describe('printing facts', () => {
+  it('reads once however many times it is asked', async () => {
+    // The most frequent of the three: the deck context needs it, and so does
+    // `/cards/batch`, which the client calls to hydrate after every recompute.
+    for (let i = 0; i < 20; i += 1) await cachedPrintingFacts(pool, 'snap-1')
+    expect(fetchFacts).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-reads once the ingest has written', async () => {
+    await cachedPrintingFacts(pool, 'snap-1')
+    await cachedPrintingFacts(pool, 'snap-2')
+    expect(fetchFacts).toHaveBeenCalledTimes(2)
+  })
+
+  it('never caches against an unknown snapshot', async () => {
+    await cachedPrintingFacts(pool, null)
+    await cachedPrintingFacts(pool, null)
+    expect(fetchFacts).toHaveBeenCalledTimes(2)
   })
 })

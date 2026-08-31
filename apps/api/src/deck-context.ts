@@ -1,12 +1,6 @@
 import type { Pool } from 'pg'
-import {
-  findEligibleCards,
-  getCards,
-  liveSnapshotId,
-  printingFactsForAll,
-  type PrintingFacts,
-} from '@roundtable/db'
-import { cachedCombosInIdentity } from './combo-cache.js'
+import { getCards, liveSnapshotId, type PrintingFacts } from '@roundtable/db'
+import { cachedCombosInIdentity, cachedEligibleCards, cachedPrintingFacts } from './corpus-cache.js'
 import type {
   Card,
   ComboIndex,
@@ -82,14 +76,13 @@ export const loadDeckContext = async (pool: Pool, deck: Deck): Promise<DeckConte
    */
   const snapshotId = await liveSnapshotId(pool)
 
+  // All three are corpus reference data: identical for every request with the
+  // same key, and changing only when the ingest runs. See `corpus-cache` — the
+  // uncached versions moved ~86 MB per request and took production down.
   const [eligible, combos, printingFacts] = await Promise.all([
-    findEligibleCards(pool, deck.colorIdentity, {
-      excludeUniversesBeyond: deck.excludeUniversesBeyond,
-    }),
-    // Not every combo, and not on every request. See `combo-cache`: the
-    // unfiltered per-request query moved 72 MB and took production down.
+    cachedEligibleCards(pool, deck.colorIdentity, deck.excludeUniversesBeyond, snapshotId),
     cachedCombosInIdentity(pool, deck.colorIdentity, snapshotId),
-    printingFactsForAll(pool),
+    cachedPrintingFacts(pool, snapshotId),
   ])
 
   if (combos.length === 0) {
