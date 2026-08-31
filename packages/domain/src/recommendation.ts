@@ -106,6 +106,33 @@ export type Reason =
        * Absent and `false` are the same thing; only `true` is ever written.
        */
       readonly emphasised?: boolean
+      /**
+       * Whether this row is on the page only because of the focus guarantee
+       * (ADR-0026): one of the top three supporters of the deck's emphasis in
+       * this category, which the group's `limitPerGroup` cut would otherwise
+       * have dropped.
+       *
+       * A SECOND CLAIM, not a restatement of `emphasised`. `emphasised: true`
+       * says the card relates to a tag the builder picked, and is true of every
+       * supporter in the list including the ones that outscored everything.
+       * This says something the reader cannot otherwise work out: this card
+       * scores below the cut and is being shown anyway, because a category that
+       * showed the builder nothing about their own focus was the defect. Pillar
+       * P4 asks the reason to name what put the card here, and for these rows
+       * the honest answer is the guarantee rather than the score.
+       *
+       * It also has to be on the wire rather than inferred from position: the
+       * client re-sorts group rows by column and merges the three `combo-N`
+       * groups into one, so "last in the list" does not survive the trip, and
+       * the merge's own density trim needs to know which rows it may not drop.
+       *
+       * On the existing member for the same reason `emphasised` is: the
+       * relationship being described is the same one, and a second reason kind
+       * carrying the same tag would put it on screen twice. Optional, so a
+       * reader that predates it renders the emphasis sentence it renders today
+       * (AGENTS.md R2). Only `true` is ever written.
+       */
+      readonly guaranteed?: boolean
     }
   | { readonly kind: 'bracket-warning'; readonly flag: BracketFlag; readonly detail: string }
 

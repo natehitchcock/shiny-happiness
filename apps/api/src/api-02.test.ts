@@ -1347,6 +1347,75 @@ describeDb('API-02 contract', () => {
       expect([...focused].sort()).toEqual([...plain].sort())
     })
 
+    /**
+     * The focus guarantee, over HTTP (ADR-0026).
+     *
+     * `limitPerGroup: 1` because the defect only exists past the cut: at the
+     * default 60 this pool is never cut at all, the guarantee has nothing to
+     * do, and the test could not fail.
+     *
+     * `emphasis: 0` weight isolates the guarantee from the SCORING half of the
+     * feature. Left at its default the emphasis term alone lifts the untapper
+     * to the top of its group, so it would be on the page whether or not a
+     * guarantee existed — which is the same vacuum. Zeroed, the focus moves no
+     * card at all and the only thing that can put the untapper on a page of one
+     * is the guarantee. It is also the case the feature exists for: a supporter
+     * that the score does not lift far enough.
+     */
+    const tight = async (id: string) =>
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/decks/${id}/recommendations`,
+          payload: { limitPerGroup: 1, weights: { emphasis: 0 } },
+        })
+      ).json()
+
+    it('carries the focus past limitPerGroup, so a cut page still shows it', async () => {
+      const plain = ordering(await tight((await freshDeck()).id))
+      const focused = ordering(await tight((await freshDeck(['untap'])).id))
+
+      // The defect: with a cut of one, the untapper is not on the page at all.
+      expect(plain).not.toContain(UNTAP_CARD)
+      expect(focused).toContain(UNTAP_CARD)
+      // And it EXTENDS rather than displacing: everything that was there is
+      // still there. The interface promises a focus never hides a card.
+      for (const id of plain) expect(focused).toContain(id)
+    })
+
+    it('says over the wire that the row is there because of the focus (P4)', async () => {
+      const body = await tight((await freshDeck(['untap'])).id)
+      const item = body.groups
+        .flatMap((g: { items: { oracleId: string; reasons: unknown[] }[] }) => g.items)
+        .find((i: { oracleId: string }) => i.oracleId === UNTAP_CARD)
+      expect(item.reasons).toContainEqual({
+        kind: 'keyword-synergy',
+        tag: 'untap',
+        direction: 'enables',
+        withOracleIds: [],
+        emphasised: true,
+        guaranteed: true,
+      })
+    })
+
+    it('will not resurrect a card the builder rejected (pillar P6)', async () => {
+      // The guarantee reaches past the cut, and a rejection lives on the other
+      // side of it. Excluding the one card the focus would have carried in must
+      // leave it off the page entirely.
+      const fresh = await freshDeck(['untap'])
+      const excluded = await app.inject({
+        method: 'POST',
+        url: `/api/v1/decks/${fresh.id}/commands`,
+        payload: {
+          commands: [{ type: 'exclude', oracleId: UNTAP_CARD }],
+          idempotencyKey: randomUUID(),
+          baseVersion: 1,
+        },
+      })
+      expect(excluded.statusCode).toBe(200)
+      expect(ordering(await tight(fresh.id))).not.toContain(UNTAP_CARD)
+    })
+
     it('says how much of the pool each emphasised tag reaches', async () => {
       // `supporting: 0` is the honest answer to "why did nothing change".
       // Without it, an emphasis nothing supports is indistinguishable from one

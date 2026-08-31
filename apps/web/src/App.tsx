@@ -510,6 +510,18 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
        * adjective on the deck's property and not a footnote about the row.
        */
       const yours = r.emphasised === true ? `your emphasised ${tag}` : `your ${tag}`
+      /*
+       * A row kept by the focus guarantee answers a different question.
+       *
+       * "Benefits from your emphasised opponent discard" is true of every
+       * supporter in the list, including the four above this one that outscored
+       * everything. It does not answer the question this row actually raises,
+       * which is why a card scoring below the cut is on the page at all — and
+       * without an answer the row reads as the ranking having gone wrong.
+       * "Top 3 here" is the answer, and `here` is load-bearing: the promise is
+       * per category, not across the deck (ADR-0026).
+       */
+      if (r.guaranteed === true) return `top 3 here for ${yours}`
       // Three directions, three different claims. 'theme' is the weak one —
       // the card wants what other cards in the deck want — and it says so
       // rather than borrowing the language of an enable.
@@ -1080,10 +1092,15 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
              */}
             <section className="start-emphasis" aria-label="Semantic focus">
               <h3>What is this deck about?</h3>
+              {/* "Only reorders" was true until the focus guarantee (ADR-0026)
+                  and is not any more: a focus now also keeps the top three
+                  cards supporting it in every category, which is an addition
+                  rather than a reordering. The half that has to survive intact
+                  is the one about hiding, because that is the promise. */}
               <p className="note">
                 Optional. Pick any of {chosen.name}’s semantics and cards supporting them are ranked
-                higher. It only reorders your suggestions — nothing is ever hidden — and you can
-                change it at any point while building.
+                higher, with the top three kept in every category. Nothing is ever hidden, and you
+                can change it at any point while building.
               </p>
               <EmphasisChoice
                 tags={commanderTags}
@@ -1343,8 +1360,8 @@ const TagChip = ({
             {onToggleEmphasis === undefined ? null : (
               <span className="hint-line">
                 {emphasised === true
-                  ? `${EMPHASIS_ON} is on: this deck is focused on ${readable(tag)}, so cards supporting it rank higher. Nothing is hidden by it.`
-                  : `Press ${EMPHASIS_OFF} beside the chip to make this deck about ${readable(tag)}. It reorders your suggestions and hides nothing.`}
+                  ? `${EMPHASIS_ON} is on: this deck is focused on ${readable(tag)}, so cards supporting it rank higher and the top three reach every category. Nothing is hidden by it.`
+                  : `Press ${EMPHASIS_OFF} beside the chip to make this deck about ${readable(tag)}. It ranks supporters higher, keeps the top three in every category, and hides nothing.`}
               </span>
             )}
             <span className="hint-line dim">
@@ -1487,8 +1504,8 @@ const FocusPanel = ({
       <h3>Focus</h3>
       {emphasis.length === 0 ? (
         <p className="note">
-          No focus yet. Emphasise a semantic and cards that support it are ranked higher — it only
-          reorders your suggestions and never hides anything.
+          No focus yet. Emphasise a semantic and cards that support it are ranked higher, and the
+          top three of them are kept in every category. Nothing is ever hidden.
         </p>
       ) : (
         <>
@@ -1513,8 +1530,8 @@ const FocusPanel = ({
             ))}
           </ul>
           <p className="note dim">
-            Emphasis reorders your suggestions. It never hides a card, so nothing disappears because
-            of a focus.
+            A focus ranks the cards supporting it higher and keeps the top three of them in every
+            category. It never hides a card, so nothing disappears because of a focus.
           </p>
         </>
       )}
@@ -5013,24 +5030,37 @@ export const Workspace = ({
   const shownGroups = useMemo(() => {
     const combo = groups.filter((g) => g.key.startsWith('combo-'))
     if (combo.length === 0) return groups
+    /*
+     * Half the rows the three groups would have shown between them.
+     *
+     * Merging tripled the region: three groups of eight became a wall of
+     * twenty-four, all making the same claim, pushing every other group off
+     * the screen. Halved, the strongest combo cards still lead the list and
+     * the gaps below them are reachable without scrolling past them.
+     */
+    const all = combo
+      .flatMap((g) => g.items)
+      .sort((a, b) => b.comboDegree - a.comboDegree || b.score - a.score)
+    const half = Math.ceil(all.length / 2)
+    /*
+     * Except the rows the focus guarantee put there (ADR-0026).
+     *
+     * They are last in this sort by construction — they are on the page because
+     * they scored BELOW their group's cut — so a plain halving throws away
+     * exactly the rows the server promised the builder, and a server-side
+     * guarantee that the client silently trims is the same defect it was built
+     * to fix, one layer up. The halving still governs everything else: this is
+     * a density decision about a merged heading, not a licence to ignore it.
+     */
+    const kept = all.slice(0, half)
+    const rescued = all.slice(half).filter((i) => i.reasons.some((r) => r.guaranteed === true))
     const merged: api.Group = {
       ...combo[0]!,
       key: 'combo',
       label: 'Completes combos',
       total: combo.reduce((n, g) => n + g.total, 0),
       rationale: 'Adding one of these finishes a combo using only cards already in your deck.',
-      /*
-       * Half the rows the three groups would have shown between them.
-       *
-       * Merging tripled the region: three groups of eight became a wall of
-       * twenty-four, all making the same claim, pushing every other group off
-       * the screen. Halved, the strongest combo cards still lead the list and
-       * the gaps below them are reachable without scrolling past them.
-       */
-      items: combo
-        .flatMap((g) => g.items)
-        .sort((a, b) => b.comboDegree - a.comboDegree || b.score - a.score)
-        .slice(0, Math.ceil(combo.reduce((n, g) => n + g.items.length, 0) / 2)),
+      items: [...kept, ...rescued],
     }
     const rest = groups.filter((g) => !g.key.startsWith('combo-'))
     // Back where the strongest of the three sat, not appended to the end.

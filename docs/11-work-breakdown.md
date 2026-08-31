@@ -172,6 +172,36 @@ opponent-discard cards led by `Tinybones, Bauble Burglar` and `Torment of
 Hailfire`. Each of them explains itself as *emphasised* rather than as ordinary
 synergy.
 
+**A focus now reaches every category, not just the ones it happened to win.**
+Emphasis was a scoring term and nothing else, and scoring only orders *within* a
+group — so a card supporting the builder's focus could still sort below
+`limitPerGroup` and never appear in that category at all. The builder said what
+the deck is about and the category answered with nothing about it. Every group
+now carries **the top three supporters of the focus** that the cut would have
+dropped, appended after the cut, which is also their score position.
+[ADR-0026](adr/0026-a-focus-guarantees-its-top-three-in-every-category.md) has
+the four decisions behind it: three across the focus as a whole rather than
+three per tag, the list **extends** rather than displacing (emphasis removing a
+card is the one thing it promises not to do), appended rather than pinned to the
+top, and past the CUT but never past the FILTER — an excluded card is not a
+candidate (P6) and a card the query withheld stays withheld.
+
+Measured in a browser on the real corpus, Tergrid leading, `opponent-discard`
+emphasised (196 supporting cards), at the `limitPerGroup: 8` the workspace
+actually asks for: `Chain of Smog` ranks **50th of 112** in *One card away*
+without a focus and **27th** with one — below the cut either way, so scoring
+alone never put it on the page. It is now row **9**, reading *"top 3 here for
+your emphasised opponent discard"*, and the eight rows above it are the same
+eight cards in the same order. `fills-land` gained `Aclazotz, Deepest Betrayal`
+the same way (191st → 183rd). The other eight groups gained nothing, because
+their top three supporters already made the cut — the common case. Removing the
+focus restores the previous page exactly.
+
+Note for anyone measuring this again: **at a small `limitPerGroup` the emphasis
+REORDERING alone changes which rows you see**, because a card lifted above the
+cut pushes one below it. That predates the guarantee and is not it; the
+guarantee only ever adds. `total` is untouched either way.
+
 **The UI half is built too.** Choosing a commander on the start screen now asks
 "What is this deck about?" and offers that commander's own semantics, both
 directions — a PROMPT and not a gate, so "Start building" stays enabled with
