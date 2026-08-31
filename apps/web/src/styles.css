@@ -2153,6 +2153,96 @@ select {
   cursor: pointer;
 }
 
+/* ------------------------------------------------------- semantic emphasis */
+
+/* The chip and its focus button travel together, so a wrap never leaves the
+   button on the line below the tag it applies to. */
+.tag-chip,
+.emphasis-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Brass for "you decided this", exactly as a locked card is brass. Never
+   colour alone: the glyph itself changes from hollow to filled, and the button
+   carries aria-pressed. */
+.tag[data-emphasised='true'] {
+  color: var(--brass);
+  border-color: var(--brass);
+}
+
+.act.emphasise {
+  /* 24 px of hittable area on a 0.7 rem glyph. Doc 08 §8.2 asks for a touch
+     target, and this control is the whole feature on a phone. */
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 4px;
+  line-height: 1;
+  font-size: 0.8rem;
+  color: var(--parchment-dim);
+}
+.act.emphasise[data-emphasised='true'] {
+  color: var(--brass);
+}
+.act.emphasise:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+/* R4: every one of these is reachable by keyboard, so every one of them has to
+   show where the keyboard is. */
+.act.emphasise:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+/* The prompt on the start screen, under the chosen commander's card. */
+.start-emphasis {
+  margin-top: var(--step);
+  text-align: left;
+}
+.start-emphasis h3 {
+  margin: 0 0 4px;
+  font: 600 0.95rem/1.3 var(--display);
+}
+.emphasis-choice {
+  gap: 8px;
+}
+
+/* The focus block above the commander, in the deck rail. */
+.focus {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  margin-bottom: var(--step);
+}
+.focus h3 {
+  margin: 0 0 4px;
+  font: 600 0.7rem/1.4 var(--ui);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--parchment-dim);
+}
+.focus-list {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+}
+.focus-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+/* Takes the rest of the row so the Remove button stays at the end, and wraps
+   rather than truncating — "nothing in your colours supports this" is a whole
+   sentence and an ellipsis in the middle of it would say nothing at all. */
+.focus-support {
+  flex: 1 1 8rem;
+  font-size: 0.68rem;
+}
+
 /* ------------------------------------------------------------ deck menu */
 
 /* The masthead's deck line, which was inert text, is now the handle. It stays
