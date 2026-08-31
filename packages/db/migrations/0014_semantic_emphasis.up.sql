@@ -1,0 +1,49 @@
+-- Per-deck semantic emphasis.
+--
+-- A commander carries a handful of mechanical synergy tags (ADR-0011, ADR-0022)
+-- and a deck is almost never about all of them. Tergrid causes `opponent-
+-- sacrifice`, `artifact-etb`, `lifeloss` and `opponent-discard` and benefits
+-- from `opponent-discard`, `opponent-sacrifice` and `untap`; a deck about
+-- opponents throwing their own permanents away and a deck about untapping her
+-- Lantern are different decks, and before this column the app could not tell
+-- them apart. This is where the builder says which ones they meant.
+--
+-- A JSON ARRAY OF TAGS. Shape:
+--
+--   ["opponent-discard", "opponent-sacrifice"]
+--
+-- Deduplicated and sorted into `SYNERGY_TAGS` order on read, so two decks that
+-- emphasise the same two things serialise identically and a round trip through
+-- here can never reorder a scoring tie (doc 05: same deck, same dataset, same
+-- ordering, every time).
+--
+-- Rejected alternative: `text[]`. Postgres would type the elements and the
+-- driver would hand back a real array, but the value would then be the one
+-- column on `decks` that is a native array of a domain vocabulary, and widening
+-- it later — an emphasis with a strength, an emphasis with a source — would be
+-- an ALTER TYPE rather than a different value. jsonb also keeps the
+-- parse-don't-cast discipline `target_overrides` established in 0013 exactly the
+-- same on both columns.
+--
+-- Rejected alternative: a Postgres enum, `synergy_tag[]`. It would let the
+-- database reject a misspelled tag, which is real. It was rejected because the
+-- vocabulary moves: `opponent-discard` and `opponent-sacrifice` were added this
+-- morning (ADR-0022), and under an enum that would have been a migration on the
+-- decks table rather than a change to one TypeScript union.
+--
+-- Rejected alternative: a `deck_semantic_emphasis` side table, one row per tag.
+-- It would make de-emphasising a DELETE. It was rejected because the whole value
+-- is at most nineteen short strings, it is read with the deck row on every
+-- recommendation and analysis request, and a join per request to rebuild an
+-- array this small buys nothing. Wholesale replacement is also what makes
+-- clearing expressible at all — see the PATCH handler.
+--
+-- NOT NULL DEFAULT '[]' rather than nullable: "has emphasised nothing" and "has
+-- not emphasised anything" are the same deck, and a nullable column would make
+-- every reader decide which one NULL was.
+ALTER TABLE decks
+  ADD COLUMN semantic_emphasis jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+-- No index, for the same reason 0013 has none: the column is never a search
+-- key. It is read with the deck row it sits on and written by that deck's own
+-- POST or PATCH.

@@ -28,7 +28,32 @@ export interface ScoringWeights {
   readonly bracketRisk: number
   /** Subtracted. */
   readonly budget: number
+  /**
+   * The semantics this builder said the deck is about (`semantic-emphasis.ts`).
+   *
+   * Optional so adding it is additive (AGENTS.md R2) — a caller holding a
+   * hand-built `ScoringWeights` from before this existed still compiles, and
+   * gets `DEFAULT_EMPHASIS_WEIGHT` rather than a silent zero, because a caller
+   * that never heard of emphasis is not a deck that asked for none.
+   *
+   * Heavier than `keywordSynergy` and equal to `combo`, which is the point: an
+   * emphasis is the one thing in the whole scoring vector the user typed with
+   * their own hands, and a term that lost to a derived heuristic would make the
+   * click feel broken. It stays under `fixing` (1.2) so an emphasised cycling
+   * desert still does not beat a real dual inside the land group — the defect
+   * `fixing` was raised to fix is not one emphasis gets to reintroduce.
+   */
+  readonly emphasis?: number
 }
+
+/**
+ * What `emphasis` is worth to a caller that did not name it.
+ *
+ * Rejected alternative: defaulting the absent case to 0. It would make the
+ * feature depend on every call site remembering to pass a weight, and the first
+ * one that forgot would look exactly like "emphasis does not work".
+ */
+export const DEFAULT_EMPHASIS_WEIGHT = 1.0
 
 export const DEFAULT_WEIGHTS: ScoringWeights = {
   combo: 1.0,

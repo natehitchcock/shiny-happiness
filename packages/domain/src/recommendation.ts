@@ -84,6 +84,26 @@ export type Reason =
       readonly direction: 'enables' | 'payoff' | 'theme'
       /** The cards it pairs with, so the reason is interrogable (pillar P4). */
       readonly withOracleIds: readonly OracleId[]
+      /**
+       * Whether this tag is one the builder EMPHASISED (`semantic-emphasis.ts`).
+       *
+       * Pillar P4 is why this exists rather than being left implicit. "Benefits
+       * from your sacrifice fodder" and "benefits from your EMPHASISED sacrifice
+       * fodder" are two different claims: the first says the deck happens to do
+       * this, the second says the card rose because the builder asked for it,
+       * and a card that moved up the list for the second reason must be able to
+       * say so or the reason is not the reason.
+       *
+       * A new optional field on the existing member rather than a new member:
+       * `tag`, `direction` and `withOracleIds` all mean exactly what they
+       * already meant, and a second reason kind carrying the same three fields
+       * would put the same relationship on screen twice. Optional, so a reader
+       * that predates it renders the true-but-weaker sentence it renders today
+       * rather than nothing at all (AGENTS.md R2).
+       *
+       * Absent and `false` are the same thing; only `true` is ever written.
+       */
+      readonly emphasised?: boolean
     }
   | { readonly kind: 'bracket-warning'; readonly flag: BracketFlag; readonly detail: string }
 

@@ -37,7 +37,14 @@ export default tseslint.config(
     // in-progress code as this tree's problem, and — because each worktree has
     // its own tsconfig — makes the type-aware rules fail outright with
     // "multiple candidate TSConfigRootDirs".
-    ignores: ['**/dist/**', '**/dist-web/**', '**/.turbo/**', 'design/**', 'coverage/**', '.claude/**'],
+    ignores: [
+      '**/dist/**',
+      '**/dist-web/**',
+      '**/.turbo/**',
+      'design/**',
+      'coverage/**',
+      '.claude/**',
+    ],
   },
 
   tseslint.configs.recommended,

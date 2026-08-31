@@ -48,6 +48,17 @@ const GC_COMMANDER = oracleId(randomUUID())
 const EXTRA_TURN = oracleId(randomUUID())
 const LAND_DENIAL = oracleId(randomUUID())
 const NONLAND_WIPE = oracleId(randomUUID())
+/**
+ * A commander that sits on both sides of one tag, plus two candidates that
+ * differ only in which of her tags they carry.
+ *
+ * Modelled on Tergrid, whose front face WANTS `opponent-discard` and whose
+ * Lantern PRODUCES it — so a deck she leads has weight on both sides of the tag
+ * and both directions of match are reachable from one fixture.
+ */
+const EMPH_COMMANDER = oracleId(randomUUID())
+const DISCARD_CARD = oracleId(randomUUID())
+const UNTAP_CARD = oracleId(randomUUID())
 
 const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   oracleId: id,
@@ -74,8 +85,8 @@ const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   primaryRole: opts.primaryRole ?? 'synergy',
   universesBeyond: false,
   gameChanger: opts.gameChanger ?? false,
-  synergyProduces: [],
-  synergyWants: [],
+  synergyProduces: opts.synergyProduces ?? [],
+  synergyWants: opts.synergyWants ?? [],
 })
 
 describeDb('API-02 contract', () => {
@@ -151,6 +162,16 @@ describeDb('API-02 contract', () => {
         types: ['sorcery'],
         oracleText: 'Destroy all nonland permanents your opponents control.',
       }),
+      card(EMPH_COMMANDER, 'Emphasis Legend', {
+        typeLine: 'Legendary Creature — God',
+        canBeCommander: true,
+        synergyProduces: ['opponent-discard'],
+        synergyWants: ['opponent-discard', 'untap'],
+      }),
+      // Deliberately the LATER name of the two, so the alphabetical tie-break
+      // puts it second and only the emphasis term can bring it first.
+      card(UNTAP_CARD, 'Zephyr Untapper', { synergyProduces: ['untap'] }),
+      card(DISCARD_CARD, 'Aggressive Discard', { synergyProduces: ['opponent-discard'] }),
     ])
     const combo: Combo = {
       id: comboId('combo-1'),
@@ -1103,6 +1124,191 @@ describeDb('API-02 contract', () => {
         method: 'PATCH',
         url: `/api/v1/decks/${(await freshDeck()).id}`,
         payload: { targetOverrides: { tolerance: 1.5 } },
+      })
+      expect(response.statusCode).toBe(400)
+    })
+  })
+
+  describe('per-deck semantic emphasis', () => {
+    const freshDeck = async (semanticEmphasis?: string[] | null): Promise<{ id: string }> =>
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/decks',
+          payload: {
+            name: 'Focused',
+            commanders: [EMPH_COMMANDER],
+            targetBracket: 3,
+            archetype: 'midrange',
+            ...(semanticEmphasis === undefined ? {} : { semanticEmphasis }),
+          },
+        })
+      ).json()
+
+    const suggest = async (id: string) =>
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/decks/${id}/recommendations`,
+          payload: {},
+        })
+      ).json()
+
+    /** Every suggested card, in the order the endpoint put them in. */
+    const ordering = (body: { groups: { items: { oracleId: string }[] }[] }) =>
+      body.groups.flatMap((g) => g.items.map((i) => i.oracleId))
+
+    it('starts every deck with nothing emphasised', async () => {
+      const fresh = await freshDeck()
+      const body = await app.inject({ method: 'GET', url: `/api/v1/decks/${fresh.id}` })
+      expect(body.json().semanticEmphasis).toEqual([])
+      expect((await suggest(fresh.id)).emphasis).toEqual([])
+    })
+
+    it('takes the emphasis at creation, because that is when the user is asked', async () => {
+      // "When choosing my commander, before I start making the deck." A deck
+      // that could only be focused by a follow-up PATCH would spend one round
+      // trip scoring against the wrong thing.
+      const fresh = await freshDeck(['untap', 'opponent-discard'])
+      const body = await app.inject({ method: 'GET', url: `/api/v1/decks/${fresh.id}` })
+      // Canonical order, not click order.
+      expect(body.json().semanticEmphasis).toEqual(['untap', 'opponent-discard'])
+    })
+
+    it('ranks a card supporting the emphasis above one that does not', async () => {
+      const plain = ordering(await suggest((await freshDeck()).id))
+      const focused = ordering(await suggest((await freshDeck(['untap'])).id))
+
+      // Without emphasis the alphabetical tie-break puts the discard card first.
+      expect(plain.indexOf(DISCARD_CARD)).toBeLessThan(plain.indexOf(UNTAP_CARD))
+      expect(focused.indexOf(UNTAP_CARD)).toBeLessThan(focused.indexOf(DISCARD_CARD))
+    })
+
+    it('never removes a suggestion — emphasis reorders and nothing else', async () => {
+      // The failure mode this feature must not have. Emphasising something the
+      // pool cannot support must not empty the feed.
+      const plain = ordering(await suggest((await freshDeck()).id))
+      const focused = ordering(await suggest((await freshDeck(['landfall'])).id))
+      expect([...focused].sort()).toEqual([...plain].sort())
+    })
+
+    it('says how much of the pool each emphasised tag reaches', async () => {
+      // `supporting: 0` is the honest answer to "why did nothing change".
+      // Without it, an emphasis nothing supports is indistinguishable from one
+      // that worked, because the list comes back full either way.
+      const body = await suggest((await freshDeck(['landfall', 'untap'])).id)
+      expect(body.emphasis).toEqual([
+        { tag: 'landfall', supporting: 0 },
+        { tag: 'untap', supporting: 1 },
+      ])
+    })
+
+    it('says the card rose because of the emphasis, not an ordinary synergy (P4)', async () => {
+      const body = await suggest((await freshDeck(['untap'])).id)
+      const item = body.groups
+        .flatMap((g: { items: { oracleId: string; reasons: unknown[] }[] }) => g.items)
+        .find((i: { oracleId: string }) => i.oracleId === UNTAP_CARD)
+      expect(item.reasons).toContainEqual({
+        kind: 'keyword-synergy',
+        tag: 'untap',
+        direction: 'enables',
+        withOracleIds: [],
+        emphasised: true,
+      })
+    })
+
+    it('makes no emphasis claim about a card the builder did not emphasise', async () => {
+      const body = await suggest((await freshDeck(['untap'])).id)
+      const item = body.groups
+        .flatMap((g: { items: { oracleId: string; reasons: { kind: string }[] }[] }) => g.items)
+        .find((i: { oracleId: string }) => i.oracleId === DISCARD_CARD)
+      const synergy = item.reasons.find((r: { kind: string }) => r.kind === 'keyword-synergy')
+      expect(synergy).not.toHaveProperty('emphasised')
+    })
+
+    it('adds an emphasis through PATCH', async () => {
+      const fresh = await freshDeck()
+      const patched = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { semanticEmphasis: ['opponent-discard'] },
+      })
+      expect(patched.statusCode).toBe(200)
+      expect(patched.json().semanticEmphasis).toEqual(['opponent-discard'])
+    })
+
+    it('de-emphasises one tag by sending the shorter list', async () => {
+      // Wholesale replacement is what makes removing a tag the same operation
+      // as adding one. There is no remove verb to forget to implement.
+      const fresh = await freshDeck(['untap', 'opponent-discard'])
+      const patched = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { semanticEmphasis: ['opponent-discard'] },
+      })
+      expect(patched.json().semanticEmphasis).toEqual(['opponent-discard'])
+    })
+
+    it('can be cleared with an empty array', async () => {
+      const fresh = await freshDeck(['untap'])
+      const patched = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { semanticEmphasis: [] },
+      })
+      expect(patched.json().semanticEmphasis).toEqual([])
+      // And the ordering goes back to what it was — an emphasis that left a
+      // residue behind would be one the user could not actually undo.
+      expect(ordering(await suggest(fresh.id))).toEqual(
+        ordering(await suggest((await freshDeck()).id)),
+      )
+    })
+
+    it('can be cleared with an explicit null', async () => {
+      const fresh = await freshDeck(['untap'])
+      const patched = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { semanticEmphasis: null },
+      })
+      expect(patched.statusCode).toBe(200)
+      expect(patched.json().semanticEmphasis).toEqual([])
+    })
+
+    it('leaves the emphasis alone when the patch does not mention it', async () => {
+      const fresh = await freshDeck(['untap'])
+      const renamed = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { name: 'Renamed' },
+      })
+      expect(renamed.json().name).toBe('Renamed')
+      expect(renamed.json().semanticEmphasis).toEqual(['untap'])
+    })
+
+    it('does not disturb the target overrides, which are a separate axis', async () => {
+      // Doc 16's controls and this one both live on `PATCH`, and a deck may
+      // want eighteen creatures AND be about opponent-discard.
+      const fresh = await freshDeck(['untap'])
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { roles: { 'role:ramp': 17 } } },
+      })
+      const body = (
+        await app.inject({ method: 'GET', url: `/api/v1/decks/${fresh.id}/analysis` })
+      ).json()
+      expect(body.semanticEmphasis).toEqual(['untap'])
+      expect(body.targetOverrides).toEqual({ roles: { 'role:ramp': 17 } })
+    })
+
+    it('rejects a tag that is not in the vocabulary', async () => {
+      // The enum is the domain's own `SYNERGY_TAGS`. A tag kept here would be
+      // an emphasis that silently matched nothing forever.
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${(await freshDeck()).id}`,
+        payload: { semanticEmphasis: ['not-a-real-tag'] },
       })
       expect(response.statusCode).toBe(400)
     })

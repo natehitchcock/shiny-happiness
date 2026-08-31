@@ -1,4 +1,4 @@
-import { ARCHETYPES, BRACKETS, COLORS, ROLE_PRECEDENCE } from '@roundtable/domain'
+import { ARCHETYPES, BRACKETS, COLORS, ROLE_PRECEDENCE, SYNERGY_TAGS } from '@roundtable/domain'
 import type { ArchetypeKey, Bracket, Color, Origin, Role } from '@roundtable/domain'
 
 /**
@@ -40,6 +40,25 @@ export const oracleIdParams = {
   properties: { oracleId: uuid },
 } as const
 
+/**
+ * The semantics a deck is about (`semantic-emphasis.ts`).
+ *
+ * `null` is accepted and means "clear it", exactly as `targetOverrides` does:
+ * the user asked in as many words to be able to de-emphasise, and `[]` alone
+ * would leave a client unable to say "back to no focus" in a body whose other
+ * fields all treat absence as "leave alone".
+ *
+ * The enum comes from the domain's own `SYNERGY_TAGS`, not a list retyped here
+ * — two tags were added this morning (ADR-0022) and a parallel copy would have
+ * 400'd them. `maxItems` is the vocabulary size because the value is a SET;
+ * duplicates are dropped on read, so a longer array carries no more meaning.
+ */
+const semanticEmphasis = {
+  type: ['array', 'null'],
+  items: { type: 'string', enum: [...SYNERGY_TAGS] },
+  maxItems: SYNERGY_TAGS.length,
+} as const
+
 export const createDeckBody = {
   type: 'object',
   required: ['name', 'commanders', 'targetBracket', 'archetype'],
@@ -56,6 +75,9 @@ export const createDeckBody = {
     // A taste filter, not a legality rule (ADR-0011). Per deck, so it survives
     // reopening; defaults off so the corpus stays whole until asked.
     excludeUniversesBeyond: { type: 'boolean' },
+    // Accepted at creation because that is when the builder is asked: the start
+    // screen offers the commander's own semantics before the deck exists.
+    semanticEmphasis,
   },
 } as const
 
@@ -126,6 +148,7 @@ export const patchDeckBody = {
     status: { type: 'string', enum: ['active', 'archived'] },
     excludeUniversesBeyond: { type: 'boolean' },
     targetOverrides,
+    semanticEmphasis,
   },
 } as const
 

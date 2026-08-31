@@ -3,6 +3,7 @@ import type { Bracket } from './bracket.js'
 import type { Color } from './card.js'
 import type { DeckId, OracleId } from './ids.js'
 import type { Role } from './role.js'
+import type { SemanticEmphasis } from './semantic-emphasis.js'
 import type { TargetOverrides } from './target-overrides.js'
 
 /**
@@ -77,6 +78,27 @@ export interface Deck {
    * card" — two very different sizes of mistake sharing one Ctrl+Z.
    */
   readonly targetOverrides?: TargetOverrides
+  /**
+   * The commander semantics this deck is actually about (ADR-0011 tags).
+   *
+   * Sparse in the same sense as `targetOverrides`: `[]` is a deck that has said
+   * nothing, and absent means the same. Optional so adding it is additive
+   * (AGENTS.md R2) and every existing `Deck` literal still type-checks. Read it
+   * as `deck.semanticEmphasis ?? NO_EMPHASIS`.
+   *
+   * A SEPARATE AXIS FROM `targetOverrides`, deliberately. A target says how many
+   * ramp cards the deck should hold; an emphasis says which of two ramp cards to
+   * offer first. Emphasis is added as its own scoring term and touches neither
+   * the composition targets nor the group a card lands in, so a deck can want
+   * eighteen creatures AND be about opponent-discard without either claim eating
+   * the other (doc 16, doc 05 §5.3).
+   *
+   * NOT part of `DeckCommand`, for the same reason a target is not: it is a
+   * property of the deck rather than an operation on its contents, and putting
+   * a chip toggle through the command batch would make "I changed my focus"
+   * undoable in the same queue as "I added a card".
+   */
+  readonly semanticEmphasis?: SemanticEmphasis
   /** Derived from the commanders; cached. */
   readonly colorIdentity: readonly Color[]
   readonly entries: readonly DeckEntry[]

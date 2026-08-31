@@ -10,6 +10,8 @@ import { parseQuery } from './query/parse.js'
 import { recommend, type CardStats, type PoolCard, type RecommendInput } from './recommend.js'
 import type { Role } from './role.js'
 import { DEFAULT_WEIGHTS, weightsFor } from './scoring.js'
+import { parseSemanticEmphasis } from './semantic-emphasis.js'
+import { COMMANDER_WEIGHT, type DeckSynergy } from './synergy.js'
 
 const card = (name: string, over: Partial<Card> = {}): Card => ({
   oracleId: oracleId(name),
@@ -437,5 +439,216 @@ describe('degenerate input', () => {
     const result = recommend(baseInput())
     expect(result.groups).toEqual([])
     expect(result.query).toEqual({ matched: 0, total: 0 })
+  })
+})
+
+/**
+ * Semantic emphasis — the tags the builder said the deck is ABOUT.
+ *
+ * Tergrid's own shape throughout: she causes `opponent-discard` and benefits
+ * from it, so a deck led by her has weight on both sides of the tag and both
+ * directions of match are reachable.
+ */
+describe('semantic emphasis', () => {
+  const tergrid: DeckSynergy = {
+    produces: new Map([
+      ['opponent-discard', COMMANDER_WEIGHT],
+      ['opponent-sacrifice', COMMANDER_WEIGHT],
+    ]),
+    wants: new Map([
+      ['opponent-discard', COMMANDER_WEIGHT],
+      ['untap', COMMANDER_WEIGHT],
+    ]),
+  }
+
+  /** Two cards that are identical apart from which of Tergrid's tags they carry. */
+  const twoCandidates = (over: Partial<RecommendInput> = {}) =>
+    recommend(
+      baseInput({
+        deckSynergy: tergrid,
+        pool: [
+          pooled('discard', {
+            card: card('discard', { synergyProduces: ['opponent-discard'] }),
+          }),
+          pooled('untapper', {
+            card: card('untapper', { synergyProduces: ['untap'] }),
+          }),
+        ],
+        ...over,
+      }),
+    )
+
+  const ordering = (r: ReturnType<typeof recommend>) =>
+    r.groups.flatMap((g) => g.items.map((i) => i.oracleId))
+
+  it('leaves the ordering untouched when nothing is emphasised', () => {
+    // Two cards with the same commander-weight synergy tie, broken by
+    // edhrecRank then name — `discard` before `untapper`.
+    expect(ordering(twoCandidates())).toEqual([oracleId('discard'), oracleId('untapper')])
+  })
+
+  it('ranks a card supporting the emphasised tag above one that does not', () => {
+    // The requirement, stated plainly. Emphasise `untap` and the untapper has
+    // to win, against a name tie-break that was pushing it second.
+    expect(ordering(twoCandidates({ emphasis: ['untap'] }))).toEqual([
+      oracleId('untapper'),
+      oracleId('discard'),
+    ])
+  })
+
+  it('is fully reversible — clearing the emphasis restores the original order', () => {
+    // De-emphasising is the half of the request most easily left unbuilt. `[]`
+    // must be indistinguishable from never having emphasised anything.
+    expect(ordering(twoCandidates({ emphasis: [] }))).toEqual(ordering(twoCandidates()))
+  })
+
+  it('lifts a card even when the deck does not do the tag yet', () => {
+    // `EMPHASIS_FLOOR`. Nothing in a Tergrid deck touches `landfall`, so a
+    // multiplier would multiply zero and the click would do nothing at all.
+    const result = recommend(
+      baseInput({
+        deckSynergy: tergrid,
+        emphasis: ['landfall'],
+        pool: [
+          pooled('alpha', { card: card('alpha') }),
+          // Named last alphabetically on purpose: the tie-break would put it
+          // second, so only the emphasis term can bring it first.
+          pooled('zeta', { card: card('zeta', { synergyWants: ['landfall'] }) }),
+        ],
+      }),
+    )
+    expect(ordering(result)).toEqual([oracleId('zeta'), oracleId('alpha')])
+  })
+
+  it('never changes which group a card lands in (pillar P5)', () => {
+    /*
+     * The reason emphasis is an additive term and not a multiplier inside
+     * `synergyMatches`: `synergyScore` feeds MECHANICAL_SYNERGY_THRESHOLD, and
+     * a user preference must not be able to relabel a card as "high synergy".
+     */
+    const pool = [
+      pooled('discard', { card: card('discard', { synergyProduces: ['opponent-discard'] }) }),
+      pooled('untapper', { card: card('untapper', { synergyProduces: ['untap'] }) }),
+    ]
+    const groupOf = (r: ReturnType<typeof recommend>) =>
+      Object.fromEntries(r.groups.flatMap((g) => g.items.map((i) => [i.oracleId, g.key])))
+    expect(
+      groupOf(recommend(baseInput({ deckSynergy: tergrid, pool, emphasis: ['untap'] }))),
+    ).toEqual(groupOf(recommend(baseInput({ deckSynergy: tergrid, pool }))))
+  })
+
+  it('does not touch the archetype composition targets', () => {
+    // Doc 16's axis, not this one. The `fills-` groups and their deficits are
+    // computed upstream of every scoring term and must be identical.
+    const pool = [pooled('lands', { card: card('lands', { synergyWants: ['landfall'] }) })]
+    const withEmphasis = recommend(baseInput({ pool, emphasis: ['landfall'] }))
+    const without = recommend(baseInput({ pool }))
+    expect(withEmphasis.groups.map((g) => g.label)).toEqual(without.groups.map((g) => g.label))
+  })
+
+  it('says the reason is an emphasis, not an ordinary synergy (pillar P4)', () => {
+    const result = recommend(
+      baseInput({
+        deckSynergy: tergrid,
+        emphasis: ['opponent-discard'],
+        pool: [
+          pooled('discard', { card: card('discard', { synergyProduces: ['opponent-discard'] }) }),
+        ],
+      }),
+    )
+    const reason = result.groups
+      .flatMap((g) => g.items)
+      .flatMap((i) => i.reasons)
+      .find((r) => r.kind === 'keyword-synergy')
+    expect(reason).toEqual({
+      kind: 'keyword-synergy',
+      tag: 'opponent-discard',
+      direction: 'enables',
+      withOracleIds: [],
+      emphasised: true,
+    })
+  })
+
+  it('does not claim an emphasis on a card that only has ordinary synergy', () => {
+    const result = recommend(
+      baseInput({
+        deckSynergy: tergrid,
+        emphasis: ['landfall'],
+        pool: [
+          pooled('discard', { card: card('discard', { synergyProduces: ['opponent-discard'] }) }),
+        ],
+      }),
+    )
+    const reason = result.groups
+      .flatMap((g) => g.items)
+      .flatMap((i) => i.reasons)
+      .find((r) => r.kind === 'keyword-synergy')
+    expect(reason).not.toHaveProperty('emphasised')
+  })
+
+  it('names the emphasised tag even when a different tag scores higher', () => {
+    // The card is in this list because of the emphasis, so the emphasised tag
+    // is what the reason must name — reporting the stronger incidental synergy
+    // would be a true sentence about the wrong card.
+    const result = recommend(
+      baseInput({
+        deckSynergy: tergrid,
+        emphasis: ['untap'],
+        pool: [
+          pooled('both', {
+            card: card('both', { synergyProduces: ['opponent-discard'], synergyWants: ['untap'] }),
+          }),
+        ],
+      }),
+    )
+    const reason = result.groups
+      .flatMap((g) => g.items)
+      .flatMap((i) => i.reasons)
+      .find((r) => r.kind === 'keyword-synergy')
+    expect(reason).toMatchObject({ tag: 'untap', emphasised: true })
+  })
+
+  it('reports how much of the pool each emphasised tag reaches', () => {
+    const result = recommend(
+      baseInput({
+        deckSynergy: tergrid,
+        // In `SYNERGY_TAGS` order, which is what `parseSemanticEmphasis` hands
+        // every real caller; the report comes back in the order it was given.
+        emphasis: parseSemanticEmphasis(['opponent-discard', 'landfall']),
+        pool: [
+          pooled('discard', { card: card('discard', { synergyProduces: ['opponent-discard'] }) }),
+          pooled('payoff', { card: card('payoff', { synergyWants: ['opponent-discard'] }) }),
+        ],
+      }),
+    )
+    // `landfall: 0` is the honest answer to "why did nothing change" — and note
+    // the suggestions are still there, because emphasis never filters.
+    expect(result.emphasis).toEqual([
+      { tag: 'landfall', supporting: 0 },
+      { tag: 'opponent-discard', supporting: 2 },
+    ])
+    expect(result.groups.flatMap((g) => g.items)).toHaveLength(2)
+  })
+
+  it('counts a card once for a tag it both produces and wants', () => {
+    const result = recommend(
+      baseInput({
+        deckSynergy: tergrid,
+        emphasis: ['opponent-discard'],
+        pool: [
+          pooled('engine', {
+            card: card('engine', {
+              synergyProduces: ['opponent-discard'],
+              synergyWants: ['opponent-discard'],
+            }),
+          }),
+        ],
+      }),
+    )
+    expect(result.emphasis).toEqual([{ tag: 'opponent-discard', supporting: 1 }])
+  })
+
+  it('reports no emphasis when none is set', () => {
+    expect(recommend(baseInput({ pool: [pooled('a')] })).emphasis).toEqual([])
   })
 })

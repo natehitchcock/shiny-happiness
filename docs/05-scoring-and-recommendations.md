@@ -170,6 +170,7 @@ score(X) = w_combo   · log2(1 + comboDegree(X))
          + w_inc     · inclusionShare(X)
          + w_fill    · roleDeficitFit(X)
          + w_curve   · curveFit(X)
+         + w_emph    · emphasisScore(X)
          − p_bracket · bracketRisk(X)
          − p_budget  · budgetOverrun(X)
 ```
@@ -190,6 +191,39 @@ Notes that matter:
 
 Ties break by `edhrecRank`, then by name, so ordering is total and stable — no
 list reshuffling between renders.
+
+### Semantic emphasis
+
+`emphasisScore` is the one term the builder writes with their own hands. A deck
+stores a set of `SynergyTag`s it is ABOUT — picked from the commander's own tags
+at the start screen, changed by clicking a chip afterwards, cleared by sending
+an empty list — and every candidate carrying one of them gains
+`sum(w) / (sum(w) + 4)`, on the same saturating curve as `synergyScore`. Weights
+come from the matches `synergyMatches` already produced, so a tag matched as
+`enables` still outranks the same tag matched as `theme`. A tag the deck does
+not do at all floors at 1 (`EMPHASIS_FLOOR`), one accepted card's worth, so
+emphasising something read off a card in the feed is not silently inert.
+
+Three properties are load-bearing:
+
+- **It is a separate additive term, not a multiplier inside `synergyScore`.**
+  `synergyScore` also feeds the `high-synergy` group threshold in §5.3, and
+  scaling it would let a user preference change which GROUP a card lands in.
+  Grouping is the product's opinion; score only orders within it (P5). For the
+  same reason it is not a raised `THEME_WEIGHT` — that is both inside
+  `synergyScore` and blind to `enables` and `payoff` matches.
+- **It never touches the composition targets of doc 16.** Those decide
+  `s.deficit` and the `fills-<role>` groups, upstream of every line in the sum.
+  A deck can want eighteen creatures AND be about opponent-discard.
+- **It never filters.** An emphasis nothing supports returns the same
+  suggestions it always did; `RecommendResult.emphasis` reports
+  `supporting: 0` per tag so the absence is named rather than mimed.
+
+`Reason` says which of the two claims it is making: a `keyword-synergy` reason
+about an emphasised tag carries `emphasised: true`, so "benefits from your
+sacrifice fodder" and "benefits from your EMPHASISED sacrifice fodder" are
+distinguishable (§5.7, P4). Where a card has both, the emphasised match is the
+one named — it is what moved the card.
 
 ## 5.7 Explanations (P4)
 

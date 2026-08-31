@@ -6,7 +6,19 @@ import { fixingFor, isManaSource, NO_FIXING } from './fixing.js'
 import { dimensionKey, type CompositionDimension, type CompositionTarget } from './composition.js'
 import type { CompositionCounts, Deficit } from './composition-analysis.js'
 import { findDeficits, shortfalls } from './composition-analysis.js'
-import { synergyMatches, synergyScore, type DeckSynergy, type SynergyMatch } from './synergy.js'
+import {
+  synergyMatches,
+  synergyScore,
+  type DeckSynergy,
+  type SynergyMatch,
+  type SynergyTag,
+} from './synergy.js'
+import {
+  emphasisMatches,
+  emphasisScore,
+  NO_EMPHASIS,
+  type SemanticEmphasis,
+} from './semantic-emphasis.js'
 import {
   curveBucket,
   curveDeltas,
@@ -20,7 +32,7 @@ import { matchesQuery, type AnnotatedCandidate } from './query/evaluate.js'
 import type { QueryNode } from './query/ast.js'
 import type { CandidateGroupKey, Reason, Recommendation } from './recommendation.js'
 import type { Role } from './role.js'
-import type { ScoringWeights } from './scoring.js'
+import { DEFAULT_EMPHASIS_WEIGHT, type ScoringWeights } from './scoring.js'
 
 /**
  * Candidate generation (doc 05, DOM-05).
@@ -74,6 +86,14 @@ export interface RecommendInput {
    * not contribute — every card scores the same on it, so nothing is skewed.
    */
   readonly deckSynergy?: DeckSynergy
+  /**
+   * The semantics the builder said this deck is about (`semantic-emphasis.ts`).
+   *
+   * Absent or empty means no emphasis, and then the emphasis term is zero for
+   * every candidate — so nothing is skewed and the ordering is byte-identical
+   * to what it was before this input existed.
+   */
+  readonly emphasis?: SemanticEmphasis
 }
 
 export interface CandidateGroup {
@@ -95,6 +115,27 @@ export interface RecommendResult {
     readonly matched: number
     readonly total: number
   }
+  /**
+   * How much of the pool each emphasised tag actually reaches. Empty when the
+   * deck emphasises nothing.
+   *
+   * Emphasis never filters, so a tag nothing supports still returns a full list
+   * of suggestions — which, on its own, is indistinguishable from an emphasis
+   * that worked. This is what makes the difference visible: `supporting: 0` lets
+   * the client say "nothing in your colours produces or wants landfall" instead
+   * of leaving the builder to wonder why their click did nothing. Same
+   * discipline as `unavailable` — a degraded answer is named, not disguised
+   * (doc 05 §5.3).
+   *
+   * Counted over eligible candidates BEFORE the query filter, because the
+   * question is about the deck's colours and the corpus, not about whatever the
+   * search box currently holds.
+   */
+  readonly emphasis: readonly {
+    readonly tag: SynergyTag
+    /** Eligible candidates that produce or want it. */
+    readonly supporting: number
+  }[]
 }
 
 const MECHANICAL_SYNERGY_THRESHOLD = 0.45
@@ -112,6 +153,8 @@ interface Scratch {
   matchesFilter: boolean
   /** Mechanical synergy with the deck, strongest first (ADR-0011). */
   readonly synergy: readonly SynergyMatch[]
+  /** The subset of that relating to a tag the builder emphasised. */
+  readonly emphasised: readonly SynergyMatch[]
   group: CandidateGroupKey | null
   score: number
   reasons: Reason[]
@@ -160,6 +203,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
   const identity = new Set(input.colorIdentity)
   const curve = input.curveTarget ?? curveTarget('midrange')
   const synergy: DeckSynergy = input.deckSynergy ?? { produces: new Map(), wants: new Map() }
+  const emphasis = input.emphasis ?? NO_EMPHASIS
   const limit = input.limitPerGroup ?? 60
   const deficits = shortfalls(findDeficits(input.counts, input.targets))
   const deficitByRole = new Map<Role, Deficit>()
@@ -173,6 +217,11 @@ export const recommend = (input: RecommendInput): RecommendResult => {
     if (!isEligible(pooled, input, identity)) continue
     const annotation = annotateCombos(input.comboIndex, input.accepted, pooled.card.oracleId)
     const primary = pooled.roles[0] ?? pooled.card.primaryRole
+    const profile = {
+      produces: pooled.card.synergyProduces,
+      wants: pooled.card.synergyWants,
+    }
+    const matches = synergyMatches(profile, synergy)
     const s: Scratch = {
       pooled,
       degree: annotation.degree,
@@ -181,13 +230,8 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       stats: input.stats?.get(pooled.card.oracleId) ?? null,
       deficit: deficitByRole.get(primary) ?? null,
       matchesFilter: true,
-      synergy: synergyMatches(
-        {
-          produces: pooled.card.synergyProduces,
-          wants: pooled.card.synergyWants,
-        },
-        synergy,
-      ),
+      synergy: matches,
+      emphasised: emphasisMatches(profile, matches, emphasis),
       group: null,
       score: 0,
       reasons: [],
@@ -255,7 +299,19 @@ export const recommend = (input: RecommendInput): RecommendResult => {
     if (s.stats !== null) {
       reasons.push({ kind: 'corpus-inclusion', share: s.stats.inclusion, synergy: s.stats.synergy })
     }
-    const topMatch = s.synergy[0]
+    /*
+     * An emphasised match OUTRANKS a stronger unemphasised one here (P4).
+     *
+     * The reason has to name the thing that moved the card. When the builder
+     * has emphasised `opponent-discard`, a discard payoff is in this list
+     * because of the emphasis term below — and reporting its incidental
+     * `creature-death` synergy instead, merely because that tag scored higher
+     * on the mechanical curve, would be a true sentence about the wrong card.
+     * `emphasised: true` is what separates "benefits from your sacrifice
+     * fodder" from "benefits from your EMPHASISED sacrifice fodder".
+     */
+    const topEmphasis = s.emphasised[0]
+    const topMatch = topEmphasis ?? s.synergy[0]
     if (topMatch !== undefined) {
       reasons.push({
         kind: 'keyword-synergy',
@@ -263,6 +319,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
         direction: topMatch.direction,
         // The cards it pairs with, so the reason can be interrogated (P4).
         withOracleIds: [],
+        ...(topEmphasis !== undefined ? { emphasised: true } : {}),
       })
     }
     // Said before the deficit, because for a land it is the more specific
@@ -323,6 +380,26 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       w.fill * (s.deficit === null ? 0 : Math.min(1, Math.abs(s.deficit.delta) / 5)) +
       w.curve * curveFit(card.manaValue, input.counts.manaCurve, curve) +
       w.keywordSynergy * synergyScore(s.synergy) +
+      /*
+       * The emphasis term (`semantic-emphasis.ts`).
+       *
+       * ADDITIVE AND SEPARATE, not a multiplier folded into `synergyScore`.
+       * `synergyScore` is read twice — here, and by the
+       * `MECHANICAL_SYNERGY_THRESHOLD` that decides whether a card is put in the
+       * `high-synergy` GROUP. Scaling it would let a user preference change
+       * which group a card lands in, and pillar P5 is explicit that grouping is
+       * the product's opinion and score only orders inside it. Rejected for the
+       * same reason: raising `THEME_WEIGHT` for emphasised tags, which is both
+       * inside `synergyScore` and reaches only one of the three directions — an
+       * emphasised tag matched as `enables` would get nothing at all.
+       *
+       * It is also why emphasis cannot quietly eat the archetype's composition
+       * targets (doc 16): those decide `s.deficit` and therefore the
+       * `fills-<role>` groups, upstream of every line in this sum. A deck can be
+       * eighteen creatures AND about opponent-discard; this term reorders within
+       * whatever the targets decided, and never against them.
+       */
+      (w.emphasis ?? DEFAULT_EMPHASIS_WEIGHT) * emphasisScore(s.emphasised) +
       w.fixing * fixing.value -
       w.bracketRisk * s.pooled.bracketFlags.length -
       w.budget * budgetOverrun
@@ -381,6 +458,17 @@ export const recommend = (input: RecommendInput): RecommendResult => {
         { key: 'high-synergy', reason: 'statistics source unavailable' },
       ]
 
+  // Counted over every eligible candidate, including ones the query filtered
+  // out and ones that fell into no group: the claim is "your colours contain
+  // nothing that does this", which the search box has no bearing on.
+  const supporting = new Map<SynergyTag, number>(emphasis.map((tag) => [tag, 0]))
+  for (const s of scratch) {
+    for (const tag of new Set([...s.pooled.card.synergyProduces, ...s.pooled.card.synergyWants])) {
+      const held = supporting.get(tag)
+      if (held !== undefined) supporting.set(tag, held + 1)
+    }
+  }
+
   return {
     groups,
     unavailable,
@@ -388,6 +476,8 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       matched: scratch.filter((s) => s.matchesFilter && s.group !== null).length,
       total: scratch.filter((s) => s.group !== null).length,
     },
+    // In `emphasis` order, which `parseSemanticEmphasis` already made canonical.
+    emphasis: emphasis.map((tag) => ({ tag, supporting: supporting.get(tag) ?? 0 })),
   }
 }
 
