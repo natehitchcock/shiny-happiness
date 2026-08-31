@@ -1,5 +1,5 @@
 import type { Pool } from 'pg'
-import { getCards, liveSnapshotId, type PrintingFacts } from '@roundtable/db'
+import { gameChangerOracleIds, getCards, liveSnapshotId, type PrintingFacts } from '@roundtable/db'
 import { cachedCombosInIdentity, cachedEligibleCards, cachedPrintingFacts } from './corpus-cache.js'
 import type {
   Card,
@@ -34,6 +34,15 @@ export interface DeckContext {
   readonly snapshotId: string | null
   readonly printingFacts: ReadonlyMap<OracleId, PrintingFacts>
   /**
+   * Wizards' Game Changers list, as oracle ids (DATA-05).
+   *
+   * Loaded here rather than in the analysis route so that the two endpoints see
+   * the same list, for the same reason the rest of this context is shared. Not
+   * cached: it is a few dozen uuids behind a partial index, next to a combo read
+   * that can be 19.6 MB.
+   */
+  readonly gameChangers: readonly OracleId[]
+  /**
    * Why a data source is missing, if it is. Reported to the client rather than
    * silently degrading (doc 05 §5.3): "no combos loaded" and "no combos apply"
    * look identical in the output otherwise.
@@ -55,7 +64,11 @@ export interface DeckContext {
 const toPoolCard = (card: Card, facts: PrintingFacts | undefined): PoolCard => ({
   card,
   roles: card.roles,
-  bracketFlags: [],
+  // See `routes/cards.ts`: the Game Changers flag is the one bracket flag a
+  // single card can carry on its own, and DATA-05 is what finally supplies it.
+  // Recommendation scoring already weights `bracketFlags.length` as bracket
+  // risk, so this is the first request in which that weight does anything.
+  bracketFlags: card.gameChanger ? ['game-changer'] : [],
   priceUsd: facts?.priceUsd ?? null,
   rarity: facts?.rarity ?? null,
   setCode: facts?.setCode ?? null,
@@ -79,10 +92,11 @@ export const loadDeckContext = async (pool: Pool, deck: Deck): Promise<DeckConte
   // All three are corpus reference data: identical for every request with the
   // same key, and changing only when the ingest runs. See `corpus-cache` — the
   // uncached versions moved ~86 MB per request and took production down.
-  const [eligible, combos, printingFacts] = await Promise.all([
+  const [eligible, combos, printingFacts, gameChangers] = await Promise.all([
     cachedEligibleCards(pool, deck.colorIdentity, deck.excludeUniversesBeyond, snapshotId),
     cachedCombosInIdentity(pool, deck.colorIdentity, snapshotId),
     cachedPrintingFacts(pool, snapshotId),
+    gameChangerOracleIds(pool),
   ])
 
   if (combos.length === 0) {
@@ -125,6 +139,7 @@ export const loadDeckContext = async (pool: Pool, deck: Deck): Promise<DeckConte
     targets,
     snapshotId,
     printingFacts,
+    gameChangers,
     missing,
   }
 }

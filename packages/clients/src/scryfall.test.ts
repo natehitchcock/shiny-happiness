@@ -336,3 +336,44 @@ describe('Universes Beyond provenance (ADR-0011)', () => {
     expect(toCard(byName('Sol Ring'), { universesBeyond: true })?.universesBeyond).toBe(true)
   })
 })
+
+describe('the Game Changers flag (DATA-05)', () => {
+  /*
+   * Both fixtures are real Scryfall records, and both are on Wizards' list as of
+   * 2026-08-30. The list is not written down anywhere in this repository — it is
+   * read from `game_changer` on the records we already download — so these
+   * assertions are about the mapping, never about which cards belong.
+   */
+  it('maps a card Scryfall flags as a Game Changer', () => {
+    expect(toCard(byName('Rhystic Study'))?.gameChanger).toBe(true)
+  })
+
+  it('maps a multi-faced Game Changer', () => {
+    // Wizards lists "Tergrid, God of Fright"; Scryfall names the record with
+    // both faces. Nothing has to reconcile the two spellings because the flag
+    // travels with the record rather than being matched by name — which is the
+    // whole reason this comes from the corpus and not a checked-in array.
+    expect(toCard(byName("Tergrid, God of Fright // Tergrid's Lantern"))?.gameChanger).toBe(true)
+  })
+
+  it('leaves an ordinary card unflagged', () => {
+    expect(toCard(byName('Sol Ring'))?.gameChanger).toBe(false)
+    expect(toCard(byName('Cultivate'))?.gameChanger).toBe(false)
+  })
+
+  it('does not read a banned card as a Game Changer', () => {
+    // Black Lotus is banned, not listed. Conflating the two would flag a card
+    // the deck cannot legally hold and miss the flag on one it can.
+    expect(toCard(byName('Black Lotus'))?.gameChanger).toBe(false)
+  })
+
+  it('reads a record with no game_changer field as unflagged', () => {
+    // An older mirror predating the field. `false` is the safe direction: it
+    // under-reports rather than accusing a deck of holding a Game Changer.
+    const { game_changer: flag, ...withoutField } = byName('Rhystic Study')
+    // Guards the test itself: if the fixture ever stops carrying the field, the
+    // assertion below would pass for the wrong reason.
+    expect(flag).toBe(true)
+    expect(toCard(withoutField)?.gameChanger).toBe(false)
+  })
+})

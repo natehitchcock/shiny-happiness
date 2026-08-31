@@ -31,6 +31,12 @@ Convert `DATA-01`, `DATA-02`, `DATA-03` and `DATA-05` from "read the terms" into
 the specific questions below. Each names what it gates, so an unanswered question
 is a visibly blocked piece of work rather than a vague obligation.
 
+> **Status as of 2026-08-30: only Scryfall question 4 (image serving, gating
+> `ING-04`) is still open.** `DATA-01`, `DATA-02`, `DATA-03` and `DATA-05` are
+> closed by ADRs [0009](0009-scryfall-terms.md), [0010](0010-spellbook-terms.md),
+> [0008](0008-drop-edhrec.md) and [0018](0018-bracket-rules-and-game-changers.md)
+> respectively.
+
 **No code depending on an unanswered question ships to production.** Writing the
 adapter is fine; deploying it publicly is not.
 
@@ -90,11 +96,13 @@ were *answered*, regardless of what the answers said — which is exactly backwa
 
 Source: Wizards of the Coast's official Commander brackets material.
 
-| #   | Question                                                         | Gates                                                                                  |
-| --- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| 1   | Current bracket definitions and their exact allowances           | `brackets/rules.data.json`, doc 03 §3.2                                                |
-| 2   | **Current Game Changers list, verbatim**                         | Same. The list has been revised since introduction; it must be fetched, never recalled |
-| 3   | Is there a machine-readable canonical source, or is this manual? | The update cadence in doc 04 §4.7                                                      |
+**Closed by [ADR-0018](0018-bracket-rules-and-game-changers.md) on 2026-08-30.**
+
+| #   | Question                                                         | Answer                                                                                                                                                                                               |
+| --- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Current bracket definitions and their exact allowances           | **Partial, and that is the real answer.** Only the Game Changers allowance is published per bracket; the tutor restriction was withdrawn in October 2025 and the other three barometers replaced by prose turn counts. Fetched values populated, the rest left null |
+| 2   | **Current Game Changers list, verbatim**                         | Not transcribed at all — Scryfall's `game_changer` boolean carries it, and returned exactly the 53 cards the Wizards page lists on 2026-08-30                                                          |
+| 3   | Is there a machine-readable canonical source, or is this manual? | **Yes**, and the project already downloads it nightly. No separate `ingest:brackets` job is needed for the list                                                                                       |
 
 ### LEGAL-01 · WotC Fan Content Policy
 

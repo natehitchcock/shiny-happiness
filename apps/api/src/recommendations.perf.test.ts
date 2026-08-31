@@ -68,6 +68,7 @@ describeDb('API-02 performance', () => {
         roles: [isLand ? 'land' : role],
         primaryRole: isLand ? 'land' : role,
         universesBeyond: false,
+        gameChanger: false,
         synergyProduces: [],
         synergyWants: [],
       })

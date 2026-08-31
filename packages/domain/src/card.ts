@@ -138,6 +138,22 @@ export interface Card {
   readonly synergyProduces: readonly SynergyTag[]
   /** Events this card pays off on. */
   readonly synergyWants: readonly SynergyTag[]
+  /**
+   * On Wizards' Game Changers list, which the brackets reference (DATA-05).
+   *
+   * Read from Scryfall's `game_changer` boolean rather than a checked-in array
+   * of names. The list is revised — cards were added in February 2026 and ten
+   * were removed the October before — and a hand-maintained copy would be wrong
+   * within months without anything failing to tell us.
+   *
+   * Non-optional, unlike `producedMana`, because "not on the list" is a real
+   * answer rather than a gap: membership is a lookup into a finite published
+   * set, and the vast majority of cards are legitimately absent from it. The
+   * risk of a false `false` is handled where it matters instead — an entire
+   * corpus reading `false` means the ingest predates migration 0011, and
+   * `loadBracketRules` refuses to load rather than pass every deck vacuously.
+   */
+  readonly gameChanger: boolean
 }
 
 export interface Printing {

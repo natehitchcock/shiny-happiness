@@ -28,6 +28,8 @@ const MOUNTAIN = oracleId(randomUUID())
 const ANTE = oracleId(randomUUID())
 const UB = oracleId(randomUUID())
 const UNDECIDED = oracleId(randomUUID())
+/** On Wizards' Game Changers list (DATA-05), so `is:gamechanger` has a subject. */
+const GAME_CHANGER = oracleId(randomUUID())
 
 const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   oracleId: id,
@@ -53,6 +55,7 @@ const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   roles: ['synergy'],
   primaryRole: 'synergy',
   universesBeyond: false,
+  gameChanger: false,
   synergyProduces: [],
   synergyWants: [],
 })
@@ -91,6 +94,7 @@ describeDb('API-01 contract', () => {
         typeLine: 'Legendary Creature — Wizard',
       }),
       { ...card(UB, 'Frodo, Test Hobbit'), universesBeyond: true },
+      { ...card(GAME_CHANGER, 'Rhystic Study'), gameChanger: true },
     ])
     const combo: Combo = {
       id: comboId('c-1'),
@@ -585,16 +589,32 @@ describeDb('API-01 contract', () => {
     })
   })
   describe('GET /api/v1/cards/search — predicates it cannot answer', () => {
-    it('refuses the negated form too, which would otherwise return everything', async () => {
-      // `-is:gamechanger` is how a bracket-conscious user filters. Answering it
-      // from an empty bracketFlags list returns Game Changers as if they were
-      // clean, which is worse than the positive form returning nothing.
+    it('answers is:gamechanger from the corpus flag (DATA-05)', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/cards/search?q=' + encodeURIComponent('is:gamechanger'),
+      })
+
+      expect(response.statusCode).toBe(200)
+      const ids = response.json().items.map((i: { oracleId: string }) => i.oracleId)
+      expect(ids).toEqual([GAME_CHANGER])
+    })
+
+    it('answers the negated form without returning Game Changers as if clean', async () => {
+      // `-is:gamechanger` is how a bracket-conscious user filters, and it was
+      // refused outright until DATA-05, because answering it from an empty
+      // bracketFlags list returns every Game Changer as though it were clean —
+      // worse than the positive form returning nothing. Both directions are
+      // asserted because only the negation fails silently.
       const response = await app.inject({
         method: 'GET',
         url: '/api/v1/cards/search?q=' + encodeURIComponent('-is:gamechanger'),
       })
 
-      expect(response.statusCode).toBe(400)
+      expect(response.statusCode).toBe(200)
+      const ids = response.json().items.map((i: { oracleId: string }) => i.oracleId)
+      expect(ids.length).toBeGreaterThan(0)
+      expect(ids).not.toContain(GAME_CHANGER)
     })
 
     it('still answers is: predicates that oracle data can decide', async () => {
@@ -758,8 +778,18 @@ describeDb('API-01 contract', () => {
         })
       ).json()
       expect(total.items).toHaveLength(1)
-      // Every seeded card, exactly once.
-      expect(all.size).toBe(7)
+      /*
+       * Every seeded card, exactly once.
+       *
+       * Eight: six original fixtures, plus the Game Changer that DATA-05 added
+       * and the undecided-eligibility card that commander validation added.
+       * Deliberately a literal and not the fixture array's length — the whole
+       * point of this test is that a paging bug cannot make the expectation
+       * move along with it, so it has to be updated by hand when a fixture is
+       * added. Two agents each added one on the same day, which is exactly the
+       * case the literal is here to catch, and it did.
+       */
+      expect(all.size).toBe(8)
     })
   })
   describe('Universes Beyond filter (ADR-0011)', () => {

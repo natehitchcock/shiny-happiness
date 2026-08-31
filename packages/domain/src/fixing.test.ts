@@ -35,6 +35,7 @@ const land = (over: Partial<Card> = {}): Card => ({
   roles: ['land'],
   primaryRole: 'land',
   universesBeyond: false,
+  gameChanger: false,
   synergyProduces: [],
   synergyWants: [],
   producedMana: ['R', 'U'],

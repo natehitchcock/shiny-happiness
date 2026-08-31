@@ -1,24 +1,63 @@
 {
   "$comment": [
-    "Commander bracket rules and the Game Changers list.",
+    "Commander bracket allowances, fetched from Wizards of the Coast (DATA-05).",
+    "See docs/adr/0006-data-source-terms-verification.md: nothing here is written",
+    "from recall, and a value that the source does not publish stays null.",
     "",
-    "STATUS: NOT POPULATED. These values are maintained by Wizards of the Coast and",
-    "have been revised since the bracket system was introduced. Task DATA-05 owns",
-    "fetching them; see docs/adr/0006-data-source-terms-verification.md.",
+    "STATUS: PARTIALLY POPULATED. The Game Changers allowance is fetched and",
+    "quoted below. The other four barometers are null because Wizards no longer",
+    "publishes a per-bracket value for them — see 'notPublished' for why.",
     "",
-    "Filling this in from memory is exactly the failure ADR-0006 exists to prevent,",
-    "so the allowances are null and loadBracketRules() reports the data as unloaded",
-    "rather than letting the app assert a bracket verdict it cannot support.",
-    "",
-    "When populating: set sourceUrl and retrievedAt, and record the exact wording."
+    "The Game Changers LIST itself is deliberately not in this file. It is read",
+    "from the corpus, where Scryfall's `game_changer` boolean carries it, so it",
+    "updates with the nightly ingest instead of drifting in a checked-in array.",
+    "Verified on 2026-08-30: Scryfall's `is:gamechanger` returns exactly the same",
+    "53 cards the Wizards page lists, differing only in that Scryfall spells",
+    "Tergrid with both faces ('Tergrid, God of Fright // Tergrid's Lantern')."
   ],
-  "sourceUrl": null,
-  "retrievedAt": null,
+  "sourceUrl": "https://magic.wizards.com/en/formats/commander",
+  "retrievedAt": "2026-08-30",
+  "quotedWording": {
+    "gameChangersAllowed": "Bracket 1 and 2 decks exclude Game Changers. Bracket 3 allows for up to three Game Changers. Brackets 4 and 5 allow for unlimited Game Changers.",
+    "bracketNames": "There are five Commander Brackets. Each one is meant to classify a different kind of game experience. Brackets 1, 2, and 3 are different levels of socially focused play. Brackets 4 and 5 are focused on a higher power or even a competitive experience."
+  },
+  "notPublished": {
+    "tutorDensity": [
+      "Withdrawn by Wizards, not merely unfound. The Commander Brackets Beta",
+      "Update of 2025-10-21 says, verbatim: \"So, after much discussion, the",
+      "avenue we'd like to take is to remove the tutor restrictions from",
+      "Commander Brackets entirely and rely on Game Changers to catch the most",
+      "efficient tutors.\" There is therefore no current per-bracket tutor",
+      "allowance to record, and inventing one would re-impose a rule the format",
+      "has dropped.",
+      "Source: https://magic.wizards.com/en/news/announcements/commander-brackets-beta-update-october-21-2025 (retrieved 2026-08-30)"
+    ],
+    "massLandDenial, extraTurnChaining, twoCardInfinites": [
+      "The official page names these three as barometers — \"There is also a list",
+      "of what is expected at that level in a few barometers: two-card infinite",
+      "combos, extra turns, mass land denial\" — but publishes no per-bracket",
+      "value for any of them. Each bracket's published entry is a prose",
+      "\"Players expect:\" list plus a turn-count expectation (Bracket 1 \"at least",
+      "nine turns\", 2 \"eight\", 3 \"six\", 4 \"four\", 5 \"could end on any turn\"),",
+      "and none of those state permitted/forbidden.",
+      "",
+      "The 2025-10-21 update replaced the old hard-line barometers with the turn",
+      "counts on purpose: \"instead of wondering what 'no early-game combos'",
+      "means, saying 'you don't expect to win or lose before turn six' gives you",
+      "a pretty clear indicator of what kind of combos could be allowed\".",
+      "",
+      "Earlier articles DO carry a per-bracket permitted/forbidden table, but",
+      "they are superseded, so copying them would encode a retired ruleset. Left",
+      "null until Wizards publishes current per-bracket values, or until this",
+      "project models the turn-count expectation instead — which is a design",
+      "question, not a data-entry one."
+    ]
+  },
   "brackets": [
     {
       "bracket": 1,
       "name": "Exhibition",
-      "gameChangersAllowed": null,
+      "gameChangersAllowed": 0,
       "massLandDenial": null,
       "extraTurnChaining": null,
       "twoCardInfinites": null,
@@ -27,7 +66,7 @@
     {
       "bracket": 2,
       "name": "Core",
-      "gameChangersAllowed": null,
+      "gameChangersAllowed": 0,
       "massLandDenial": null,
       "extraTurnChaining": null,
       "twoCardInfinites": null,
@@ -36,7 +75,7 @@
     {
       "bracket": 3,
       "name": "Upgraded",
-      "gameChangersAllowed": null,
+      "gameChangersAllowed": 3,
       "massLandDenial": null,
       "extraTurnChaining": null,
       "twoCardInfinites": null,
@@ -45,7 +84,7 @@
     {
       "bracket": 4,
       "name": "Optimized",
-      "gameChangersAllowed": null,
+      "gameChangersAllowed": "unlimited",
       "massLandDenial": null,
       "extraTurnChaining": null,
       "twoCardInfinites": null,
@@ -54,12 +93,11 @@
     {
       "bracket": 5,
       "name": "cEDH",
-      "gameChangersAllowed": null,
+      "gameChangersAllowed": "unlimited",
       "massLandDenial": null,
       "extraTurnChaining": null,
       "twoCardInfinites": null,
       "tutorDensity": null
     }
-  ],
-  "gameChangers": []
+  ]
 }

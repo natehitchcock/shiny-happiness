@@ -37,6 +37,7 @@ const card = (over: Partial<Card> = {}): Card => ({
   roles: ['sac-outlet'],
   primaryRole: 'sac-outlet',
   universesBeyond: false,
+  gameChanger: false,
   synergyProduces: [],
   synergyWants: [],
   ...over,

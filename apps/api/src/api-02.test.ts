@@ -27,6 +27,16 @@ const LAND = oracleId(randomUUID())
 const OFF_COLOR = oracleId(randomUUID())
 const BAD_COMMANDER = oracleId(randomUUID())
 const UNDECIDED = oracleId(randomUUID())
+/**
+ * Four cards flagged as Game Changers (DATA-05).
+ *
+ * Four because Bracket 3 allows three: three of them is the boundary that must
+ * pass and four is the one that must fail, and a fixture with fewer could not
+ * tell those apart.
+ */
+const GAME_CHANGERS = [0, 1, 2, 3].map(() => oracleId(randomUUID()))
+/** A legendary Game Changer, so the command zone can be checked too. */
+const GC_COMMANDER = oracleId(randomUUID())
 
 const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   oracleId: id,
@@ -52,6 +62,7 @@ const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   roles: opts.roles ?? ['synergy'],
   primaryRole: opts.primaryRole ?? 'synergy',
   universesBeyond: false,
+  gameChanger: opts.gameChanger ?? false,
   synergyProduces: [],
   synergyWants: [],
 })
@@ -109,6 +120,11 @@ describeDb('API-02 contract', () => {
         types: ['land'],
       }),
       card(OFF_COLOR, 'Blue Thing', { colorIdentity: ['U'], colors: ['U'] }),
+      ...GAME_CHANGERS.map((id, index) => card(id, `Game Changer ${index}`, { gameChanger: true })),
+      card(GC_COMMANDER, 'Tergrid, Test Legend', {
+        typeLine: 'Legendary Creature — God',
+        gameChanger: true,
+      }),
     ])
     const combo: Combo = {
       id: comboId('combo-1'),
@@ -333,8 +349,9 @@ describeDb('API-02 contract', () => {
         await app.inject({ method: 'GET', url: `/api/v1/decks/${deck.id}/analysis` })
       ).json()
 
-      // brackets/rules.data.json is unpopulated (DATA-05). Guessing here is what
-      // AGENTS.md §8 rejects, so `assessed` is null and the gap is reported.
+      // Wizards publishes a per-bracket value for one barometer of five
+      // (DATA-05), so which bracket a deck IS still cannot be decided. Guessing
+      // is what AGENTS.md §8 rejects: `assessed` is null and the gap is named.
       expect(body.bracket.target).toBe(3)
       expect(body.bracket.assessed).toBeNull()
       const keys = body.unavailable.map((u: { key: string }) => u.key)
@@ -405,6 +422,136 @@ describeDb('API-02 contract', () => {
       const gap = body.unavailable.find((u: { key: string }) => u.key === 'commander-eligibility')
       expect(gap).toBeDefined()
       expect(gap.reason).toMatch(/re-ingest/)
+    })
+
+    describe('bracket checks (DATA-05)', () => {
+      /** A deck at `targetBracket` holding `count` of the Game Changer fixtures. */
+      const deckHolding = async (targetBracket: number, count: number) => {
+        const fresh = (
+          await app.inject({
+            method: 'POST',
+            url: '/api/v1/decks',
+            payload: {
+              name: `Bracket ${targetBracket} with ${count}`,
+              commanders: [KROV],
+              targetBracket,
+              archetype: 'midrange',
+            },
+          })
+        ).json()
+        if (count > 0) {
+          await app.inject({
+            method: 'POST',
+            url: `/api/v1/decks/${fresh.id}/commands`,
+            payload: {
+              commands: GAME_CHANGERS.slice(0, count).map((id) => ({
+                type: 'accept',
+                oracleId: id,
+                origin: 'manual',
+              })),
+              idempotencyKey: randomUUID(),
+              baseVersion: 1,
+            },
+          })
+        }
+        return (
+          await app.inject({ method: 'GET', url: `/api/v1/decks/${fresh.id}/analysis` })
+        ).json()
+      }
+
+      it('names the Game Changers the deck holds', async () => {
+        const body = await deckHolding(3, 2)
+        expect(body.bracket.gameChangers).toHaveLength(2)
+        expect(body.bracket.gameChangers).toContain(GAME_CHANGERS[0])
+      })
+
+      it('reports no violation at the allowance', async () => {
+        // Three is what Bracket 3 allows, quoted in brackets/rules.data.json.
+        const body = await deckHolding(3, 3)
+        expect(body.bracket.violations).toEqual([])
+      })
+
+      it('reports a violation one Game Changer past the allowance', async () => {
+        const body = await deckHolding(3, 4)
+        expect(body.bracket.violations).toHaveLength(1)
+        expect(body.bracket.violations[0].flag).toBe('game-changer')
+        expect(body.bracket.violations[0].allowed).toBe(3)
+        expect(body.bracket.violations[0].actual).toBe(4)
+      })
+
+      it('reports a violation for a single Game Changer at bracket 1', async () => {
+        const body = await deckHolding(1, 1)
+        expect(body.bracket.violations).toHaveLength(1)
+        expect(body.bracket.violations[0].allowed).toBe(0)
+      })
+
+      it('reports no violation at bracket 4, whatever the deck holds', async () => {
+        const body = await deckHolding(4, 4)
+        expect(body.bracket.violations).toEqual([])
+      })
+
+      it('counts a Game Changer in the command zone', async () => {
+        // The command zone is the one place a Game Changer is guaranteed to be
+        // available every game, so leaving commanders out of the count would
+        // clear the deck hardest to defend. Bracket 2 allows none.
+        const fresh = (
+          await app.inject({
+            method: 'POST',
+            url: '/api/v1/decks',
+            payload: {
+              name: 'Legendary Game Changer',
+              commanders: [GC_COMMANDER],
+              targetBracket: 2,
+              archetype: 'midrange',
+            },
+          })
+        ).json()
+
+        const body = (
+          await app.inject({ method: 'GET', url: `/api/v1/decks/${fresh.id}/analysis` })
+        ).json()
+
+        expect(body.bracket.gameChangers).toEqual([GC_COMMANDER])
+        expect(body.bracket.violations).toHaveLength(1)
+        expect(body.bracket.violations[0].actual).toBe(1)
+      })
+
+      it('flags a Game Changer among the recommendations it offers', async () => {
+        // The flag is surfaced, never used to filter (doc 03 §3.2): the card is
+        // still offered, and the user is told what it is.
+        const body = (
+          await app.inject({
+            method: 'POST',
+            url: `/api/v1/decks/${deck.id}/recommendations`,
+            payload: {},
+          })
+        ).json()
+
+        const items = body.groups.flatMap(
+          (g: { items: { oracleId: string; bracketFlags: string[] }[] }) => g.items,
+        )
+        const flagged = items.filter((i: { bracketFlags: string[] }) =>
+          i.bracketFlags.includes('game-changer'),
+        )
+        expect(flagged.length).toBeGreaterThan(0)
+        // Nothing unflagged may sneak into that list either: a flag applied to
+        // everything is as useless as a flag applied to nothing.
+        for (const item of flagged) {
+          expect([...GAME_CHANGERS, GC_COMMANDER]).toContain(item.oracleId)
+        }
+        const unflagged = items.filter(
+          (i: { bracketFlags: string[] }) => !i.bracketFlags.includes('game-changer'),
+        )
+        expect(unflagged.length).toBeGreaterThan(0)
+      })
+
+      it('carries the provenance of the allowance to the client', async () => {
+        // The product should be able to show where the rule came from and when,
+        // which is the whole point of ADR-0006 reaching past the repository.
+        const body = await deckHolding(3, 0)
+        expect(body.bracket.rules.sourceUrl).toMatch(/^https:\/\/magic\.wizards\.com\//)
+        expect(body.bracket.rules.retrievedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+      })
     })
 
     it('lists an assembled combo once both pieces are accepted', async () => {

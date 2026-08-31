@@ -10,8 +10,6 @@ import {
   validateDeck,
   type CommanderInfo,
 } from './legality.js'
-import { loadBracketRules, type RawBracketData } from './bracket-rules.js'
-import rawBracketData from './brackets/rules.data.json' with { type: 'json' }
 
 const card = (
   name: string,
@@ -36,6 +34,7 @@ const card = (
   roles: ['synergy'],
   primaryRole: opts.primaryRole ?? 'synergy',
   universesBeyond: false,
+  gameChanger: false,
   synergyProduces: [],
   synergyWants: [],
 })
@@ -429,86 +428,5 @@ describe('deckColorIdentity', () => {
   it('is empty for a colourless commander', () => {
     const a = card('a', { colorIdentity: [] })
     expect(deckColorIdentity([oracleId('a')], cardMap(a))).toEqual([])
-  })
-})
-
-describe('loadBracketRules', () => {
-  // ADR-0006: the official allowances have not been fetched. The loader must say
-  // so rather than letting the app assert a bracket verdict it cannot support.
-  it('reports the checked-in data as unpopulated instead of guessing', () => {
-    const result = loadBracketRules(rawBracketData as RawBracketData)
-    expect(result.ok).toBe(false)
-    if (!result.ok) {
-      expect(result.error.kind).toBe('not-populated')
-      expect(result.error.message).toMatch(/DATA-05|ADR-0006/)
-    }
-  })
-
-  it('loads a fully populated file', () => {
-    const populated: RawBracketData = {
-      sourceUrl: 'https://example.invalid/brackets',
-      retrievedAt: '2026-08-29',
-      brackets: [1, 2, 3, 4, 5].map((n) => ({
-        bracket: n,
-        name: `B${n}`,
-        gameChangersAllowed: n >= 4 ? ('unlimited' as const) : n,
-        massLandDenial: 'forbidden',
-        extraTurnChaining: 'discouraged',
-        twoCardInfinites: 'allowed',
-        tutorDensity: 'moderate',
-      })),
-      gameChangers: ['gc-1', 'gc-2'],
-    }
-    const result = loadBracketRules(populated)
-    expect(result.ok).toBe(true)
-    if (result.ok) {
-      expect(result.value.byBracket.size).toBe(5)
-      expect(result.value.gameChangers.size).toBe(2)
-      expect(result.value.byBracket.get(4)?.gameChangersAllowed).toBe('unlimited')
-    }
-  })
-
-  it('rejects an unknown permission value', () => {
-    const bad = {
-      sourceUrl: 'x',
-      retrievedAt: 'y',
-      brackets: [
-        {
-          bracket: 1,
-          name: 'B1',
-          gameChangersAllowed: 0,
-          massLandDenial: 'sometimes',
-          extraTurnChaining: 'allowed',
-          twoCardInfinites: 'allowed',
-          tutorDensity: 'low',
-        },
-      ],
-      gameChangers: [],
-    } as RawBracketData
-    const result = loadBracketRules(bad)
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error.kind).toBe('malformed')
-  })
-
-  it('rejects a file missing brackets', () => {
-    const short = {
-      sourceUrl: 'x',
-      retrievedAt: 'y',
-      brackets: [
-        {
-          bracket: 1,
-          name: 'B1',
-          gameChangersAllowed: 0,
-          massLandDenial: 'allowed',
-          extraTurnChaining: 'allowed',
-          twoCardInfinites: 'allowed',
-          tutorDensity: 'low',
-        },
-      ],
-      gameChangers: [],
-    } as RawBracketData
-    const result = loadBracketRules(short)
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error.kind).toBe('malformed')
   })
 })

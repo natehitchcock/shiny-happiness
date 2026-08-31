@@ -26,9 +26,24 @@ The app is called **Lotus Wizard** in the interface. The name is tentative and
 **not cleared** — `LEGAL-01` owns that, and there is a real question to answer
 first: see doc 04 §4.6. Package scopes stay `@roundtable/*` until it is settled.
 
-**Done (21 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`, `API-01`, `API-02`,
-`DATA-01`, `DATA-02`, `ING-01`, `ING-02`, `FOUND-02`, `UI-01`, and a vertical slice of `WEB-01`.
+**Done (22 tasks).** `FOUND-01`, `DOM-01`–`DOM-09`, `DB-01`, `API-01`, `API-02`,
+`DATA-01`, `DATA-02`, `DATA-05`, `ING-01`, `ING-02`, `FOUND-02`, `UI-01`, and a vertical slice of `WEB-01`.
 `DATA-03` is closed by decision and `ING-03` cut ([ADR-0008](adr/0008-drop-edhrec.md)).
+
+**The bracket check does something now, and says what it still cannot do.**
+`DATA-05` is closed by [ADR-0018](adr/0018-bracket-rules-and-game-changers.md).
+Wizards publishes a per-bracket number for exactly one barometer — Game Changers,
+0/0/3/unlimited/unlimited — so that one is fetched, quoted and enforced, and the
+other four stay `null` because the tutor restriction was withdrawn in October 2025
+and the rest were replaced by prose turn counts. `bracket.assessed` is still
+`null`: one barometer of five is not a verdict. The Game Changers **list** is not
+in the repository at all — Scryfall's `game_changer` boolean carries it, and it
+matched the Wizards page card-for-card (53) on 2026-08-30.
+
+> **A card re-ingest is required** before bracket checks answer. Migration `0011`
+> defaults every existing row to `game_changer = false`, and a corpus with no Game
+> Changers is refused by `loadBracketRules` rather than passing every deck
+> vacuously.
 
 **Run it locally:**
 
@@ -49,7 +64,7 @@ administrator rights, no service.
 **Verify:**
 
 ```bash
-pnpm check          # lint + typecheck + 722 tests
+pnpm check          # lint + typecheck + 949 tests
 ```
 
 The integration tests need a real Postgres and SKIP (loudly) without one. The
@@ -63,10 +78,11 @@ API-02 performance test seeds a 20,000-card corpus and takes ~40 s.
 | `FOUND-02` | ✅ **Done.** Design tokens as asserted data + `packages/ui` scaffold; the app imports them rather than keeping a copy | root | ✅ 13 contrast pairs asserted, each naming what it is for. Caught a live defect on the first run: rust was 2.80:1 on `ink-2`, the surface cut hints are drawn on. `tokens.css` is generated from the data and a test holds the two in step |
 | `WEB-01` proper | The slice is one deck in localStorage with no offline queue, no optimistic mutation and no reconcile. Everything in WEB-02..24 assumes those exist. |
 | `LEGAL-01` (name clearance) | **Lotus Wizard** needs checking before it goes on a domain. Now urgent rather than cheap-and-later: the Vercel config is written. |
-| `DATA-05` | The last unanswered terms question. Until the bracket rules are populated, `analysis.bracket.assessed` is honestly null and core packages cannot be built. Scryfall now exposes a `game_changer` boolean on card records, which may answer half of it. |
 | `API-06` | `409` returns the current deck with an empty `since`; the client can refetch but not replay. |
+| Bracket UI | The API answers `bracket.violations`, `bracket.gameChangers` and `bracket.rules`, and nothing renders them. Doc 03 §3.2 describes the warning chip and the "Bracket check" panel; the masthead still prints a bare `BRACKET 3`. |
 
-**`DATA-05` is the only third-party question left.** `DATA-01` and `DATA-02` are
+**No third-party question is left open except Scryfall Q4** (image serving, which
+gates `ING-04`). `DATA-01` and `DATA-02` are
 answered ([ADR-0009](adr/0009-scryfall-terms.md), [ADR-0010](adr/0010-spellbook-terms.md)):
 Scryfall grants use explicitly, Spellbook publishes no prohibition. `DATA-03` is
 closed — EDHREC's terms forbid automated queries, and Archidekt carries the
@@ -150,7 +166,7 @@ against their interfaces; nothing depending on an unanswered question ships.
 | `DATA-01` | ✅ **Done.** All seven Scryfall questions answered with quoted wording and retrieval dates ([ADR-0009](adr/0009-scryfall-terms.md)) | — | ✅ Rate limits are **per endpoint** (search is 2/s, not 10/s — doc 04 §4.1 was wrong); bulk data is mandatory, not optional; prices are estimates and must be labelled so. Q4 narrowed: `ING-04` still needs the image-serving question confirmed |
 | `DATA-02` | ✅ **Done.** Spellbook questions answered ([ADR-0010](adr/0010-spellbook-terms.md)) | — | ✅ `robots.txt` quoted with date; no terms page exists, so no prohibition — a weaker position than Scryfall's explicit grant, recorded as such. Q5 resolved: `uses[].card.oracleId` is Scryfall's oracle id, so no name matching |
 | `DATA-03` | ✅ **Closed by decision, not completed.** EDHREC's terms were read on 2026-08-29 and prohibit automated queries; the project does not query EDHREC ([ADR-0008](adr/0008-drop-edhrec.md)) | — | ✅ Terms and `robots.txt` quoted with retrieval dates in ADR-0008. No permission request sent — permission was not the blocker. `ING-03` cut |
-| `DATA-05` | Fetch the **current official** bracket rules + Game Changers list into `brackets/rules.data.json` ([ADR-0006](adr/0006-data-source-terms-verification.md)) | —                      | Checked in with source URL and retrieval date; list fetched, never recalled; no bracket constant hardcoded elsewhere                                             |
+| `DATA-05` | ✅ **Done.** Bracket allowances fetched into `brackets/rules.data.json`; Game Changers list mapped from Scryfall's `game_changer` into the corpus ([ADR-0018](adr/0018-bracket-rules-and-game-changers.md)) | — | ✅ Source URL, retrieval date and quoted wording checked in. Only the Game Changers allowance is published per bracket, so the other four barometers are null and `bracket.assessed` stays null. List never recalled — 53 cards, matching the Wizards page exactly. **Needs a card re-ingest** (migration `0011`) |
 | `ING-01` | ✅ **Done.** Scryfall bulk ingest: download, stream-parse, map to `Card`, snapshot-and-swap | DATA-01, DB-01 | ✅ 34,492 cards + printings from 38,627 records in <5 s against the real bulk file; re-run is idempotent. 4,135 non-playable records (art series, tokens, stickers, conspiracies) rejected — `CardType` is the definition of a deck card |
 | `ING-02` | ✅ **Done.** Spellbook combo ingest + oracle-id mapping, **failing loudly on unmapped cards** | DATA-02, DB-01 | ✅ 108,046 combos in 12.8 s with **zero unmapped**; pieces map on `oracleId` with no name matching. Only `OK` variants ingested; a combo naming an unknown card is reported, never stored |
 | ~~`ING-03`~~ | ❌ **Cut.** EDHREC stats fetcher. No aggregated-decklist source has usable terms — Archidekt carries the identical prohibition, Moxfield is out of scope, Deckstats is unreachable ([ADR-0008](adr/0008-drop-edhrec.md)). Inclusion and synergy statistics come from the project's own imported-deck corpus or not at all | — | — |
@@ -217,11 +233,14 @@ The domain layer is done, so everything below is now unblocked in its own right.
 
 **Needs a browser, not a compiler — and blocks deployment of all ingestion:**
 
-1. `DATA-01`, `DATA-02`, `DATA-05` — the terms questions in
-   [ADR-0006](adr/0006-data-source-terms-verification.md). Until `DATA-05` is
-   answered, `brackets/rules.data.json` stays unpopulated and the bracket loader
-   correctly refuses to assert a verdict. `DATA-03` is **closed** and `ING-03`
-   **cut** — the project does not query EDHREC ([ADR-0008](adr/0008-drop-edhrec.md)).
+1. ~~`DATA-01`, `DATA-02`, `DATA-05`~~ — the terms questions in
+   [ADR-0006](adr/0006-data-source-terms-verification.md) are answered.
+   `DATA-05` is closed by [ADR-0018](adr/0018-bracket-rules-and-game-changers.md):
+   the Game Changers allowance is fetched and enforced, the four barometers
+   Wizards no longer publishes stay null, and the list itself comes from the
+   corpus. `DATA-03` is **closed** and `ING-03` **cut** — the project does not
+   query EDHREC ([ADR-0008](adr/0008-drop-edhrec.md)). Scryfall Q4 (image
+   serving) is the one question still open, and it gates `ING-04` alone.
 
 **Needs infrastructure:**
 
