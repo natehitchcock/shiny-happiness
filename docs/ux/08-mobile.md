@@ -55,6 +55,16 @@ a screen reader or switch control.
 | Change zoom | Zoom control in command bar | Pinch | `1`–`4` |
 | Inspect | Tap card → sheet opens at detail | — | `I` |
 
+**As built (WEB-01):** the deck bottom sheet and its three detents do not exist
+yet — below 900 px the workspace simply stacks — but *Inspect* has its own sheet
+already, because without one the analysis region lands under the whole feed and
+tapping a card wrote its details several screens down. It is the same `Preview`
+element the desktop rail holds, restyled to the bottom edge by a media query
+rather than a second copy; it is a non-modal `dialog`, takes focus as it opens,
+closes on Escape and returns focus to the card that opened it. When the deck
+sheet does arrive, the two have to become detents of one sheet rather than two
+sheets stacked on each other.
+
 Swipe-to-accept / swipe-to-reject is the fast path a practised user will live in.
 Both are undoable from a snackbar, because swipe gestures misfire.
 

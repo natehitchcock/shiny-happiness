@@ -875,6 +875,34 @@ const Works = ({
   )
 }
 
+/**
+ * The width at which `.workspace` collapses to a single column.
+ *
+ * Duplicated from `styles.css` on purpose and pinned by `sheet.test.tsx`: the
+ * sheet's box is CSS and its focus behaviour is JavaScript, and a viewport
+ * where only one of the two believes it is narrow is worse than either — a
+ * panel that grabs focus but never appears, or one that appears and cannot be
+ * reached.
+ */
+export const SINGLE_COLUMN = '(max-width: 900px)'
+
+/** Whether the workspace is currently stacked into one column. */
+const useSingleColumn = (): boolean => {
+  const [narrow, setNarrow] = useState(() => window.matchMedia(SINGLE_COLUMN).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(SINGLE_COLUMN)
+    const onChange = (): void => setNarrow(mq.matches)
+    // Read once more here, not just in the initialiser: a rotate between the
+    // first render and this effect would otherwise leave the flag stale until
+    // the next resize, and phones rotate during load more often than desktops
+    // are resized at all.
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return narrow
+}
+
 const Preview = ({
   card,
   detail,
@@ -883,6 +911,7 @@ const Preview = ({
   accepted,
   lockedIds,
   cards,
+  sheet,
 }: {
   /** The hydrated card, already in memory. Everything readable comes from here. */
   card: api.Card | undefined
@@ -893,13 +922,75 @@ const Preview = ({
   accepted: ReadonlySet<string>
   lockedIds: ReadonlySet<string>
   cards: ReadonlyMap<string, api.Card>
+  /**
+   * The workspace is one column, so this panel is a bottom sheet over the feed
+   * rather than the top of the right-hand rail.
+   */
+  sheet: boolean
 }): React.JSX.Element | null => {
   // `detail` is the fallback, not the source: a card reached from somewhere that
   // never hydrated it still previews once its detail lands.
   const shown = card ?? detail
+  const shownId = shown?.oracleId ?? null
+  const ref = useRef<HTMLElement>(null)
+
+  /*
+   * Read `sheet` through a ref inside the focus effect.
+   *
+   * Crossing the breakpoint — a rotate, a dragged window edge — must not by
+   * itself move focus; only opening a card may. Putting `sheet` in the effect's
+   * dependency list would yank focus into the panel the moment a phone turned
+   * sideways, which is exactly the sort of surprise that makes people distrust
+   * a page.
+   */
+  const sheetRef = useRef(sheet)
+  useEffect(() => {
+    sheetRef.current = sheet
+  }, [sheet])
+
+  /*
+   * Bring focus into the sheet as it appears, and again when a different card
+   * replaces the one it is showing.
+   *
+   * On the rail this would be theft — the panel is already on screen beside
+   * what the user was reading — so it is confined to the sheet, where the panel
+   * has just covered the bottom of the viewport and is the thing they asked for.
+   */
+  useEffect(() => {
+    if (shownId === null || !sheetRef.current) return
+    ref.current?.focus()
+  }, [shownId])
+
+  /*
+   * Escape closes it. Bound to the document rather than to the panel because
+   * the sheet is deliberately not modal — nothing behind it is inert, so focus
+   * can legitimately be outside it when the user gives up on it.
+   */
+  useEffect(() => {
+    if (shownId === null || !sheet) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [shownId, sheet, onClose])
+
   if (shown === null || shown === undefined) return null
   return (
-    <aside className="preview" aria-label={`${shown.name} details`}>
+    <aside
+      ref={ref}
+      className={sheet ? 'preview preview-sheet' : 'preview'}
+      aria-label={`${shown.name} details`}
+      /*
+       * `dialog`, but never `aria-modal`. The sheet covers the lower part of a
+       * phone screen and leaves the candidate feed above it live and tappable,
+       * so claiming the rest of the page is inert would be a lie to a screen
+       * reader — and a focus trap on top of that lie would strand anyone who
+       * wanted the list back.
+       */
+      role={sheet ? 'dialog' : undefined}
+      tabIndex={sheet ? -1 : undefined}
+    >
       <div className="preview-head">
         <h3>{shown.name}</h3>
         <button className="act" onClick={onClose} aria-label="Close preview">
@@ -1535,6 +1626,24 @@ export const Workspace = ({
   const [detail, setDetail] = useState<api.CardDetail | null>(null)
   /** Which card the preview is showing, known before its detail arrives. */
   const [inspect, setInspect] = useState<string | null>(null)
+  /** The control that opened the preview, so closing it can hand focus back. */
+  const previewOpener = useRef<HTMLElement | null>(null)
+  /*
+   * On one column the right-hand rail is at the bottom of a very long page, so
+   * the preview renders as a bottom sheet over the feed instead.
+   *
+   * The alternative considered and rejected was scrolling the rail into view on
+   * open: it puts the panel on screen once, then every requery, every accepted
+   * card and every stray scroll takes it away again, and it drags the whole
+   * composition dashboard along with it. Rejected too was rendering a second
+   * copy of the panel in a portal — two Previews is two things to keep in step,
+   * and they would drift. Moving the existing element in the DOM at this
+   * breakpoint would remount it, throwing away the in-flight `/cards/{id}`
+   * request and reordering the page for a screen reader. So the element stays
+   * exactly where it is and only its box changes, which also makes a rotate
+   * across the breakpoint a repaint rather than a remount.
+   */
+  const singleColumn = useSingleColumn()
   /** Locks the server has not answered yet — these rows show a spinner. */
   const [locking, setLocking] = useState<ReadonlySet<string>>(new Set())
   /**
@@ -2027,6 +2136,11 @@ export const Workspace = ({
    * and slot in. That also means a card whose fetch fails still previews.
    */
   const open = (oracleId: string): void => {
+    // Remember what the user was on so closing can put them back. Nothing that
+    // calls `open` lives inside the preview, so this is always a row in the
+    // deck, the suggestions or a name-match list, never the panel itself.
+    const active = document.activeElement
+    previewOpener.current = active instanceof HTMLElement ? active : null
     setInspect(oracleId)
     setDetail(null)
     void api
@@ -2042,10 +2156,23 @@ export const Workspace = ({
       .catch(() => undefined)
   }
 
-  const closePreview = (): void => {
+  /*
+   * Closing puts focus back on the card that opened the panel.
+   *
+   * Without this the Close button unmounts under the caret and focus falls to
+   * `<body>`, which on a long deck list means the next Tab starts again from
+   * the masthead. That was already true on the rail; it becomes unusable once
+   * the panel is a sheet that opening moved focus into.
+   */
+  const closePreview = useCallback((): void => {
     setInspect(null)
     setDetail(null)
-  }
+    const opener = previewOpener.current
+    previewOpener.current = null
+    // A card removed from the deck while its preview was open leaves a detached
+    // button behind; focusing it would silently drop focus to nowhere.
+    if (opener !== null && opener.isConnected) opener.focus()
+  }, [])
 
   /** The deck as the user sees it: saved entries plus what is still in flight. */
   const optimistic = useMemo(() => {
@@ -2986,6 +3113,7 @@ export const Workspace = ({
               accepted={acceptedIds}
               lockedIds={lockedIds}
               cards={cards}
+              sheet={singleColumn}
             />
 
             <h2 style={{ marginTop: '1.25rem' }}>Composition</h2>
