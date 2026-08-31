@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from './api'
-import { rejectionNotice, Workspace } from './App'
+import { rejectionNotice, sortByColumns, Workspace, type Column } from './App'
 
 /**
  * The workspace panels, driven through the rendered UI.
@@ -418,5 +418,201 @@ describe('the name-match rows', () => {
 
     const line = await screen.findByText(/nothing ranked them into a group/)
     expect(line.textContent).not.toMatch(/being already in it, excluded, or outside/)
+  })
+})
+
+// ------------------------------------------------------------ column sort
+
+/**
+ * Promoting a query to a column SORTS by it, and columns compose.
+ *
+ * The pure half is tested directly, because the composition rule is the part
+ * that is easy to get subtly wrong and hard to read off a rendered list: with
+ * three columns there are eight match combinations and only one correct order.
+ */
+describe('sortByColumns', () => {
+  const query = (q: string): Column => ({ kind: 'query', query: q })
+  const rows = (...ids: string[]): { oracleId: string }[] => ids.map((oracleId) => ({ oracleId }))
+  const matches = (m: Record<string, string[]>): Map<string, Set<string>> =>
+    new Map(Object.entries(m).map(([k, v]) => [k, new Set(v)]))
+
+  it('leaves the score order alone when there are no columns', () => {
+    const items = rows('a', 'b', 'c')
+    // The same array, not a copy: nothing to do is nothing to allocate.
+    expect(sortByColumns(items, [], new Map())).toBe(items)
+  })
+
+  it('brings the matches to the front and leaves the rest in score order', () => {
+    const out = sortByColumns(rows('a', 'b', 'c', 'd'), [query('x')], matches({ x: ['b', 'd'] }))
+    expect(out.map((r) => r.oracleId)).toEqual(['b', 'd', 'a', 'c'])
+  })
+
+  it('breaks the first column’s ties with the second, never the other way round', () => {
+    /*
+     * The whole feature in one case. `x` splits the four rows into two pairs;
+     * `y` orders within each pair and must not lift a row out of its pair.
+     *
+     *   a  x yes, y no        c  x no,  y yes
+     *   b  x yes, y yes       d  x no,  y no
+     *
+     * Correct: b (both), a (x only), c (y only), d (neither).
+     * A single-key sort on `y` would give b, c, a, d — c above a, which puts a
+     * row the PRIMARY column rejected above one it accepted.
+     */
+    const out = sortByColumns(
+      rows('a', 'b', 'c', 'd'),
+      [query('x'), query('y')],
+      matches({ x: ['a', 'b'], y: ['b', 'c'] }),
+    )
+    expect(out.map((r) => r.oracleId)).toEqual(['b', 'a', 'c', 'd'])
+  })
+
+  it('falls back to the order the server sent, which is score', () => {
+    // Every row agrees on every column, so nothing may move.
+    const out = sortByColumns(
+      rows('a', 'b', 'c'),
+      [query('x'), query('y')],
+      matches({ x: ['a', 'b', 'c'], y: [] }),
+    )
+    expect(out.map((r) => r.oracleId)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('is deterministic — the same input twice is the same output', () => {
+    const items = rows('a', 'b', 'c', 'd', 'e')
+    const cols = [query('x'), query('y')]
+    const m = matches({ x: ['c'], y: ['a', 'd'] })
+    const first = sortByColumns(items, cols, m).map((r) => r.oracleId)
+    const second = sortByColumns(items, cols, m).map((r) => r.oracleId)
+    expect(first).toEqual(second)
+    expect(first).toEqual(['c', 'a', 'd', 'b', 'e'])
+  })
+
+  it('gives a metric column no opinion until its values exist', () => {
+    // A seam, not a feature: `impact` and `efficiency` are being computed in
+    // packages/domain. A column with no values must contribute NOTHING to the
+    // order rather than inventing one, so the query column beside it decides.
+    const out = sortByColumns(
+      rows('a', 'b', 'c'),
+      [{ kind: 'metric', metric: 'impact', label: 'Impact' }, query('x')],
+      matches({ x: ['c'] }),
+    )
+    expect(out.map((r) => r.oracleId)).toEqual(['c', 'a', 'b'])
+  })
+})
+
+describe('a column sorts the suggestion feed', () => {
+  const group = (key: string, label: string, ids: string[]): api.Group =>
+    ({
+      key,
+      label,
+      rationale: 'because',
+      total: ids.length,
+      items: ids.map((oracleId) => ({
+        oracleId,
+        score: 1,
+        comboDegree: 0,
+        nearCombosAt1: 0,
+        completedCombos: [],
+        combos: [],
+        reasons: [],
+      })),
+    }) as api.Group
+
+  /** The card names under one heading, in the order they are rendered. */
+  const names = (container: HTMLElement, groupKey: string): string[] => {
+    const groups = [...container.querySelectorAll('.group')]
+    const wanted = groups.find((g) => g.querySelector(`[aria-controls="group-${groupKey}"]`))
+    return [...(wanted?.querySelectorAll('.card-row .name') ?? [])].map((n) =>
+      (n.firstChild?.textContent ?? '').trim(),
+    )
+  }
+
+  const hydrated = (ids: string[]): api.Hydrated => ({
+    cards: new Map([
+      ['cmd', card({ oracleId: 'cmd', name: 'Krenko, Mob Boss' })],
+      ...ids.map((id): [string, api.Card] => [id, card({ oracleId: id, name: id.toUpperCase() })]),
+    ]),
+    prices: new Map(),
+    images: new Map(),
+  })
+
+  it('sorts the matches to the top of their group, and only within it', async () => {
+    /*
+     * Group order is doc 05 §5.3 and pillar P5: the groups are the app's
+     * argument about what this deck needs, so a sort may reorder rows inside a
+     * heading and may never move one between headings — nor reorder the
+     * headings themselves.
+     */
+    mocked.getRecommendations.mockResolvedValue(
+      recs({
+        groups: [group('g1', 'First', ['a', 'b']), group('g2', 'Second', ['c', 'd'])],
+        columns: [{ query: 'x', matched: ['b', 'd'] }],
+      }),
+    )
+    mocked.hydrate.mockResolvedValue(hydrated(['a', 'b', 'c', 'd']))
+    const { container } = render(<Workspace deck={deck} />)
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+    await typeFilter('x')
+    await act(async () => {
+      screen.getByLabelText(/Show this query as a column/).click()
+    })
+
+    await waitFor(() => expect(names(container, 'g1')).toEqual(['B', 'A']))
+    // The second group sorted too, and nothing crossed between them.
+    expect(names(container, 'g2')).toEqual(['D', 'C'])
+    // And the headings kept their own order.
+    expect([...container.querySelectorAll('.group h3')].map((h) => h.textContent)).toEqual([
+      'First',
+      'Second',
+    ])
+  })
+
+  it('numbers the chips so the reader can see which column wins', async () => {
+    mocked.getRecommendations.mockResolvedValue(
+      recs({
+        groups: [group('g1', 'First', ['a', 'b'])],
+        columns: [
+          { query: 'x', matched: ['b'] },
+          { query: 'y', matched: ['a'] },
+        ],
+      }),
+    )
+    mocked.hydrate.mockResolvedValue(hydrated(['a', 'b']))
+    const { container } = render(<Workspace deck={deck} />)
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+    for (const q of ['x', 'y']) {
+      await typeFilter(q)
+      await act(async () => {
+        screen.getByLabelText(/Show this query as a column/).click()
+      })
+    }
+
+    await waitFor(() => expect(container.querySelectorAll('.column-chip')).toHaveLength(2))
+    expect([...container.querySelectorAll('.column-rank')].map((r) => r.textContent)).toEqual([
+      '1',
+      '2',
+    ])
+    // In words as well, because a lone digit read aloud is not information.
+    expect(screen.getByLabelText(/^Remove the x column . sorts first/)).toBeDefined()
+    expect(screen.getByLabelText(/^Remove the y column . then by this/)).toBeDefined()
+  })
+
+  it('refuses the same query twice — that would be two answers to "what sorts first"', async () => {
+    mocked.getRecommendations.mockResolvedValue(
+      recs({ groups: [group('g1', 'First', ['a'])], columns: [{ query: 'x', matched: [] }] }),
+    )
+    mocked.hydrate.mockResolvedValue(hydrated(['a']))
+    const { container } = render(<Workspace deck={deck} />)
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+    await typeFilter('x')
+    await act(async () => {
+      screen.getByLabelText(/Show this query as a column/).click()
+    })
+    await waitFor(() => expect(container.querySelectorAll('.column-chip')).toHaveLength(1))
+
+    await typeFilter('x')
+    expect(
+      (screen.getByLabelText(/Show this query as a column/) as HTMLButtonElement).disabled,
+    ).toBe(true)
   })
 })

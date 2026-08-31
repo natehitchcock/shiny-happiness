@@ -1362,6 +1362,26 @@ select {
   color: var(--parchment);
 }
 
+/*
+ * Which column sorts first.
+ *
+ * A column no longer only ticks rows, it orders them — and the chips composing
+ * left to right is not something a reader can be expected to infer from a stack
+ * of chips. The digit says it. It is `aria-hidden`; the same fact is in the
+ * remove button's accessible name in words ("sorts first", "then by this"),
+ * because a lone "1" read aloud beside a query is not information.
+ *
+ * Dim, and in the mono face the other numbers on this screen use: it is an
+ * index, not a value, and it must not read as a count of matches.
+ */
+.column-rank {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--parchment-dim);
+  border-right: 1px solid var(--rule);
+  padding-right: 4px;
+}
+
 /* A column is a fact about a row, not a ranking, so it sits quietly beside the
    costs rather than competing with the reasons. */
 .col-cell {

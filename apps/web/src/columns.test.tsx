@@ -288,7 +288,11 @@ describe('the column legend', () => {
 
     await waitFor(() => expect(container.querySelector('.column-chip')).not.toBeNull())
     await act(async () => {
-      screen.getByLabelText('Remove the mv<=3 column').click()
+      // The name now carries the column's SORT PRIORITY as well, because a
+      // column decides the order of the rows and a stack of chips does not say
+      // which one wins. Matched on the prefix so the wording of the second half
+      // can change without breaking the thing under test, which is removal.
+      screen.getByLabelText(/^Remove the mv<=3 column/).click()
     })
     expect(container.querySelector('.column-chip')).toBeNull()
   })

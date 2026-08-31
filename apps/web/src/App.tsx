@@ -2665,6 +2665,122 @@ const ImportDialog = ({
  * ring still knows a query is coming and how long they have to stop it.
  */
 /**
+ * One column of the suggestion table.
+ *
+ * A union rather than the bare query string this used to be, because a column
+ * is about to stop always being a query: `impact` and `efficiency` are arriving
+ * as NAMED METRICS that are present by default and removable like any other
+ * column. They take part in the sort chain on exactly the same terms — no
+ * special tier, no exemption — so the difference has to live in the value and
+ * not in a second code path beside it.
+ *
+ * `metric` is a seam and nothing more. Nothing in this build creates one, and
+ * the numbers behind it are being computed in `packages/domain`; what is here
+ * is the shape that stops the sort, the legend and the request from each
+ * assuming a column is a string.
+ */
+export type Column =
+  | { readonly kind: 'query'; readonly query: string }
+  | { readonly kind: 'metric'; readonly metric: string; readonly label: string }
+
+/**
+ * The identity of a column, for React keys and for `columnMatches`.
+ *
+ * A query column keys on its own text, which is what the server echoes back on
+ * `Recommendations.columns[].query`. A metric keys under a prefix so a metric
+ * called `impact` and someone's query `impact` cannot collide.
+ */
+export const columnKey = (c: Column): string =>
+  c.kind === 'query' ? c.query : `metric:${c.metric}`
+
+/** What the legend chip says. */
+export const columnLabel = (c: Column): string => (c.kind === 'query' ? c.query : c.label)
+
+/**
+ * The subset the RECOMMENDATIONS REQUEST can carry.
+ *
+ * `columns` on the wire is a list of query strings the server evaluates per
+ * candidate (doc 10). A metric is not a query and the server does not evaluate
+ * it — its values ride on the recommendation itself — so sending its name would
+ * be asking the parser to read `impact` as a filter. One function, so the three
+ * places that build a request cannot each answer this differently.
+ */
+export const queryColumnsOf = (columns: readonly Column[]): readonly string[] =>
+  columns.filter((c) => c.kind === 'query').map((c) => c.query)
+
+/**
+ * Where one card sorts on one column. Lower is earlier.
+ *
+ * For a query the answer is binary and the ordering is "matches first", which
+ * is what promoting a filter to a column is asking for: keep everything, and
+ * bring the ones I asked about to the top.
+ *
+ * Ties are not broken here. That is the caller's job and it is the whole point
+ * of the feature — see `sortByColumns`.
+ */
+export const columnRank = (
+  column: Column,
+  oracleId: string,
+  matches: ReadonlyMap<string, ReadonlySet<string>>,
+): number => {
+  if (column.kind === 'query') {
+    return matches.get(column.query)?.has(oracleId) === true ? 0 : 1
+  }
+  /*
+   * A metric column has no ranking in this build.
+   *
+   * Deliberately 0 for every card rather than a guess: a metric whose values
+   * have not arrived must contribute NOTHING to the order, so the columns after
+   * it decide. Inventing an order from data we do not have would be worse than
+   * a column that does not sort yet — it would look like it worked.
+   */
+  return 0
+}
+
+/**
+ * Sort one group's rows by the columns, in the order they were added.
+ *
+ * Three rules, and the first outranks the other two:
+ *
+ *   GROUP ORDER IS UNTOUCHED (doc 05 §5.3, pillar P5). The groups are the app's
+ *   argument about what this deck needs, in the order it wants to make it, and
+ *   a sort that could move a row from "completes a combo" into "fills ramp"
+ *   would be re-deciding that argument on the strength of a text query. So this
+ *   sorts WITHIN a group and is never applied across them.
+ *
+ *   COLUMNS COMPOSE. The first column added is the primary sort, the second
+ *   breaks its ties, and so on — which is the only reading of "as a secondary
+ *   sort, maintaining the ordering of previous sorts" that survives a third
+ *   column being added.
+ *
+ *   SCORE IS THE LAST WORD. Two rows that every column agrees about keep the
+ *   order the server sent them in, which is descending score. Carried as an
+ *   explicit index rather than leaning on `Array.prototype.sort` being stable:
+ *   the guarantee holds in every engine this ships to, but a deterministic
+ *   order is the thing being promised and it should be visible in the code
+ *   that promises it.
+ */
+export const sortByColumns = <T extends { readonly oracleId: string }>(
+  items: readonly T[],
+  columns: readonly Column[],
+  matches: ReadonlyMap<string, ReadonlySet<string>>,
+): readonly T[] => {
+  if (columns.length === 0) return items
+  return items
+    .map((item, at) => ({ item, at }))
+    .sort((a, b) => {
+      for (const column of columns) {
+        const delta =
+          columnRank(column, a.item.oracleId, matches) -
+          columnRank(column, b.item.oracleId, matches)
+        if (delta !== 0) return delta
+      }
+      return a.at - b.at
+    })
+    .map((x) => x.item)
+}
+
+/**
  * The column queries, under the filter bar, each sitting over its own column.
  *
  * A chip that just says `mv<=3` in a row of chips makes you count ticks to work
@@ -2686,8 +2802,9 @@ const ColumnLegend = ({
   onRemove,
   measureRoot,
 }: {
-  columns: readonly string[]
-  onRemove: (query: string) => void
+  columns: readonly Column[]
+  /** By `columnKey`, so a metric and a query of the same text cannot collide. */
+  onRemove: (key: string) => void
   measureRoot: React.RefObject<HTMLElement | null>
 }): React.JSX.Element | null => {
   const barRef = useRef<HTMLDivElement>(null)
@@ -2739,22 +2856,38 @@ const ColumnLegend = ({
       style={aligned ? { height: `${String(columns.length * 1.4)}rem` } : undefined}
       aria-label="Columns"
     >
-      {columns.map((c, i) => (
-        <span
-          className="column-chip"
-          key={c}
-          style={
-            aligned
-              ? { right: `${String(insets[i] ?? 0)}px`, top: `${String(i * 1.4)}rem` }
-              : undefined
-          }
-        >
-          <code>{c}</code>
-          <button className="act" onClick={() => onRemove(c)} aria-label={`Remove the ${c} column`}>
-            ×
-          </button>
-        </span>
-      ))}
+      {columns.map((c, i) => {
+        const label = columnLabel(c)
+        // The chips are already in priority order, but "the order they happen
+        // to be in" is not something a reader can be expected to infer from a
+        // stack of chips — and it now decides what the list is sorted by. So
+        // the position is stated.
+        const rank = i === 0 ? 'sorts first' : `then by this${i > 1 ? ` (${String(i + 1)})` : ''}`
+        return (
+          <span
+            className="column-chip"
+            key={columnKey(c)}
+            style={
+              aligned
+                ? { right: `${String(insets[i] ?? 0)}px`, top: `${String(i * 1.4)}rem` }
+                : undefined
+            }
+          >
+            <span className="column-rank" aria-hidden="true">
+              {i + 1}
+            </span>
+            <code>{label}</code>
+            <button
+              className="act"
+              onClick={() => onRemove(columnKey(c))}
+              aria-label={`Remove the ${label} column — ${rank}`}
+              title={`Matches sort to the top; ${rank}. Remove this column.`}
+            >
+              ×
+            </button>
+          </span>
+        )
+      })}
     </div>
   )
 }
@@ -2964,14 +3097,21 @@ export const Workspace = ({
   const targetsBaselineRef = useRef<{ short: string[]; cuts: number } | null>(null)
   const [targetsChange, setTargetsChange] = useState<string | null>(null)
   /**
-   * Queries promoted to columns.
+   * The columns, in priority order. The ONLY copy of this list.
    *
-   * A column does NOT filter. It evaluates the query per row and shows a tick,
-   * so the ordering stays the general one — combo degree, synergy, curve — and
-   * the column is an extra fact about each card rather than a different list.
-   * That is the difference between "show me only X" and "which of these are X".
+   * A column still does not FILTER — every suggestion stays on screen and the
+   * column says which ones match, which is the difference between "show me only
+   * X" and "which of these are X". What it now also does is SORT: matches come
+   * first within each group, the second column breaks the first's ties, and the
+   * server's score has the last word. See `sortByColumns` for why the sort
+   * never crosses a group boundary.
+   *
+   * Every add and every remove goes through `addColumn` / `removeColumn` rather
+   * than calling the setter in place. That is not tidiness: this list is about
+   * to become a persisted field on the deck, and the two functions are where
+   * the PATCH will go. Scattered setters would be four places to remember.
    */
-  const [columns, setColumns] = useState<readonly string[]>([])
+  const [columns, setColumns] = useState<readonly Column[]>([])
   const [columnMatches, setColumnMatches] = useState<Map<string, Set<string>>>(new Map())
   const [draftQuery, setDraftQuery] = useState('')
   /**
@@ -3012,7 +3152,7 @@ export const Workspace = ({
   const [notice, setNotice] = useState<string | null>(null)
   const deckRef = useRef(deck)
   const queryRef = useRef(query)
-  const columnsRef = useRef<readonly string[]>([])
+  const columnsRef = useRef<readonly Column[]>([])
   /** Groups the user has asked for more of. Read by `load` on every recompute. */
   const expandedRef = useRef<ReadonlySet<string>>(new Set())
   /**
@@ -3185,7 +3325,9 @@ export const Workspace = ({
       api.getRecommendations(current.id, {
         limitPerGroup: 8,
         ...(queryRef.current === '' ? {} : { query: queryRef.current }),
-        ...(columnsRef.current.length > 0 ? { columns: columnsRef.current } : {}),
+        ...(queryColumnsOf(columnsRef.current).length > 0
+          ? { columns: queryColumnsOf(columnsRef.current) }
+          : {}),
       }),
       api.getAnalysis(current.id),
     ])
@@ -3206,7 +3348,7 @@ export const Workspace = ({
       current.id,
       expandedRef.current,
       queryRef.current,
-      columnsRef.current,
+      queryColumnsOf(columnsRef.current),
     )
 
     /*
@@ -3338,6 +3480,28 @@ export const Workspace = ({
     // changes what the server must compute. Without it a new column showed no
     // ticks until something else happened to trigger a recompute.
   }, [query, columns, refresh])
+
+  /*
+   * The two ways the column list changes, and the only two.
+   *
+   * Everything that adds or removes a column goes through these. They do
+   * nothing today that an inline `setColumns` would not — the point is that the
+   * list is becoming a persisted deck field, and when it does, the PATCH goes
+   * here rather than in each of the call sites that would otherwise exist.
+   */
+  const addColumn = useCallback((column: Column): void => {
+    setColumns((current) =>
+      // Adding a column that is already there would give it two positions in
+      // the sort chain, which is two different answers to "what sorts first".
+      current.some((c) => columnKey(c) === columnKey(column)) ? current : [...current, column],
+    )
+  }, [])
+
+  const removeColumn = useCallback((key: string): void => {
+    // The survivors keep their relative order, so removing the primary sort
+    // promotes the second rather than reshuffling the rest.
+    setColumns((current) => current.filter((c) => columnKey(c) !== key))
+  }, [])
 
   // Basics never change for a deck — its colour identity is fixed by its
   // commanders — so this is fetched once rather than with every recompute.
@@ -3856,6 +4020,28 @@ export const Workspace = ({
     [shownGroups, extraItems],
   )
 
+  /**
+   * The same groups, with each one's rows put in column order.
+   *
+   * The groups themselves are NOT reordered and no row moves between them
+   * (doc 05 §5.3, pillar P5) — the sort happens inside each heading, because
+   * the headings are the app's argument about what this deck needs and a text
+   * query does not get to re-decide that.
+   *
+   * Rows an expand fetched are folded in above, so they sort with everything
+   * else rather than sitting in a block at the end.
+   */
+  const sortedGroups = useMemo(
+    () =>
+      columns.length === 0
+        ? visibleGroups
+        : visibleGroups.map((g) => ({
+            ...g,
+            items: [...sortByColumns(g.items, columns, columnMatches)],
+          })),
+    [visibleGroups, columns, columnMatches],
+  )
+
   /** Whether anything is left to show under a heading, filters applied. */
   const rowsIn = (g: api.Group): number =>
     g.items.filter((item) => {
@@ -3954,7 +4140,12 @@ export const Workspace = ({
     // would be frozen at the deck they were chosen for.
     const keys = new Set([...expandedRef.current, key])
     expandedRef.current = keys
-    void expansionsFor(deckRef.current.id, new Set([key]), queryRef.current, columnsRef.current)
+    void expansionsFor(
+      deckRef.current.id,
+      new Set([key]),
+      queryRef.current,
+      queryColumnsOf(columnsRef.current),
+    )
       .then(async (fetched) => {
         const items = fetched.get(key) ?? []
         // These are cards nothing has hydrated, so their rows would read
@@ -4587,27 +4778,30 @@ export const Workspace = ({
               />
               <button
                 className="act"
-                disabled={draftQuery.trim() === '' || columns.includes(draftQuery.trim())}
+                disabled={
+                  draftQuery.trim() === '' ||
+                  columns.some((c) => c.kind === 'query' && c.query === draftQuery.trim())
+                }
                 onClick={() => {
-                  setColumns((c) => [...c, draftQuery.trim()])
+                  addColumn({ kind: 'query', query: draftQuery.trim() })
                   // Promoting a query to a column means "keep showing me
-                  // everything, just tell me which ones match", so the filter
-                  // itself is cleared.
+                  // everything, just sort the ones that match to the top", so
+                  // the filter itself is cleared.
                   setDraftQuery('')
                   setQuery('')
                 }}
-                aria-label="Show this query as a column instead of filtering by it"
-                title="Add as a column: keeps every suggestion and ranking, and ticks the ones that match"
+                aria-label="Show this query as a column, and sort by it, instead of filtering by it"
+                title={
+                  columns.length === 0
+                    ? 'Add as a column: keeps every suggestion, ticks the ones that match, and sorts them to the top of their group'
+                    : 'Add as a column: sorts within each group after the columns already here'
+                }
               >
                 + column
               </button>
             </div>
 
-            <ColumnLegend
-              columns={columns}
-              onRemove={(c) => setColumns((all) => all.filter((x) => x !== c))}
-              measureRoot={suggestionsRef}
-            />
+            <ColumnLegend columns={columns} onRemove={removeColumn} measureRoot={suggestionsRef} />
 
             {queryError !== null ? <p className="problem">{queryError}</p> : null}
           </div>
@@ -4745,7 +4939,7 @@ export const Workspace = ({
             </div>
           ) : null}
 
-          {visibleGroups.map((g) => (
+          {sortedGroups.map((g) => (
             <div className={`group${isCollapsed(g) ? ' collapsed' : ''}`} key={g.key}>
               <div className="group-head">
                 <button
@@ -4882,19 +5076,22 @@ export const Workspace = ({
                             )}
                           </span>
                         </span>
-                        {columns.map((c) => (
-                          <span
-                            className="col-cell"
-                            key={c}
-                            data-match={columnMatches.get(c)?.has(item.oracleId) === true}
-                            title={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
-                            aria-label={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
-                          >
-                            {columnMatches.get(c)?.has(item.oracleId) === true
-                              ? '\u2713'
-                              : '\u00B7'}
-                          </span>
-                        ))}
+                        {columns.map((c) => {
+                          const matched =
+                            c.kind === 'query' &&
+                            columnMatches.get(c.query)?.has(item.oracleId) === true
+                          return (
+                            <span
+                              className="col-cell"
+                              key={columnKey(c)}
+                              data-match={matched}
+                              title={`${columnLabel(c)}: ${matched ? 'yes' : 'no'}`}
+                              aria-label={`${columnLabel(c)}: ${matched ? 'yes' : 'no'}`}
+                            >
+                              {matched ? '\u2713' : '\u00B7'}
+                            </span>
+                          )
+                        })}
                         <Costs
                           manaCost={cards.get(item.oracleId)?.manaCost}
                           price={prices.get(item.oracleId)}
