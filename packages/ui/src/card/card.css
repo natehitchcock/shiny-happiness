@@ -337,6 +337,106 @@
   border-color: var(--brass-dim);
 }
 
+/* ------------------------------------------------- impact and efficiency */
+
+/*
+ * The two card-intrinsic metrics (doc 18).
+ *
+ * Sized for the narrowest box either mount ever gets: the detail column is
+ * 21rem — about 312px inside the panel's padding — and the mobile sheet is the
+ * full width but only `min(65dvh, 30rem)` tall and scrolling. So every rule
+ * here is fluid and nothing is given a width: the label/value row is a flex
+ * pair that wraps, and the tier list is a two-track grid whose first track is
+ * `max-content`, so "Falls on" sets the gutter and the value takes the rest.
+ *
+ * Rejected: a fixed label column in `ch` or `rem`. It looks tidier until the
+ * longest label changes, and then it either clips or leaves a hole — and this
+ * is a panel where a mis-measured gutter costs the explanation its second line.
+ */
+.rt-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.rt-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rt-metric-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  margin: 0;
+}
+.rt-metric-label {
+  font: 600 11px/1.2 var(--ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+}
+/* Mono so the digits line up between the two metrics stacked above each other,
+   and so a three-decimal value does not look like a different kind of number
+   from a two-decimal one. */
+.rt-metric-value {
+  font: 500 13px/1.2 var(--mono);
+  color: var(--parchment);
+}
+/* The range and the unit, quieter than the figure but never hidden — they are
+   the half that makes the figure mean anything. */
+.rt-metric-of {
+  font: 400 11px/1.2 var(--ui);
+  color: var(--parchment-dim);
+}
+/*
+ * The impact meter. Brass on rule, the same pairing the rest of the card
+ * primitives use for "this is the value" against "this is the track".
+ *
+ * 4px tall and never interactive: it is a restatement of the number beside it,
+ * so it must not look like something to drag or click.
+ */
+.rt-metric-meter {
+  block-size: 4px;
+  inline-size: 100%;
+  background: var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.rt-metric-fill {
+  display: block;
+  block-size: 100%;
+  background: var(--brass);
+}
+.rt-metric-rows {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 1px 8px;
+  margin: 2px 0 0;
+  font: 400 12px/1.4 var(--ui);
+}
+/* Each `dt`/`dd` pair is wrapped in a `div` so a name and its value stay on one
+   row; the wrapper is `display: contents` so the grid still sees four items and
+   not two boxes. */
+.rt-metric-rows > div {
+  display: contents;
+  grid-column: 1 / -1;
+}
+.rt-metric-rows dt {
+  color: var(--parchment-dim);
+}
+.rt-metric-rows dd {
+  margin: 0;
+  color: var(--parchment);
+}
+.rt-metric-note {
+  margin: 0;
+  font: 400 11px/1.45 var(--ui);
+  color: var(--parchment-dim);
+}
+
 /* ----------------------------------------------------------- rules text */
 
 /*

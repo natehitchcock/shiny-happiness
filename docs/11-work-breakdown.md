@@ -227,9 +227,43 @@ columns come back has not cleared anything. No ADR: every contract change is a
 new optional field. The recommendations request is unchanged — a metric column
 needs no server evaluation, since its number is already on the row.
 
-**The UI half is not built.** Nothing renders a metric column or persists the
-column list to the deck yet; the storage, the metrics, the endpoints and the
+**The COLUMN half is not built.** Nothing renders a metric column or persists
+the column list to the deck yet; the storage, the metrics, the endpoints and the
 `queryColumns` seam are.
+
+**The DETAIL half is.** Both metrics are drawn on the card detail pane — in the
+workspace preview panel and in the L3 `Detail` primitive, through one shared
+`CardMetrics` component so the two surfaces cannot disagree. What it draws is
+not a bare float, because the user has never seen either number:
+
+- **Impact against its scale.** `impact.ts` now exports `IMPACT_MAX`, derived
+  from the three tier tables rather than written down (18.48 = 6.0 × 2.2 × 1.4),
+  and the pane prints `6.12 of 18.48` over a meter filled to that fraction. The
+  docblock's old "roughly 0–13" is corrected, closing the item ADR-0025 listed.
+  Rejected: a corpus percentile — more useful, and it would need a server-side
+  distribution to keep in step with the model. The ceiling is a fact about the
+  model and cannot drift.
+- **The tiers, as the reasons.** `breadth`, `persistence`, `stakes` and
+  `symmetry` are already on the wire (§18.8) and are rendered in plain English —
+  "Reach: everything at once / Repeats: once, then it is done / Falls on: an
+  opponent's side, your board included". A score with its reasons can be
+  disbelieved usefully; a score alone can only be taken on trust. `scales` and
+  `fragile` get the marker §18.5 asks for, and the model's own documented blind
+  spot ("effects only: a card whose job is mana or a tax reads low") is printed
+  unconditionally, because otherwise Sol Ring's 0.68 reads as a verdict.
+- **Efficiency as a rate, with its working.** `0.549 per mana`, then
+  `No surplus body, plus 2.744 for its text, over 5 — its mana plus the card
+  itself`, then the caveat that it divides by cost so a small cheap card can
+  out-rate a bomb. **No meter**: impact has an exact ceiling and efficiency has
+  none, so a bar would need a maximum invented in the renderer — the unstated
+  range the rest of this is built to remove.
+
+**Nothing rounds for display.** ADR-0025 §2 binds it: the filter compares the
+raw score, so the pane draws the stored number, ragged decimals and all
+(`6.12`, `0.549`, `13.464`). `toFixed(2)` would make `impact>=6.13` drop a row
+whose own cell said 6.13.
+
+Read-only figures, so no controls and nothing for R4 to govern.
 
 **Both metrics are now filterable** ([ADR-0025](adr/0025-impact-and-efficiency-are-query-fields.md)).
 `impact` and `efficiency` are numeric fields of the candidate query language —

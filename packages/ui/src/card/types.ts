@@ -24,6 +24,8 @@
  * already means.
  */
 
+import type { EfficiencyView, ImpactView } from './metrics.js'
+
 export type Color = 'W' | 'U' | 'B' | 'R' | 'G'
 
 export interface CardView {
@@ -72,4 +74,16 @@ export interface CardView {
    * is a bug, and `Detail` renders this as the answer to "why is this here".
    */
   readonly reasons?: readonly string[] | undefined
+  /**
+   * How much the card does, and what it costs to do it (doc 18).
+   *
+   * Whole objects, not bare scores: the tiers behind the number are what make
+   * it readable, and the card-detail route already sends them (`cardImpact(card)`
+   * rather than `cardImpact(card).score`). Optional because they ride on card
+   * detail and on recommendation items only — a half-resolved card, a search
+   * result, or an unresolved import has neither, and `CardMetrics` draws
+   * nothing rather than a heading over two blanks.
+   */
+  readonly impact?: ImpactView | undefined
+  readonly efficiency?: EfficiencyView | undefined
 }

@@ -73,6 +73,26 @@ const FIXTURES: readonly CardView[] = [
         'https://cards.scryfall.io/normal/front/c/8/c83ed3e0-82d0-4410-a6ca-b0f923eadf83.jpg?1783931576',
     },
     reasons: ['Blinks your enter-the-battlefield creatures every turn', 'Completes 2 combos'],
+    /*
+     * Real `cardImpact` / `cardEfficiency` output for this exact oracle text,
+     * not invented numbers. This page exists to be LOOKED at, and a metrics
+     * block drawn from made-up tiers would look fine while showing a
+     * combination the classifier cannot produce.
+     *
+     * Three fixtures, three readings worth looking at side by side: a mid
+     * scorer here, the documented blind spot on Sol Ring below, and a card that
+     * is almost all body on `f3`.
+     */
+    impact: {
+      score: 2.64,
+      breadth: 'one',
+      persistence: 'upkeep',
+      stakes: 'opposing',
+      symmetry: 'none',
+      scales: false,
+      fragile: false,
+    },
+    efficiency: { score: 1.081, statSurplus: 4.219, effectValue: 1.184, baseline: 6.781, cost: 5 },
   },
   {
     oracleId: 'f2',
@@ -92,6 +112,20 @@ const FIXTURES: readonly CardView[] = [
         'https://cards.scryfall.io/normal/front/9/1/91fdb56b-54d5-4272-8319-505ff987fe9b.jpg?1783903215',
     },
     reasons: ['Two mana ahead on turn one, in every deck that can cast it'],
+    // 0.68 — the blind spot `impact.ts` names in its own docblock and declined
+    // to patch. On the page on purpose: it is the reading most likely to make
+    // someone think the metric is broken, and the "effects only" line under it
+    // is the answer.
+    impact: {
+      score: 0.68,
+      breadth: 'none',
+      persistence: 'activated',
+      stakes: 'self',
+      symmetry: 'none',
+      scales: false,
+      fragile: false,
+    },
+    efficiency: { score: 0.152, statSurplus: 0, effectValue: 0.305, baseline: 2.966, cost: 2 },
   },
   {
     oracleId: 'f3',
@@ -105,6 +139,19 @@ const FIXTURES: readonly CardView[] = [
     bracketFlags: ['game changer'],
     priceUsd: null,
     reasons: [],
+    // Two keywords and no effect: 0.425, the floor for a card that has text the
+    // model cannot count. Next to a 2.64 and a 0.68 it shows the bottom of the
+    // meter is a real position and not a loading state.
+    impact: {
+      score: 0.425,
+      breadth: 'none',
+      persistence: 'one-shot',
+      stakes: 'self',
+      symmetry: 'none',
+      scales: false,
+      fragile: false,
+    },
+    efficiency: { score: 0.038, statSurplus: 0, effectValue: 0.191, baseline: 6.781, cost: 5 },
   },
   {
     oracleId: 'f4',

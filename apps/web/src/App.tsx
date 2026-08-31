@@ -25,7 +25,14 @@ import { oracleId as asOracleId } from '@roundtable/domain'
 // `IDENTITY_COLORS` rather than a hex in this file: Magic's five colours are
 // data the design system owns, and a second copy here is how the pie and the
 // mana symbols come to disagree about what blue is.
-import { CardFace, IDENTITY_COLORS, ManaCost, OracleText, levelSpec } from '@roundtable/ui'
+import {
+  CardFace,
+  CardMetrics,
+  IDENTITY_COLORS,
+  ManaCost,
+  OracleText,
+  levelSpec,
+} from '@roundtable/ui'
 import type { CardView, Color } from '@roundtable/ui'
 import type { DeckCommand, SynergyTag } from '@roundtable/domain'
 import { DeckMenu } from './DeckMenu'
@@ -1970,6 +1977,27 @@ const Preview = ({
       <p className="oracle">
         <OracleText text={shown.oracleText} faces={shown.oracleTextFaces} />
       </p>
+      {/*
+       * Impact and efficiency, immediately under the text they are a reading OF
+       * (doc 18 §18.8).
+       *
+       * Here rather than lower down because the tier lines — "Reach: everything
+       * at once", "Falls on: an opponent's side — and yours too" — are a claim
+       * about the oracle text directly above them, and a reader has to be able
+       * to check one against the other without scrolling between them.
+       *
+       * From `detail`, never from `shown`. The metrics ride on the card-detail
+       * response and on recommendation items only; the hydrated `api.Card` the
+       * panel prefers for everything else has neither, so reading them from
+       * `shown` would draw nothing for a card that had already arrived. The
+       * component renders null until detail lands, which is the same beat the
+       * combo count below already waits for.
+       *
+       * The same component the L3 `Detail` primitive uses. This panel is a
+       * second renderer of card detail, and two implementations of one number
+       * is how two surfaces start disagreeing about it.
+       */}
+      <CardMetrics impact={detail?.impact} efficiency={detail?.efficiency} />
       <p className="note">
         {/* ADR-0009 Q7: a price is an estimate and the interface has to say so.
             The number moves to the card's badge row when there is a card face
@@ -3640,9 +3668,11 @@ const FILTER_FIELDS: readonly (readonly [string, string])[] = [
   ['tag:treasure', 'a synergy tag, either side'],
   ['combo>=2', 'combos it completes in THIS deck'],
   ['near>=1', 'combos it leaves one card away'],
-  // 0–18.48, not the "roughly 0–13" `impact.ts` estimates in its docblock:
-  // 18.48 is the model's actual ceiling (breadth 6.0 × persistence 2.2 ×
-  // stakes 1.4), and 93 of 1,448 rows in one real mono-red pool are over 13.
+  // 0–18.48, not the "roughly 0–13" `impact.ts` used to estimate in its
+  // docblock: 18.48 is the model's actual ceiling (breadth 6.0 × persistence
+  // 2.2 × stakes 1.4), and 93 of 1,448 rows in one real mono-red pool are over
+  // 13. `impact.ts` now exports it as `IMPACT_MAX`, and the card detail pane
+  // draws every score against the same number this line quotes.
   // A range that stops below a fifteenth of the pool sends a builder looking
   // for a threshold to the wrong end of the scale.
   ['impact>=6', 'how much the card does (0–18)'],
