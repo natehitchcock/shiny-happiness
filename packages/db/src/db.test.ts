@@ -72,9 +72,18 @@ describeDb('packages/db against real PostgreSQL', () => {
     db = await createTestDatabase('main')
   }, 60_000)
 
+  /*
+   * 60 s, like every other teardown that drops a test database.
+   *
+   * This one was left on vitest's 10 s default and flaked: `drop()` ends the
+   * pool, opens a fresh admin connection and issues DROP DATABASE, and on an
+   * unlucky moment that is more than ten seconds — the suite passed all 66
+   * tests and failed the hook. A teardown that opens a connection is not a
+   * cheap operation and should not be held to a default meant for assertions.
+   */
   afterAll(async () => {
     await db?.drop()
-  })
+  }, 60_000)
 
   describe('migrations', () => {
     it('applied every migration', async () => {
