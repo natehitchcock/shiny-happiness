@@ -414,9 +414,20 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
     let cancelled = false
     setSearch('searching')
     void api
-      // Only legendary creatures can lead a deck, so the search says so
-      // rather than offering every card and rejecting the choice later.
-      .searchCards(`${query} type:legendary type:creature`, {
+      /*
+       * `is:commander`, not `type:legendary type:creature`.
+       *
+       * The old pair was both too narrow and too wide. Too narrow: Rowan
+       * Kenrith and the twenty other planeswalkers whose text says they can
+       * lead a deck were unreachable, as were Backgrounds. Too wide: the type
+       * filter is a substring test over the whole line, so Westvale Abbey —
+       * `Land // Legendary Creature — Demon` — was offered as a commander, and
+       * so were ten `Invasion of …` battles.
+       *
+       * `is:commander` reads the flag the ingest derives, so this list and the
+       * server's 422 are the same rule and cannot disagree.
+       */
+      .searchCards(`${query} is:commander`, {
         excludeUniversesBeyond: noUB,
       })
       .then((r) => {
@@ -482,7 +493,7 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
               id="commander"
               type="text"
               value={chosen?.name ?? term}
-              placeholder="Search legendary creatures…"
+              placeholder="Search cards that can lead a deck…"
               onChange={(e) => {
                 setChosen(null)
                 setTerm(e.target.value)
@@ -516,7 +527,7 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
                 Nothing found.
                 <span className="note">
                   {' '}
-                  No legendary creature matches “{query}”.
+                  No card that can be a commander matches “{query}”.
                   {noUB ? ' Universes Beyond cards are excluded — try unchecking that.' : ''}
                 </span>
               </p>

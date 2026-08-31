@@ -18,6 +18,7 @@ interface CardRow {
   readonly loyalty: string | null
   readonly keywords: string[]
   readonly legality_commander: string
+  readonly can_be_commander: boolean | null
   readonly edhrec_rank: number | null
   readonly default_printing: string | null
   readonly roles: string[]
@@ -55,6 +56,13 @@ const toCard = (row: CardRow): Card => ({
   loyalty: row.loyalty,
   keywords: row.keywords,
   legalities: { commander: row.legality_commander as Card['legalities']['commander'] },
+  // NULL is not `false`. A row written before migration 0010 has no answer, and
+  // `false` would say the card may not lead a deck — which for the 3,384
+  // eligible cards in the corpus is a lie, and one that would reject every deck
+  // created between the migration and the re-ingest that fills the column.
+  ...(row.can_be_commander === null || row.can_be_commander === undefined
+    ? {}
+    : { canBeCommander: row.can_be_commander }),
   edhrecRank: row.edhrec_rank,
   defaultPrinting: row.default_printing as PrintingId | null,
   roles: row.roles as Role[],
@@ -106,6 +114,10 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
     toughness_num: wholeNumber(c.toughness),
     keywords: c.keywords,
     legality_commander: c.legalities.commander,
+    // Null, not `false`, when the card was read before the flag existed: the
+    // column's whole point is that "cannot lead a deck" and "nobody has decided
+    // yet" must not arrive in the database as the same value.
+    can_be_commander: c.canBeCommander ?? null,
     edhrec_rank: c.edhrecRank,
     default_printing: c.defaultPrinting,
     roles: c.roles,
@@ -119,12 +131,12 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
     `INSERT INTO cards (
        oracle_id, name, mana_cost, mana_value, color_identity, colors, produced_mana, type_line,
        types, oracle_text, oracle_text_faces, power, toughness, loyalty, power_num, toughness_num,
-       keywords, legality_commander, edhrec_rank,
+       keywords, legality_commander, can_be_commander, edhrec_rank,
        default_printing, roles, primary_role, universes_beyond,
        synergy_produces, synergy_wants)
      SELECT oracle_id, name, mana_cost, mana_value, color_identity, colors, produced_mana, type_line,
             types, oracle_text, oracle_text_faces, power, toughness, loyalty, power_num, toughness_num,
-            keywords, legality_commander, edhrec_rank,
+            keywords, legality_commander, can_be_commander, edhrec_rank,
             default_printing, roles, primary_role, universes_beyond,
             synergy_produces, synergy_wants
        FROM jsonb_to_recordset($1::jsonb) AS x(
@@ -133,7 +145,7 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
          type_line text, types text[],
          oracle_text text, oracle_text_faces text[], power text, toughness text, loyalty text,
          power_num integer, toughness_num integer,
-         keywords text[], legality_commander text,
+         keywords text[], legality_commander text, can_be_commander boolean,
          edhrec_rank integer, default_printing uuid, roles text[], primary_role text,
          universes_beyond boolean, synergy_produces text[], synergy_wants text[])
      ON CONFLICT (oracle_id) DO UPDATE SET
@@ -147,6 +159,12 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
        loyalty = EXCLUDED.loyalty, power_num = EXCLUDED.power_num,
        toughness_num = EXCLUDED.toughness_num,
        keywords = EXCLUDED.keywords, legality_commander = EXCLUDED.legality_commander,
+       -- In the UPDATE clause as well as the INSERT, and this is the half that
+       -- matters: the re-ingest that fills this column meets 34,492 rows that
+       -- already exist, so every value arrives through ON CONFLICT. Left out
+       -- here the column would stay NULL forever while an insert-only test
+       -- passed.
+       can_be_commander = EXCLUDED.can_be_commander,
        edhrec_rank = EXCLUDED.edhrec_rank, default_printing = EXCLUDED.default_printing,
        roles = EXCLUDED.roles, primary_role = EXCLUDED.primary_role,
        universes_beyond = EXCLUDED.universes_beyond,

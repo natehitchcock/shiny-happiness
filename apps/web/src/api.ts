@@ -25,6 +25,14 @@ export interface Card {
   toughness: string | null
   loyalty: string | null
   colorIdentity: string[]
+  /**
+   * Whether this card may lead a deck.
+   *
+   * Absent for a row ingested before the flag existed, which is why it is
+   * optional rather than defaulted here: `false` would claim the card cannot be
+   * a commander, and the server draws that distinction too.
+   */
+  canBeCommander?: boolean
   primaryRole: string
   edhrecRank: number | null
   universesBeyond: boolean

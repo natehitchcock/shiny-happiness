@@ -306,6 +306,37 @@ describeDb('packages/db against real PostgreSQL', () => {
       expect((await getCard(db.pool, c.oracleId))?.oracleTextFaces).toBeUndefined()
     })
 
+    it('round-trips commander eligibility, both true and false', async () => {
+      const yes = card('Krenko, Mob Boss', { canBeCommander: true })
+      const no = card('Sol Ring', { canBeCommander: false })
+      await upsertCards(db.pool, [yes, no])
+      expect((await getCard(db.pool, yes.oracleId))?.canBeCommander).toBe(true)
+      // Explicitly, not "falsy": `false` and absent mean different things here
+      // and the API branches on the difference.
+      expect((await getCard(db.pool, no.oracleId))?.canBeCommander).toBe(false)
+    })
+
+    it('writes commander eligibility onto a card already in the corpus', async () => {
+      // The path that matters. The re-ingest filling this column meets 34,492
+      // rows that already exist, so every value arrives through ON CONFLICT DO
+      // UPDATE rather than through the INSERT. A column left out of that clause
+      // writes nothing for every card that is already there — which is all of
+      // them — while the insert-only test above passes throughout.
+      const id = uuid()
+      await upsertCards(db.pool, [card('Krenko, Mob Boss', { oracleId: id })])
+      await upsertCards(db.pool, [card('Krenko, Mob Boss', { oracleId: id, canBeCommander: true })])
+      expect((await getCard(db.pool, id))?.canBeCommander).toBe(true)
+    })
+
+    it('reads a card ingested before the column as undecided, not as ineligible', async () => {
+      // NULL must not come back as `false`. `false` is the claim "this card may
+      // not lead a deck", and applied to a pre-0010 corpus that is every card —
+      // which would reject every deck until the re-ingest ran.
+      const c = card('Older Than The Column')
+      await upsertCards(db.pool, [c])
+      expect((await getCard(db.pool, c.oracleId))?.canBeCommander).toBeUndefined()
+    })
+
     it('round-trips a card with no printing resolved yet (ADR-0007)', async () => {
       const c = card('No Art Yet', { defaultPrinting: null })
       await upsertCards(db.pool, [c])

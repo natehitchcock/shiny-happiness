@@ -27,6 +27,7 @@ const COUNTER = oracleId(randomUUID())
 const MOUNTAIN = oracleId(randomUUID())
 const ANTE = oracleId(randomUUID())
 const UB = oracleId(randomUUID())
+const UNDECIDED = oracleId(randomUUID())
 
 const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   oracleId: id,
@@ -43,6 +44,10 @@ const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   loyalty: null,
   keywords: [],
   legalities: opts.legalities ?? { commander: 'legal' },
+  // Set from the fixture rather than derived here: these rows stand in for what
+  // the ingest wrote, and a test corpus that derived its own answers would be
+  // testing the derivation twice instead of the route once.
+  ...(opts.canBeCommander === undefined ? {} : { canBeCommander: opts.canBeCommander }),
   edhrecRank: opts.edhrecRank ?? null,
   defaultPrinting: printingId(randomUUID()),
   roles: ['synergy'],
@@ -62,11 +67,29 @@ describeDb('API-01 contract', () => {
       card(KROV, 'Krovax, Test Commander', {
         typeLine: 'Legendary Creature — Vampire',
         colorIdentity: ['B', 'R'],
+        canBeCommander: true,
       }),
-      card(SOL, 'Sol Ring', { typeLine: 'Artifact', colorIdentity: [], colors: [] }),
-      card(COUNTER, 'Counterspell', { colorIdentity: ['U'], colors: ['U'] }),
-      card(MOUNTAIN, 'Mountain', { typeLine: 'Basic Land — Mountain' }),
-      card(ANTE, 'Contract from Below', { legalities: { commander: 'banned' } }),
+      card(SOL, 'Sol Ring', {
+        typeLine: 'Artifact',
+        colorIdentity: [],
+        colors: [],
+        canBeCommander: false,
+      }),
+      card(COUNTER, 'Counterspell', {
+        colorIdentity: ['U'],
+        colors: ['U'],
+        canBeCommander: false,
+      }),
+      card(MOUNTAIN, 'Mountain', { typeLine: 'Basic Land — Mountain', canBeCommander: false }),
+      card(ANTE, 'Contract from Below', {
+        legalities: { commander: 'banned' },
+        canBeCommander: false,
+      }),
+      // Left undecided on purpose: this is a row the ingest has not revisited
+      // since migration 0010, and the route has to tell that from a "no".
+      card(UNDECIDED, 'Legend of Unknown Eligibility', {
+        typeLine: 'Legendary Creature — Wizard',
+      }),
       { ...card(UB, 'Frodo, Test Hobbit'), universesBeyond: true },
     ])
     const combo: Combo = {
@@ -151,6 +174,48 @@ describeDb('API-01 contract', () => {
       const response = await createDeck({ commanders: [KROV, SOL, COUNTER] })
 
       expect(response.statusCode).toBe(400)
+    })
+
+    it('refuses a card that cannot be a commander', async () => {
+      // The defect: a deck was created on production with Sol Ring leading it,
+      // and every suggestion afterwards was scored against the colour identity
+      // of a card that cannot legally be in the command zone.
+      const response = await createDeck({ commanders: [SOL] })
+
+      expect(response.statusCode).toBe(422)
+      expect(response.headers['content-type']).toContain('application/problem+json')
+      const problem = response.json()
+      expect(problem.ineligible).toEqual([SOL])
+      // The card is named in `detail`, which is the string the web client
+      // renders. A uuid on its own is not something a builder can act on.
+      expect(problem.detail).toContain('Sol Ring')
+    })
+
+    it('names every ineligible commander, not just the first', async () => {
+      const response = await createDeck({ commanders: [SOL, COUNTER] })
+
+      expect(response.statusCode).toBe(422)
+      expect(new Set(response.json().ineligible)).toEqual(new Set([SOL, COUNTER]))
+    })
+
+    it('still refuses an ineligible commander sitting beside a legal one', async () => {
+      const response = await createDeck({ commanders: [KROV, SOL] })
+
+      expect(response.statusCode).toBe(422)
+      expect(response.json().ineligible).toEqual([SOL])
+    })
+
+    it('lets a commander through when the ingest has not decided yet', async () => {
+      /*
+       * `canBeCommander` is null for every row until the re-ingest that follows
+       * migration 0010 runs, and "not decided" is not "no". Rejecting on it
+       * would refuse every commander in the corpus for the length of that
+       * window, so the deck is created and the gap is reported on the analysis
+       * endpoint instead.
+       */
+      const response = await createDeck({ commanders: [UNDECIDED] })
+
+      expect(response.statusCode).toBe(201)
     })
   })
 
@@ -694,7 +759,7 @@ describeDb('API-01 contract', () => {
       ).json()
       expect(total.items).toHaveLength(1)
       // Every seeded card, exactly once.
-      expect(all.size).toBe(6)
+      expect(all.size).toBe(7)
     })
   })
   describe('Universes Beyond filter (ADR-0011)', () => {

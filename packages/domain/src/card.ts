@@ -100,6 +100,25 @@ export interface Card {
   readonly loyalty: string | null
   readonly keywords: readonly string[]
   readonly legalities: { readonly commander: Legality }
+  /**
+   * Whether this card may lead a deck (`deriveCanBeCommander`, doc 03 §3.1).
+   *
+   * Stored rather than recomputed per request for the same reason `roles` and
+   * `synergyProduces` are: deck creation, the analysis endpoint and the
+   * `is:commander` search predicate all ask this question, and three readings of
+   * the type line would eventually be three different answers.
+   *
+   * True is a claim about the card ALONE. A Background may be a commander only
+   * beside a `Choose a Background` card, and the pairing rules that decide that
+   * live in `partnershipAllowed`, which needs a `PartnerRule` this field does
+   * not carry.
+   *
+   * Optional because a row written before migration 0010 has no answer, and
+   * `false` would be the wrong one: it would read as "this card may not lead a
+   * deck", which for every legendary creature in the corpus is a lie. Callers
+   * must treat absence as "not known" and say so rather than deciding.
+   */
+  readonly canBeCommander?: boolean
   /** Lower is more played overall. Null when Scryfall has no rank. */
   readonly edhrecRank: number | null
   /** Null until ING-04 resolves imagery for this card — see ADR-0007. */

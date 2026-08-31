@@ -286,6 +286,26 @@ describe('evaluation', () => {
     )
   })
 
+  it('answers is:commander from the stored flag, not from the type line', () => {
+    // The Start screen's commander picker is this predicate, so it and the
+    // server's 422 are the same rule read from the same field.
+    const krenko = candidate({
+      card: card({ typeLine: 'Legendary Creature — Goblin Warrior', canBeCommander: true }),
+    })
+    const solRing = candidate({ card: card({ typeLine: 'Artifact', canBeCommander: false }) })
+    expect(matchesQuery(ast('is:commander'), krenko)).toBe(true)
+    expect(matchesQuery(ast('is:commander'), solRing)).toBe(false)
+  })
+
+  it('does not treat an underived eligibility as a yes', () => {
+    // A card ingested before migration 0010 has no answer. Matching it here
+    // would put every artifact back in the commander picker, which is the
+    // defect this predicate exists to close.
+    const unknown = candidate({ card: card({ typeLine: 'Legendary Creature — Goblin' }) })
+    expect(unknown.card.canBeCommander).toBeUndefined()
+    expect(matchesQuery(ast('is:commander'), unknown)).toBe(false)
+  })
+
   it('combines and, or and not', () => {
     expect(matchesQuery(ast('t:enchantment mv<=2'), bombardment)).toBe(true)
     expect(matchesQuery(ast('t:enchantment mv<=1'), bombardment)).toBe(false)

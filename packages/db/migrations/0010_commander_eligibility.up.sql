@@ -1,0 +1,22 @@
+-- Whether a card may lead a deck.
+--
+-- Without it the API accepted any card in the corpus as a commander: a deck was
+-- created on production with Sol Ring, an Artifact, in the command zone, and
+-- every suggestion after that was scored against a colour identity derived from
+-- a card that cannot legally be there.
+--
+-- Derived at ingest by `deriveCanBeCommander` in packages/domain, exactly like
+-- `roles` and `synergy_produces`, and stored rather than recomputed: deck
+-- creation, the analysis endpoint and the `is:commander` search predicate all
+-- ask the question, and three separate readings of a type line would eventually
+-- be three different answers. Not derived in SQL here either, for that reason —
+-- a backfill expression in this file would be a second implementation of the
+-- rule, and it is the drift between the two that ships the bug.
+--
+-- Nullable on purpose, and not `NOT NULL DEFAULT false`. Every one of the
+-- 34,492 existing rows predates this column and has no answer, and `false` is
+-- not "no answer" — it is the claim that no card in the corpus may lead a deck,
+-- which would reject every commander between this migration and the re-ingest
+-- that fills it. NULL reads back as absent, callers treat absence as unknown,
+-- and the analysis endpoint reports the gap instead of ruling on it.
+ALTER TABLE cards ADD COLUMN can_be_commander boolean;

@@ -1,4 +1,4 @@
-import type { Card, Color } from './card.js'
+import type { Card, Color, Legality } from './card.js'
 import type { Deck, PartnerRule } from './deck.js'
 import type { OracleId } from './ids.js'
 
@@ -53,6 +53,77 @@ export interface CommanderInfo {
 }
 
 const isBasicLand = (card: Card): boolean => /\bBasic\b.*\bLand\b/.test(card.typeLine)
+
+/**
+ * The printed front of a type line.
+ *
+ * Scryfall joins the faces of a two-faced card with ` // `, and the commander
+ * rule is about the face you cast: Westvale Abbey's line is
+ * `Land // Legendary Creature — Demon`, so a test against the whole string
+ * offers a land as a commander. Ten `Invasion of …` battles have the same
+ * shape. Taking the front is the only reading that gets both right.
+ */
+const frontOfTypeLine = (typeLine: string): string => typeLine.split(' // ')[0] ?? typeLine
+
+/**
+ * A card is a creature card everywhere except the battlefield.
+ *
+ * Exactly one card in the 34,492-card corpus says this — Grist, the Hunger
+ * Tide — and it is why Grist leads decks despite a planeswalker type line: the
+ * commander rule looks at the card in the command zone, where Grist is a
+ * creature. The pattern is deliberately narrow rather than a general "is a
+ * creature somewhere" reading, which would sweep in every card that animates
+ * itself on the battlefield, none of which qualify.
+ */
+const CREATURE_OFF_BATTLEFIELD = /isn't on the battlefield, it's a[^.]*\bcreature\b/i
+
+/** Backgrounds. `Choose a Background` says: "You can have a Background as a second commander." */
+const BACKGROUND_SUBTYPE = /\bBackground\b/
+
+/** Rowan Kenrith, Grist's fellow planeswalkers, and the Un-set oddities. */
+const SELF_DECLARED = /can be your commanders?\b/i
+
+/**
+ * Whether this card may be a commander at all (doc 03 §3.1).
+ *
+ * Derived from the card's own text, and only from that, because the alternative
+ * is a hand-maintained list of eligible cards that is wrong the day a set ships.
+ * Three readings, each traceable to something printed on a card:
+ *
+ *   1. A legendary creature — the ordinary case, 3,334 of the corpus's 3,384
+ *      eligible cards. The front face only; see `frontOfTypeLine`.
+ *   2. Text that says so. Twenty-one legal cards, all planeswalkers, carry a
+ *      literal "<name> can be your commander." line.
+ *   3. A Background. Backgrounds do not say it themselves — the thirty-one
+ *      cards with `Choose a Background` say it for them, in reminder text:
+ *      "You can have a Background as a second commander."
+ *
+ * Plus Grist, which is clause 1 wearing a planeswalker's type line.
+ *
+ * Format legality gates all of it, and that is what keeps the reading honest:
+ * the phrase in clause 2 also appears in `Partner with itself` reminder text
+ * and on a Background whose "it" means the creature choosing it, and every one
+ * of those cards is `not_legal` in Commander.
+ *
+ * KNOWN GAP — legendary Vehicles. Twenty-six are legal in Commander and at
+ * least one (Shorikai, Genesis Engine) is a real face commander, but nothing in
+ * a Vehicle's oracle text distinguishes Shorikai from Heart of Kiran, which is
+ * not a commander. Encoding "legendary Vehicles may lead a deck" would be
+ * asserting a rule the data does not contain, so they are reported ineligible
+ * and the gap is stated rather than guessed (AGENTS.md §8).
+ */
+export const deriveCanBeCommander = (card: {
+  readonly typeLine: string
+  readonly oracleText: string
+  readonly legalities: { readonly commander: Legality }
+}): boolean => {
+  if (card.legalities.commander !== 'legal') return false
+  const front = frontOfTypeLine(card.typeLine)
+  if (/\bLegendary\b/.test(front) && /\bCreature\b/.test(front)) return true
+  if (SELF_DECLARED.test(card.oracleText)) return true
+  if (BACKGROUND_SUBTYPE.test(front)) return true
+  return CREATURE_OFF_BATTLEFIELD.test(card.oracleText)
+}
 
 /** Union of the commanders' colour identities — the deck's legal colour space. */
 export const deckColorIdentity = (

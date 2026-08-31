@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
 import { getDeck } from '@roundtable/db'
-import type { CardType, Color, Role } from '@roundtable/domain'
+import type { CardType, Color, CommanderInfo, OracleId, Role } from '@roundtable/domain'
 import {
   NO_SINGLETON_EXCEPTIONS,
   acceptedSet,
@@ -110,13 +110,41 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
       return { comboId, pieces: combo?.pieces ?? [], produces: combo?.produces ?? [] }
     })
 
-    // Commander eligibility is not stored yet, so `validateDeck` is given an
-    // empty map and will report `invalid-commander`. Rather than feed it a
-    // fabricated "yes", the problem is filtered out and the gap is reported in
-    // `unavailable` — a legality verdict built on invented data is worse than a
-    // stated absence (doc 10 §10.9).
-    const report = validateDeck(deck, cards, new Map(), NO_SINGLETON_EXCEPTIONS)
-    const problems = report.problems.filter((p) => p.kind !== 'invalid-commander')
+    /*
+     * Commander eligibility, from the corpus rather than from an empty map.
+     *
+     * This used to hand `validateDeck` no information at all and then throw
+     * away the `invalid-commander` it inevitably produced, which is why a deck
+     * led by Sol Ring analysed as fine. The flag is derived at ingest now, so
+     * the check is real.
+     *
+     * A commander whose card row predates migration 0010 has `canBeCommander`
+     * undefined, which is "not decided", not "no". Those are left out of the
+     * map entirely and their `invalid-commander` is filtered below — feeding a
+     * fabricated "yes" would be worse than a stated absence (doc 10 §10.9).
+     */
+    const commanderInfo = new Map<OracleId, CommanderInfo>()
+    const undecided = new Set<OracleId>()
+    for (const oracle of deck.commanders) {
+      const eligible = cards.get(oracle)?.canBeCommander
+      if (eligible === undefined) {
+        undecided.add(oracle)
+        continue
+      }
+      // `none` for every commander because the partnership rules are not
+      // derived yet (see the `commander-partnership` gap below); the pairing
+      // verdict this would produce is discarded rather than reported.
+      commanderInfo.set(oracle, { canBeCommander: eligible, partnerRule: { kind: 'none' } })
+    }
+
+    const report = validateDeck(deck, cards, commanderInfo, NO_SINGLETON_EXCEPTIONS)
+    const problems = report.problems.filter((p) => {
+      if (p.kind === 'invalid-commander') return !undecided.has(p.oracleId)
+      // Every commander is fed `partnerRule: none`, so a two-commander deck
+      // always fails `partnershipAllowed` here. That verdict is about the
+      // placeholder, not about the cards, so it is dropped and the gap named.
+      return p.kind !== 'invalid-partnership'
+    })
 
     return {
       counts: {
@@ -182,10 +210,31 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
           key: 'bracket-assessment',
           reason: 'brackets/rules.data.json is not populated (DATA-05)',
         },
-        {
-          key: 'commander-legality',
-          reason: 'commander eligibility is not stored yet; those checks are skipped',
-        },
+        /*
+         * Both entries are conditional, which is the point: the flat
+         * "eligibility is not stored" line that used to sit here was reported
+         * for every deck forever, so it said nothing about any particular one.
+         *
+         * A single-commander deck on an ingested corpus now gets neither, and
+         * `legality.problems` is the whole answer.
+         */
+        ...(undecided.size > 0
+          ? [
+              {
+                key: 'commander-eligibility',
+                reason: `eligibility is not stored for ${undecided.size} of this deck's commanders; the corpus predates migration 0010 and needs a re-ingest`,
+              },
+            ]
+          : []),
+        ...(deck.commanders.length > 1
+          ? [
+              {
+                key: 'commander-partnership',
+                reason:
+                  'partner rules are not derived at ingest, so whether these two commanders may be paired is not checked; each is checked on its own',
+              },
+            ]
+          : []),
       ],
     }
   })

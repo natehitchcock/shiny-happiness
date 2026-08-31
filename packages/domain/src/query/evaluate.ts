@@ -99,6 +99,11 @@ const evaluateIs = (candidate: AnnotatedCandidate, predicate: string): boolean =
       return !card.types.includes('land')
     case 'creature':
       return card.types.includes('creature')
+    case 'commander':
+      // `=== true`, so a card whose eligibility was never derived does not match
+      // — the same direction `is:gamechanger` takes. The alternative, treating
+      // "not known" as "yes", would put Sol Ring back in the commander picker.
+      return card.canBeCommander === true
     case 'land':
       return card.types.includes('land')
     case 'vanilla':

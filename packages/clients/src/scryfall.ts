@@ -1,7 +1,13 @@
 import { createInterface } from 'node:readline'
 import { Readable } from 'node:stream'
 import type { Card, CardType, Color, ManaLetter, Printing } from '@roundtable/domain'
-import { deriveRoles, deriveSynergy, oracleId, printingId } from '@roundtable/domain'
+import {
+  deriveCanBeCommander,
+  deriveRoles,
+  deriveSynergy,
+  oracleId,
+  printingId,
+} from '@roundtable/domain'
 import { textStreamOf } from './http.js'
 
 /**
@@ -296,6 +302,13 @@ export const toCard = (
 
   const id = oracleId(raw.oracle_id)
   const legality = raw.legalities?.['commander'] ?? 'not_legal'
+  // An unknown legality must not read as legal (the DB CHECK enforces this
+  // too); anything unrecognised is treated as not legal.
+  const legalities = {
+    commander: (LEGALITIES.has(legality)
+      ? legality
+      : 'not_legal') as Card['legalities']['commander'],
+  }
 
   const derived = deriveRoles({ oracleId: id, typeLine, oracleText })
   // Derived here, stored by the ingest: doing it per request over 34k cards
@@ -329,13 +342,18 @@ export const toCard = (
     // are different types, and "single-faced" is absence.
     ...(faces.length > 1 ? { oracleTextFaces: faces } : {}),
     keywords: raw.keywords ?? [],
-    // An unknown legality must not read as legal (the DB CHECK enforces this
-    // too); anything unrecognised is treated as not legal.
-    legalities: {
-      commander: (LEGALITIES.has(legality)
-        ? legality
-        : 'not_legal') as Card['legalities']['commander'],
-    },
+    legalities,
+    /*
+     * Whether this card may lead a deck, decided here rather than at the point
+     * of use.
+     *
+     * Derived at ingest like `roles` and `synergyProduces`, and for the same
+     * reason: deck creation, the analysis endpoint and `is:commander` all need
+     * the answer, and re-reading 34k type lines per request does not fit
+     * API-02's 200 ms budget. The reading itself is the domain's — this file
+     * maps Scryfall to `Card` and decides nothing about Magic.
+     */
+    canBeCommander: deriveCanBeCommander({ typeLine, oracleText, legalities }),
     edhrecRank: raw.edhrec_rank ?? null,
     defaultPrinting: printingId(raw.id),
     roles: derived.roles,

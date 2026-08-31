@@ -147,6 +147,37 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
       )
     }
 
+    /*
+     * A commander has to be able to BE one.
+     *
+     * Until this check existed the endpoint took any card in the corpus, and a
+     * deck was created on production with Sol Ring in the command zone. The
+     * damage is not the bad row: every recommendation afterwards is scored
+     * against a colour identity derived from a card that cannot legally be
+     * there, so the whole deck is quietly built to the wrong shape.
+     *
+     * `=== false` rather than a falsy test, and the difference is the entire
+     * design of the column. `undefined` means the ingest has not decided yet
+     * (migration 0010 applied, re-ingest not run), and rejecting on that would
+     * refuse every commander in the corpus during the window between the two.
+     * Unknown eligibility lets the deck through and is reported as a gap on
+     * `GET /decks/:id/analysis` rather than being silently ruled on.
+     */
+    const ineligible = commanders.filter((id) => cards.get(id)?.canBeCommander === false)
+    if (ineligible.length > 0) {
+      // Named in `detail`, not only in the extension members: the web client
+      // renders `detail` verbatim, and "Sol Ring cannot be a commander" is
+      // something a builder can act on where a bare uuid is not.
+      const names = ineligible.map((id) => cards.get(id)?.name ?? String(id))
+      return sendProblem(
+        rep,
+        unprocessable(
+          `${names.join(' and ')} cannot be a commander: a commander must be a legendary creature, or a card whose text says it can be your commander`,
+          { ineligible, names },
+        ),
+      )
+    }
+
     const deck = await createDeck(pool, {
       id: deckId(randomUUID()),
       ownerId: ownerOf(req),

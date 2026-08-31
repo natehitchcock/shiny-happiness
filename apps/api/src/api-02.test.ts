@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { createTestDatabase, databaseUrl, type TestDatabase } from '@roundtable/db/testing'
-import { insertCombos, upsertCards } from '@roundtable/db'
+import { createDeck, insertCombos, upsertCards } from '@roundtable/db'
 import type { Card, CardType, Combo, OracleId } from '@roundtable/domain'
-import { comboId, oracleId, printingId } from '@roundtable/domain'
+import { comboId, deckId, oracleId, printingId } from '@roundtable/domain'
 import type { FastifyInstance } from 'fastify'
 import { buildServer } from './server.js'
 
@@ -25,6 +25,8 @@ const PIECE_B = oracleId(randomUUID())
 const RAMP = oracleId(randomUUID())
 const LAND = oracleId(randomUUID())
 const OFF_COLOR = oracleId(randomUUID())
+const BAD_COMMANDER = oracleId(randomUUID())
+const UNDECIDED = oracleId(randomUUID())
 
 const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   oracleId: id,
@@ -41,6 +43,10 @@ const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   loyalty: null,
   keywords: [],
   legalities: { commander: 'legal' },
+  // Absent unless the fixture says otherwise, which is the pre-re-ingest state
+  // of every row in the real corpus and the one the analysis endpoint has to
+  // report rather than rule on.
+  ...(opts.canBeCommander === undefined ? {} : { canBeCommander: opts.canBeCommander }),
   edhrecRank: opts.edhrecRank ?? null,
   defaultPrinting: printingId(randomUUID()),
   roles: opts.roles ?? ['synergy'],
@@ -58,7 +64,26 @@ describeDb('API-02 contract', () => {
   beforeAll(async () => {
     db = await createTestDatabase('api02')
     await upsertCards(db.pool, [
-      card(KROV, 'Krovax', { typeLine: 'Legendary Creature — Vampire', colorIdentity: ['R'] }),
+      card(KROV, 'Krovax', {
+        typeLine: 'Legendary Creature — Vampire',
+        colorIdentity: ['R'],
+        canBeCommander: true,
+      }),
+      // The production defect, preserved as a row: a deck already exists with
+      // this in the command zone, and creation now refuses it, so the only way
+      // to reach the analysis path is a deck written straight to the database.
+      card(BAD_COMMANDER, 'Sol Ring', {
+        typeLine: 'Artifact',
+        types: ['artifact'],
+        colorIdentity: [],
+        colors: [],
+        canBeCommander: false,
+      }),
+      // Deliberately undecided: a row the re-ingest behind migration 0010 has
+      // not reached.
+      card(UNDECIDED, 'Legend of Unknown Eligibility', {
+        typeLine: 'Legendary Creature — Wizard',
+      }),
       card(PIECE_A, 'Combo Piece A'),
       card(PIECE_B, 'Combo Piece B'),
       card(RAMP, 'Ramp Rock', {
@@ -314,6 +339,72 @@ describeDb('API-02 contract', () => {
       expect(body.bracket.assessed).toBeNull()
       const keys = body.unavailable.map((u: { key: string }) => u.key)
       expect(keys).toContain('bracket-assessment')
+    })
+
+    it('checks commander eligibility rather than declaring it unavailable', async () => {
+      const body = (
+        await app.inject({ method: 'GET', url: `/api/v1/decks/${deck.id}/analysis` })
+      ).json()
+
+      const keys = body.unavailable.map((u: { key: string }) => u.key)
+      // The endpoint used to admit here that it skipped these checks entirely.
+      expect(keys).not.toContain('commander-legality')
+      expect(keys).not.toContain('commander-eligibility')
+      const kinds = body.legality.problems.map((p: { kind: string }) => p.kind)
+      expect(kinds).not.toContain('invalid-commander')
+    })
+
+    it('reports a deck already led by an ineligible card', async () => {
+      /*
+       * Written straight to the database, because the creation route refuses
+       * this now — and that is exactly the deck this test is about. The decks
+       * built before the check existed are still out there, and an analysis
+       * that stayed quiet about them would leave the user with no way to find
+       * out why their suggestions look wrong.
+       */
+      const id = deckId(randomUUID())
+      await createDeck(db.pool, {
+        id,
+        ownerId: '00000000-0000-0000-0000-000000000001',
+        name: 'Led by Sol Ring',
+        commanders: [BAD_COMMANDER],
+        targetBracket: 3,
+        archetype: 'midrange',
+        colorIdentity: [],
+      })
+
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/decks/${id}/analysis` })).json()
+
+      const problem = body.legality.problems.find(
+        (p: { kind: string }) => p.kind === 'invalid-commander',
+      )
+      expect(problem).toBeDefined()
+      expect(problem.oracleId).toBe(BAD_COMMANDER)
+      expect(body.legality.legal).toBe(false)
+    })
+
+    it('reports the gap rather than a verdict when the corpus has not decided', async () => {
+      // `canBeCommander` is null for every row until the re-ingest runs. Ruling
+      // "ineligible" on that would call every deck illegal; ruling "eligible"
+      // would be inventing the answer. It says it does not know.
+      const id = deckId(randomUUID())
+      await createDeck(db.pool, {
+        id,
+        ownerId: '00000000-0000-0000-0000-000000000001',
+        name: 'Undecided commander',
+        commanders: [UNDECIDED],
+        targetBracket: 3,
+        archetype: 'midrange',
+        colorIdentity: ['R'],
+      })
+
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/decks/${id}/analysis` })).json()
+
+      const kinds = body.legality.problems.map((p: { kind: string }) => p.kind)
+      expect(kinds).not.toContain('invalid-commander')
+      const gap = body.unavailable.find((u: { key: string }) => u.key === 'commander-eligibility')
+      expect(gap).toBeDefined()
+      expect(gap.reason).toMatch(/re-ingest/)
     })
 
     it('lists an assembled combo once both pieces are accepted', async () => {

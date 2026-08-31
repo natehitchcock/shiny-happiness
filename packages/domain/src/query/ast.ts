@@ -139,6 +139,7 @@ export const IS_PREDICATES: ReadonlySet<string> = new Set([
   'permanent',
   'spell',
   'creature',
+  'commander',
   'land',
   'vanilla',
   'modal',

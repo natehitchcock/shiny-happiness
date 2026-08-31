@@ -106,6 +106,28 @@ describe('toCard', () => {
     expect(toCard(raw)?.legalities.commander).toBe('not_legal')
   })
 
+  it('decides commander eligibility at ingest rather than leaving it open', () => {
+    // The mapping is what is under test here, not the rule — `legality.test.ts`
+    // owns the rule against real type lines. What matters at this seam is that
+    // every mapped card carries an answer, because the API reads `undefined` as
+    // "the ingest has not run" and lets the deck through on that.
+    expect(toCard(byName('Lord of the Nazgûl'))?.canBeCommander).toBe(true)
+    expect(toCard(byName('Sol Ring'))?.canBeCommander).toBe(false)
+    for (const raw of cards) {
+      const card = toCard(raw)
+      if (card !== null) expect(typeof card.canBeCommander).toBe('boolean')
+    }
+  })
+
+  it('will not call a card a commander when its legality is unrecognised', () => {
+    // A legendary creature Scryfall reports with a legality nobody recognises.
+    // The type line alone would say yes, and the format gate is the only thing
+    // between that and a deck built around a card that cannot be played —
+    // which is the same direction `legalities` itself is defaulted in.
+    const raw = { ...byName('Lord of the Nazgûl'), legalities: { commander: 'sideways' } }
+    expect(toCard(raw)?.canBeCommander).toBe(false)
+  })
+
   it('keeps both halves of a split card searchable', () => {
     const card = toCard(byName('Fire // Ice'))
 

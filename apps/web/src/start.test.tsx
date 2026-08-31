@@ -86,7 +86,9 @@ describe('picking a commander', () => {
     await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
     await typeAndSearch('Krenko')
 
-    await waitFor(() => expect(screen.getByText(/No legendary creature matches/)).toBeDefined())
+    await waitFor(() =>
+      expect(screen.getByText(/No card that can be a commander matches/)).toBeDefined(),
+    )
   })
 
   it('surfaces an API failure instead of swallowing it', async () => {
@@ -216,10 +218,43 @@ describe('the commander search runs on a countdown, like the filter', () => {
     render(<App />)
     await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
     await typeAndSearch('Krenko')
-    expect(mocked.searchCards).toHaveBeenCalledWith(
-      'Krenko type:legendary type:creature',
-      expect.anything(),
-    )
+    expect(mocked.searchCards).toHaveBeenCalledWith('Krenko is:commander', expect.anything())
+  })
+
+  it('asks for commanders, not for a type line that only looks like one', async () => {
+    /*
+     * `type:legendary type:creature` was a substring test over the joined type
+     * line, so it offered Westvale Abbey — `Land // Legendary Creature —
+     * Demon` — and every `Invasion of …` battle, all of which the server now
+     * refuses with a 422. `is:commander` reads the same flag the server does.
+     */
+    render(<App />)
+    await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
+    await typeAndSearch('Westvale')
+
+    const [query] = mocked.searchCards.mock.calls[0] as [string, unknown]
+    expect(query).toContain('is:commander')
+    expect(query).not.toContain('type:legendary')
+  })
+
+  it('shows the server’s reason when it refuses the commander', async () => {
+    // Reaching this needs a card the filter let through and the server did not
+    // — an unreingested corpus, or a stale tab. The 422 detail names the card,
+    // and a create button that just stopped working would not.
+    mocked.searchCards.mockResolvedValue({ items: [card('Sol Ring')] })
+    mocked.createDeck.mockRejectedValue(new Error('Sol Ring cannot be a commander'))
+    render(<App />)
+    await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
+    await typeAndSearch('Sol Ring')
+    await waitFor(() => expect(screen.getByText('Sol Ring')).toBeDefined())
+    await act(async () => {
+      screen.getByText('Choose').click()
+    })
+    await act(async () => {
+      screen.getByText('Start building').closest('button')!.click()
+    })
+
+    await waitFor(() => expect(screen.getByText(/Sol Ring cannot be a commander/)).toBeDefined())
   })
 
   it('shows the spinner while the search is in flight, and hides the countdown', async () => {
