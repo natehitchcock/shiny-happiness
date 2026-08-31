@@ -4,7 +4,7 @@
  * Relative paths throughout: Vite proxies `/api` in development and the API is
  * same-origin in production, so no base URL is ever configured in the client.
  */
-import type { DeckCommand, DeckCommandBatch } from '@roundtable/domain'
+import type { CardEfficiency, CardImpact, DeckCommand, DeckCommandBatch } from '@roundtable/domain'
 
 export interface Card {
   oracleId: string
@@ -76,6 +76,25 @@ export interface CardDetail extends Card {
     pieces: { oracleId: string; name: string | null }[]
     produces: string[]
   }[]
+  /**
+   * The two card-intrinsic metrics (doc 18 §18.8).
+   *
+   * WHOLE OBJECTS, not bare scores. The route sends `cardImpact(card)` and
+   * `cardEfficiency(card)` — not `.score` — so the tiers behind each number are
+   * already on the wire, and it is the tiers that make the number readable.
+   * This type lagged the route: both fields have been sent since the metrics
+   * shipped and were simply never declared, so the client could not see them.
+   *
+   * The domain types themselves, not a restatement. `apps/web` depends on
+   * `@roundtable/domain` and both sides run the same code (doc 09 §9.4), so a
+   * field the server adds or renames is a compile error here rather than a
+   * silent `undefined` at runtime.
+   *
+   * Optional because a server from before the metrics shipped answers without
+   * them, and `CardMetrics` renders nothing rather than `NaN of 18.48`.
+   */
+  impact?: CardImpact
+  efficiency?: CardEfficiency
 }
 
 export interface Reason {

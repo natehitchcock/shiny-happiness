@@ -61,6 +61,37 @@ describe('card.css', () => {
     expect(rule('.rt-detail-body')).toMatch(/overflow-y:\s*auto/)
   })
 
+  it('keeps the impact meter inside its track however the fill is sized', () => {
+    // The fill's width is an inline percentage from `impactFraction`. If the
+    // track ever stops clipping, a score at the ceiling paints past the edge of
+    // a 21rem panel — and the panel is 21rem at every width the app uses.
+    expect(rule('.rt-metric-meter')).toMatch(/overflow:\s*hidden/)
+    expect(rule('.rt-metric-meter')).toMatch(/inline-size:\s*100%/)
+  })
+
+  it('gives the metrics no fixed widths, so 21rem and a phone both fit', () => {
+    // The two mounts are a 21rem column and a full-width bottom sheet. A `px`
+    // or `ch` width anywhere in this group would be measured for one of them
+    // and wrong in the other. `100%` and the 4px track height are the only
+    // absolute lengths that may appear.
+    for (const selector of [
+      '.rt-metrics',
+      '.rt-metric',
+      '.rt-metric-head',
+      '.rt-metric-rows',
+      '.rt-metric-note',
+    ]) {
+      expect(rule(selector)).not.toMatch(/(?:^|[^-])(?:inline-size|width):\s*\d/)
+    }
+    // The label column is content-sized, so the longest label sets the gutter
+    // rather than a number someone measured once.
+    expect(rule('.rt-metric-rows')).toMatch(/grid-template-columns:\s*max-content 1fr/)
+  })
+
+  it('lets the head row wrap rather than pushing the value out of the panel', () => {
+    expect(rule('.rt-metric-head')).toMatch(/flex-wrap:\s*wrap/)
+  })
+
   it('truncates a long card name rather than reflowing the tile', () => {
     const strip = rule('.rt-tile-name')
     expect(strip).toMatch(/text-overflow:\s*ellipsis/)

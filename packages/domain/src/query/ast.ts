@@ -59,8 +59,10 @@ export type QueryField =
    * to a shared 0–10 was rejected for exactly that: it would make every
    * threshold on screen a translation.
    *
-   * `impact.ts` says "roughly 0–13" in its own docblock, which understates it —
-   * 93 of 1,448 candidates in that pool score above 13.
+   * `impact.ts` used to say "roughly 0–13" in its own docblock, which
+   * understated it — 93 of 1,448 candidates in that pool score above 13. It now
+   * exports `IMPACT_MAX`, derived from the three tier tables, and the card
+   * detail pane draws every score against it.
    */
   | 'impact'
   | 'efficiency'

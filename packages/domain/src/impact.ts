@@ -128,9 +128,32 @@ const STAKES_VALUE: Readonly<Record<StakesTier, number>> = {
  */
 const SYMMETRY_DISCOUNT = 0.85
 
+/**
+ * The highest score this model can produce: 6.0 × 2.2 × 1.4 = 18.48.
+ *
+ * DERIVED FROM THE THREE TABLES, never written down as a literal, because a
+ * literal is a number that goes stale silently the first time a rung moves. Any
+ * renderer that draws a proportion — "6.12 of what?" — needs a denominator, and
+ * this is the only one that is a fact about the model rather than an
+ * observation about whichever pool happened to be measured.
+ *
+ * It is REACHABLE, not a theoretical bound: `unbounded` breadth with an
+ * `each opponent` clause takes `player` stakes and the `one-sided` symmetry
+ * branch, so an upkeep trigger over every opponent scores exactly this. The
+ * symmetry discount cannot apply at the maximum for the same reason — a
+ * symmetric effect is by definition not the `each opponent` shape — so it is
+ * correctly absent from the product.
+ *
+ * This replaces the "roughly 0–13" this docblock used to claim, which was
+ * measured wrong: 93 of 1,448 rows in a real mono-red pool score above 13
+ * (ADR-0025). The interface and the model now quote the same number because
+ * only one of them owns it.
+ */
+export const IMPACT_MAX = BREADTH_VALUE.unbounded * PERSISTENCE_VALUE.upkeep * STAKES_VALUE.player
+
 export interface CardImpact {
   /**
-   * `breadth × persistence × stakes`, discounted for symmetry. Roughly 0–13.
+   * `breadth × persistence × stakes`, discounted for symmetry. 0 to `IMPACT_MAX`.
    *
    * Exactly 0, and only 0, for a card with no rules text at all. That is not a
    * rounding convenience: the vanilla creatures are what `efficiency.ts`

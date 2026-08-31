@@ -15,6 +15,7 @@ import type { JSX } from 'react'
 import { CARD_ASPECT, imageFor, levelSpec } from './presentation.js'
 import { ComboBadge, IdentityStrip, ManaValue, Price, RoleDot } from './Badges.js'
 import { ManaCost } from './ManaCost.js'
+import { CardMetrics } from './CardMetrics.js'
 import { OracleText } from './OracleText.js'
 import type { CardView } from './types.js'
 
@@ -128,6 +129,16 @@ export const Detail = ({
             ))}
           </ul>
         )}
+
+        {/*
+         * Above "Why this is here", because the two answer different questions
+         * and the intrinsic one comes first. Impact and efficiency are true of
+         * this card in every deck that has ever existed (doc 18 §18.8);
+         * `reasons` is why it surfaced in THIS one. Reading the deck-relative
+         * argument before knowing what the card does is reading the verdict
+         * before the evidence.
+         */}
+        <CardMetrics impact={card.impact} efficiency={card.efficiency} />
 
         <h3 className="rt-detail-h">Why this is here</h3>
         {reasons.length === 0 ? (

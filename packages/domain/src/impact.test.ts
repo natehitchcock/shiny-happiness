@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cardImpact, type ImpactInput } from './impact.js'
+import { IMPACT_MAX, cardImpact, type ImpactInput } from './impact.js'
 
 /**
  * The impact model (doc 18 §18.3–§18.5).
@@ -309,5 +309,48 @@ describe('cardImpact', () => {
       expect(cardImpact(SOL_RING).score).toBe(0.68)
       expect(cardImpact(GRIZZLY_BEARS).score).toBe(0)
     })
+  })
+})
+
+/**
+ * The ceiling a renderer divides by.
+ *
+ * Two claims, and both have to hold or the proportion an interface draws is a
+ * lie: the number is 18.48, and it is a score a card can actually reach.
+ */
+describe('IMPACT_MAX', () => {
+  it('is the product of the three top rungs', () => {
+    expect(IMPACT_MAX).toBe(18.48)
+  })
+
+  it('is reachable — an upkeep trigger over every opponent scores exactly it', () => {
+    // Not a bound nobody touches. `unbounded` breadth plus `each opponent`
+    // takes `player` stakes and the `one-sided` symmetry branch, so no discount
+    // applies and the product stands.
+    const ceiling = card({
+      name: 'Ceiling',
+      typeLine: 'Enchantment',
+      oracleText: 'At the beginning of your upkeep, each opponent loses 1 life.',
+    })
+    const at = cardImpact(ceiling)
+    expect(at.breadth).toBe('unbounded')
+    expect(at.persistence).toBe('upkeep')
+    expect(at.stakes).toBe('player')
+    expect(at.symmetry).toBe('one-sided')
+    expect(at.score).toBe(IMPACT_MAX)
+  })
+
+  it('bounds every fixture, so nothing can draw past the end of a meter', () => {
+    for (const c of [
+      TORMENT_OF_HAILFIRE,
+      CYCLONIC_RIFT,
+      WRATH_OF_GOD,
+      LIGHTNING_BOLT,
+      RHYSTIC_STUDY,
+      SOL_RING,
+      GRIZZLY_BEARS,
+    ]) {
+      expect(cardImpact(c).score).toBeLessThanOrEqual(IMPACT_MAX)
+    }
   })
 })
