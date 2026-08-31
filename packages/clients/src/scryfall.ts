@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline'
 import { Readable } from 'node:stream'
-import type { Card, CardType, Color, Printing } from '@roundtable/domain'
+import type { Card, CardType, Color, ManaLetter, Printing } from '@roundtable/domain'
 import { deriveRoles, deriveSynergy, oracleId, printingId } from '@roundtable/domain'
 import { textStreamOf } from './http.js'
 
@@ -101,6 +101,7 @@ export interface ScryfallCard {
   readonly cmc?: number
   readonly color_identity?: string[]
   readonly colors?: string[]
+  readonly produced_mana?: string[]
   readonly type_line?: string
   readonly oracle_text?: string
   readonly keywords?: string[]
@@ -237,6 +238,17 @@ const COLORS = new Set(['W', 'U', 'B', 'R', 'G'])
 const asColors = (values: readonly string[] | undefined): readonly Color[] =>
   (values ?? []).filter((c): c is Color => COLORS.has(c))
 
+/**
+ * Produced mana, keeping the colourless `C` that `asColors` drops.
+ *
+ * Scryfall reports `produced_mana: ["C"]` for a land that taps for colourless
+ * only, and `["W","U","B","R","G"]` for Command Tower. Filtering `C` out would
+ * make a Wastes and a land with no mana ability at all look identical, and they
+ * are not: one is a mana source and the other is a spell.
+ */
+const asProduced = (values: readonly string[] | undefined): readonly ManaLetter[] =>
+  (values ?? []).filter((c): c is ManaLetter => COLORS.has(c) || c === 'C')
+
 const LEGALITIES = new Set(['legal', 'not_legal', 'banned', 'restricted'])
 
 /**
@@ -291,6 +303,15 @@ export const toCard = (
     manaValue: raw.cmc ?? 0,
     colorIdentity: asColors(raw.color_identity),
     colors: asColors(raw.colors),
+    /*
+     * What the card taps for, which for a land is the whole point of it.
+     *
+     * `asColors` drops anything outside WUBRG, and that includes the `C`
+     * Scryfall reports for colourless producers. Kept separately below rather
+     * than lost: "produces only colourless" distinguishes a utility land from a
+     * land with no mana ability at all, and the two deserve different scores.
+     */
+    producedMana: asProduced(raw.produced_mana),
     typeLine,
     types: parseTypes(typeLine),
     oracleText,

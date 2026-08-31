@@ -41,6 +41,21 @@ export type Reason =
       readonly dimension: CompositionDimension
       readonly deficit: number
     }
+  /**
+   * What this land taps for, relative to the deck's colours.
+   *
+   * A new member rather than a change to an existing one, so readers that do
+   * not know it simply do not render it (AGENTS.md R2). It exists because
+   * `fills-deficit` says "you need lands" for all 436 of them and cannot say
+   * why THIS one — which for a land is the only interesting question.
+   */
+  | {
+      readonly kind: 'mana-fixing'
+      /** How many of the deck's colours it produces. Zero means colourless only. */
+      readonly coloursCovered: number
+      /** The deck's colour count, so the reason reads "2 of 3". */
+      readonly of: number
+    }
   | {
       readonly kind: 'curve-fit'
       readonly manaValue: number

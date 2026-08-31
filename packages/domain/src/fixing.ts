@@ -1,0 +1,96 @@
+import type { Card, Color } from './card.js'
+
+/**
+ * How much a card helps cast the deck's spells.
+ *
+ * The land category was ranked entirely by rules text, because rules text was
+ * all the scorer could see. The result was a list with no duals in it at all:
+ * cycling deserts and MDFCs with a whole spell side beat Steam Vents and
+ * Command Tower, because a dual's text is a mana ability and a mana ability
+ * produces no synergy tags and joins no combos. Measured on an Izzet deck,
+ * every one of the top 40 "fills land" suggestions scored on `keyword-synergy`
+ * or `near-combo`, and the best of them were Smoldering Crater and Desert of
+ * the Fervent — lands whose only merit is that they cycle.
+ *
+ * A land's job is mana. This is the term that says so.
+ */
+
+/** 0 for a land that does nothing for this deck, 1 for one that fixes it fully. */
+export interface Fixing {
+  /** How many of the deck's own colours this card can produce. */
+  readonly coloursCovered: number
+  /** Produces mana of some kind, even if only colourless. */
+  readonly producesMana: boolean
+  /** 0..1, the value used for ordering. */
+  readonly value: number
+}
+
+export const NO_FIXING: Fixing = { coloursCovered: 0, producesMana: false, value: 0 }
+
+/**
+ * Score a card's mana contribution against a deck's colour identity.
+ *
+ * The shape of the curve matters more than the exact numbers, so it is stated
+ * rather than tuned:
+ *
+ *   - Covering MORE of the deck's colours is better, and the gain per colour
+ *     shrinks. The step from one colour to two is the difference between a
+ *     basic and a dual and is worth a lot; the step from four to five in a
+ *     five-colour deck is worth much less, because by then the deck is already
+ *     casting its spells.
+ *   - A card that produces only colourless still beats one that produces
+ *     nothing. A Wastes is a bad land and an Ancient Tomb is a fine one, but
+ *     both are mana; a land with no mana ability is a spell that costs you a
+ *     land drop.
+ *   - A MONOCOLOUR deck is the case that needs care. Every land producing its
+ *     one colour covers 100% of the identity, so the term would rank all of
+ *     them identically and change nothing — which is correct. A mono-red deck
+ *     does not need fixing, and the scorer should not pretend it does.
+ *
+ * Colourless-only production is scored as a fraction of one colour rather than
+ * zero, so it orders above nothing and below any real fixing.
+ */
+const COLOURLESS_ONLY = 0.15
+
+export const fixingFor = (card: Card, identity: readonly Color[]): Fixing => {
+  const produced = card.producedMana ?? []
+  if (produced.length === 0) return NO_FIXING
+
+  const wanted = new Set<string>(identity)
+  const coloursCovered = [...new Set(produced)].filter((m) => wanted.has(m)).length
+
+  // A colourless deck wants colourless mana, so "covers none of my colours" is
+  // not a criticism there — there are no colours to cover.
+  if (identity.length === 0) {
+    return { coloursCovered: 0, producesMana: true, value: COLOURLESS_ONLY }
+  }
+
+  if (coloursCovered === 0) {
+    return { coloursCovered: 0, producesMana: true, value: COLOURLESS_ONLY }
+  }
+
+  /*
+   * Diminishing returns, expressed as a share of the identity with the first
+   * colour weighted heaviest. `sqrt` rather than a linear share: the difference
+   * between covering one of five colours and two of five is a real improvement
+   * to a five-colour mana base, but it is not twice as good, and a linear term
+   * would let a five-colour land outrank a combo piece in a group where the
+   * deck already has enough sources.
+   */
+  return {
+    coloursCovered,
+    producesMana: true,
+    value: Math.sqrt(coloursCovered / identity.length),
+  }
+}
+
+/**
+ * Whether the fixing term should apply at all.
+ *
+ * Only to cards whose job is mana. A creature that taps for one colour is a
+ * mana dork and genuinely does fix, but it is competing in a group of creatures
+ * where its body and its text are the interesting part; letting fixing reorder
+ * that group would be the same mistake in the other direction. Lands compete
+ * only with other lands, so this is where the term belongs.
+ */
+export const isManaSource = (card: Card): boolean => card.types.includes('land')

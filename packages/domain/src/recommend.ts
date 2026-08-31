@@ -2,6 +2,7 @@ import { assertNever } from './assert-never.js'
 import type { BracketFlag } from './bracket.js'
 import type { Card, Color } from './card.js'
 import { annotateCombos, type ComboIndex } from './combo-index.js'
+import { fixingFor, isManaSource, NO_FIXING } from './fixing.js'
 import { dimensionKey, type CompositionDimension, type CompositionTarget } from './composition.js'
 import type { CompositionCounts, Deficit } from './composition-analysis.js'
 import { findDeficits, shortfalls } from './composition-analysis.js'
@@ -264,6 +265,17 @@ export const recommend = (input: RecommendInput): RecommendResult => {
         withOracleIds: [],
       })
     }
+    // Said before the deficit, because for a land it is the more specific
+    // claim: "taps for two of your colours" is why THIS land rather than the
+    // 435 others that also fill the same gap.
+    const fixing = isManaSource(card) ? fixingFor(card, input.colorIdentity) : NO_FIXING
+    if (fixing.producesMana && isManaSource(card)) {
+      reasons.push({
+        kind: 'mana-fixing',
+        coloursCovered: fixing.coloursCovered,
+        of: input.colorIdentity.length,
+      })
+    }
     if (s.deficit !== null) {
       reasons.push({
         kind: 'fills-deficit',
@@ -305,7 +317,8 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       w.inclusion * (s.stats?.inclusion ?? 0) +
       w.fill * (s.deficit === null ? 0 : Math.min(1, Math.abs(s.deficit.delta) / 5)) +
       w.curve * curveFit(card.manaValue, input.counts.manaCurve, curve) +
-      w.keywordSynergy * synergyScore(s.synergy) -
+      w.keywordSynergy * synergyScore(s.synergy) +
+      w.fixing * fixing.value -
       w.bracketRisk * s.pooled.bracketFlags.length -
       w.budget * budgetOverrun
   }

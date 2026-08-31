@@ -8,6 +8,7 @@ interface CardRow {
   readonly mana_value: number
   readonly color_identity: string[]
   readonly colors: string[]
+  readonly produced_mana: string[]
   readonly type_line: string
   readonly types: string[]
   readonly oracle_text: string
@@ -39,6 +40,7 @@ const toCard = (row: CardRow): Card => ({
   manaValue: row.mana_value,
   colorIdentity: row.color_identity as Color[],
   colors: row.colors as Color[],
+  producedMana: (row.produced_mana ?? []) as NonNullable<Card['producedMana']>,
   typeLine: row.type_line,
   types: row.types as Card['types'],
   oracleText: row.oracle_text,
@@ -79,6 +81,9 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
     mana_value: c.manaValue,
     color_identity: c.colorIdentity,
     colors: c.colors,
+    // `[]` rather than null: the column is NOT NULL, and a card read before
+    // migration 0008 genuinely has no answer, which is the same as none known.
+    produced_mana: c.producedMana ?? [],
     type_line: c.typeLine,
     types: c.types,
     oracle_text: c.oracleText,
@@ -105,19 +110,20 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
 
   const { rowCount } = await pool.query(
     `INSERT INTO cards (
-       oracle_id, name, mana_cost, mana_value, color_identity, colors, type_line,
+       oracle_id, name, mana_cost, mana_value, color_identity, colors, produced_mana, type_line,
        types, oracle_text, power, toughness, loyalty, power_num, toughness_num,
        keywords, legality_commander, edhrec_rank,
        default_printing, roles, primary_role, universes_beyond,
        synergy_produces, synergy_wants)
-     SELECT oracle_id, name, mana_cost, mana_value, color_identity, colors, type_line,
+     SELECT oracle_id, name, mana_cost, mana_value, color_identity, colors, produced_mana, type_line,
             types, oracle_text, power, toughness, loyalty, power_num, toughness_num,
             keywords, legality_commander, edhrec_rank,
             default_printing, roles, primary_role, universes_beyond,
             synergy_produces, synergy_wants
        FROM jsonb_to_recordset($1::jsonb) AS x(
          oracle_id uuid, name text, mana_cost text, mana_value real,
-         color_identity char(1)[], colors char(1)[], type_line text, types text[],
+         color_identity char(1)[], colors char(1)[], produced_mana char(1)[],
+         type_line text, types text[],
          oracle_text text, power text, toughness text, loyalty text,
          power_num integer, toughness_num integer,
          keywords text[], legality_commander text,
@@ -126,7 +132,8 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
      ON CONFLICT (oracle_id) DO UPDATE SET
        name = EXCLUDED.name, mana_cost = EXCLUDED.mana_cost,
        mana_value = EXCLUDED.mana_value, color_identity = EXCLUDED.color_identity,
-       colors = EXCLUDED.colors, type_line = EXCLUDED.type_line,
+       colors = EXCLUDED.colors, produced_mana = EXCLUDED.produced_mana,
+       type_line = EXCLUDED.type_line,
        types = EXCLUDED.types, oracle_text = EXCLUDED.oracle_text,
        power = EXCLUDED.power, toughness = EXCLUDED.toughness,
        loyalty = EXCLUDED.loyalty, power_num = EXCLUDED.power_num,

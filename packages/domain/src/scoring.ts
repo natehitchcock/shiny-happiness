@@ -15,6 +15,15 @@ export interface ScoringWeights {
   readonly curve: number
   /** Mechanical synergy with what the deck already does (ADR-0011). */
   readonly keywordSynergy: number
+  /**
+   * Colour fixing, applied to lands only (see `fixing.ts`).
+   *
+   * Heavier than `keywordSynergy` on purpose. Within the land group these are
+   * the two terms that compete, and the whole defect this fixes was rules text
+   * outranking mana: a cycling desert beat every dual because cycling is a
+   * synergy tag and tapping for two colours was worth nothing at all.
+   */
+  readonly fixing: number
   /** Subtracted. A soft penalty that reorders; it never filters (doc 03 §3.2). */
   readonly bracketRisk: number
   /** Subtracted. */
@@ -29,6 +38,7 @@ export const DEFAULT_WEIGHTS: ScoringWeights = {
   fill: 0.7,
   curve: 0.3,
   keywordSynergy: 0.7,
+  fixing: 1.2,
   bracketRisk: 0.5,
   budget: 0.4,
 }

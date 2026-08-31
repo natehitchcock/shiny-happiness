@@ -57,6 +57,9 @@ export interface Reason {
   dimension?: { role?: string; type?: string }
   deficit?: number
   manaValue?: number
+  /** : how many of the deck colours this land taps for, and of how many. */
+  coloursCovered?: number
+  of?: number
   direction?: 'short' | 'over' | 'balanced' | 'enables' | 'payoff' | 'theme'
   delta?: number
   tag?: string

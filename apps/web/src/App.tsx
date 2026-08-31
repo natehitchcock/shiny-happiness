@@ -102,6 +102,15 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
           ? `shares your ${tag} theme`
           : `enables your ${tag}`
     }
+    case 'mana-fixing': {
+      // The whole point of the reason: for a land, "fills a gap" is true of
+      // every land, and what it taps for is the thing that tells them apart.
+      const n = r.coloursCovered ?? 0
+      const of = r.of ?? 0
+      if (n === 0) return 'taps for colourless'
+      if (of <= 1) return 'taps for your colour'
+      return `taps for ${String(n)} of your ${String(of)} colours`
+    }
     case 'corpus-inclusion':
       return 'played in similar decks'
     case 'top-by-type':

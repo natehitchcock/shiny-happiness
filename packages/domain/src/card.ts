@@ -4,6 +4,15 @@ import type { SynergyTag } from './synergy.js'
 
 export type Color = 'W' | 'U' | 'B' | 'R' | 'G'
 
+/**
+ * A colour, or colourless.
+ *
+ * Separate from `Color` because colourless is not a colour in Magic's rules and
+ * conflating them would let `{C}` leak into a colour-identity check, where it
+ * would be wrong. It is only ever a thing a permanent PRODUCES.
+ */
+export type ManaLetter = Color | 'C'
+
 export const COLORS: readonly Color[] = ['W', 'U', 'B', 'R', 'G']
 
 export type Legality = 'legal' | 'not_legal' | 'banned' | 'restricted'
@@ -37,6 +46,22 @@ export interface Card {
    */
   readonly colorIdentity: readonly Color[]
   readonly colors: readonly Color[]
+  /**
+   * Which mana this card can produce — `C` included (Scryfall `produced_mana`).
+   *
+   * The land category was ranked entirely by rules text before this existed, so
+   * cycling deserts and MDFCs with a spell side beat every real dual: a dual's
+   * text is a mana ability and produces no synergy tags, so the scorer had
+   * nothing to see. This is the field that says what a land is actually for.
+   *
+   * NOT the same as `colorIdentity`. They agree for Steam Vents and disagree
+   * for exactly the lands that matter most: Command Tower has an empty identity
+   * and taps for every colour, as does every fetchland.
+   *
+   * Optional because a card read before ING added the column has no answer, and
+   * `[]` would be the wrong one — "produces nothing" is a claim, not a gap.
+   */
+  readonly producedMana?: readonly ManaLetter[]
   readonly typeLine: string
   readonly types: readonly CardType[]
   readonly oracleText: string
