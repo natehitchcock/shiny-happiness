@@ -732,3 +732,62 @@ describe('rejecting a card', () => {
     expect(screen.queryAllByLabelText(/^Never suggest/)).toHaveLength(0)
   })
 })
+
+describe('the impact and efficiency filter fields (doc 18 §18.8)', () => {
+  /*
+   * The two metrics were display-only and unaskable. These cover the client
+   * half of making them queries: that a query naming a metric really does reach
+   * the server as a column, and that a builder can find out the fields exist
+   * without reading `docs/13-candidate-query.md`.
+   */
+  it('sends a query that names a metric to the server as an ordinary column', async () => {
+    // The seam that had to be re-argued: `queryColumnsOf` strips METRIC columns
+    // and must not strip a QUERY that happens to name a metric.
+    render(<Workspace deck={deck} />)
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+
+    await typeFilter('impact>=6 -t:land')
+    await act(async () => {
+      screen.getByLabelText(/Show this query as a column/).click()
+    })
+
+    await waitFor(() => {
+      const bodies = mocked.getRecommendations.mock.calls.map((c) => c[1])
+      expect(bodies.some((b) => b.columns?.includes('impact>=6 -t:land') === true)).toBe(true)
+    })
+  })
+
+  it('documents both fields with a copyable example, reachable by keyboard', async () => {
+    // R4: the reference opens from the keyboard, not from hover alone. `Hint`'s
+    // trigger is a real button that opens on focus, which is what this asserts —
+    // a `title` attribute would satisfy neither this nor a touch device.
+    render(<Workspace deck={deck} />)
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+
+    const trigger = screen.getByLabelText('What can I type in the filter?')
+    expect(trigger.tagName).toBe('BUTTON')
+
+    await act(async () => {
+      trigger.focus()
+      trigger.dispatchEvent(new FocusEvent('focus', { bubbles: true }))
+    })
+
+    const help = screen.getByRole('tooltip')
+
+    /*
+     * The EXACT text of each `<code>`, not a substring of the whole panel.
+     *
+     * Found by mutation: replacing the `eff>=1.5` row in the field list with
+     * `price>=1.5` left `toContain('eff>=1.5')` green, because the worked
+     * example lower down still says `eff>=1.5 mv<=3`. A substring match on a
+     * panel that mentions a field twice cannot tell the list from the prose.
+     */
+    const snippets = [...help.querySelectorAll('code')].map((c) => c.textContent)
+    expect(snippets).toContain('impact>=6')
+    expect(snippets).toContain('eff>=1.5')
+
+    // And a worked example that composes one of them with another field, which
+    // is the thing a builder actually needs to see to believe it composes.
+    expect(snippets).toContain('impact>=6 -t:land')
+  })
+})

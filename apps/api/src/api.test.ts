@@ -31,6 +31,16 @@ const UB = oracleId(randomUUID())
 const UNDECIDED = oracleId(randomUUID())
 /** On Wizards' Game Changers list (DATA-05), so `is:gamechanger` has a subject. */
 const GAME_CHANGER = oracleId(randomUUID())
+/**
+ * The only fixture with rules text, so it is the only one that scores above
+ * zero on the two card-intrinsic metrics (doc 18).
+ *
+ * Every other card here is deliberately textless, which made `impact>0` and
+ * `impact=0` return the same thing whether or not the route evaluated the
+ * field — a test that passed with the field stubbed out. This card is what
+ * makes the two queries disagree, and therefore what makes them a test.
+ */
+const HIGH_IMPACT = oracleId(randomUUID())
 
 const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   oracleId: id,
@@ -96,6 +106,12 @@ describeDb('API-01 contract', () => {
       }),
       { ...card(UB, 'Frodo, Test Hobbit'), universesBeyond: true },
       { ...card(GAME_CHANGER, 'Rhystic Study'), gameChanger: true },
+      card(HIGH_IMPACT, 'Wrath of Testing', {
+        typeLine: 'Sorcery',
+        types: ['sorcery'],
+        oracleText: "Destroy all creatures. They can't be regenerated.",
+        canBeCommander: false,
+      }),
     ])
     const combo: Combo = {
       id: comboId('c-1'),
@@ -412,6 +428,47 @@ describeDb('API-01 contract', () => {
 
       expect(response.statusCode).toBe(400)
       expect(response.json().detail).toContain('combo')
+    })
+
+    it('answers impact and efficiency, which are card-intrinsic and need no deck', async () => {
+      // The other half of the rule above. `combo` is refused because it is
+      // meaningless without a deck; these two are properties of the card (doc
+      // 18 §18.2), so refusing them would be refusing a question this endpoint
+      // can actually answer.
+      const zero = await app.inject({
+        method: 'GET',
+        url: '/api/v1/cards/search?q=' + encodeURIComponent('impact=0'),
+      })
+      expect(zero.statusCode).toBe(200)
+      expect(zero.json().items.length).toBeGreaterThan(0)
+
+      // EVALUATED, not merely accepted, and this is the assertion that says so.
+      // `HIGH_IMPACT` is the one fixture with rules text, so it is the only one
+      // over zero — a route that waved the field through without reading it
+      // would return every card here instead of exactly one, which is the
+      // silent-wrong-answer failure `UNSUPPORTED_FIELDS` exists to stop.
+      //
+      // An earlier version of this test asserted `items` was EMPTY, back when
+      // every fixture was textless. It passed with `impact` stubbed to 0.
+      const above = await app.inject({
+        method: 'GET',
+        url: '/api/v1/cards/search?q=' + encodeURIComponent('impact>0'),
+      })
+      expect(above.statusCode).toBe(200)
+      expect(above.json().items.map((c: Card) => c.oracleId)).toEqual([HIGH_IMPACT])
+
+      // The same card, and only that card: efficiency is impact valued in stat
+      // points over the cost, so a textless card with no body scores zero too.
+      const efficient = await app.inject({
+        method: 'GET',
+        url: '/api/v1/cards/search?q=' + encodeURIComponent('eff>0'),
+      })
+      expect(efficient.statusCode).toBe(200)
+      expect(efficient.json().items.map((c: Card) => c.oracleId)).toEqual([HIGH_IMPACT])
+
+      // And it is excluded from the complement, so the two halves partition the
+      // corpus rather than both matching.
+      expect(zero.json().items.map((c: Card) => c.oracleId)).not.toContain(HIGH_IMPACT)
     })
   })
   // --------------------------------------------------------------- commands
@@ -782,15 +839,16 @@ describeDb('API-01 contract', () => {
       /*
        * Every seeded card, exactly once.
        *
-       * Eight: six original fixtures, plus the Game Changer that DATA-05 added
-       * and the undecided-eligibility card that commander validation added.
+       * Nine: six original fixtures, plus the Game Changer that DATA-05 added,
+       * the undecided-eligibility card that commander validation added, and the
+       * one card with rules text that the impact/efficiency filter fields need.
        * Deliberately a literal and not the fixture array's length — the whole
        * point of this test is that a paging bug cannot make the expectation
        * move along with it, so it has to be updated by hand when a fixture is
        * added. Two agents each added one on the same day, which is exactly the
        * case the literal is here to catch, and it did.
        */
-      expect(all.size).toBe(8)
+      expect(all.size).toBe(9)
     })
   })
   describe('Universes Beyond filter (ADR-0011)', () => {

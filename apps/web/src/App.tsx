@@ -2999,6 +2999,23 @@ const ImportDialog = ({
  * the numbers behind it are being computed in `packages/domain`; what is here
  * is the shape that stops the sort, the legend and the request from each
  * assuming a column is a string.
+ *
+ * THE UNION SURVIVES `impact` AND `efficiency` BECOMING QUERY FIELDS, and the
+ * reason is that they answer different questions about the same number:
+ *
+ *   `{kind:'query', query:'impact>=6'}`  a tick. "Which of these clear my bar."
+ *   `{kind:'metric', metric:'impact'}`   a number. "How do these compare."
+ *
+ * Neither subsumes the other. A query column cannot show a value, and a metric
+ * column has no threshold to show a tick against — and you need the number
+ * column to find out where your threshold should be. Collapsing them would mean
+ * asking a builder to name a cutoff before they have seen the distribution,
+ * which is the wrong way round.
+ *
+ * `columnKey`'s `metric:` prefix is MORE load-bearing after the change, not
+ * less: `impact` is now a legal thing to type as well as a metric name, so a
+ * builder can legitimately hold both `impact>=6` and the impact metric column
+ * at once, and the two must key apart.
  */
 export type Column =
   | { readonly kind: 'query'; readonly query: string }
@@ -3021,10 +3038,20 @@ export const columnLabel = (c: Column): string => (c.kind === 'query' ? c.query 
  * The subset the RECOMMENDATIONS REQUEST can carry.
  *
  * `columns` on the wire is a list of query strings the server evaluates per
- * candidate (doc 10). A metric is not a query and the server does not evaluate
- * it — its values ride on the recommendation itself — so sending its name would
- * be asking the parser to read `impact` as a filter. One function, so the three
- * places that build a request cannot each answer this differently.
+ * candidate (doc 10), and a metric column has no query text to send.
+ *
+ * This filter used to be justified by "the server cannot read `impact`". That
+ * is no longer true — `impact` and `efficiency` are numeric fields of the
+ * candidate query language now, and `{kind:'query', query:'impact>=6'}` is an
+ * ordinary column the server evaluates like any other. What is still true, and
+ * is the actual reason, is that a metric column names a NUMBER TO DRAW rather
+ * than a QUESTION TO ASK: `metric:'impact'` has no operator and no threshold,
+ * so the nearest thing to send would be the bare word `impact`, which parses as
+ * a name substring search and would tick every card called "Impact Tremors".
+ * Its values ride on the recommendation instead (doc 18 §18.8).
+ *
+ * One function, so the three places that build a request cannot each answer
+ * this differently.
  */
 export const queryColumnsOf = (columns: readonly Column[]): readonly string[] =>
   columns.filter((c) => c.kind === 'query').map((c) => c.query)
@@ -3100,6 +3127,77 @@ export const sortByColumns = <T extends { readonly oracleId: string }>(
     })
     .map((x) => x.item)
 }
+
+/**
+ * What the filter box can be asked, beside the filter box.
+ *
+ * The placeholder can hold three examples and the language has twenty-two
+ * fields, so everything past `t:` and `mv<=3` was discoverable only by reading
+ * doc 13 — which is to say, not discoverable. That was survivable while the
+ * fields were all things you could see on a card; it stopped being survivable
+ * with `impact` and `efficiency`, because those are numbers this app invented
+ * and nothing on screen said they were askable at all.
+ *
+ * Through `Hint`, not a `title`: this needs to open on a phone, and `title`
+ * does not (see `Hint`'s own docblock). That also gives it the button, the
+ * focus ring, the tap-to-pin and the Escape that R4 requires.
+ *
+ * An EXAMPLE per field rather than a description. `impact` — "how much a card
+ * does, 0–13" is a definition someone still has to translate into syntax;
+ * `impact>=6` is the thing they can copy into the box and press Enter.
+ */
+const FILTER_FIELDS: readonly (readonly [string, string])[] = [
+  ['t:creature', 'type line'],
+  ['o:"draw a card"', 'rules text'],
+  ['mv<=3', 'mana value'],
+  ['c:r  id<=rg', 'colours, colour identity'],
+  ['price<=5', 'cheapest printing, USD'],
+  ['role:ramp', 'the role we derived'],
+  ['tag:treasure', 'a synergy tag, either side'],
+  ['combo>=2', 'combos it completes in THIS deck'],
+  ['near>=1', 'combos it leaves one card away'],
+  // 0–18.48, not the "roughly 0–13" `impact.ts` estimates in its docblock:
+  // 18.48 is the model's actual ceiling (breadth 6.0 × persistence 2.2 ×
+  // stakes 1.4), and 93 of 1,448 rows in one real mono-red pool are over 13.
+  // A range that stops below a fifteenth of the pool sends a builder looking
+  // for a threshold to the wrong end of the scale.
+  ['impact>=6', 'how much the card does (0–18)'],
+  ['eff>=1.5', 'what you get per mana (a small ratio)'],
+  ['is:gamechanger', 'and permanent, land, vanilla, …'],
+]
+
+const FilterHelp = (): React.JSX.Element => (
+  <Hint
+    className="filter-help"
+    label="What can I type in the filter?"
+    content={
+      <>
+        <strong>Filter fields</strong>
+        <span className="hint-line dim">
+          Terms combine with a space (AND), <code>or</code>, and <code>-</code> to negate.
+        </span>
+        {FILTER_FIELDS.map(([example, meaning]) => (
+          <span className="hint-line" key={example}>
+            <code>{example}</code> {meaning}
+          </span>
+        ))}
+        <span className="hint-line dim">
+          {/* The two metrics are the pair worth a worked example: they are the
+              only fields whose numbers a builder has to have SEEN to guess a
+              threshold for, and the column beside the row is where they see
+              them. */}
+          Try <code>impact&gt;=6 -t:land</code> for the heavy hitters that are not lands, or{' '}
+          <code>eff&gt;=1.5 mv&lt;=3</code> for cheap cards that punch up. Both compare against the
+          numbers in the impact and efficiency columns exactly as shown.
+        </span>
+      </>
+    }
+  >
+    <span className="help" aria-hidden="true">
+      ?
+    </span>
+  </Hint>
+)
 
 /**
  * The column queries, under the filter bar, each sitting over its own column.
@@ -5124,7 +5222,10 @@ export const Workspace = ({
                 ref={filterRef}
                 type="text"
                 value={draftQuery}
-                placeholder="Filter — try  t:creature  or  mv<=3  or  tag:treasure"
+                // Three examples is all this fits, so it spends one of them on
+                // `impact>=6`: the metric fields are the ones a builder has no
+                // other way to guess exist. The rest are behind the `?`.
+                placeholder="Filter — try  t:creature  or  mv<=3  or  impact>=6"
                 onChange={(e) => setDraftQuery(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') setQuery(draftQuery)
@@ -5162,6 +5263,7 @@ export const Workspace = ({
               >
                 + column
               </button>
+              <FilterHelp />
             </div>
 
             <ColumnLegend columns={columns} onRemove={removeColumn} measureRoot={suggestionsRef} />

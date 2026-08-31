@@ -129,6 +129,17 @@ const asCandidate = (card: Card, facts: PrintingFacts | undefined): AnnotatedCan
   toughness: null,
   reserved: facts?.reserved ?? false,
   group: null,
+  /*
+   * Card-intrinsic (doc 18 §18.2), so this endpoint can answer them and they
+   * are NOT in `UNSUPPORTED_FIELDS` above: `impact>=6` over the whole corpus is
+   * a real question with a real answer, and one with no deck to be relative to.
+   *
+   * The same two calls the card-detail route makes further down, so a card
+   * filtered in by `impact>=6` here reports the same 6.12 when opened. Both are
+   * pure functions of the card row; nothing is cached, nothing is stored.
+   */
+  impact: cardImpact(card).score,
+  efficiency: cardEfficiency(card).score,
 })
 
 /**

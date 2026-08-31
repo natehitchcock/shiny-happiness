@@ -400,6 +400,76 @@ describe('query filtering (doc 13 §13.1)', () => {
   void index
 })
 
+describe('filtering by impact and efficiency (doc 18 §18.8)', () => {
+  /*
+   * The two metrics were readable and unaskable: a row could show 6.12 and no
+   * query could say "the ones like that".
+   *
+   * What these pin is not the arithmetic — `impact.test.ts` owns that — but the
+   * AGREEMENT. The predicate compares the same number the item carries to the
+   * client, so a surviving row can never contradict its own cell. Asserted
+   * against the values read off an unfiltered run rather than against
+   * hardcoded constants, so a recalibrated baseline moves both sides together
+   * or fails here.
+   */
+  const wrath = pooled('wrath', {
+    card: card('wrath', {
+      typeLine: 'Sorcery',
+      types: ['sorcery'],
+      oracleText: "Destroy all creatures. They can't be regenerated.",
+    }),
+  })
+  const bear = pooled('bear', {
+    card: card('bear', { typeLine: 'Creature — Bear', types: ['creature'], oracleText: '' }),
+  })
+  const input = baseInput({ pool: [wrath, bear] })
+
+  const itemsOf = (r: ReturnType<typeof recommend>) => r.groups.flatMap((g) => g.items)
+  const unfiltered = itemsOf(recommend({ ...input, query: null }))
+
+  it('keeps exactly the rows whose own impact cell clears the threshold', () => {
+    const expected = unfiltered.filter((i) => (i.impact?.score ?? -1) >= 6).map((i) => i.oracleId)
+    expect(expected).toEqual([oracleId('wrath')])
+    expect(
+      itemsOf(recommend({ ...input, query: ast('impact>=6') })).map((i) => i.oracleId),
+    ).toEqual(expected)
+  })
+
+  it('keeps exactly the rows whose own efficiency cell clears the threshold', () => {
+    const cutoff = 0.5
+    const expected = unfiltered
+      .filter((i) => (i.efficiency?.score ?? -1) >= cutoff)
+      .map((i) => i.oracleId)
+    expect(expected).toEqual([oracleId('wrath')])
+    expect(itemsOf(recommend({ ...input, query: ast('eff>=0.5') })).map((i) => i.oracleId)).toEqual(
+      expected,
+    )
+  })
+
+  it('matches the exact score a row reports, to the last decimal it has', () => {
+    // The boundary is where a filter that re-rounded for display would part
+    // company with the column, so it is the case worth pinning.
+    const score = unfiltered.find((i) => i.oracleId === oracleId('wrath'))?.impact?.score
+    expect(score).toBeDefined()
+    const at = String(score)
+    expect(recommend({ ...input, query: ast(`impact>=${at}`) }).query.matched).toBe(1)
+    expect(recommend({ ...input, query: ast(`impact>${at}`) }).query.matched).toBe(0)
+  })
+
+  it('composes with the rest of the language', () => {
+    expect(recommend({ ...input, query: ast('impact>=6 -t:land') }).query.matched).toBe(1)
+    expect(recommend({ ...input, query: ast('impact>=6 -t:sorcery') }).query.matched).toBe(0)
+    expect(recommend({ ...input, query: ast('-impact>=6') }).query.matched).toBe(1)
+  })
+
+  it('reports the withheld rows rather than hiding them', () => {
+    // Same promise every other filter makes (doc 13 §13.1): a card kept out by
+    // the query is counted, never silently absent.
+    const result = recommend({ ...input, query: ast('impact>=6') })
+    expect(result.query).toEqual({ matched: 1, total: 2 })
+  })
+})
+
 describe('scoring weights', () => {
   it('lets archetype nudge the defaults', () => {
     expect(weightsFor('combo').combo).toBeGreaterThan(DEFAULT_WEIGHTS.combo)

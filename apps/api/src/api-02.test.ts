@@ -1530,5 +1530,53 @@ describeDb('API-02 contract', () => {
         .find((i: { oracleId: string }) => i.oracleId === NONLAND_WIPE)
       if (item !== undefined) expect(item.impact).toEqual(detail.impact)
     })
+
+    it('ticks exactly the rows whose own impact cell clears the column threshold', async () => {
+      /*
+       * The two halves meeting, end to end.
+       *
+       * A column of `impact>=6` is evaluated server-side against the SAME
+       * number the client draws in the impact cell, so a ticked row can never
+       * contradict what it displays. Asserted as set equality against the
+       * items' own scores rather than against a hardcoded card list — the point
+       * is the agreement, not which cards happen to be over six.
+       */
+      const body = (
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/decks/${deck.id}/recommendations`,
+          payload: { columns: ['impact>=6', 'eff>=0.5'] },
+        })
+      ).json()
+
+      const items = body.groups.flatMap(
+        (g: {
+          items: { oracleId: string; impact: { score: number }; efficiency: { score: number } }[]
+        }) => g.items,
+      )
+      expect(items.length).toBeGreaterThan(0)
+
+      const column = (query: string): string[] =>
+        [
+          ...((body.columns as { query: string; matched: string[] }[]).find(
+            (c) => c.query === query,
+          )?.matched ?? []),
+        ].sort()
+
+      const expectedImpact = items
+        .filter((i: { impact: { score: number } }) => i.impact.score >= 6)
+        .map((i: { oracleId: string }) => i.oracleId)
+        .sort()
+      const expectedEff = items
+        .filter((i: { efficiency: { score: number } }) => i.efficiency.score >= 0.5)
+        .map((i: { oracleId: string }) => i.oracleId)
+        .sort()
+
+      // A vacuous pass would be two empty lists agreeing, so at least one side
+      // has to actually select something.
+      expect(expectedImpact.length).toBeGreaterThan(0)
+      expect(column('impact>=6')).toEqual(expectedImpact)
+      expect(column('eff>=0.5')).toEqual(expectedEff)
+    })
   })
 })

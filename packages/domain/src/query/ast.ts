@@ -41,6 +41,29 @@ export type QueryField =
   | 'produces'
   | 'wants'
   | 'tag'
+  /**
+   * The two card-intrinsic metrics (doc 18), which the suggestion table already
+   * offers as columns.
+   *
+   * They were deliberately NOT queries while they were display-only, on the
+   * reasoning that a metric is something a column draws rather than something
+   * the parser reads. That reasoning stopped holding the moment a builder could
+   * see 6.12 on a row and had no way to ask for the rows like it — `impact>=6
+   * -t:land` is the query that was impossible.
+   *
+   * Numeric, and on their OWN SCALES: impact runs 0–18.48 (its ceiling is
+   * breadth 6.0 × persistence 2.2 × stakes 1.4) and efficiency is a small ratio
+   * — measured to 6.03 over a real mono-red pool. No rescaling happens
+   * anywhere, so the number a user types is the number the column shows them
+   * (§18.8, and the comment on `AnnotatedCandidate.impact`). Normalising either
+   * to a shared 0–10 was rejected for exactly that: it would make every
+   * threshold on screen a translation.
+   *
+   * `impact.ts` says "roughly 0–13" in its own docblock, which understates it —
+   * 93 of 1,448 candidates in that pool score above 13.
+   */
+  | 'impact'
+  | 'efficiency'
 
 export type QueryNode =
   | { readonly kind: 'and'; readonly children: readonly QueryNode[] }
@@ -99,6 +122,13 @@ export const FIELD_ALIASES: ReadonlyMap<string, QueryField> = new Map([
   ['benefits', 'wants'],
   ['tag', 'tag'],
   ['synergy', 'tag'],
+  // Short spelling first, long spelling canonical — the shape `mv`/`cmc` and
+  // `price`/`usd` already have. `imp` and `eff` are what a repeat user types;
+  // the full word is what the chip and the error message read back.
+  ['imp', 'impact'],
+  ['impact', 'impact'],
+  ['eff', 'efficiency'],
+  ['efficiency', 'efficiency'],
 ])
 
 /** Canonical spelling used by `formatQuery`, so formatting round-trips. */
@@ -124,6 +154,15 @@ export const CANONICAL_FIELD: Readonly<Record<QueryField, string>> = {
   produces: 'produces',
   wants: 'wants',
   tag: 'tag',
+  /*
+   * The FULL word, not `imp`/`eff`. The abbreviated canonicals above are the
+   * ones Scryfall taught users (`t`, `o`, `mv`); every field this project
+   * invented — `combo`, `near`, `price`, `role`, `group`, `tag` — formats back
+   * as the word it is, because the chip row and the screen-reader description
+   * are the things that read it.
+   */
+  impact: 'impact',
+  efficiency: 'efficiency',
 }
 
 export const NUMERIC_FIELDS: ReadonlySet<QueryField> = new Set<QueryField>([
@@ -133,6 +172,11 @@ export const NUMERIC_FIELDS: ReadonlySet<QueryField> = new Set<QueryField>([
   'price',
   'combo',
   'near',
+  // Fractional, unlike every other member: `eff>=1.5` and `impact>=6.12` are
+  // both ordinary queries. The validator's number pattern already allows a
+  // decimal part, so nothing else has to change for that.
+  'impact',
+  'efficiency',
 ])
 
 export const IS_PREDICATES: ReadonlySet<string> = new Set([

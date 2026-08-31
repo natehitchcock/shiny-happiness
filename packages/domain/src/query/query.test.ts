@@ -56,6 +56,12 @@ const candidate = (over: Partial<AnnotatedCandidate> = {}): AnnotatedCandidate =
   toughness: null,
   reserved: false,
   group: null,
+  // Hardcoded like `priceUsd` above rather than derived from the card, so a
+  // change to the impact classifier cannot quietly rewrite what these tests
+  // assert. The agreement between the two is pinned in `recommend.test.ts`,
+  // where it belongs — that is the seam where a disagreement would be a bug.
+  impact: 0,
+  efficiency: 0,
   ...over,
 })
 
@@ -84,12 +90,16 @@ describe('parsing', () => {
     expect(ast('type:creature')).toEqual(ast('t:creature'))
     expect(ast('cmc<=3')).toEqual(ast('mv<=3'))
     expect(ast('colour:r')).toEqual(ast('c:r'))
+    expect(ast('imp>=6')).toEqual(ast('impact>=6'))
+    expect(ast('eff>=1.5')).toEqual(ast('efficiency>=1.5'))
   })
 
   it('parses comparison operators', () => {
     expect(ast('mv<=3')).toMatchObject({ field: 'manaValue', op: '<=', value: '3' })
     expect(ast('combo>=2')).toMatchObject({ field: 'combo', op: '>=', value: '2' })
     expect(ast('pow!=4')).toMatchObject({ field: 'power', op: '!=', value: '4' })
+    expect(ast('impact>=6')).toMatchObject({ field: 'impact', op: '>=', value: '6' })
+    expect(ast('eff>1.2')).toMatchObject({ field: 'efficiency', op: '>', value: '1.2' })
   })
 
   it('parses a quoted phrase, spaces and all', () => {
@@ -148,6 +158,8 @@ describe('errors are reported, never ignored', () => {
   it('rejects a non-numeric value for a numeric field', () => {
     const errors = errorsOf('mv<=lots')
     expect(errors[0]!.message).toMatch(/needs a number/)
+    expect(errorsOf('impact>=high')[0]!.message).toMatch(/impact needs a number/)
+    expect(errorsOf('eff>=good')[0]!.message).toMatch(/efficiency needs a number/)
   })
 
   it('rejects an unknown is: predicate and lists real ones', () => {
@@ -186,10 +198,25 @@ describe('formatQuery is idempotent', () => {
     '-t:land',
     'role:ramp mv<=2 price<=5',
     'is:permanent',
+    'impact>=6',
+    'efficiency>=1.5',
+    'impact>=6 -t:land',
+    'impact>=6 or efficiency>=1.5',
   ])('round-trips %s', (input) => {
     const once = formatQuery(ast(input))
     const twice = formatQuery(ast(once))
     expect(twice).toBe(once)
+    /*
+     * The idempotence assertion above is VACUOUS for a query that does not
+     * parse: an unknown field drops the term, the AST is null, and `'' === ''`
+     * passes. Found by mutation — deleting `impact` from `NUMERIC_FIELDS` left
+     * every one of these cases green while `impact>=6` silently became nothing.
+     *
+     * Every input in this table is a complete query, so every one must format
+     * back to something.
+     */
+    expect(once).not.toBe('')
+    expect(errorsOf(input)).toEqual([])
   })
 
   it('preserves grouping when an or sits inside an and', () => {
@@ -201,12 +228,27 @@ describe('formatQuery is idempotent', () => {
   it('quotes a value that needs quoting', () => {
     expect(formatQuery(ast('o:"draw a card"'))).toBe('o:"draw a card"')
   })
+
+  it('canonicalises the short metric aliases to the words the chip shows', () => {
+    // `imp` and `eff` are for typing; the chip and the legend read the field
+    // out in full, the same way `usd` formats back as `price`.
+    expect(formatQuery(ast('imp>=6'))).toBe('impact>=6')
+    expect(formatQuery(ast('eff>1.2'))).toBe('efficiency>1.2')
+  })
+
+  it('keeps a fractional metric threshold intact', () => {
+    // A formatter that dropped the decimal would turn `eff>=1.5` into a filter
+    // for a different, much rarer card on the next chip edit.
+    expect(formatQuery(ast('eff>=1.333'))).toBe('efficiency>=1.333')
+  })
 })
 
 describe('describeQuery', () => {
   it('reads as plain English', () => {
     expect(describeQuery(ast('t:instant mv<=2'))).toBe('type instant, mana value at most 2')
     expect(describeQuery(ast('combo>=2'))).toBe('combos completed at least 2')
+    expect(describeQuery(ast('impact>=6'))).toBe('impact at least 6')
+    expect(describeQuery(ast('eff>1.2'))).toBe('efficiency over 1.2')
     expect(describeQuery(null)).toBe('no filter')
   })
 })
@@ -326,6 +368,63 @@ describe('evaluation', () => {
   it('never matches printing-level predicates it cannot decide', () => {
     // Better to match nothing than to silently match everything.
     expect(matchesQuery(ast('is:reprint'), bombardment)).toBe(false)
+  })
+})
+
+describe('filtering by impact and efficiency (doc 18)', () => {
+  // The two metrics were display-only: a builder could SEE that a card scored
+  // 6.12 and had no way to ask for the ones that do. `impact>=6 -t:land` is the
+  // query that was impossible.
+  const wrath = candidate({ card: card({ name: 'Wrath of God' }), impact: 6.12, efficiency: 0.914 })
+  const bolt = candidate({ card: card({ name: 'Lightning Bolt' }), impact: 1.4, efficiency: 0.314 })
+  const bear = candidate({ card: card({ name: 'Grizzly Bears' }), impact: 0, efficiency: 0 })
+
+  it('compares impact with every numeric operator', () => {
+    expect(matchesQuery(ast('impact>=6'), wrath)).toBe(true)
+    expect(matchesQuery(ast('impact>=6'), bolt)).toBe(false)
+    expect(matchesQuery(ast('impact<2'), bolt)).toBe(true)
+    expect(matchesQuery(ast('impact=0'), bear)).toBe(true)
+    expect(matchesQuery(ast('impact!=0'), bear)).toBe(false)
+  })
+
+  it('compares efficiency, which is a small ratio rather than a count', () => {
+    // `eff>1` would keep nothing here, and that is the point: the thresholds
+    // are on the scale the column draws, not on some rescaled version of it.
+    expect(matchesQuery(ast('eff>=0.9'), wrath)).toBe(true)
+    expect(matchesQuery(ast('eff>=0.9'), bolt)).toBe(false)
+    expect(matchesQuery(ast('eff>0'), bear)).toBe(false)
+  })
+
+  it('compares the number the row carries, not a rounded version of it', () => {
+    // The scores arrive already quantised to three places by `cardImpact` and
+    // `cardEfficiency`, and this predicate re-rounds nothing. A filter that
+    // compared a display-rounded value would answer `impact>=6.2` with a card
+    // whose row reads 6.12.
+    expect(matchesQuery(ast('impact>=6.12'), wrath)).toBe(true)
+    expect(matchesQuery(ast('impact>6.12'), wrath)).toBe(false)
+    expect(matchesQuery(ast('impact>=6.2'), wrath)).toBe(false)
+    expect(matchesQuery(ast('eff>=0.914'), wrath)).toBe(true)
+    expect(matchesQuery(ast('eff>0.914'), wrath)).toBe(false)
+  })
+
+  it('composes with negation and with the rest of the language', () => {
+    const land = candidate({
+      card: card({ name: 'Field of the Dead', typeLine: 'Land' }),
+      impact: 6.6,
+      efficiency: 1.9,
+    })
+    expect(matchesQuery(ast('impact>=6 -t:land'), wrath)).toBe(true)
+    expect(matchesQuery(ast('impact>=6 -t:land'), land)).toBe(false)
+    expect(matchesQuery(ast('-impact>=6'), bolt)).toBe(true)
+    expect(matchesQuery(ast('impact>=6 or eff>=0.3'), bolt)).toBe(true)
+  })
+
+  it('is a query field, so an unknown neighbour still fails loudly', () => {
+    // Guards the whole point of adding these: a typo must not fall back to
+    // "matches everything" now that there is a real field near it.
+    expect(errorsOf('impcat>=6')[0]!.message).toMatch(/unknown field "impcat"/)
+    expect(errorsOf('impact>=6')).toEqual([])
+    expect(errorsOf('eff>=1.5')).toEqual([])
   })
 })
 

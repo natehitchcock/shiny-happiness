@@ -53,6 +53,20 @@ const FIELD_PROSE: Readonly<Record<string, string>> = {
   flag: 'flagged',
   group: 'group',
   name: 'name containing',
+  /*
+   * The words the column headings use, so the chip under a column and the
+   * column itself name the same thing. "how much it does" reads better in
+   * isolation and worse beside a heading that says Impact.
+   *
+   * These two are the only entries that MATCH `describeQuery`'s `?? node.field`
+   * fallback, so deleting them would change nothing — verified by mutation.
+   * Written out anyway: the fallback exists to stop an unlisted field rendering
+   * as `undefined`, not to serve as the prose for a field somebody chose not to
+   * describe, and the next person to widen `QueryField` should find a complete
+   * table rather than one with two silent holes in it.
+   */
+  impact: 'impact',
+  efficiency: 'efficiency',
 }
 
 const OP_PROSE: Readonly<Record<string, string>> = {

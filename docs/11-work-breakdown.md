@@ -191,6 +191,18 @@ needs no server evaluation, since its number is already on the row.
 column list to the deck yet; the storage, the metrics, the endpoints and the
 `queryColumns` seam are.
 
+**Both metrics are now filterable** ([ADR-0024](adr/0024-impact-and-efficiency-are-query-fields.md)).
+`impact` and `efficiency` are numeric fields of the candidate query language —
+aliases `imp` and `eff` — so `impact>=6 -t:land` and `eff>=1.5 mv<=3` work in
+the filter box, as a column, and on `/cards/search`, which answers them because
+they are card-intrinsic. `AnnotatedCandidate` gains two required numbers, which
+is the contract change the ADR exists for; there are **three** construction
+sites, the third being an inline literal in `routes/recommendations.ts` that a
+grep for the type name does not find. The filter compares the raw score, so a
+matched row always agrees with the number a column would draw. The filter box
+also gains a `?` listing every field with an example — the metrics were
+otherwise undiscoverable, being numbers this app invented.
+
 **The deck is a picture now, at `#web`.** [Doc 17](17-deck-web.md) is built: a
 second mode, entered from the masthead, that replaces everything below it with
 one node per card — the art crop — and one line per relationship. It makes **no
