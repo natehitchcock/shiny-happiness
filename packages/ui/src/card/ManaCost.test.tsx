@@ -56,6 +56,17 @@ describe('ManaCost — what is drawn', () => {
     expect(mana.querySelector('.rt-sym-raw')?.textContent).toBe('{ZZZ9}')
   })
 
+  it('draws the // of a split cost as text, and not as a flagged unknown', () => {
+    const mana = draw('{1}{R} // {1}{U}')
+
+    expect(mana.querySelectorAll('.rt-sym')).toHaveLength(4)
+    expect(mana.querySelector('.rt-sym-sep')?.textContent).toBe('//')
+    // Not `.rt-sym-raw`. That box is drawn in the alarm colour and means the
+    // app met a symbol it does not know — it knows this one. And not a disc
+    // either: no card prints the separator in a circle.
+    expect(mana.querySelectorAll('.rt-sym-raw')).toHaveLength(0)
+  })
+
   it('draws nothing for a land', () => {
     expect(draw(null).querySelectorAll('.rt-sym')).toHaveLength(0)
   })
@@ -76,10 +87,22 @@ describe('ManaCost — the screen-reader path', () => {
     // A row of unlabelled marks would be the regression; a row of marks read
     // out beside the sentence that already says the same thing is the other.
     const mana = draw('{W/U}{R}')
-    for (const node of mana.querySelectorAll('.rt-sym, .rt-sym-raw')) {
+    for (const node of mana.querySelectorAll('.rt-sym, .rt-sym-raw, .rt-sym-sep')) {
       expect(node.getAttribute('aria-hidden')).toBe('true')
     }
     expect(mana.querySelector('.rt-sr')?.textContent).toBe('mana cost white or blue, red')
+  })
+
+  it('states a split cost as two costs, not as an unreadable one', () => {
+    // The playtest defect: `Fire // Ice` announced its separator as
+    // "unreadable //", which is the one thing the parser says when it has lost
+    // the reader's trust — and it said it about every split card.
+    const mana = draw('{1}{R} // {1}{U}')
+
+    expect(mana.querySelector('.rt-sr')?.textContent).toBe(
+      'mana cost 1 generic, red or 1 generic, blue',
+    )
+    expect(mana.querySelector('.rt-sym-sep')?.getAttribute('aria-hidden')).toBe('true')
   })
 
   it('keeps the shorthand available on hover for a sighted reader', () => {

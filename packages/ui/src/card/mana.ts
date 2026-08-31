@@ -56,6 +56,17 @@ export type ManaSymbolKind =
   | 'monohybrid'
   /** `{G/P}`, `{P}`, `{W/U/P}` — payable with two life. */
   | 'phyrexian'
+  /**
+   * `//` — the boundary between the two halves of a split card's cost.
+   *
+   * Not a symbol, and not a token: Scryfall writes it BARE inside `mana_cost`
+   * (`Fire // Ice` is `{1}{R} // {1}{U}`), and `/symbology` has no entry for it
+   * — checked 2026-08-31, the published list runs `{T}`…`{D}` and nothing in it
+   * is a slash pair. So it arrives on the loose-text path, which used to end in
+   * `unknown`, and every split card in the corpus was announced as
+   * "unreadable //".
+   */
+  | 'separator'
   /** Anything this parser could not read. Shown as its own text. */
   | 'unknown'
 
@@ -106,6 +117,31 @@ const partOf = (part: string): Part | null => {
   if (part === 'S') return { fill: null, mark: 'S', word: 'snow' }
   return null
 }
+
+/** How Scryfall writes the boundary between two halves of one cost. */
+const SEPARATOR = '//'
+
+/**
+ * The `//` between the two halves of a split card's cost.
+ *
+ * Spoken as "or", because that is what it means at the moment a cost is read:
+ * each half has its own cost and you pay ONE of them to cast that half. Two
+ * alternatives were rejected. Leaving the raw `//` in the spoken name is what
+ * `unknown` already did and is worse than saying nothing — a screen reader
+ * treats it as punctuation, so two costs run together into one that is neither.
+ * And "slash slash" is accurate about the ink and useless about the card.
+ *
+ * `fills` and `marks` are empty because it is not a disc; `ManaCost` draws it
+ * as its own text, which is what it already looked like. The defect was only
+ * ever in the announcement.
+ */
+const separator = (): ManaSymbol => ({
+  raw: SEPARATOR,
+  kind: 'separator',
+  fills: [],
+  marks: [],
+  label: 'or',
+})
 
 const unknown = (raw: string): ManaSymbol => ({
   raw,
@@ -202,7 +238,16 @@ export const parseManaCost = (cost: string | null | undefined): readonly ManaSym
   const flush = (): void => {
     const text = loose.trim()
     loose = ''
-    if (text !== '') symbols.push(unknown(text))
+    if (text === '') return
+    /*
+     * `//` is the ONLY loose fragment real data contains: measured against the
+     * local corpus on 2026-08-31, all 361 non-brace fragments across 33,128
+     * mana costs are `//`. Recognising it here rather than in `symbolFor`
+     * because it is never braced — see the `separator` kind — and recognising
+     * exactly it, so anything else arriving on this path still says it cannot
+     * be read.
+     */
+    symbols.push(text === SEPARATOR ? separator() : unknown(text))
   }
 
   while (at < cost.length) {
@@ -233,8 +278,24 @@ export const parseManaCost = (cost: string | null | undefined): readonly ManaSym
  * "no mana cost" (a land, an unresolved import) is a stated answer rather than
  * silence.
  */
-export const manaCostLabel = (symbols: readonly ManaSymbol[]): string =>
-  symbols.length === 0 ? 'no mana cost' : `mana cost ${symbols.map((s) => s.label).join(', ')}`
+export const manaCostLabel = (symbols: readonly ManaSymbol[]): string => {
+  if (symbols.length === 0) return 'no mana cost'
+  /*
+   * Comma between symbols, space around a separator.
+   *
+   * The separator is a joiner and not an item, so the plain `join(', ')` this
+   * replaces would announce Fire // Ice as "red, or, 1 generic" — a list with a
+   * loose word dropped into it. Spaces give "1 generic, red or 1 generic, blue",
+   * where the two costs are two phrases and "or" belongs to neither.
+   */
+  const words = symbols.reduce((sentence, symbol, index) => {
+    if (index === 0) return symbol.label
+    const glue =
+      symbol.kind === 'separator' || symbols[index - 1]?.kind === 'separator' ? ' ' : ', '
+    return sentence + glue + symbol.label
+  }, '')
+  return `mana cost ${words}`
+}
 
 // ---------------------------------------------------------------- painting
 

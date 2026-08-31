@@ -448,6 +448,18 @@
   font: 500 0.85em/1.4 var(--mono);
 }
 
+/*
+ * The `//` between the two halves of a split card's cost. Text and not a disc,
+ * because no card prints it in a circle — and deliberately not `.rt-sym-raw`,
+ * whose alarm border means "unknown symbol, go fix it". This one is understood.
+ * Dimmed so the discs either side stay the thing being read.
+ */
+.rt-sym-sep {
+  padding: 0 1px;
+  color: var(--parchment-dim);
+  font: 500 0.85em/1.4 var(--mono);
+}
+
 /* A symbol sitting in a sentence rather than in a cost line. Nudged down a
    fraction so the disc sits on the text baseline instead of riding above it. */
 .rt-inline-sym {
