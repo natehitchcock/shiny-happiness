@@ -294,6 +294,18 @@ describe('the stylesheet parses', () => {
 describe('the preview at each width', () => {
   const css = readFileSync(join(here, 'styles.css'), 'utf8')
 
+  /*
+   * The rail's own rule, and only it.
+   *
+   * This was `/\.region\.analysis\s*\{([^}]*)\}/`, which finds the first rule
+   * whose selector merely ENDS with `.region.analysis` — so the moment anything
+   * declared `.workspace[...] > .region.analysis` earlier in the sheet, these
+   * tests started reading that rule instead and failed on a sheet that was
+   * perfectly correct. Anchoring to the start of a line pins the unconditional,
+   * unindented rule, which is the one being asserted about.
+   */
+  const railRule = (): string => /^\.region\.analysis\s*\{([^}]*)\}/m.exec(css)?.[1] ?? ''
+
   it('anchors to the analysis rail only above the single-column breakpoint', () => {
     const desktop = /@media \(min-width:\s*901px\)\s*\{\s*\.preview\s*\{([^}]*)\}/.exec(css)
     expect(desktop).not.toBeNull()
@@ -324,8 +336,7 @@ describe('the preview at each width', () => {
      * they never overlap, and a rail that could cover the deck switcher would
      * be a worse bug than the one this fixes.
      */
-    const rail = /\.region\.analysis\s*\{([^}]*)\}/.exec(css)
-    const railZ = /z-index:\s*(\d+)/.exec(rail?.[1] ?? '')
+    const railZ = /z-index:\s*(\d+)/.exec(railRule())
     // The masthead is declared twice — a layout rule and, later, the sticky
     // rule that carries the z-index. Take the one that sets it.
     const mastheadZ = /\.masthead\s*\{[^}]*z-index:\s*(\d+)/.exec(css)
@@ -339,8 +350,216 @@ describe('the preview at each width', () => {
     // `.region.analysis` was `overflow: hidden`, which clipped both the overlay
     // and the panel a curve bar opens. The scroll body still owns its own
     // scrolling, so nothing in normal flow escapes.
-    const rail = /\.region\.analysis\s*\{([^}]*)\}/.exec(css)
-    expect(rail?.[1]).toMatch(/overflow:\s*visible/)
+    expect(railRule()).toMatch(/overflow:\s*visible/)
     expect(css).toMatch(/\.analysis-scroll\s*\{[^}]*overflow-y:\s*auto/)
+  })
+})
+
+/**
+ * On a wide enough screen the detail pane stops covering the feed and becomes a
+ * column of its own.
+ *
+ * The defect the overlay caused: reading a card's details hid the Add and
+ * Reject buttons on the rows being read, so you could not act on what you were
+ * reading. The overlay is still the right answer when there is genuinely no
+ * room — these tests pin WHERE the line is and that the arithmetic behind it is
+ * the arithmetic in the sheet, not a number someone liked.
+ */
+describe('the detail pane as a fourth column', () => {
+  const sheet = strip(join(here, 'styles.css'))
+
+  /** The body of the `@media` block whose condition contains `q`, braces matched. */
+  const mediaBody = (q: string): string => {
+    const opener = new RegExp(`@media[^{]*${q}[^{]*\\{`, 'g')
+    const start = opener.exec(sheet)
+    if (start === null) return ''
+    let depth = 1
+    let i = opener.lastIndex
+    while (i < sheet.length && depth > 0) {
+      if (sheet[i] === '{') depth += 1
+      else if (sheet[i] === '}') depth -= 1
+      i += 1
+    }
+    return sheet.slice(opener.lastIndex, i - 1)
+  }
+
+  /** The threshold this whole feature is gated on, read from the sheet. */
+  const threshold = (): number => {
+    const found = /@media \(min-width:\s*(\d+)px\)\s*\{\s*\.workspace\[data-detail='open'\]/.exec(
+      sheet,
+    )
+    expect(found).not.toBeNull()
+    return Number(found?.[1])
+  }
+
+  /** One declaration's value out of one rule inside the four-column block. */
+  const declared = (selector: string, property: string): string | null => {
+    const body = mediaBody(`min-width: ${String(threshold())}px`)
+    const rule = new RegExp(
+      `${selector.replace(/[[\]().*+?^$|\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`,
+    ).exec(body)?.[1]
+    if (rule === undefined) return null
+    return new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`).exec(rule)?.[1]?.trim() ?? null
+  }
+
+  /** `grid-template-columns` split into tracks, respecting `minmax(...)`. */
+  const tracks = (): string[] => {
+    const value = declared(".workspace[data-detail='open']", 'grid-template-columns')
+    expect(value).not.toBeNull()
+    const out: string[] = []
+    let depth = 0
+    let current = ''
+    for (const ch of value ?? '') {
+      if (ch === '(') depth += 1
+      if (ch === ')') depth -= 1
+      if (ch === ' ' && depth === 0) {
+        if (current !== '') out.push(current)
+        current = ''
+      } else current += ch
+    }
+    if (current !== '') out.push(current)
+    return out
+  }
+
+  /** The smallest width a track can take, in px. */
+  const floorPx = (track: string): number => {
+    const min = /^minmax\(\s*([^,]+),/.exec(track)?.[1]?.trim() ?? track
+    if (min.endsWith('rem')) return Number.parseFloat(min) * 16
+    return Number.parseFloat(min)
+  }
+
+  it('gives the panel a track of its own, and puts the rail past it', () => {
+    const four = tracks()
+    expect(four).toHaveLength(4)
+    // Third of four: beside the suggestion row it describes, and still left of
+    // the rail, which the user asked to keep for composition and combos.
+    expect(four[2]).toBe('21rem')
+    /*
+     * Three regions into four tracks auto-place into 1, 2 and 3 — the rail
+     * would sit in the detail's slot and the reserved column would open at the
+     * far right, behind nothing. The rail is placed rather than left to the
+     * cursor.
+     */
+    expect(declared(".workspace[data-detail='open'] > .region.analysis", 'grid-column')).toBe('4')
+  })
+
+  it('asks the deck rail for the width it actually needs, not the one it declares', () => {
+    /*
+     * The grid's own floor for the side rails is 230px, and the deck rail cannot
+     * hold it: measured in Chrome, at 230px the deck row's Remove button finishes
+     * 58px OUTSIDE the column, on top of the feed. The spill reaches zero at
+     * 310px.
+     *
+     * The cause is a defect in the row, not in the grid — the
+     * `@container (max-width: 250px)` rule meant to drop the mana column on a
+     * cramped rail never fires, because `.card-row .mana { display: flex }` is
+     * declared later at equal specificity and wins the cascade. That is somebody
+     * else's fix. What this pins is that the four-column layout does not build a
+     * threshold on a floor the rail cannot stand on.
+     */
+    expect(floorPx(tracks()[0] ?? '')).toBeGreaterThanOrEqual(310)
+  })
+
+  it('opens the column only where all four columns still fit', () => {
+    /*
+     * The derivation, executable so it cannot drift from the comment beside it.
+     *
+     * Every floor here was measured on the running app rather than read off a
+     * `minmax`: 400px for the feed, below which `.card-row .name` is already at
+     * its 5rem minimum and the name button is wider than the cell holding it;
+     * 310px for the deck rail, above; 230px for the analysis rail, which does
+     * hold its declared floor. The detail column is the panel's own 21rem.
+     *
+     * The scrollbar allowance is not slop. Chrome resolves a media query against
+     * `innerWidth`, which on Windows includes the classic scrollbar that the
+     * layout viewport does not get — measured on the running app at
+     * `clientWidth` 2545 with `(min-width: 2546px)` matching.
+     */
+    const four = tracks()
+    const feedFloor = 400
+    const scrollbar = 17
+    const gaps = 3 // three 1px rules between four columns
+    const layout = threshold() - scrollbar
+    const feed =
+      layout - gaps - floorPx(four[2] ?? '') - floorPx(four[0] ?? '') - floorPx(four[3] ?? '')
+    expect(feed).toBeGreaterThanOrEqual(feedFloor)
+  })
+
+  it('never makes opening a card reformat the rows it describes', () => {
+    /*
+     * The reflow cost, bounded rather than hoped about. The feed narrows when
+     * the column opens, and a feed that drops its price column the moment you
+     * click a card would be a worse experience than the overlay was. So the
+     * threshold has to leave the feed above the width at which the container
+     * query trips, with the panel open — which is exactly why the floor above
+     * is the name's 400px and not the price query's own number.
+     */
+    const priceQuery = /@container \(max-width:\s*(\d+)px\)\s*\{\s*\.card-row \.cash/.exec(sheet)
+    expect(priceQuery).not.toBeNull()
+    // `.region` pads `calc(var(--step) * 2)` a side and `--step` is 0.5rem, so
+    // the query container is 32px narrower than its column.
+    const columnAtWhichPriceDrops = Number(priceQuery?.[1]) + 32
+    const four = tracks()
+    const feed =
+      threshold() -
+      17 -
+      3 -
+      floorPx(four[2] ?? '') -
+      floorPx(four[0] ?? '') -
+      floorPx(four[3] ?? '')
+    expect(feed).toBeGreaterThan(columnAtWhichPriceDrops)
+  })
+
+  it('fills the reserved track exactly, top to bottom, so none of it shows through', () => {
+    /*
+     * `.workspace` paints `--rule` and each region paints `--ink` over its own
+     * track, so a reserved track has nothing in it but the grid's background —
+     * and the workspace is several thousand pixels tall. Any part of the column
+     * the panel does not cover is a slab of rule colour. The panel is the
+     * column's background as well as its content, which is why it is stretched
+     * rather than left at its content height.
+     *
+     * `right: calc(100% + 1px)` lands its right edge on the rule between the
+     * two columns whatever the grid rounds the tracks to, because `100%` is the
+     * rail's own padding box.
+     */
+    expect(declared(".workspace[data-detail='open'] .preview", 'width')).toBe('21rem')
+    expect(declared(".workspace[data-detail='open'] .preview", 'right')).toBe('calc(100% + 1px)')
+    expect(declared(".workspace[data-detail='open'] .preview", 'top')).toBe('0')
+    expect(declared(".workspace[data-detail='open'] .preview", 'bottom')).toBe('0')
+    // The overlay's caps would fight the stretch: `max-height` wins over
+    // `bottom` when the box is over-constrained, and would leave a bare strip.
+    expect(declared(".workspace[data-detail='open'] .preview", 'max-height')).toBe('none')
+  })
+
+  it('drops the shadow that said "on top of"', () => {
+    // The shadow is what made an overlay read as an overlay. Beside is not on
+    // top of, and a shadow on a column makes it look like it has come loose.
+    expect(declared(".workspace[data-detail='open'] .preview", 'box-shadow')).toBe('none')
+  })
+
+  it('leaves the three-column grid alone when nothing is selected', () => {
+    /*
+     * A permanently reserved track would take 21rem from the feed at every
+     * moment to hold a space for a panel that is closed most of the time, which
+     * is the opposite of "when there is space". So every rule here is gated on
+     * the workspace saying a panel is actually open.
+     */
+    const body = mediaBody(`min-width: ${String(threshold())}px`)
+    const selectors = body.match(/[^{}]+(?=\{)/g) ?? []
+    expect(selectors.length).toBeGreaterThan(0)
+    for (const selector of selectors) {
+      expect(selector).toContain("[data-detail='open']")
+    }
+  })
+
+  it('is out of reach of the mobile sheet and of the overlay it replaces', () => {
+    // Three disjoint regimes: sheet at ≤900, overlay from 901, column from the
+    // threshold. The sheet is a `max-width` block, so a `min-width` threshold
+    // above 900 can never reach it.
+    expect(threshold()).toBeGreaterThan(900)
+    expect(mediaBody(`min-width: ${String(threshold())}px`)).not.toContain('preview-sheet')
+    // And the overlay is still there for the band below the threshold.
+    expect(sheet).toMatch(/@media \(min-width:\s*901px\)\s*\{\s*\.preview\s*\{[^}]*right:\s*100%/)
   })
 })

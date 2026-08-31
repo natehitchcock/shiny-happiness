@@ -4711,6 +4711,23 @@ export const Workspace = ({
       ? accepted.filter((e) => (prices.get(e.oracleId) ?? 0) > budget.maxCardUsd!).length
       : 0
 
+  /*
+   * Whether the preview is on screen, hoisted out of the `<Preview>` call so the
+   * workspace grid can read it too.
+   *
+   * Above 1240px the panel is a column of the grid rather than an overlay on the
+   * feed, and a grid reserves its tracks in the PARENT — CSS cannot ask whether a
+   * descendant rendered. So the workspace states it and `styles.css` reads it.
+   *
+   * It is the panel's own render condition and not `inspect !== null`, which is
+   * the same test one step too early: `open` sets `inspect` before the detail
+   * request goes out, and a card the hydration maps have never seen previews
+   * only once that request lands. Keying the grid on the click would open an
+   * empty 21rem column and hold it there for the length of a round trip.
+   */
+  const previewCard = inspect === null ? undefined : cards.get(inspect)
+  const detailOpen = (previewCard ?? detail ?? null) !== null
+
   return (
     <>
       <header className="masthead">
@@ -4849,7 +4866,7 @@ export const Workspace = ({
         />
       ) : null}
 
-      <div className="workspace" hidden={webMode}>
+      <div className="workspace" hidden={webMode} data-detail={detailOpen ? 'open' : 'closed'}>
         <section className="region" aria-label="Deck">
           <h2>Deck · {deckSize}</h2>
 
@@ -5514,7 +5531,7 @@ export const Workspace = ({
             of box and not a change of parent.
           */}
           <Preview
-            card={inspect === null ? undefined : cards.get(inspect)}
+            card={previewCard}
             detail={detail}
             price={prices.get(inspect ?? '')}
             images={images.get(inspect ?? '')}
