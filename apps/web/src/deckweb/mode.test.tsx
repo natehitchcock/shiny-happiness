@@ -153,8 +153,8 @@ afterEach(() => {
 })
 
 const enterWeb = async (): Promise<void> => {
-  await act(async () => screen.getByRole('button', { name: 'Web' }).click())
-  await waitFor(() => expect(screen.getByLabelText(/Deck web for/)).toBeTruthy())
+  await act(async () => screen.getByRole('button', { name: 'Graph' }).click())
+  await waitFor(() => expect(screen.getByLabelText(/Deck graph for/)).toBeTruthy())
 }
 
 describe('entering and leaving the mode', () => {
@@ -165,7 +165,7 @@ describe('entering and leaving the mode', () => {
 
     // The masthead is how you get back, so it survives the switch.
     expect(screen.getByText(/Lotus/)).toBeTruthy()
-    expect(screen.getByLabelText('Deck web for Aristocrats')).toBeTruthy()
+    expect(screen.getByLabelText('Deck graph for Aristocrats')).toBeTruthy()
     // Doc 17 §17.1: the web replaces everything below the masthead.
     expect(document.querySelector('.workspace')?.hasAttribute('hidden')).toBe(true)
   })
@@ -194,9 +194,9 @@ describe('entering and leaving the mode', () => {
   it('marks the masthead control as pressed while the mode is on', async () => {
     render(<Workspace deck={deck} />)
     await waitFor(() => expect(screen.getByText('Viscera Seer')).toBeTruthy())
-    expect(screen.getByRole('button', { name: 'Web' }).getAttribute('aria-pressed')).toBe('false')
+    expect(screen.getByRole('button', { name: 'Graph' }).getAttribute('aria-pressed')).toBe('false')
     await enterWeb()
-    expect(screen.getByRole('button', { name: 'Web' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Graph' }).getAttribute('aria-pressed')).toBe('true')
   })
 })
 

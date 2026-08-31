@@ -102,6 +102,156 @@ const cardView = (
   imageUris: viewImageUris(images),
 })
 
+/**
+ * The cheapest price across a card's printings.
+ *
+ * The fallback for a card the hydration maps never covered — a name-match
+ * result is not in the deck and not in the suggestion feed, so `prices` has no
+ * entry for it and the preview printed a bare em dash beside "est. cheapest of
+ * 53 printings". The panel was reading the printings to COUNT them and not to
+ * answer the question the count was decorating.
+ *
+ * `null` only when no printing carries a price at all, which is a real answer:
+ * the estimate does not exist rather than being unknown.
+ */
+export const cheapestPrinting = (
+  printings: readonly { priceUsd: number | null }[],
+): number | null => {
+  let best: number | null = null
+  for (const p of printings) {
+    if (p.priceUsd === null) continue
+    if (best === null || p.priceUsd < best) best = p.priceUsd
+  }
+  return best
+}
+
+/**
+ * Art from the first printing that has any.
+ *
+ * First rather than cheapest, deliberately: `printingsFor` orders by set code
+ * and collector number, so "first" is the earliest printing, which is the one
+ * most people picture. Pairing the art with the CHEAPEST printing was the other
+ * option and was rejected — it would put a different card on screen depending
+ * on the day's prices, and the note under it already says the price is for a
+ * printing that may not be the one shown (ADR-0021).
+ *
+ * Empty strings are absence, not URLs: `packages/db` writes `''` for a printing
+ * with no cached image, and `<img src="">` re-requests the page itself.
+ */
+export const artFromPrintings = (
+  printings: readonly { imageUris?: { artCrop: string; normal: string } }[],
+): api.ImageUris | undefined => {
+  for (const p of printings) {
+    const artCrop = p.imageUris?.artCrop ?? ''
+    const normal = p.imageUris?.normal ?? ''
+    if (artCrop === '' && normal === '') continue
+    return { artCrop: artCrop === '' ? null : artCrop, normal: normal === '' ? null : normal }
+  }
+  return undefined
+}
+
+/**
+ * An enum key as a phrase, for a `kind` or a source key this build has no
+ * sentence for.
+ *
+ * The point is that a NEW kind from a newer server degrades to readable English
+ * instead of to `not-legal-in-commander`. It is a fallback and never the first
+ * choice: every kind the domain declares today has a real sentence below.
+ */
+const humanise = (key: string): string => {
+  const words = key.replace(/[-_]/g, ' ').trim()
+  return words === '' ? 'Unknown' : words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/**
+ * A legality problem in words, naming the card it is about.
+ *
+ * Two defects in one line of JSX before this: the panel rendered `{p.kind}`, so
+ * a builder read `wrong-card-count`; and a problem carries an `oracleId` and no
+ * name, so `color-identity` reported an illegal card WITHOUT SAYING WHICH. The
+ * name is in the hydrated `cards` map — the same map the deck list draws from —
+ * so the only card that cannot be named is one this view has never loaded, and
+ * that is said in words rather than as a truncated uuid. A uuid is not an
+ * identifier to anybody holding a pile of cardboard.
+ */
+export const legalityText = (
+  p: api.LegalityProblem,
+  cards: ReadonlyMap<string, api.Card>,
+): string => {
+  const name = p.oracleId === undefined ? undefined : cards.get(p.oracleId)?.name
+  // Never the uuid. "A card" plus the rule broken is less information than a
+  // name and more than a 36-character string nobody can act on.
+  const subject = name ?? 'A card this view has not loaded'
+  switch (p.kind) {
+    case 'wrong-card-count': {
+      const actual = p.actual ?? 0
+      const expected = p.expected ?? 100
+      const off = expected - actual
+      if (off === 0) return `The deck has ${String(actual)} cards.`
+      return off > 0
+        ? `${String(off)} cards short of ${String(expected)} — the deck has ${String(actual)}.`
+        : `${String(-off)} cards over ${String(expected)} — the deck has ${String(actual)}.`
+    }
+    case 'not-singleton':
+      return `${subject}: ${String(p.copies ?? 0)} copies, and Commander allows ${String(p.allowed ?? 1)}.`
+    case 'banned':
+      return `${subject} is banned in Commander.`
+    case 'not-legal-in-commander':
+      return `${subject} is not legal in Commander.`
+    case 'color-identity': {
+      const off = p.offending ?? []
+      return off.length === 0
+        ? `${subject} is outside your commander's colour identity.`
+        : `${subject} is outside your commander's colour identity (${off.join('')}).`
+    }
+    case 'no-commander':
+      return 'This deck has no commander.'
+    case 'too-many-commanders':
+      return `${String(p.count ?? 0)} commanders — Commander allows one, or two that partner.`
+    case 'invalid-commander':
+      return `${subject} cannot lead a deck${p.reason === undefined ? '' : ` — ${p.reason}`}.`
+    case 'invalid-partnership':
+      return `These commanders cannot be paired${p.reason === undefined ? '' : ` — ${p.reason}`}.`
+    case 'unknown-card':
+      return `${subject} is not in the card corpus.`
+    default:
+      // A kind added after this build. Readable, and it still names the card.
+      return name === undefined ? humanise(p.kind) : `${humanise(p.kind)} — ${name}`
+  }
+}
+
+/**
+ * The name of a thing the server could not compute.
+ *
+ * `top-<type>` is a PLACEHOLDER the domain uses because the real key is one per
+ * card type, and the "Not computed" list printed it literally — angle brackets
+ * and all — as though it were the name of a feature. Mapped here rather than
+ * renamed in `packages/domain`: the key is a contract (AGENTS.md R2) and it is
+ * the right key, it was only ever the wrong thing to show a person.
+ */
+export const unavailableLabel = (key: string): string => {
+  switch (key) {
+    case 'top-<type>':
+      return 'Most-played, by card type'
+    case 'high-synergy':
+      return 'High synergy'
+    case 'statistics':
+      return 'Play statistics'
+    case 'combos':
+      return 'Combo data'
+    case 'dataset-snapshot':
+      return 'Dataset snapshot'
+    case 'bracket-assessment':
+      return 'Bracket assessment'
+    case 'commander-eligibility':
+      return 'Commander eligibility'
+    case 'commander-partnership':
+      return 'Commander partnership'
+    default:
+      return humanise(key)
+  }
+}
+
 /** A cut reason, in words. The badge never shows a bare kind. */
 const cutText = (r: {
   kind: string
@@ -1103,9 +1253,32 @@ const Preview = ({
   }, [shownId, sheet, onClose])
 
   if (shown === null || shown === undefined) return null
+  /*
+   * Art and price, from the hydration maps FIRST and the detail's printings
+   * second.
+   *
+   * The maps only hold cards in the deck or in the current suggestion feed, so
+   * a card reached from "Cards named like…" — the one route that deliberately
+   * shows cards that are NOT candidates — had no entry in either and previewed
+   * with no image and a bare em dash, directly under a line saying it had 53
+   * printings. The detail was already in hand and already being counted; it
+   * simply was never read for anything else.
+   *
+   * The maps stay first because they are the answer the rest of the app agrees
+   * with: `images` is the DEFAULT printing (ADR-0021) and `prices` is the
+   * server's own cheapest, so a hydrated card must not change appearance or
+   * price the moment its detail lands.
+   */
+  const printings = detail?.printings ?? []
+  // `viewImageUris` is the test for "is there art here at all": a hydrated
+  // entry with both members null is one of the 501 art-less cards, and falling
+  // through to the printings is what gives those cards a picture when a
+  // non-default printing has one.
+  const art = viewImageUris(images) === undefined ? artFromPrintings(printings) : images
+  const shownPrice = price ?? cheapestPrinting(printings)
   // Built once and read twice — the face draws from it, and the note line asks
   // it whether there is a face at all before deciding where the price goes.
-  const view = cardView(shown, price, images)
+  const view = cardView(shown, shownPrice, art)
   return (
     <aside
       ref={ref}
@@ -1205,7 +1378,7 @@ const Preview = ({
             for. The art above is the default printing and the price is the
             cheapest one, and for about a third of the corpus those are two
             different cards (ADR-0021). */}
-        {view.imageUris === undefined ? `${usd(price)} ` : ''}
+        {view.imageUris === undefined ? `${usd(shownPrice)} ` : ''}
         <span className="estimate">est.</span>{' '}
         {detail === null
           ? 'cheapest printing'
@@ -2000,6 +2173,59 @@ interface QueryResult {
 }
 
 /**
+ * What an empty suggestion heading means, in words.
+ *
+ * One badge, five states, and the whole point is that they are not the same
+ * badge. `satisfied` was previously shown for all of them, so a filter that
+ * matched nothing and a request that failed both reported the deck's needs as
+ * met — the second of those while the app held no information whatsoever.
+ *
+ * The words go in the badge and the arithmetic goes in the `title`, because the
+ * heading is a flex row that already carries a name, a count, a rationale and
+ * two buttons; a sentence in it wraps the row on a phone. The badge text alone
+ * is never a lie, which is the property that matters — the tooltip only adds
+ * detail, it does not correct the label.
+ */
+const GroupBadge = ({
+  state,
+  gap,
+  total,
+}: {
+  state: 'rows' | 'stale' | 'filtered' | 'short' | 'decided' | 'satisfied'
+  /** How many cards short this heading's dimension is, if it names one. */
+  gap: number | null
+  total: number
+}): React.JSX.Element | null => {
+  if (state === 'rows') return null
+  const shortfall =
+    gap === null || gap === 0 ? '' : ` The deck is still ${plural(gap, 'card')} short here.`
+  const badge = {
+    stale: {
+      text: 'not updated',
+      title: `The last refresh did not finish, so this list is out of date. Nothing here has been checked against your deck.${shortfall}`,
+    },
+    filtered: {
+      text: 'no match',
+      title: `Nothing in this group matches your filter. That is a fact about the query, not about the deck.${shortfall}`,
+    },
+    short: {
+      text: gap === null ? 'still short' : `still short ${String(gap)}`,
+      title: `Nothing left to show under this heading, and the gap it names is still open.${shortfall}`,
+    },
+    decided: {
+      text: 'all rejected',
+      title: `You rejected every suggestion offered here. ${plural(total, 'candidate')} matched — ask for more to see the rest.`,
+    },
+    satisfied: { text: 'satisfied', title: 'This need is met. Nothing is missing here.' },
+  }[state]
+  return (
+    <span className="satisfied" data-state={state} title={badge.title}>
+      {badge.text}
+    </span>
+  )
+}
+
+/**
  * The progress bar in the masthead.
  *
  * Two halves that mean different things, which is why it is one bar and not a
@@ -2562,6 +2788,25 @@ export const Workspace = ({
   const serverDeckRef = useRef<api.Deck | null>(null)
   /** The suggestions region, so the column legend can find the columns in it. */
   const suggestionsRef = useRef<HTMLElement>(null)
+  /** The filter box — the last resort for focus when the feed empties out. */
+  const filterRef = useRef<HTMLInputElement>(null)
+  /**
+   * The suggestion row focus should land on once the current render settles.
+   *
+   * A ref rather than state: setting it must not itself cause a render, and it
+   * is written during an event and read in the layout effect of the very render
+   * that event caused. Held by oracle id, not by element — the element the user
+   * pressed is on its way out of the document, which is the whole problem.
+   */
+  const focusAfterAct = useRef<string | null>(null)
+  /**
+   * What just happened, for a screen reader.
+   *
+   * Its own region rather than reusing `notice`: `notice` is a visible banner
+   * across the top of the workspace, and a banner for every one of 98 accepts
+   * would be noise everybody learns to ignore. This one is only ever announced.
+   */
+  const [announcement, setAnnouncement] = useState('')
 
   /**
    * Locks the user has set that no server response has confirmed yet.
@@ -2719,7 +2964,11 @@ export const Workspace = ({
      * cannot tell those apart, so the label reads the commands.
      */
     describe: (queued) => {
-      if (queued.length === 0) return 'Preparing…'
+      // Nothing queued is nothing to describe. Returning a string here — it
+      // said "Preparing…" — overrode the phase-derived label for every run
+      // with no clicks behind it, so the masthead's live region announced
+      // "Preparing…" while idle and again through every filter recompute.
+      if (queued.length === 0) return undefined
       const words: Record<PendingCommand['type'], string> = {
         accept: 'Adding',
         exclude: 'Rejecting',
@@ -2799,6 +3048,102 @@ export const Workspace = ({
     setPending((current) => [...current, { type, oracleId }])
     pipeline.schedule({ type, oracleId })
   }
+
+  /**
+   * The suggestion row after this one, by oracle id.
+   *
+   * Read off the DOM rather than recomputed from `visibleGroups`, because the
+   * destination has to be the row the user can SEE below the one they just
+   * acted on — across group boundaries, past rows a decision has already
+   * removed, and in whatever order the feed actually rendered. Deriving it from
+   * the data would mean restating the render's own filtering and flattening,
+   * and the two would drift apart the first time either changed.
+   *
+   * Scoped to `suggestionsRef`: the deck rail uses `.card-row` too, and landing
+   * focus over there would be worse than landing it nowhere.
+   *
+   * Falls back to the row ABOVE for the last row in the feed, which is the only
+   * remaining neighbour.
+   */
+  const rowAfter = (oracleId: string): string | null => {
+    const root = suggestionsRef.current
+    if (root === null) return null
+    const rows = [...root.querySelectorAll<HTMLElement>('.card-row[data-row-id]')]
+    const at = rows.findIndex((r) => r.dataset['rowId'] === oracleId)
+    if (at < 0) return null
+    return (rows[at + 1] ?? rows[at - 1])?.dataset['rowId'] ?? null
+  }
+
+  /**
+   * Accept or reject from the suggestion feed (AGENTS.md R4, pillar P1).
+   *
+   * `act` alone is what the button used to call, and it left a keyboard user
+   * stranded: Enter on "Add" replaced that button with a spinner — or, for
+   * Reject, removed the whole row — the focused element left the document, and
+   * focus fell to `<body>`. The next Tab restarted at the masthead, so
+   * accepting the second of 98 suggestions cost seven tabs, the third cost
+   * seven more, and so on. Nothing said the card had been added, either: the
+   * only live region on the page was the progress bar.
+   *
+   * The fix is the pattern already in this file for the preview, which stores
+   * `previewOpener` and hands focus back on close. The destination differs
+   * because the situation does: there is nothing to hand focus BACK to — the
+   * control is gone and its row may be gone with it — so focus goes forward, to
+   * the row that has taken its place. That is also where the user is looking.
+   */
+  const decide = (oracleId: string, type: 'accept' | 'exclude'): void => {
+    // Captured BEFORE the state change, while the feed still holds the row we
+    // are acting on; afterwards its neighbours have shifted under us.
+    focusAfterAct.current = rowAfter(oracleId)
+    const name = cards.get(oracleId)?.name ?? 'Card'
+    const size =
+      optimistic.commanders.length + optimistic.entries.filter((e) => e.zone === 'accepted').length
+    // The count is not decoration: it is what makes two adds in a row two
+    // distinct announcements. A live region with identical text is silent the
+    // second time, which is exactly when a user most needs the confirmation.
+    setAnnouncement(
+      type === 'accept'
+        ? `${name} added. ${plural(size + 1, 'card')} in the deck.`
+        : `${name} rejected. ${plural(size, 'card')} in the deck.`,
+    )
+    act(oracleId, type)
+  }
+
+  /**
+   * Put focus on the row that replaced the one just acted on.
+   *
+   * A layout effect, not an effect: it runs before the browser paints, so focus
+   * never visibly rests on `<body>` and a screen reader is not told about a
+   * document-level focus it is about to lose again.
+   *
+   * Only when focus has actually been dropped. A user who tabbed away, or
+   * clicked into the filter box, while the row was unmounting must not have
+   * focus yanked back into the feed — so the effect claims focus only from
+   * `<body>` or from an element that has left the document, which are the two
+   * ways the browser signals "the thing you were on is gone".
+   */
+  useLayoutEffect(() => {
+    const target = focusAfterAct.current
+    if (target === null) return
+    focusAfterAct.current = null
+    const active = document.activeElement
+    if (active !== null && active !== document.body && active.isConnected) return
+    const root = suggestionsRef.current
+    if (root === null) return
+    const row = [...root.querySelectorAll<HTMLElement>('.card-row[data-row-id]')].find(
+      (r) => r.dataset['rowId'] === target,
+    )
+    // `Add` by preference — it is the action the user is repeating. A row whose
+    // own command is still in flight has a spinner where its buttons were, so
+    // any focusable control in it is better than none.
+    const next =
+      row?.querySelector<HTMLElement>('button.accept') ??
+      row?.querySelector<HTMLElement>('button') ??
+      null
+    // Nothing left in the feed to land on: back to the control that produced
+    // it, which is a real place to be rather than the top of the document.
+    ;(next ?? filterRef.current)?.focus()
+  })
 
   /**
    * Move a basic to an exact count.
@@ -3204,7 +3549,67 @@ export const Workspace = ({
       return decided === undefined || decided.zone !== 'excluded'
     }).length
 
-  /** Collapsed by choice, or because the deck no longer needs this category. */
+  /**
+   * The gap a `fills-<dimension>` heading names, as the last analysis measured
+   * it. `null` for a heading that names no gap at all — a combo group is not
+   * short of anything, so "satisfied" is not a thing that can be true of it.
+   *
+   * The key's suffix IS the dimension name: `labelFor` in the domain builds
+   * `fills-<dimensionLabel(d)>` and looks the deficit up by exactly that
+   * string, so reading it back the same way is not a guess. Read from
+   * `analysis.deficits` rather than parsed out of the label text — the label
+   * already prints the number, and two readings of one fact drift.
+   */
+  const gapIn = (g: api.Group): number | null => {
+    if (analysis === null || !g.key.startsWith('fills-')) return null
+    const name = g.key.slice('fills-'.length)
+    const deficit = analysis.deficits.find((d) => dimensionName(d.dimension) === name)
+    return deficit === undefined ? 0 : Math.max(0, -deficit.delta)
+  }
+
+  /**
+   * Why a heading has no rows under it.
+   *
+   * This used to be one test — `rowsIn(g) === 0` — driving one badge that said
+   * SATISFIED, and it conflated four situations that call for four different
+   * reactions from the user. The worst of them was the third: with the API
+   * down, every heading claimed the deck's every need was met, at the exact
+   * moment the app knew nothing at all, with a small `Request failed (502)` as
+   * the only contradiction.
+   *
+   *   stale     the last run failed. We do not know what is in this group, so
+   *             nothing may be claimed about it — including that it is fine.
+   *   filtered  the server had candidates here and the FILTER took every one.
+   *             `total` is the count matching the query before `limitPerGroup`
+   *             (see `CandidateGroup` in the domain), and the server only emits
+   *             a group at all if it has members or withheld some — so with a
+   *             query active, `total === 0` means precisely "your query, not
+   *             your deck". The gap is untouched and is still reported.
+   *   short     nothing to show, and the gap this heading names is still open.
+   *             The one the repro caught: `Fills gap · land -27` and SATISFIED
+   *             on the same line.
+   *   decided   rows were offered here and you acted on all of them.
+   *   satisfied no filter, no failure, no measurable gap left. The honest one,
+   *             and the only case that keeps the badge.
+   *
+   * Order matters and is from least to most knowledge: a failure outranks a
+   * filter because a failed run's `total` describes a question we no longer
+   * know the answer to.
+   */
+  const emptinessOf = (
+    g: api.Group,
+  ): 'rows' | 'stale' | 'filtered' | 'short' | 'decided' | 'satisfied' => {
+    if (rowsIn(g) > 0) return 'rows'
+    // No analysis is not "no gap" either: without it the deficit is unreadable,
+    // so the honest answer is the same one a failed run gets.
+    if (pipeline.error !== null || analysis === null) return 'stale'
+    if (query.trim() !== '' && g.total === 0) return 'filtered'
+    const gap = gapIn(g)
+    if (gap !== null && gap > 0) return 'short'
+    return g.total > 0 ? 'decided' : 'satisfied'
+  }
+
+  /** Collapsed by choice, or because there is nothing under the heading. */
   const isCollapsed = (g: api.Group): boolean => collapsed.has(g.key) || rowsIn(g) === 0
 
   const toggleCollapsed = (key: string): void =>
@@ -3445,15 +3850,22 @@ export const Workspace = ({
         <button className="act" onClick={exportDeck}>
           Export
         </button>
-        {/* Doc 17 §17.1: the web is entered from a control in the masthead and
+        {/* Doc 17 §17.1: the mode is entered from a control in the masthead and
             left the same way. `aria-pressed` rather than two buttons, because
-            it is one thing being turned on and off. */}
+            it is one thing being turned on and off.
+
+            Labelled "Graph", not "Web": on a page served over the web, in an
+            app whose other masthead controls are Import and Export, "Web" reads
+            as a destination rather than as a view of the deck. The ROUTE stays
+            `#web` and so do the module and the class names — a bookmark that
+            stopped working would be a real cost for a wording change. */}
         <button
           className="act"
           aria-pressed={webMode}
+          title={webMode ? 'Back to the deck list' : "See the deck as a graph of what it's doing"}
           onClick={() => (webMode ? leaveDeckWeb() : enterDeckWeb())}
         >
-          Web
+          Graph
         </button>
       </header>
 
@@ -3495,6 +3907,16 @@ export const Workspace = ({
           }}
         />
       ) : null}
+
+      {/* Accepting a card is a change to the deck with no visible confirmation
+          of its own — the row grows a spinner and the count in the masthead
+          ticks over, neither of which a screen reader is watching. This says it.
+          Always mounted: a live region only announces text that changes INSIDE
+          an already-present region, so one that appears with its message is
+          routinely missed. */}
+      <p className="sr" role="status" aria-live="polite">
+        {announcement}
+      </p>
 
       {notice !== null ? (
         <p className="banner note" role="status">
@@ -3793,6 +4215,7 @@ export const Workspace = ({
           <div className="field">
             <div className="filter-bar">
               <input
+                ref={filterRef}
                 type="text"
                 value={draftQuery}
                 placeholder="Filter — try  t:creature  or  mv<=3  or  tag:treasure"
@@ -3897,10 +4320,11 @@ export const Workspace = ({
                 </button>
                 <h3>{g.label}</h3>
                 <span className="count">{g.total}</span>
-                {/* A category the deck has satisfied is kept, not deleted — it
-                    says the need is met, which is the answer to the question
-                    the heading asks. */}
-                {rowsIn(g) === 0 ? <span className="satisfied">satisfied</span> : null}
+                {/* A heading with no rows is kept, not deleted — but WHY it has
+                    no rows is four different answers and it used to give one.
+                    `satisfied` is now reserved for the case that is actually
+                    satisfied; see `emptinessOf`. */}
+                <GroupBadge state={emptinessOf(g)} gap={gapIn(g)} total={g.total} />
                 <span className="rationale">{g.rationale}</span>
                 <button
                   type="button"
@@ -3940,7 +4364,10 @@ export const Workspace = ({
                       return decided === undefined || decided.zone !== 'excluded'
                     })
                     .map((item) => (
-                      <div className="card-row" key={item.oracleId}>
+                      // `data-row-id` is what `rowAfter` walks: after an accept
+                      // or a reject, focus has to find the row that took this
+                      // one's place, and the key alone is not in the DOM.
+                      <div className="card-row" data-row-id={item.oracleId} key={item.oracleId}>
                         <Degree
                           degree={item.comboDegree}
                           near={item.nearCombosAt1}
@@ -4041,7 +4468,7 @@ export const Workspace = ({
                           <>
                             <button
                               className="act accept"
-                              onClick={() => act(item.oracleId, 'accept')}
+                              onClick={() => decide(item.oracleId, 'accept')}
                               aria-label={`Add ${cards.get(item.oracleId)?.name ?? 'card'}`}
                             >
                               Add
@@ -4051,7 +4478,7 @@ export const Workspace = ({
                           harsher commitment than it actually is. */}
                             <button
                               className="act exclude"
-                              onClick={() => act(item.oracleId, 'exclude')}
+                              onClick={() => decide(item.oracleId, 'exclude')}
                               aria-label={`Reject ${cards.get(item.oracleId)?.name ?? 'card'}`}
                               title="Stop suggesting this card. You can undo it from the Rejected list."
                             >
@@ -4218,9 +4645,12 @@ export const Workspace = ({
             {unavailable.length > 0 ? (
               <div className="unavailable">
                 <strong>Not computed:</strong>
+                {/* The NAME of the thing, not its key. `top-<type>` is a
+                    placeholder the domain uses for a family of keys, and it was
+                    being printed literally, angle brackets and all. */}
                 {unavailable.map((u) => (
                   <div key={u.key}>
-                    {u.key} — {u.reason}
+                    {unavailableLabel(u.key)} — {u.reason}
                   </div>
                 ))}
               </div>
@@ -4242,11 +4672,16 @@ export const Workspace = ({
               {analysis.legality.problems.length === 0 ? (
                 <p className="note">No problems found.</p>
               ) : (
-                analysis.legality.problems.slice(0, 4).map((p, i) => (
-                  <p className="problem" key={i}>
-                    {p.kind}
-                  </p>
-                ))
+                analysis.legality.problems
+                  .slice(0, 4)
+                  // In words, and naming the card. `{p.kind}` used to be
+                  // rendered raw, so the rail read `wrong-card-count` and a
+                  // colour-identity problem named no card at all.
+                  .map((p, i) => (
+                    <p className="problem" key={i}>
+                      {legalityText(p, cards)}
+                    </p>
+                  ))
               )}
             </div>
           ) : null}

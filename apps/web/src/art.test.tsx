@@ -211,6 +211,155 @@ describe('the preview pane with a card that has no art', () => {
   })
 })
 
+/**
+ * The one route in the app that shows a card the deck has never hydrated.
+ *
+ * "Cards named like…" exists precisely to answer "is this card here" for a card
+ * that is NOT a suggestion and NOT in the deck — so `images` and `prices` have
+ * no entry for it, and the preview drew no art and a bare em dash directly
+ * under a line reading "est. cheapest of 53 printings". The panel was counting
+ * the printings and reading nothing else out of them.
+ */
+describe('a card opened from the name matches', () => {
+  const STRANGER = 'o9'
+  const P_ART = 'https://cards.scryfall.io/art_crop/front/9/9/shivan.jpg?1'
+  const P_NORMAL = 'https://cards.scryfall.io/normal/front/9/9/shivan.jpg?1'
+
+  const shivan = card({ oracleId: STRANGER, name: 'Shivan Dragon', oracleText: 'Flying.' })
+
+  const openStranger = async (detail: Partial<api.CardDetail>): Promise<HTMLElement> => {
+    mocked.searchCards.mockResolvedValue({ items: [shivan] })
+    mocked.getCardDetail.mockResolvedValue({ ...shivan, combos: [], ...detail } as api.CardDetail)
+    render(<Workspace deck={deck} />)
+    await waitFor(() => expect(screen.getByLabelText('Filter suggestions')).toBeTruthy())
+
+    const box = screen.getByLabelText('Filter suggestions') as HTMLInputElement
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+    await act(async () => {
+      setter?.call(box, 'Shivan Dragon')
+      box.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    // The name-match list follows the COMMITTED query, not the draft — typing
+    // no longer fires a recompute on its own.
+    await act(async () => screen.getByLabelText(/^Run this filter/).click())
+    await waitFor(() => expect(screen.getByText('Shivan Dragon')).toBeTruthy())
+    await act(async () => screen.getByText('Shivan Dragon').click())
+    return await screen.findByLabelText('Shivan Dragon details')
+  }
+
+  it('draws the art its printings carry, having none of its own hydrated', async () => {
+    const preview = await openStranger({
+      printings: [
+        {
+          printingId: 'p1',
+          setCode: 'lea',
+          setName: 'Limited Edition Alpha',
+          rarity: 'rare',
+          priceUsd: 1200,
+          imageUris: { artCrop: P_ART, normal: P_NORMAL },
+        },
+      ],
+    })
+    expect(preview.querySelector('img')?.getAttribute('src')).toBe(P_NORMAL)
+  })
+
+  it('prices it from the cheapest printing, not with an em dash', async () => {
+    const preview = await openStranger({
+      printings: [
+        {
+          printingId: 'p1',
+          setCode: 'lea',
+          setName: 'Alpha',
+          rarity: 'rare',
+          priceUsd: 1200,
+          imageUris: { artCrop: '', normal: '' },
+        },
+        {
+          printingId: 'p2',
+          setCode: 'm10',
+          setName: 'Magic 2010',
+          rarity: 'rare',
+          priceUsd: 0.45,
+          imageUris: { artCrop: '', normal: '' },
+        },
+        {
+          printingId: 'p3',
+          setCode: 'unp',
+          setName: 'Unpriced',
+          rarity: 'rare',
+          priceUsd: null,
+          imageUris: { artCrop: '', normal: '' },
+        },
+      ],
+    })
+    // Cheapest, and `null` is skipped rather than sorting below everything.
+    expect(preview.textContent).toContain('$0.45')
+    expect(preview.textContent).toContain('cheapest of 3 printings')
+  })
+
+  it('treats an empty image string as no art, not as a URL', async () => {
+    // `packages/db` writes '' for a printing with no cached image, and
+    // `<img src="">` re-requests the page itself.
+    const preview = await openStranger({
+      printings: [
+        {
+          printingId: 'p1',
+          setCode: 'lea',
+          setName: 'Alpha',
+          rarity: 'rare',
+          priceUsd: 3,
+          imageUris: { artCrop: '', normal: '' },
+        },
+      ],
+    })
+    expect(preview.querySelector('img')).toBeNull()
+    // With no face to carry the badge, the price comes back into the note.
+    expect(preview.textContent).toContain('$3.00')
+  })
+
+  it('survives a server whose printings carry no images key at all', async () => {
+    const preview = await openStranger({
+      printings: [
+        { printingId: 'p1', setCode: 'lea', setName: 'Alpha', rarity: 'rare', priceUsd: 3 },
+      ],
+    })
+    expect(preview.querySelector('img')).toBeNull()
+    expect(preview.textContent).toContain('Shivan Dragon')
+  })
+})
+
+describe('a card the deck HAS hydrated', () => {
+  it('keeps the hydrated art and price, so its detail landing changes nothing', async () => {
+    /*
+     * The hydration maps stay the first source on purpose. `images` is the
+     * DEFAULT printing (ADR-0021) and `prices` is the server's own cheapest; if
+     * the printings won, a card would swap its picture and its price a moment
+     * after opening, for no reason the reader could see.
+     */
+    mocked.getCardDetail.mockResolvedValue({
+      ...card(),
+      printings: [
+        {
+          printingId: 'p1',
+          setCode: 'other',
+          setName: 'Other',
+          rarity: 'rare',
+          priceUsd: 99,
+          imageUris: {
+            artCrop: 'https://cards.scryfall.io/art_crop/front/0/0/other.jpg?1',
+            normal: 'https://cards.scryfall.io/normal/front/0/0/other.jpg?1',
+          },
+        },
+      ],
+      combos: [],
+    } as unknown as api.CardDetail)
+    const preview = await openPreview()
+
+    expect(preview.querySelector('img')?.getAttribute('src')).toBe(NORMAL)
+    expect(preview.textContent).not.toContain('$99.00')
+  })
+})
+
 describe('where art is deliberately absent', () => {
   it('leaves the deck rail as text', async () => {
     /*

@@ -2051,12 +2051,34 @@ select {
   color: var(--brass);
 }
 
-/* Said rather than implied: the group is still here, its need is just met. */
+/*
+ * Said rather than implied: the group is still here, and the badge says WHY it
+ * is empty.
+ *
+ * One class, five states, because they sit in the same slot in the heading and
+ * differ only in what they claim. Colour is never the signal — the words are
+ * different words, and `data-state` only tints them — which is what keeps this
+ * legible under deuteranopia without a second marker (see
+ * `packages/ui/src/tokens.ts`).
+ */
 .group-head .satisfied {
   color: var(--brass);
   font-size: 0.65rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+/* An open gap is the one state that is a problem with the DECK. */
+.group-head .satisfied[data-state='short'] {
+  color: var(--rust);
+}
+
+/* Two states that are facts about the request, not about the deck: a failed
+   refresh, and a filter of the user's own. Neither is an alarm. */
+.group-head .satisfied[data-state='stale'],
+.group-head .satisfied[data-state='filtered'],
+.group-head .satisfied[data-state='decided'] {
+  color: var(--parchment-dim);
 }
 .group.collapsed .group-head {
   opacity: 0.65;
