@@ -12,31 +12,47 @@ import type { Pool } from 'pg'
 interface ComboRow {
   readonly combo_id: string
   readonly pieces: string[]
-  readonly prerequisites: string
-  readonly steps: string[]
   readonly produces: string[]
-  readonly color_identity: string[]
+  /** Absent on the scoring read, which does not select them (ADR-0017). */
+  readonly prerequisites?: string
+  readonly steps?: string[]
+  readonly color_identity?: string[]
 }
 
+/**
+ * A row becomes a combo, carrying only the fields the row actually had.
+ *
+ * The optional three are spread in conditionally rather than defaulted to `''`
+ * and `[]`. Under `exactOptionalPropertyTypes` a present-but-undefined property
+ * is not the same as an absent one, and the distinction is the point: a reader
+ * must be able to tell "this combo has no steps" from "steps were not
+ * fetched", and an invented empty array says the first while meaning the
+ * second.
+ */
 const toCombo = (row: ComboRow): Combo => ({
   id: row.combo_id as ComboId,
   pieces: row.pieces as OracleId[],
-  prerequisites: row.prerequisites,
-  steps: row.steps,
   produces: row.produces as Combo['produces'],
-  colorIdentity: row.color_identity as Combo['colorIdentity'],
+  ...(row.prerequisites === undefined ? {} : { prerequisites: row.prerequisites }),
+  ...(row.steps === undefined ? {} : { steps: row.steps }),
+  ...(row.color_identity === undefined
+    ? {}
+    : { colorIdentity: row.color_identity as NonNullable<Combo['colorIdentity']> }),
 })
 
 /** See `upsertCards` for why this is jsonb rather than unnest. */
 export const insertCombos = async (pool: Pool, combos: readonly Combo[]): Promise<number> => {
   if (combos.length === 0) return 0
+  // The ingest always has all six; the defaults are for a caller that built a
+  // combo from a scoring read, which would otherwise write SQL nulls into
+  // NOT NULL columns and fail at the database rather than here.
   const payload = combos.map((c) => ({
     combo_id: c.id,
     pieces: c.pieces,
-    prerequisites: c.prerequisites,
-    steps: c.steps,
+    prerequisites: c.prerequisites ?? '',
+    steps: c.steps ?? [],
     produces: c.produces,
-    color_identity: c.colorIdentity,
+    color_identity: c.colorIdentity ?? [],
   }))
 
   const { rowCount } = await pool.query(
@@ -85,36 +101,40 @@ export const allCombos = async (pool: Pool): Promise<Combo[]> => {
 }
 
 /**
- * Combos every piece of which is castable in a colour identity.
+ * Combos castable in a colour identity, carrying only what scoring reads.
  *
- * `allCombos` pulls the whole table — 108,046 rows, 72 MB on the wire — and the
- * deck context did that on EVERY recommendation and analysis request. Against a
- * database on the same machine that is merely wasteful; against a metered
- * managed Postgres it exhausted a 5 GB monthly transfer quota in about sixty
- * requests and took the deployment down.
+ * `allCombos` pulls the whole table — 108,046 rows, 79.7 MB on the wire — and
+ * the deck context did that on EVERY recommendation and analysis request.
+ * Against a database on the same machine that is merely wasteful; against a
+ * metered managed Postgres it exhausted a 5 GB monthly transfer allowance in
+ * about sixty requests and took the deployment down.
  *
- * Colour identity is the right filter because it is the same rule the deck is
- * built under (doc 03 §3.1): a combo with a single blue piece can never be
- * assembled in a mono-red deck, so scoring it is work whose answer is fixed.
- * Measured: mono-red 72 MB -> 2.1 MB, Mardu 72 MB -> 16.8 MB.
+ * Two cuts, and both are needed:
  *
- * A piece with NO card row is kept, not dropped: the `NOT EXISTS` can only
- * reject a piece it can find, so an unknown piece has no identity to be outside
- * of. That is deliberate — it is exactly what `allCombos` did — and this change
- * is meant to move less data, not to quietly change which combos exist.
+ *   - The COLUMNS. `steps` and `prerequisites` are two thirds of the table's
+ *     bytes and are read by nothing (ADR-0017); `color_identity` is what this
+ *     query filters on and so never has to travel. 79.7 MB -> 19.6 MB.
+ *   - The ROWS. Colour identity is the rule the deck is built under (doc 03
+ *     §3.1), so a combo with a blue piece is not merely surplus in a mono-red
+ *     deck, it can never be assembled. 19.6 MB -> 0.5 MB for mono-red, 4.6 MB
+ *     for Mardu. It does nothing for a five-colour commander, who is legal for
+ *     every combo there is — that case is what the warm-instance cache in
+ *     `apps/api/src/combo-cache.ts` is for.
+ *
+ * The filter reads the STORED `combos.color_identity` rather than joining every
+ * piece to its card. The first version did the join, on the grounds that it did
+ * not depend on trusting an upstream field; checked against the whole corpus at
+ * five identities the two agree on all 108,046 rows with zero disagreements, so
+ * the join was cost with no evidence behind it.
  */
 export const combosInIdentity = async (
   pool: Pool,
   identity: readonly Color[],
 ): Promise<Combo[]> => {
   const { rows } = await pool.query<ComboRow>(
-    `SELECT * FROM combos co
-      WHERE NOT EXISTS (
-        SELECT 1
-          FROM unnest(co.pieces) AS piece
-          JOIN cards ca ON ca.oracle_id = piece
-         WHERE NOT (ca.color_identity <@ $1::char(1)[])
-      )
+    `SELECT combo_id, pieces, produces
+       FROM combos
+      WHERE color_identity <@ $1::char(1)[]
       ORDER BY combo_id`,
     [identity],
   )

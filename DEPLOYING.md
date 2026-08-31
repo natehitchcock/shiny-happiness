@@ -117,6 +117,16 @@ as broken. **Run `migrate status` against production whenever something is
 missing rather than wrong**; it is a five-second check that names the cause
 directly.
 
+**Watch data transfer, not just storage.** The recommendation and analysis
+endpoints read the candidate pool and the combo set on every request, and the
+client issues one on every filter change, every accept and every auto-query
+tick. Before ADR-0017 that was 79.7 MB of combos per request, which exhausted a
+5 GB monthly allowance in about sixty requests and returned `500` on every route
+that touches the database — the message only visible by connecting directly:
+`Your project has exceeded the data transfer quota`. If every DB-backed route
+starts failing at once and the code has not changed, check the quota before
+anything else.
+
 **A migration that adds a column does not fill it.** `0006` is the example:
 after `migrate up`, every card has `power = NULL` until the cards ingest runs
 again. Adding a column to `cards` therefore means step 4 as well as step 3.

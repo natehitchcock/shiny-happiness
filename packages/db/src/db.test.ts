@@ -405,43 +405,91 @@ describeDb('packages/db against real PostgreSQL', () => {
      * down.
      *
      * `allCombos` moved the whole table on every recommendation and analysis
-     * request — 108,046 rows and 72 MB against the real corpus. On a metered
-     * database that exhausted a 5 GB monthly transfer quota in about sixty
+     * request — 108,046 rows and 79.7 MB against the real corpus. On a metered
+     * database that exhausted a 5 GB monthly transfer allowance in about sixty
      * requests. A combo with a blue piece cannot be assembled in a mono-red
      * deck, so the rows were not merely surplus, they were unusable.
+     *
+     * The filter reads the STORED `combos.color_identity` (ADR-0017), so these
+     * fixtures set it truthfully rather than letting every combo claim red —
+     * a fixture that lies about its own identity would pass whatever the query
+     * did.
      */
     describe('scoped to a colour identity', () => {
-      const red = uuid()
-      const blue = uuid()
+      const redPiece = uuid()
+      const bluePiece = uuid()
+
+      const scoped = (
+        id: string,
+        pieces: OracleId[],
+        identity: NonNullable<Combo['colorIdentity']>,
+      ): Combo => ({ ...combo(id, pieces), colorIdentity: identity })
 
       beforeAll(async () => {
-        await upsertCards(db.pool, [
-          card('Red Piece', { oracleId: red, colorIdentity: ['R'] }),
-          card('Blue Piece', { oracleId: blue, colorIdentity: ['U'] }),
+        await insertCombos(db.pool, [
+          scoped('mono-red-combo', [redPiece], ['R']),
+          scoped('izzet-combo', [redPiece, bluePiece], ['R', 'U']),
+          scoped('colorless-combo', [redPiece], []),
         ])
-        await insertCombos(db.pool, [combo('all-red', [red]), combo('needs-blue', [red, blue])])
       })
 
       it('keeps a combo every piece of which is castable', async () => {
         const found = await combosInIdentity(db.pool, ['R'])
-        expect(found.map((c) => c.id)).toContain('all-red')
+        expect(found.map((c) => c.id)).toContain('mono-red-combo')
       })
 
-      it('drops a combo with a piece outside the identity', async () => {
+      it('drops a combo whose identity reaches outside the deck', async () => {
         const found = await combosInIdentity(db.pool, ['R'])
-        expect(found.map((c) => c.id)).not.toContain('needs-blue')
+        expect(found.map((c) => c.id)).not.toContain('izzet-combo')
       })
 
-      it('keeps it once the identity covers every piece', async () => {
+      it('keeps it once the identity covers it', async () => {
         const found = await combosInIdentity(db.pool, ['R', 'U'])
-        expect(found.map((c) => c.id)).toContain('needs-blue')
+        expect(found.map((c) => c.id)).toContain('izzet-combo')
       })
 
-      it('keeps a combo whose piece is not a known card', async () => {
-        // Deliberate: the filter can only reject a piece it can find, and this
-        // change is meant to move less data, not to change which combos exist.
-        // `elsewhere` is built from a bare uuid with no card row.
-        expect((await combosInIdentity(db.pool, ['R'])).map((c) => c.id)).toContain('elsewhere')
+      it('keeps a colourless combo in every deck', async () => {
+        // An empty array is contained by every identity, which is correct: a
+        // combo of colourless pieces is castable anywhere.
+        for (const identity of [['R'], ['U'], []] as const)
+          expect((await combosInIdentity(db.pool, identity)).map((c) => c.id)).toContain(
+            'colorless-combo',
+          )
+      })
+
+      it('carries only the fields scoring reads', async () => {
+        // ADR-0017: `steps` and `prerequisites` are two thirds of the table's
+        // bytes and are read by nothing. Undefined, not empty — "not fetched"
+        // is a different claim from "this combo has no steps".
+        const found = await combosInIdentity(db.pool, ['R'])
+        const one = found.find((c) => c.id === 'mono-red-combo')
+        expect(one?.pieces).toEqual([redPiece])
+        expect(one?.produces).toEqual(['infinite-damage'])
+        expect(one?.steps).toBeUndefined()
+        expect(one?.prerequisites).toBeUndefined()
+        expect(one?.colorIdentity).toBeUndefined()
+      })
+
+      it('is served by the identity index rather than a scan', async () => {
+        // Without the index the filter is a sequential scan over the table it
+        // exists to avoid reading, which trades transfer for CPU.
+        //
+        // `enable_seqscan = off` for the same reason the `pieces` test does it:
+        // a handful of fixture rows are cheaper to scan than to index, so the
+        // planner would rightly refuse the index and the assertion would be
+        // about the table's size rather than about the index existing.
+        const client = await db.pool.connect()
+        try {
+          await client.query('BEGIN')
+          await client.query('SET LOCAL enable_seqscan = off')
+          const { rows } = await client.query<{ 'QUERY PLAN': string }>(
+            "EXPLAIN SELECT combo_id FROM combos WHERE color_identity <@ '{R}'::char(1)[]",
+          )
+          await client.query('ROLLBACK')
+          expect(rows.map((r) => r['QUERY PLAN']).join(' ')).toMatch(/combos_identity_idx/)
+        } finally {
+          client.release()
+        }
       })
     })
 

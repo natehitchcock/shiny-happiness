@@ -1,0 +1,12 @@
+-- Filtering combos by colour identity, which the scoring read now does on every
+-- request (ADR-0017).
+--
+-- GIN with the array ops class, because the query is `color_identity <@ $1` —
+-- array containment, which is exactly what GIN answers. Without this the filter
+-- is a sequential scan over the table it exists to avoid reading, which trades
+-- transfer for CPU rather than saving anything.
+--
+-- 842 combos have an empty identity (colourless pieces only). An empty array is
+-- contained by every identity, so they are returned for every deck — which is
+-- correct, and worth knowing when reading a row count.
+CREATE INDEX IF NOT EXISTS combos_identity_idx ON combos USING gin (color_identity);

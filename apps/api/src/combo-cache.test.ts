@@ -74,6 +74,17 @@ describe('what invalidates it', () => {
     expect(after.map((c) => c.id)).toEqual(['c2'])
   })
 
+  it('drops every identity on a new snapshot, not just the one asked for', async () => {
+    await cachedCombosInIdentity(pool, ['R'], 'snap-1')
+    await cachedCombosInIdentity(pool, ['U'], 'snap-1')
+    expect(fetchCombos).toHaveBeenCalledTimes(2)
+
+    // Every held set describes the old corpus, so every one of them is stale.
+    await cachedCombosInIdentity(pool, ['R'], 'snap-2')
+    await cachedCombosInIdentity(pool, ['U'], 'snap-2')
+    expect(fetchCombos).toHaveBeenCalledTimes(4)
+  })
+
   it('re-reads for a different colour identity', async () => {
     await cachedCombosInIdentity(pool, ['R'], 'snap-1')
     await cachedCombosInIdentity(pool, ['U'], 'snap-1')
@@ -81,15 +92,49 @@ describe('what invalidates it', () => {
     expect(fetchCombos).toHaveBeenCalledTimes(2)
   })
 
-  it('holds one entry, so switching decks and back re-reads', async () => {
-    // Bounded on purpose. A cache that grows with the number of decks an
-    // instance happens to see multiplies its worst case by traffic, which is a
-    // hard failure to see coming in a serverless function.
+  it('keeps several identities at once, so two decks do not evict each other', async () => {
+    // The failure this prevents: one user on mono-red and one on Azorius
+    // sharing an instance and each re-reading on every request because the
+    // other had just used the single slot.
     await cachedCombosInIdentity(pool, ['R'], 'snap-1')
     await cachedCombosInIdentity(pool, ['U'], 'snap-1')
     await cachedCombosInIdentity(pool, ['R'], 'snap-1')
+    await cachedCombosInIdentity(pool, ['U'], 'snap-1')
 
-    expect(fetchCombos).toHaveBeenCalledTimes(3)
+    expect(fetchCombos).toHaveBeenCalledTimes(2)
+  })
+
+  it('evicts the least recently used once it is full', async () => {
+    // Bounded on purpose: memory that tracks an instance's popularity fails in
+    // a way that is very hard to see coming.
+    for (const id of [['W'], ['U'], ['B'], ['R']] as const)
+      await cachedCombosInIdentity(pool, id, 'snap-1')
+    expect(fetchCombos).toHaveBeenCalledTimes(4)
+
+    // Touch W so it is no longer the oldest, then overflow with a fifth.
+    await cachedCombosInIdentity(pool, ['W'], 'snap-1')
+    await cachedCombosInIdentity(pool, ['G'], 'snap-1')
+    expect(fetchCombos).toHaveBeenCalledTimes(5)
+
+    // U was the least recently used, so it is the one that went.
+    await cachedCombosInIdentity(pool, ['W'], 'snap-1')
+    expect(fetchCombos).toHaveBeenCalledTimes(5)
+    await cachedCombosInIdentity(pool, ['U'], 'snap-1')
+    expect(fetchCombos).toHaveBeenCalledTimes(6)
+  })
+
+  it('reads once for a whole session of operations on one deck', async () => {
+    // What the cache is actually for: a user adding, rejecting and filtering
+    // fires a recommendation request each time, and a deck's colour identity is
+    // fixed by its commanders, so none of them can miss.
+    for (let i = 0; i < 40; i += 1) await cachedCombosInIdentity(pool, ['R', 'W'], 'snap-1')
+    expect(fetchCombos).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats colourless as its own identity rather than a missing key', async () => {
+    await cachedCombosInIdentity(pool, [], 'snap-1')
+    await cachedCombosInIdentity(pool, [], 'snap-1')
+    expect(fetchCombos).toHaveBeenCalledTimes(1)
   })
 
   it('never caches against an unknown snapshot', async () => {
