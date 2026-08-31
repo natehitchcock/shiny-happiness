@@ -77,6 +77,21 @@ export const COLORS: readonly ColorToken[] = [
       '#A8503C, which the contrast test caught at 2.80:1 on ink-2 — below the 3:1 ' +
       'floor, on the very surface cut hints are drawn.',
   },
+  {
+    name: 'edge-combo',
+    value: '#b28f1f',
+    role: 'accent',
+    comment:
+      'A combo line in the deck web (doc 17 §17.3). Brass stepped down one: the ' +
+      'existing #c9a227 sits at L 0.728, outside the dark-mode lightness band the ' +
+      'palette validator holds edge colours to, and this is the same hue inside ' +
+      'it. It keeps brass meaning "earned" — a combo the deck has assembled is ' +
+      'exactly that — while the deck web pairs it with steel for the other edge ' +
+      'kind. Validated against steel by scripts/validate_palette.js as part of ' +
+      'the four-colour set doc 17 §17.3 records; two of those four were cut when ' +
+      'the open questions were answered, and dropping members of a passing set ' +
+      'cannot lower any surviving pair separation.',
+  },
 ]
 
 export const byName = (name: string): ColorToken => {
@@ -148,6 +163,9 @@ export const CONTRAST_RULES: readonly ContrastRule[] = [
   { foreground: 'steel', background: 'ink', min: 3, why: 'a curve bucket inside its target band' },
   { foreground: 'steel', background: 'ink-2', min: 3, why: 'the same, on a raised panel' },
   { foreground: 'ink', background: 'brass', min: 4.5, why: 'text on the primary button' },
+  // Doc 17 §17.3's two edge kinds. Steel on ink is already listed above, which
+  // is the same pairing — a benefits line is drawn on the same ground.
+  { foreground: 'edge-combo', background: 'ink', min: 3, why: 'a combo line in the deck web' },
 ]
 
 /**
