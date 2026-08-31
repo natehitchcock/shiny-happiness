@@ -279,3 +279,43 @@ describe('the stylesheet parses', () => {
     expect(text).not.toMatch(/:[^;{}]+;\s*\n\s*\n\s*[.#@a-zA-Z][^{}\n]*\{/)
   })
 })
+
+/**
+ * The preview overlays the feed on a wide screen and is a bottom sheet on a
+ * narrow one, and the two must never both apply.
+ *
+ * Asserted against the source rather than through `winner`, because both rules
+ * live inside `@media` blocks and the resolver above deliberately reads only
+ * unconditional rules. What is being pinned is the BOUNDARY: the mobile sheet
+ * was built deliberately and is tested in `sheet.test.tsx`, so the desktop
+ * overlay has to be a disjoint range rather than something that merely happens
+ * to lose the cascade.
+ */
+describe('the preview at each width', () => {
+  const css = readFileSync(join(here, 'styles.css'), 'utf8')
+
+  it('anchors to the analysis rail only above the single-column breakpoint', () => {
+    const desktop = /@media \(min-width:\s*901px\)\s*\{\s*\.preview\s*\{([^}]*)\}/.exec(css)
+    expect(desktop).not.toBeNull()
+    // `right: 100%` is what puts it OUTSIDE the rail, over the feed. Without it
+    // the panel is back inside the column it is supposed to have left.
+    expect(desktop?.[1]).toMatch(/right:\s*100%/)
+    expect(desktop?.[1]).toMatch(/position:\s*absolute/)
+  })
+
+  it('leaves the mobile sheet alone — the two ranges do not overlap', () => {
+    // 900 and 901. `SINGLE_COLUMN` in App.tsx is `(max-width: 900px)` and both
+    // bounds are integers, so no viewport can match both blocks.
+    expect(css).toMatch(/@media \(max-width:\s*900px\)\s*\{\s*\.preview\.preview-sheet/)
+    expect(css).toMatch(/@media \(min-width:\s*901px\)\s*\{\s*\.preview\s*\{/)
+  })
+
+  it('keeps the rail from clipping what is meant to hang outside it', () => {
+    // `.region.analysis` was `overflow: hidden`, which clipped both the overlay
+    // and the panel a curve bar opens. The scroll body still owns its own
+    // scrolling, so nothing in normal flow escapes.
+    const rail = /\.region\.analysis\s*\{([^}]*)\}/.exec(css)
+    expect(rail?.[1]).toMatch(/overflow:\s*visible/)
+    expect(css).toMatch(/\.analysis-scroll\s*\{[^}]*overflow-y:\s*auto/)
+  })
+})

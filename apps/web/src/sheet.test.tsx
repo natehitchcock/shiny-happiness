@@ -274,16 +274,44 @@ describe('the preview on a wide viewport', () => {
     expect(document.activeElement).toBe(opener)
   })
 
-  it('ignores Escape, which belongs to whatever else is open on a desktop', async () => {
+  it('closes on Escape and hands focus back to the row that opened it', async () => {
+    /*
+     * This used to assert the opposite, and the opposite was right at the time:
+     * the panel was a block at the TOP OF THE RAIL, it covered nothing, and
+     * there was nothing for Escape to dismiss — so the key was left for whatever
+     * else might be open.
+     *
+     * The panel is now anchored to the rail's left edge and overlays the
+     * suggestion feed. A thing that covers your work has to have a keyboard way
+     * out, and Escape is the key everybody already presses; the Close button is
+     * a tab away from wherever the user actually is.
+     *
+     * Focus goes back to the opener, which is `previewOpener`'s whole job and
+     * the reason Escape does not strand a keyboard user at `<body>`.
+     */
     await mount()
-    await tapPreview('Krenko, Mob Boss')
+    const opener = await tapPreview('Krenko, Mob Boss')
     await screen.findByLabelText('Krenko, Mob Boss details')
 
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     })
 
-    expect(screen.getByLabelText('Krenko, Mob Boss details')).toBeTruthy()
+    expect(screen.queryByLabelText('Krenko, Mob Boss details')).toBeNull()
+    expect(document.activeElement).toBe(opener)
+  })
+
+  it('overlays the feed rather than sitting inside the rail scroller', async () => {
+    // The defect: as the first block in `.analysis-scroll`, opening a card
+    // pushed Composition, the bracket check and the combo list off the screen —
+    // the dashboard you watch while deciding vanished at the moment of the
+    // decision. A sibling of the scroller costs it nothing.
+    await mount()
+    await tapPreview('Krenko, Mob Boss')
+    const panel = await screen.findByLabelText('Krenko, Mob Boss details')
+
+    expect(panel.closest('.analysis-scroll')).toBeNull()
+    expect(panel.parentElement?.classList.contains('analysis')).toBe(true)
   })
 })
 

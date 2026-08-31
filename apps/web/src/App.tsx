@@ -1437,18 +1437,27 @@ const Preview = ({
   }, [shownId])
 
   /*
-   * Escape closes it. Bound to the document rather than to the panel because
-   * the sheet is deliberately not modal — nothing behind it is inert, so focus
-   * can legitimately be outside it when the user gives up on it.
+   * Escape closes it, at every width.
+   *
+   * It used to be bound only when `sheet` was true, which was defensible while
+   * the panel was a block at the top of the rail: it covered nothing, so there
+   * was nothing to dismiss. It is an OVERLAY over the suggestion feed now, and
+   * a thing that covers your work has to have a keyboard way out — the Close
+   * button is a tab away from wherever you are, and Escape is the key everybody
+   * already presses.
+   *
+   * Bound to the document rather than to the panel because it is deliberately
+   * not modal: nothing behind it is inert, so focus can legitimately be outside
+   * it when the user gives up on it.
    */
   useEffect(() => {
-    if (shownId === null || !sheet) return
+    if (shownId === null) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [shownId, sheet, onClose])
+  }, [shownId, onClose])
 
   if (shown === null || shown === undefined) return null
   /*
@@ -5289,19 +5298,33 @@ export const Workspace = ({
         </section>
 
         <section className="region analysis" aria-label="Analysis">
-          <div className="analysis-scroll">
-            <Preview
-              card={inspect === null ? undefined : cards.get(inspect)}
-              detail={detail}
-              price={prices.get(inspect ?? '')}
-              images={images.get(inspect ?? '')}
-              onClose={closePreview}
-              accepted={acceptedIds}
-              lockedIds={lockedIds}
-              cards={cards}
-              sheet={singleColumn}
-            />
+          {/*
+            A sibling of the scroller, not the first thing inside it.
+            The preview used to sit at the top of the rail's scrolling body,
+            which meant opening a card pushed Composition, the bracket check and
+            the combo list off the screen — the dashboard you keep an eye on
+            while deciding disappeared at the exact moment you were deciding.
+            It is anchored to this rail's LEFT edge instead and overlays the
+            suggestion feed, so the rail can stay what it is for.
 
+            The move is in the SOURCE, once, and is never conditional on the
+            breakpoint. Moving an element at runtime would remount it — throwing
+            away the in-flight `/cards/{id}` request and reordering the document
+            for a screen reader — which is the same reason the sheet is a change
+            of box and not a change of parent.
+          */}
+          <Preview
+            card={inspect === null ? undefined : cards.get(inspect)}
+            detail={detail}
+            price={prices.get(inspect ?? '')}
+            images={images.get(inspect ?? '')}
+            onClose={closePreview}
+            accepted={acceptedIds}
+            lockedIds={lockedIds}
+            cards={cards}
+            sheet={singleColumn}
+          />
+          <div className="analysis-scroll">
             <h2 style={{ marginTop: '1.25rem' }}>
               Composition
               {/* The handle for doc 16's sheet, on the panel it edits rather

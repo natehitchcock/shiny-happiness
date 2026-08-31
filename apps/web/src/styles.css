@@ -641,6 +641,50 @@ select {
 }
 
 /*
+ * On a wide screen the preview hangs off the LEFT edge of the analysis rail and
+ * overlays the suggestion feed.
+ *
+ * It used to be the first block inside the rail's scroller, so opening a card
+ * pushed Composition, the bracket check and the combo list down and off the
+ * screen — the dashboard you keep an eye on while deciding vanished at the
+ * moment you were deciding. Anchored here it costs the rail nothing, and the
+ * rail gets to stay what it is for: composition and combos.
+ *
+ * `right: 100%` on a rail that is `position: sticky` — sticky is a positioned
+ * element, so it is the containing block, and the panel therefore tracks the
+ * rail's left edge however the grid is sized or the divider dragged. No
+ * measurement, no observer.
+ *
+ * `min-width: 901px`, not "not max-width: 900px": below 900 the panel is the
+ * bottom sheet and the two rule sets must never both apply. The gap at exactly
+ * 900.5px is not reachable — `.workspace` collapses at the same breakpoint the
+ * JS `SINGLE_COLUMN` query uses, and both are integers.
+ *
+ * The shadow is what says "on top of" rather than "beside": without it a panel
+ * sitting over the feed reads as a column of the layout, and the rows it is
+ * covering look deleted rather than obscured.
+ */
+@media (min-width: 901px) {
+  .preview {
+    position: absolute;
+    top: 0;
+    right: 100%;
+    /* Clear of the 1px grid rule between the two regions. */
+    margin-right: calc(var(--step) + 1px);
+    z-index: 25;
+    width: 21rem;
+    /* Never wider than the feed it covers: at the narrowest two-column layout
+       the middle region is around 300px, and a panel wider than its own
+       backdrop stops reading as an overlay. */
+    max-width: calc(100vw - 27rem);
+    max-height: calc(100vh - 78px);
+    overflow-y: auto;
+    margin-bottom: 0;
+    box-shadow: 0 12px 34px rgb(0 0 0 / 55%);
+  }
+}
+
+/*
  * On one column the preview is a bottom sheet, not the top of the rail.
  *
  * The defect: `.workspace` collapses to `1fr` below 900px, which puts the
