@@ -1,0 +1,2840 @@
+{
+ "timestamp": "2026-08-30T05:12:43+00:00",
+ "version": "6.2.6",
+ "variants": [
+  {
+   "id": "2105-3337--140",
+   "status": "OK",
+   "uses": [
+    {
+     "card": {
+      "id": 3337,
+      "name": "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+      "oracleId": "c0957e5e-c71b-439c-931c-9f55d2f76ace",
+      "spoiler": false,
+      "faces": 2,
+      "typeLine": "Enchantment — Saga // Enchantment Creature — Goblin Shaman",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "layoutRotationFront": null,
+      "imageUriBackPng": "https://cards.scryfall.io/png/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriBackLarge": "https://cards.scryfall.io/large/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackNormal": "https://cards.scryfall.io/normal/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackSmall": "https://cards.scryfall.io/small/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackArtCrop": "https://cards.scryfall.io/art_crop/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": 2
+    },
+    {
+     "card": {
+      "id": 2105,
+      "name": "Combat Celebrant",
+      "oracleId": "5e15ff93-99a0-4000-918e-4bd2c257188d",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.png?1783936491",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    }
+   ],
+   "requires": [
+    {
+     "template": {
+      "id": 140,
+      "name": "Mana Dork or Mana Dork Creator",
+      "scryfallQuery": "otag:mana-dork (o:{T} or otag:animate-land or otag:copy-land)",
+      "scryfallApi": "https://api.scryfall.com/cards/search?q=%28otag%3Amana-dork+%28o%3A%7BT%7D+or+otag%3Aanimate-land+or+otag%3Acopy-land%29%29+legal%3Acommander"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1
+    }
+   ],
+   "produces": [
+    {
+     "feature": {
+      "id": 19,
+      "name": "Infinite combat phases",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 4,
+      "name": "Infinite creature ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 3,
+      "name": "Infinite creature LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 6,
+      "name": "Infinite creature sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 39,
+      "name": "Infinite creature tokens with haste",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 7,
+      "name": "Infinite death triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    }
+   ],
+   "of": [
+    {
+     "id": 33873
+    }
+   ],
+   "includes": [
+    {
+     "id": 27480
+    },
+    {
+     "id": 31074
+    },
+    {
+     "id": 32272
+    },
+    {
+     "id": 33873
+    }
+   ],
+   "identity": "R",
+   "manaNeeded": "",
+   "manaValueNeeded": 0,
+   "easyPrerequisites": "Reflection of Kiki-Jiki does not have summoning sickness.",
+   "notablePrerequisites": "",
+   "description": "Activate the mana dork by tapping it, adding one mana.\nActivate Reflection of Kiki-Jiki by paying {1} and tapping it, creating a token copy of Combat Celebrant with haste.\nDeclare the token Combat Celebrant as an attacker and exert it, untapping all creatures you control and gaining an extra combat.\nRepeat.",
+   "notes": "",
+   "popularity": 6473,
+   "spoiler": false,
+   "bracketTag": "E",
+   "legalities": {
+    "commander": true,
+    "pauperCommanderMain": false,
+    "pauperCommander": false,
+    "oathbreaker": true,
+    "predh": false,
+    "standardBrawl": false,
+    "brawl": true,
+    "competitiveBrawl": true,
+    "alchemy": false,
+    "vintage": true,
+    "legacy": true,
+    "premodern": false,
+    "modern": true,
+    "pioneer": true,
+    "standard": false,
+    "pauper": false
+   },
+   "prices": {
+    "tcgplayer": "7.00",
+    "cardkingdom": "11.98",
+    "cardmarket": "9.70"
+   },
+   "variantCount": 1
+  },
+  {
+   "id": "2105-2215-3337",
+   "status": "OK",
+   "uses": [
+    {
+     "card": {
+      "id": 3337,
+      "name": "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+      "oracleId": "c0957e5e-c71b-439c-931c-9f55d2f76ace",
+      "spoiler": false,
+      "faces": 2,
+      "typeLine": "Enchantment — Saga // Enchantment Creature — Goblin Shaman",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "layoutRotationFront": null,
+      "imageUriBackPng": "https://cards.scryfall.io/png/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriBackLarge": "https://cards.scryfall.io/large/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackNormal": "https://cards.scryfall.io/normal/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackSmall": "https://cards.scryfall.io/small/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackArtCrop": "https://cards.scryfall.io/art_crop/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2105,
+      "name": "Combat Celebrant",
+      "oracleId": "5e15ff93-99a0-4000-918e-4bd2c257188d",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.png?1783936491",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2215,
+      "name": "Grim Hireling",
+      "oracleId": "89738595-dafb-400a-bfba-91a53a37e717",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Tiefling Rogue",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/3/8/38326f48-548c-4b18-9ad2-0b7c23385deb.png?1783922451",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/3/8/38326f48-548c-4b18-9ad2-0b7c23385deb.jpg?1783922451",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/3/8/38326f48-548c-4b18-9ad2-0b7c23385deb.jpg?1783922451",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/3/8/38326f48-548c-4b18-9ad2-0b7c23385deb.jpg?1783922451",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/3/8/38326f48-548c-4b18-9ad2-0b7c23385deb.jpg?1783922451",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    }
+   ],
+   "requires": [],
+   "produces": [
+    {
+     "feature": {
+      "id": 91,
+      "name": "Infinite Treasure tokens",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 2408,
+      "name": "Infinite artifact ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 2409,
+      "name": "Infinite artifact LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 2419,
+      "name": "Infinite artifact sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 587,
+      "name": "Infinite artifact tokens",
+      "uncountable": true,
+      "status": "C"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 5,
+      "name": "Infinite colored mana",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 19,
+      "name": "Infinite combat phases",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 4,
+      "name": "Infinite creature ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 3,
+      "name": "Infinite creature LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 6,
+      "name": "Infinite creature sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 39,
+      "name": "Infinite creature tokens with haste",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 7,
+      "name": "Infinite death triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    }
+   ],
+   "of": [
+    {
+     "id": 10720
+    }
+   ],
+   "includes": [
+    {
+     "id": 26302
+    },
+    {
+     "id": 26311
+    },
+    {
+     "id": 27480
+    },
+    {
+     "id": 10720
+    },
+    {
+     "id": 31074
+    },
+    {
+     "id": 33866
+    }
+   ],
+   "identity": "BR",
+   "manaNeeded": "{1}",
+   "manaValueNeeded": 1,
+   "easyPrerequisites": "Reflection of Kiki-Jiki does not have summoning sickness.",
+   "notablePrerequisites": "An opponent cannot block at least one creature you control.",
+   "description": "Activate Reflection of KIki-Jiki by paying {1} and tapping it, creating a token copy of Combat Celebrant with haste.\nDeclare the Combat Celebrant token and, if needed, an additional creature an opponent cannot block as attackers, choosing to exert Combat Celebrant as it attacks.\nWhen you attack, the token Combat Celebrant triggers, untapping all other creatures you control and causing you to get an additional combat phase after this one.\nWhen you deal combat damage, Grim Hireling triggers, creating at least one Treasure token.\nActivate a Treasure by tapping and sacrificing it, adding one mana.\nRepeat.",
+   "notes": "",
+   "popularity": 499,
+   "spoiler": false,
+   "bracketTag": "E",
+   "legalities": {
+    "commander": true,
+    "pauperCommanderMain": false,
+    "pauperCommander": false,
+    "oathbreaker": true,
+    "predh": false,
+    "standardBrawl": false,
+    "brawl": true,
+    "competitiveBrawl": true,
+    "alchemy": false,
+    "vintage": true,
+    "legacy": true,
+    "premodern": false,
+    "modern": false,
+    "pioneer": false,
+    "standard": false,
+    "pauper": false
+   },
+   "prices": {
+    "tcgplayer": "17.15",
+    "cardkingdom": "24.97",
+    "cardmarket": "21.22"
+   },
+   "variantCount": 16
+  },
+  {
+   "id": "1731-2105-3337",
+   "status": "OK",
+   "uses": [
+    {
+     "card": {
+      "id": 3337,
+      "name": "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+      "oracleId": "c0957e5e-c71b-439c-931c-9f55d2f76ace",
+      "spoiler": false,
+      "faces": 2,
+      "typeLine": "Enchantment — Saga // Enchantment Creature — Goblin Shaman",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "layoutRotationFront": null,
+      "imageUriBackPng": "https://cards.scryfall.io/png/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriBackLarge": "https://cards.scryfall.io/large/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackNormal": "https://cards.scryfall.io/normal/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackSmall": "https://cards.scryfall.io/small/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackArtCrop": "https://cards.scryfall.io/art_crop/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2105,
+      "name": "Combat Celebrant",
+      "oracleId": "5e15ff93-99a0-4000-918e-4bd2c257188d",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.png?1783936491",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 1731,
+      "name": "Tanuki Transplanter",
+      "oracleId": "4d1c7f42-19ef-405e-9edc-50a81b78f97c",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Artifact Creature — Equipment Dog",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/4/5/45ea5ead-9fd8-4909-96aa-d4e970891c93.png?1783923988",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/4/5/45ea5ead-9fd8-4909-96aa-d4e970891c93.jpg?1783923988",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/4/5/45ea5ead-9fd8-4909-96aa-d4e970891c93.jpg?1783923988",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/4/5/45ea5ead-9fd8-4909-96aa-d4e970891c93.jpg?1783923988",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/4/5/45ea5ead-9fd8-4909-96aa-d4e970891c93.jpg?1783923988",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    }
+   ],
+   "requires": [],
+   "produces": [
+    {
+     "feature": {
+      "id": 19,
+      "name": "Infinite combat phases",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 4,
+      "name": "Infinite creature ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 3,
+      "name": "Infinite creature LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 6,
+      "name": "Infinite creature sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 39,
+      "name": "Infinite creature tokens with haste",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 7,
+      "name": "Infinite death triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 35,
+      "name": "Infinite green mana",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    }
+   ],
+   "of": [
+    {
+     "id": 10720
+    }
+   ],
+   "includes": [
+    {
+     "id": 27473
+    },
+    {
+     "id": 27480
+    },
+    {
+     "id": 10720
+    },
+    {
+     "id": 31074
+    },
+    {
+     "id": 33871
+    }
+   ],
+   "identity": "RG",
+   "manaNeeded": "{1}",
+   "manaValueNeeded": 1,
+   "easyPrerequisites": "Reflection of Kiki-Jiki does not have summoning sickness.",
+   "notablePrerequisites": "Tanuki Transplanter or the creature it is attached to can attack without taking damage.",
+   "description": "Activate Reflection of KIki-Jiki by paying {1} and tapping it, creating a token copy of Combat Celebrant with haste.\nDeclare Tanuki Transplanter and Combat Celebrant token as attackers, choosing to exert Combat Celebrant as it attacks.\nWhen you attack, Tanuki Transplanter and the Combat Celebrant token trigger.\nResolve the token's trigger, untapping all other creatures you control and causing you to get an additional combat phase after this one.\nResolve Tanuki Transplanter's trigger, adding mana.\nRepeat.",
+   "notes": "",
+   "popularity": 1,
+   "spoiler": false,
+   "bracketTag": "E",
+   "legalities": {
+    "commander": true,
+    "pauperCommanderMain": false,
+    "pauperCommander": false,
+    "oathbreaker": true,
+    "predh": false,
+    "standardBrawl": false,
+    "brawl": false,
+    "competitiveBrawl": false,
+    "alchemy": false,
+    "vintage": true,
+    "legacy": true,
+    "premodern": false,
+    "modern": false,
+    "pioneer": false,
+    "standard": false,
+    "pauper": false
+   },
+   "prices": {
+    "tcgplayer": "8.06",
+    "cardkingdom": "13.47",
+    "cardmarket": "10.18"
+   },
+   "variantCount": 16
+  },
+  {
+   "id": "62-2105-3337",
+   "status": "OK",
+   "uses": [
+    {
+     "card": {
+      "id": 3337,
+      "name": "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+      "oracleId": "c0957e5e-c71b-439c-931c-9f55d2f76ace",
+      "spoiler": false,
+      "faces": 2,
+      "typeLine": "Enchantment — Saga // Enchantment Creature — Goblin Shaman",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "layoutRotationFront": null,
+      "imageUriBackPng": "https://cards.scryfall.io/png/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriBackLarge": "https://cards.scryfall.io/large/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackNormal": "https://cards.scryfall.io/normal/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackSmall": "https://cards.scryfall.io/small/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackArtCrop": "https://cards.scryfall.io/art_crop/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2105,
+      "name": "Combat Celebrant",
+      "oracleId": "5e15ff93-99a0-4000-918e-4bd2c257188d",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.png?1783936491",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 62,
+      "name": "Savage Ventmaw",
+      "oracleId": "f743d85f-754e-4e70-9907-af54acb9e8d4",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Dragon",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/5/0/50027d69-8bb0-444c-8e9b-4c9afd91cbda.png?1783908909",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/5/0/50027d69-8bb0-444c-8e9b-4c9afd91cbda.jpg?1783908909",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/5/0/50027d69-8bb0-444c-8e9b-4c9afd91cbda.jpg?1783908909",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/5/0/50027d69-8bb0-444c-8e9b-4c9afd91cbda.jpg?1783908909",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/5/0/50027d69-8bb0-444c-8e9b-4c9afd91cbda.jpg?1783908909",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    }
+   ],
+   "requires": [],
+   "produces": [
+    {
+     "feature": {
+      "id": 19,
+      "name": "Infinite combat phases",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 4,
+      "name": "Infinite creature ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 3,
+      "name": "Infinite creature LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 6,
+      "name": "Infinite creature sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 39,
+      "name": "Infinite creature tokens with haste",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 7,
+      "name": "Infinite death triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 35,
+      "name": "Infinite green mana",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 20,
+      "name": "Infinite red mana",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    }
+   ],
+   "of": [
+    {
+     "id": 10720
+    }
+   ],
+   "includes": [
+    {
+     "id": 27472
+    },
+    {
+     "id": 27473
+    },
+    {
+     "id": 27480
+    },
+    {
+     "id": 10720
+    },
+    {
+     "id": 31074
+    },
+    {
+     "id": 33870
+    },
+    {
+     "id": 33871
+    }
+   ],
+   "identity": "RG",
+   "manaNeeded": "{1}",
+   "manaValueNeeded": 1,
+   "easyPrerequisites": "Reflection of Kiki-Jiki does not have summoning sickness.",
+   "notablePrerequisites": "Savage Ventmaw can attack without taking damage.",
+   "description": "Activate Reflection of KIki-Jiki by paying {1} and tapping it, creating a token copy of Combat Celebrant with haste.\nDeclare Savage Ventmaw and Combat Celebrant token as attackers, choosing to exert Combat Celebrant as it attacks.\nWhen you attack, Savage Ventmaw and the Combat Celebrant token trigger.\nResolve the token's trigger, untapping all other creatures you control and causing you to get an additional combat phase after this one.\nResolve Savage Ventmaw's trigger, adding mana.\nRepeat.",
+   "notes": "",
+   "popularity": 41,
+   "spoiler": false,
+   "bracketTag": "E",
+   "legalities": {
+    "commander": true,
+    "pauperCommanderMain": false,
+    "pauperCommander": false,
+    "oathbreaker": true,
+    "predh": false,
+    "standardBrawl": false,
+    "brawl": true,
+    "competitiveBrawl": true,
+    "alchemy": false,
+    "vintage": true,
+    "legacy": true,
+    "premodern": false,
+    "modern": true,
+    "pioneer": true,
+    "standard": false,
+    "pauper": false
+   },
+   "prices": {
+    "tcgplayer": "7.26",
+    "cardkingdom": "12.77",
+    "cardmarket": "10.12"
+   },
+   "variantCount": 16
+  },
+  {
+   "id": "2105-3337-5608",
+   "status": "OK",
+   "uses": [
+    {
+     "card": {
+      "id": 3337,
+      "name": "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+      "oracleId": "c0957e5e-c71b-439c-931c-9f55d2f76ace",
+      "spoiler": false,
+      "faces": 2,
+      "typeLine": "Enchantment — Saga // Enchantment Creature — Goblin Shaman",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "layoutRotationFront": null,
+      "imageUriBackPng": "https://cards.scryfall.io/png/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriBackLarge": "https://cards.scryfall.io/large/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackNormal": "https://cards.scryfall.io/normal/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackSmall": "https://cards.scryfall.io/small/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackArtCrop": "https://cards.scryfall.io/art_crop/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2105,
+      "name": "Combat Celebrant",
+      "oracleId": "5e15ff93-99a0-4000-918e-4bd2c257188d",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.png?1783936491",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 5608,
+      "name": "Radha, Heir to Keld",
+      "oracleId": "61d94fe7-b559-4bd4-94a7-f4ed4c853b4b",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Legendary Creature — Elf Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/e/c/ecb7c19a-b4af-405d-b016-a546ed12a99d.png?1783918429",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/e/c/ecb7c19a-b4af-405d-b016-a546ed12a99d.jpg?1783918429",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/e/c/ecb7c19a-b4af-405d-b016-a546ed12a99d.jpg?1783918429",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/e/c/ecb7c19a-b4af-405d-b016-a546ed12a99d.jpg?1783918429",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/e/c/ecb7c19a-b4af-405d-b016-a546ed12a99d.jpg?1783918429",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    }
+   ],
+   "requires": [],
+   "produces": [
+    {
+     "feature": {
+      "id": 19,
+      "name": "Infinite combat phases",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 4,
+      "name": "Infinite creature ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 3,
+      "name": "Infinite creature LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 6,
+      "name": "Infinite creature sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 39,
+      "name": "Infinite creature tokens with haste",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 7,
+      "name": "Infinite death triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    }
+   ],
+   "of": [
+    {
+     "id": 10720
+    }
+   ],
+   "includes": [
+    {
+     "id": 27480
+    },
+    {
+     "id": 10720
+    },
+    {
+     "id": 31074
+    }
+   ],
+   "identity": "RG",
+   "manaNeeded": "{1}",
+   "manaValueNeeded": 1,
+   "easyPrerequisites": "Reflection of Kiki-Jiki does not have summoning sickness.",
+   "notablePrerequisites": "Radha can attack without taking damage.",
+   "description": "Activate Reflection of KIki-Jiki by paying {1} and tapping it, creating a token copy of Combat Celebrant with haste.\nDeclare Radha and Combat Celebrant token as attackers, choosing to exert Combat Celebrant as it attacks.\nWhen you attack, Radha and the Combat Celebrant token trigger.\nResolve the token's trigger, untapping all other creatures you control and causing you to get an additional combat phase after this one.\nResolve Radha's trigger, adding mana.\nRepeat.",
+   "notes": "",
+   "popularity": 27,
+   "spoiler": false,
+   "bracketTag": "E",
+   "legalities": {
+    "commander": true,
+    "pauperCommanderMain": false,
+    "pauperCommander": false,
+    "oathbreaker": true,
+    "predh": false,
+    "standardBrawl": false,
+    "brawl": false,
+    "competitiveBrawl": false,
+    "alchemy": false,
+    "vintage": true,
+    "legacy": true,
+    "premodern": false,
+    "modern": true,
+    "pioneer": false,
+    "standard": false,
+    "pauper": false
+   },
+   "prices": {
+    "tcgplayer": "7.20",
+    "cardkingdom": "12.33",
+    "cardmarket": "9.82"
+   },
+   "variantCount": 16
+  },
+  {
+   "id": "778-2105-3337",
+   "status": "OK",
+   "uses": [
+    {
+     "card": {
+      "id": 3337,
+      "name": "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+      "oracleId": "c0957e5e-c71b-439c-931c-9f55d2f76ace",
+      "spoiler": false,
+      "faces": 2,
+      "typeLine": "Enchantment — Saga // Enchantment Creature — Goblin Shaman",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "layoutRotationFront": null,
+      "imageUriBackPng": "https://cards.scryfall.io/png/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriBackLarge": "https://cards.scryfall.io/large/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackNormal": "https://cards.scryfall.io/normal/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackSmall": "https://cards.scryfall.io/small/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackArtCrop": "https://cards.scryfall.io/art_crop/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2105,
+      "name": "Combat Celebrant",
+      "oracleId": "5e15ff93-99a0-4000-918e-4bd2c257188d",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.png?1783936491",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 778,
+      "name": "Ancient Copper Dragon",
+      "oracleId": "48daee9d-ddaf-410f-8c3a-12fa1064ab56",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Elder Dragon",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/3/8/3836dddd-a7e4-499f-ad49-ce298aa65720.png?1783922745",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/3/8/3836dddd-a7e4-499f-ad49-ce298aa65720.jpg?1783922745",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/3/8/3836dddd-a7e4-499f-ad49-ce298aa65720.jpg?1783922745",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/3/8/3836dddd-a7e4-499f-ad49-ce298aa65720.jpg?1783922745",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/3/8/3836dddd-a7e4-499f-ad49-ce298aa65720.jpg?1783922745",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    }
+   ],
+   "requires": [],
+   "produces": [
+    {
+     "feature": {
+      "id": 19,
+      "name": "Infinite combat phases",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 4,
+      "name": "Infinite creature ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 3,
+      "name": "Infinite creature LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 6,
+      "name": "Infinite creature sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 39,
+      "name": "Infinite creature tokens with haste",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 7,
+      "name": "Infinite death triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    }
+   ],
+   "of": [
+    {
+     "id": 10720
+    }
+   ],
+   "includes": [
+    {
+     "id": 27480
+    },
+    {
+     "id": 10720
+    },
+    {
+     "id": 31074
+    }
+   ],
+   "identity": "R",
+   "manaNeeded": "{1}",
+   "manaValueNeeded": 1,
+   "easyPrerequisites": "Reflection of Kiki-Jiki does not have summoning sickness.\nAn opponent cannot block Ancient Copper Dragon.",
+   "notablePrerequisites": "",
+   "description": "Activate Reflection of KIki-Jiki by paying {1} and tapping it, creating a token copy of Combat Celebrant with haste.\nDeclare Ancient Copper Dragon and Combat Celebrant token as attackers, choosing to exert Combat Celebrant as it attacks.\nWhen you attack, the token Combat Celebrant triggers, untapping all other creatures you control and causing you to get an additional combat phase after this one.\nWhen you deal combat damage, Ancient Copper Dragon triggers, creating at least one Treasure token.\nActivate a Treasure by tapping and sacrificing it, adding one mana.\nRepeat.",
+   "notes": "",
+   "popularity": 698,
+   "spoiler": false,
+   "bracketTag": "E",
+   "legalities": {
+    "commander": true,
+    "pauperCommanderMain": false,
+    "pauperCommander": false,
+    "oathbreaker": true,
+    "predh": false,
+    "standardBrawl": false,
+    "brawl": true,
+    "competitiveBrawl": true,
+    "alchemy": false,
+    "vintage": true,
+    "legacy": true,
+    "premodern": false,
+    "modern": false,
+    "pioneer": false,
+    "standard": false,
+    "pauper": false
+   },
+   "prices": {
+    "tcgplayer": "119.40",
+    "cardkingdom": "161.97",
+    "cardmarket": "79.92"
+   },
+   "variantCount": 16
+  },
+  {
+   "id": "2105-3337-7748",
+   "status": "OK",
+   "uses": [
+    {
+     "card": {
+      "id": 3337,
+      "name": "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+      "oracleId": "c0957e5e-c71b-439c-931c-9f55d2f76ace",
+      "spoiler": false,
+      "faces": 2,
+      "typeLine": "Enchantment — Saga // Enchantment Creature — Goblin Shaman",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "layoutRotationFront": null,
+      "imageUriBackPng": "https://cards.scryfall.io/png/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriBackLarge": "https://cards.scryfall.io/large/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackNormal": "https://cards.scryfall.io/normal/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackSmall": "https://cards.scryfall.io/small/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackArtCrop": "https://cards.scryfall.io/art_crop/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2105,
+      "name": "Combat Celebrant",
+      "oracleId": "5e15ff93-99a0-4000-918e-4bd2c257188d",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.png?1783936491",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 7748,
+      "name": "Ant-Man, Elusive Avenger",
+      "oracleId": "f334087a-deda-4e9e-ab58-68f7e226d7ce",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Legendary Creature — Human Rogue Hero",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/1/8/18e2b0a4-0ed3-48e6-8334-198a19e54bff.png?1783903274",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/1/8/18e2b0a4-0ed3-48e6-8334-198a19e54bff.jpg?1783903274",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/1/8/18e2b0a4-0ed3-48e6-8334-198a19e54bff.jpg?1783903274",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/1/8/18e2b0a4-0ed3-48e6-8334-198a19e54bff.jpg?1783903274",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/1/8/18e2b0a4-0ed3-48e6-8334-198a19e54bff.jpg?1783903274",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    }
+   ],
+   "requires": [],
+   "produces": [
+    {
+     "feature": {
+      "id": 91,
+      "name": "Infinite Treasure tokens",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 2408,
+      "name": "Infinite artifact ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 2409,
+      "name": "Infinite artifact LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 2419,
+      "name": "Infinite artifact sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 587,
+      "name": "Infinite artifact tokens",
+      "uncountable": true,
+      "status": "C"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 5,
+      "name": "Infinite colored mana",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 19,
+      "name": "Infinite combat phases",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 4,
+      "name": "Infinite creature ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 3,
+      "name": "Infinite creature LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 6,
+      "name": "Infinite creature sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 39,
+      "name": "Infinite creature tokens with haste",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 7,
+      "name": "Infinite death triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    }
+   ],
+   "of": [
+    {
+     "id": 10720
+    }
+   ],
+   "includes": [
+    {
+     "id": 26302
+    },
+    {
+     "id": 26311
+    },
+    {
+     "id": 27480
+    },
+    {
+     "id": 10720
+    },
+    {
+     "id": 31074
+    },
+    {
+     "id": 33866
+    }
+   ],
+   "identity": "UR",
+   "manaNeeded": "{1}",
+   "manaValueNeeded": 1,
+   "easyPrerequisites": "Reflection of Kiki-Jiki does not have summoning sickness.\nAn opponent cannot block Ant-Man.",
+   "notablePrerequisites": "",
+   "description": "Activate Reflection of KIki-Jiki by paying {1} and tapping it, creating a token copy of Combat Celebrant with haste.\nDeclare Ant-Man and Combat Celebrant token as attackers, choosing to exert Combat Celebrant as it attacks.\nWhen you attack, the token Combat Celebrant triggers, untapping all other creatures you control and causing you to get an additional combat phase after this one.\nWhen you deal combat damage, Ant-Man triggers, creating at least one Treasure token.\nActivate a Treasure by tapping and sacrificing it, adding one mana.\nRepeat.",
+   "notes": "",
+   "popularity": 2,
+   "spoiler": false,
+   "bracketTag": "S",
+   "legalities": {
+    "commander": true,
+    "pauperCommanderMain": false,
+    "pauperCommander": false,
+    "oathbreaker": true,
+    "predh": false,
+    "standardBrawl": false,
+    "brawl": false,
+    "competitiveBrawl": false,
+    "alchemy": false,
+    "vintage": true,
+    "legacy": true,
+    "premodern": false,
+    "modern": false,
+    "pioneer": false,
+    "standard": false,
+    "pauper": false
+   },
+   "prices": {
+    "tcgplayer": "7.33",
+    "cardkingdom": "12.47",
+    "cardmarket": "10.16"
+   },
+   "variantCount": 16
+  },
+  {
+   "id": "1800-2105-3337",
+   "status": "OK",
+   "uses": [
+    {
+     "card": {
+      "id": 3337,
+      "name": "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+      "oracleId": "c0957e5e-c71b-439c-931c-9f55d2f76ace",
+      "spoiler": false,
+      "faces": 2,
+      "typeLine": "Enchantment — Saga // Enchantment Creature — Goblin Shaman",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "layoutRotationFront": null,
+      "imageUriBackPng": "https://cards.scryfall.io/png/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriBackLarge": "https://cards.scryfall.io/large/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackNormal": "https://cards.scryfall.io/normal/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackSmall": "https://cards.scryfall.io/small/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackArtCrop": "https://cards.scryfall.io/art_crop/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2105,
+      "name": "Combat Celebrant",
+      "oracleId": "5e15ff93-99a0-4000-918e-4bd2c257188d",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.png?1783936491",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 1800,
+      "name": "Old Gnawbone",
+      "oracleId": "dff3f4c7-f792-4ca3-9b0a-0738e70664d9",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Legendary Creature — Dragon",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/7/7/77ceba8b-de19-4db8-b5a7-f5df49bf241f.png?1783926458",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/7/7/77ceba8b-de19-4db8-b5a7-f5df49bf241f.jpg?1783926458",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/7/7/77ceba8b-de19-4db8-b5a7-f5df49bf241f.jpg?1783926458",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/7/7/77ceba8b-de19-4db8-b5a7-f5df49bf241f.jpg?1783926458",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/7/7/77ceba8b-de19-4db8-b5a7-f5df49bf241f.jpg?1783926458",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    }
+   ],
+   "requires": [],
+   "produces": [
+    {
+     "feature": {
+      "id": 91,
+      "name": "Infinite Treasure tokens",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 2408,
+      "name": "Infinite artifact ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 2409,
+      "name": "Infinite artifact LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 2419,
+      "name": "Infinite artifact sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 587,
+      "name": "Infinite artifact tokens",
+      "uncountable": true,
+      "status": "C"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 5,
+      "name": "Infinite colored mana",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 19,
+      "name": "Infinite combat phases",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 4,
+      "name": "Infinite creature ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 3,
+      "name": "Infinite creature LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 6,
+      "name": "Infinite creature sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 39,
+      "name": "Infinite creature tokens with haste",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 7,
+      "name": "Infinite death triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    }
+   ],
+   "of": [
+    {
+     "id": 10720
+    }
+   ],
+   "includes": [
+    {
+     "id": 26302
+    },
+    {
+     "id": 26311
+    },
+    {
+     "id": 27480
+    },
+    {
+     "id": 10720
+    },
+    {
+     "id": 31074
+    },
+    {
+     "id": 33866
+    }
+   ],
+   "identity": "RG",
+   "manaNeeded": "{1}",
+   "manaValueNeeded": 1,
+   "easyPrerequisites": "Reflection of Kiki-Jiki does not have summoning sickness.",
+   "notablePrerequisites": "An opponent cannot block at least one creature you control.",
+   "description": "Activate Reflection of KIki-Jiki by paying {1} and tapping it, creating a token copy of Combat Celebrant with haste.\nDeclare Combat Celebrant token and, if needed, any creature that an opponent cannot block as attackers, choosing to exert Combat Celebrant as it attacks.\nWhen you attack, the token Combat Celebrant triggers, untapping all other creatures you control and causing you to get an additional combat phase after this one.\nWhen you deal combat damage, Old Gnawbone triggers, creating at least one Treasure token.\nActivate a Treasure by tapping and sacrificing it, adding one mana.\nRepeat.",
+   "notes": "",
+   "popularity": 55,
+   "spoiler": false,
+   "bracketTag": "E",
+   "legalities": {
+    "commander": true,
+    "pauperCommanderMain": false,
+    "pauperCommander": false,
+    "oathbreaker": true,
+    "predh": false,
+    "standardBrawl": false,
+    "brawl": true,
+    "competitiveBrawl": true,
+    "alchemy": false,
+    "vintage": true,
+    "legacy": true,
+    "premodern": false,
+    "modern": true,
+    "pioneer": true,
+    "standard": false,
+    "pauper": false
+   },
+   "prices": {
+    "tcgplayer": "58.16",
+    "cardkingdom": "76.97",
+    "cardmarket": "52.52"
+   },
+   "variantCount": 16
+  },
+  {
+   "id": "996-2105-3337",
+   "status": "OK",
+   "uses": [
+    {
+     "card": {
+      "id": 3337,
+      "name": "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+      "oracleId": "c0957e5e-c71b-439c-931c-9f55d2f76ace",
+      "spoiler": false,
+      "faces": 2,
+      "typeLine": "Enchantment — Saga // Enchantment Creature — Goblin Shaman",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "layoutRotationFront": null,
+      "imageUriBackPng": "https://cards.scryfall.io/png/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriBackLarge": "https://cards.scryfall.io/large/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackNormal": "https://cards.scryfall.io/normal/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackSmall": "https://cards.scryfall.io/small/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackArtCrop": "https://cards.scryfall.io/art_crop/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2105,
+      "name": "Combat Celebrant",
+      "oracleId": "5e15ff93-99a0-4000-918e-4bd2c257188d",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.png?1783936491",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 996,
+      "name": "Ragavan, Nimble Pilferer",
+      "oracleId": "37108cd4-bbab-4ce3-9ed6-f60e8422e703",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Legendary Creature — Monkey Pirate",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/a/9/a9738cda-adb1-47fb-9f4c-ecd930228c4d.png?1783926839",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/a/9/a9738cda-adb1-47fb-9f4c-ecd930228c4d.jpg?1783926839",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/a/9/a9738cda-adb1-47fb-9f4c-ecd930228c4d.jpg?1783926839",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/a/9/a9738cda-adb1-47fb-9f4c-ecd930228c4d.jpg?1783926839",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/a/9/a9738cda-adb1-47fb-9f4c-ecd930228c4d.jpg?1783926839",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    }
+   ],
+   "requires": [],
+   "produces": [
+    {
+     "feature": {
+      "id": 19,
+      "name": "Infinite combat phases",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 4,
+      "name": "Infinite creature ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 3,
+      "name": "Infinite creature LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 6,
+      "name": "Infinite creature sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 39,
+      "name": "Infinite creature tokens with haste",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 7,
+      "name": "Infinite death triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    }
+   ],
+   "of": [
+    {
+     "id": 10720
+    }
+   ],
+   "includes": [
+    {
+     "id": 27480
+    },
+    {
+     "id": 10720
+    },
+    {
+     "id": 31074
+    }
+   ],
+   "identity": "R",
+   "manaNeeded": "{1}",
+   "manaValueNeeded": 1,
+   "easyPrerequisites": "Reflection of Kiki-Jiki does not have summoning sickness.",
+   "notablePrerequisites": "An opponent cannot block Ragavan.",
+   "description": "Activate Reflection of KIki-Jiki by paying {1} and tapping it, creating a token copy of Combat Celebrant with haste.\nDeclare Ragavan and Combat Celebrant token as attackers, choosing to exert Combat Celebrant as it attacks.\nWhen you attack, the token Combat Celebrant triggers, untapping all other creatures you control and causing you to get an additional combat phase after this one.\nWhen you deal combat damage, Ragavan triggers, creating at least one Treasure token.\nActivate a Treasure by tapping and sacrificing it, adding one mana.\nRepeat.",
+   "notes": "",
+   "popularity": 1707,
+   "spoiler": false,
+   "bracketTag": "E",
+   "legalities": {
+    "commander": true,
+    "pauperCommanderMain": false,
+    "pauperCommander": false,
+    "oathbreaker": true,
+    "predh": false,
+    "standardBrawl": false,
+    "brawl": true,
+    "competitiveBrawl": false,
+    "alchemy": false,
+    "vintage": true,
+    "legacy": false,
+    "premodern": false,
+    "modern": true,
+    "pioneer": false,
+    "standard": false,
+    "pauper": false
+   },
+   "prices": {
+    "tcgplayer": "49.33",
+    "cardkingdom": "66.97",
+    "cardmarket": "39.20"
+   },
+   "variantCount": 16
+  },
+  {
+   "id": "1059-2105-3337",
+   "status": "OK",
+   "uses": [
+    {
+     "card": {
+      "id": 3337,
+      "name": "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+      "oracleId": "c0957e5e-c71b-439c-931c-9f55d2f76ace",
+      "spoiler": false,
+      "faces": 2,
+      "typeLine": "Enchantment — Saga // Enchantment Creature — Goblin Shaman",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "layoutRotationFront": null,
+      "imageUriBackPng": "https://cards.scryfall.io/png/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriBackLarge": "https://cards.scryfall.io/large/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackNormal": "https://cards.scryfall.io/normal/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackSmall": "https://cards.scryfall.io/small/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackArtCrop": "https://cards.scryfall.io/art_crop/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2105,
+      "name": "Combat Celebrant",
+      "oracleId": "5e15ff93-99a0-4000-918e-4bd2c257188d",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.png?1783936491",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 1059,
+      "name": "Grand Warlord Radha",
+      "oracleId": "0fb90df6-a62b-4a9f-ae79-db71d40466ce",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Legendary Creature — Elf Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/9/8/986981fa-a744-45d8-81c7-68ef335c79e2.png?1783934967",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/9/8/986981fa-a744-45d8-81c7-68ef335c79e2.jpg?1783934967",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/9/8/986981fa-a744-45d8-81c7-68ef335c79e2.jpg?1783934967",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/9/8/986981fa-a744-45d8-81c7-68ef335c79e2.jpg?1783934967",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/9/8/986981fa-a744-45d8-81c7-68ef335c79e2.jpg?1783934967",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    }
+   ],
+   "requires": [],
+   "produces": [
+    {
+     "feature": {
+      "id": 19,
+      "name": "Infinite combat phases",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 4,
+      "name": "Infinite creature ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 3,
+      "name": "Infinite creature LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 6,
+      "name": "Infinite creature sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 39,
+      "name": "Infinite creature tokens with haste",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 7,
+      "name": "Infinite death triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 35,
+      "name": "Infinite green mana",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 20,
+      "name": "Infinite red mana",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    }
+   ],
+   "of": [
+    {
+     "id": 10720
+    }
+   ],
+   "includes": [
+    {
+     "id": 27472
+    },
+    {
+     "id": 27473
+    },
+    {
+     "id": 27480
+    },
+    {
+     "id": 10720
+    },
+    {
+     "id": 31074
+    },
+    {
+     "id": 33870
+    },
+    {
+     "id": 33871
+    }
+   ],
+   "identity": "RG",
+   "manaNeeded": "{1}",
+   "manaValueNeeded": 1,
+   "easyPrerequisites": "Reflection of Kiki-Jiki does not have summoning sickness.",
+   "notablePrerequisites": "Grand Warlord Radha can attack without taking damage.",
+   "description": "Activate Reflection of KIki-Jiki by paying {1} and tapping it, creating a token copy of Combat Celebrant with haste.\nDeclare Grand Warlord Radha and Combat Celebrant token as attackers, choosing to exert Combat Celebrant as it attacks.\nWhen you attack, Grand Warlord Radha and the Combat Celebrant token trigger.\nResolve the token's trigger, untapping all other creatures you control and causing you to get an additional combat phase after this one.\nResolve Grand Warlord Radha's trigger, adding mana.\nRepeat.",
+   "notes": "",
+   "popularity": 49,
+   "spoiler": false,
+   "bracketTag": "E",
+   "legalities": {
+    "commander": true,
+    "pauperCommanderMain": false,
+    "pauperCommander": false,
+    "oathbreaker": true,
+    "predh": false,
+    "standardBrawl": false,
+    "brawl": true,
+    "competitiveBrawl": true,
+    "alchemy": false,
+    "vintage": true,
+    "legacy": true,
+    "premodern": false,
+    "modern": true,
+    "pioneer": true,
+    "standard": false,
+    "pauper": false
+   },
+   "prices": {
+    "tcgplayer": "7.85",
+    "cardkingdom": "12.67",
+    "cardmarket": "10.07"
+   },
+   "variantCount": 16
+  },
+  {
+   "id": "2105-3337-5607",
+   "status": "OK",
+   "uses": [
+    {
+     "card": {
+      "id": 3337,
+      "name": "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+      "oracleId": "c0957e5e-c71b-439c-931c-9f55d2f76ace",
+      "spoiler": false,
+      "faces": 2,
+      "typeLine": "Enchantment — Saga // Enchantment Creature — Goblin Shaman",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "layoutRotationFront": null,
+      "imageUriBackPng": "https://cards.scryfall.io/png/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriBackLarge": "https://cards.scryfall.io/large/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackNormal": "https://cards.scryfall.io/normal/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackSmall": "https://cards.scryfall.io/small/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackArtCrop": "https://cards.scryfall.io/art_crop/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2105,
+      "name": "Combat Celebrant",
+      "oracleId": "5e15ff93-99a0-4000-918e-4bd2c257188d",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.png?1783936491",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 5607,
+      "name": "Klauth, Unrivaled Ancient",
+      "oracleId": "8cefa5d6-5151-4e75-8b72-f210a4c751ea",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Legendary Creature — Dragon",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/7/f/7f5cf828-17b2-4105-9a9a-ee0ab720c2ee.png?1783926239",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/7/f/7f5cf828-17b2-4105-9a9a-ee0ab720c2ee.jpg?1783926239",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/7/f/7f5cf828-17b2-4105-9a9a-ee0ab720c2ee.jpg?1783926239",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/7/f/7f5cf828-17b2-4105-9a9a-ee0ab720c2ee.jpg?1783926239",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/7/f/7f5cf828-17b2-4105-9a9a-ee0ab720c2ee.jpg?1783926239",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    }
+   ],
+   "requires": [],
+   "produces": [
+    {
+     "feature": {
+      "id": 5,
+      "name": "Infinite colored mana",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 19,
+      "name": "Infinite combat phases",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 4,
+      "name": "Infinite creature ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 3,
+      "name": "Infinite creature LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 6,
+      "name": "Infinite creature sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 39,
+      "name": "Infinite creature tokens with haste",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 7,
+      "name": "Infinite death triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    }
+   ],
+   "of": [
+    {
+     "id": 10720
+    }
+   ],
+   "includes": [
+    {
+     "id": 26311
+    },
+    {
+     "id": 27469
+    },
+    {
+     "id": 27470
+    },
+    {
+     "id": 27471
+    },
+    {
+     "id": 27472
+    },
+    {
+     "id": 27473
+    },
+    {
+     "id": 27480
+    },
+    {
+     "id": 28137
+    },
+    {
+     "id": 10720
+    },
+    {
+     "id": 31074
+    },
+    {
+     "id": 33867
+    },
+    {
+     "id": 33868
+    },
+    {
+     "id": 33869
+    },
+    {
+     "id": 33870
+    },
+    {
+     "id": 33871
+    }
+   ],
+   "identity": "RG",
+   "manaNeeded": "{1}",
+   "manaValueNeeded": 1,
+   "easyPrerequisites": "Reflection of Kiki-Jiki does not have summoning sickness.",
+   "notablePrerequisites": "Klauth can attack without taking damage.",
+   "description": "Activate Reflection of KIki-Jiki by paying {1} and tapping it, creating a token copy of Combat Celebrant with haste.\nDeclare Klauth and Combat Celebrant token as attackers, choosing to exert Combat Celebrant as it attacks.\nWhen you attack, Klauth and the Combat Celebrant token trigger.\nResolve the token's trigger, untapping all other creatures you control and causing you to get an additional combat phase after this one.\nResolve Klauth's trigger, adding mana.\nRepeat.",
+   "notes": "",
+   "popularity": 35,
+   "spoiler": false,
+   "bracketTag": "E",
+   "legalities": {
+    "commander": true,
+    "pauperCommanderMain": false,
+    "pauperCommander": false,
+    "oathbreaker": true,
+    "predh": false,
+    "standardBrawl": false,
+    "brawl": false,
+    "competitiveBrawl": false,
+    "alchemy": false,
+    "vintage": true,
+    "legacy": true,
+    "premodern": false,
+    "modern": false,
+    "pioneer": false,
+    "standard": false,
+    "pauper": false
+   },
+   "prices": {
+    "tcgplayer": "16.83",
+    "cardkingdom": "26.97",
+    "cardmarket": "20.66"
+   },
+   "variantCount": 16
+  },
+  {
+   "id": "2105-2815-3337",
+   "status": "OK",
+   "uses": [
+    {
+     "card": {
+      "id": 3337,
+      "name": "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+      "oracleId": "c0957e5e-c71b-439c-931c-9f55d2f76ace",
+      "spoiler": false,
+      "faces": 2,
+      "typeLine": "Enchantment — Saga // Enchantment Creature — Goblin Shaman",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "layoutRotationFront": null,
+      "imageUriBackPng": "https://cards.scryfall.io/png/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.png?1783923875",
+      "imageUriBackLarge": "https://cards.scryfall.io/large/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackNormal": "https://cards.scryfall.io/normal/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackSmall": "https://cards.scryfall.io/small/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875",
+      "imageUriBackArtCrop": "https://cards.scryfall.io/art_crop/back/2/4/24c0d87b-0049-4beb-b9cb-6f813b7aa7dc.jpg?1783923875"
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2105,
+      "name": "Combat Celebrant",
+      "oracleId": "5e15ff93-99a0-4000-918e-4bd2c257188d",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.png?1783936491",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/2/8/28b63c3d-2e55-4343-b49a-11fa602ec473.jpg?1783936491",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    },
+    {
+     "card": {
+      "id": 2815,
+      "name": "Professional Face-Breaker",
+      "oracleId": "04152e7a-969c-4858-841b-0a569a9fc1bf",
+      "spoiler": false,
+      "faces": 1,
+      "typeLine": "Creature — Human Warrior",
+      "imageUriFrontPng": "https://cards.scryfall.io/png/front/4/2/42acbf52-b137-44f0-a815-2817fe8d2da2.png?1783923119",
+      "imageUriFrontLarge": "https://cards.scryfall.io/large/front/4/2/42acbf52-b137-44f0-a815-2817fe8d2da2.jpg?1783923119",
+      "imageUriFrontNormal": "https://cards.scryfall.io/normal/front/4/2/42acbf52-b137-44f0-a815-2817fe8d2da2.jpg?1783923119",
+      "imageUriFrontSmall": "https://cards.scryfall.io/small/front/4/2/42acbf52-b137-44f0-a815-2817fe8d2da2.jpg?1783923119",
+      "imageUriFrontArtCrop": "https://cards.scryfall.io/art_crop/front/4/2/42acbf52-b137-44f0-a815-2817fe8d2da2.jpg?1783923119",
+      "layoutRotationFront": null,
+      "imageUriBackPng": null,
+      "imageUriBackLarge": null,
+      "imageUriBackNormal": null,
+      "imageUriBackSmall": null,
+      "imageUriBackArtCrop": null
+     },
+     "zoneLocations": [
+      "B"
+     ],
+     "battlefieldCardState": "",
+     "exileCardState": "",
+     "libraryCardState": "",
+     "graveyardCardState": "",
+     "mustBeCommander": false,
+     "quantity": 1,
+     "usedFace": null
+    }
+   ],
+   "requires": [],
+   "produces": [
+    {
+     "feature": {
+      "id": 91,
+      "name": "Infinite Treasure tokens",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 2408,
+      "name": "Infinite artifact ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 2409,
+      "name": "Infinite artifact LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 2419,
+      "name": "Infinite artifact sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 587,
+      "name": "Infinite artifact tokens",
+      "uncountable": true,
+      "status": "C"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 5,
+      "name": "Infinite colored mana",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 19,
+      "name": "Infinite combat phases",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 4,
+      "name": "Infinite creature ETB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 3,
+      "name": "Infinite creature LTB",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 6,
+      "name": "Infinite creature sacrifice triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 39,
+      "name": "Infinite creature tokens with haste",
+      "uncountable": true,
+      "status": "S"
+     },
+     "quantity": 1
+    },
+    {
+     "feature": {
+      "id": 7,
+      "name": "Infinite death triggers",
+      "uncountable": true,
+      "status": "H"
+     },
+     "quantity": 1
+    }
+   ],
+   "of": [
+    {
+     "id": 10720
+    }
+   ],
+   "includes": [
+    {
+     "id": 26302
+    },
+    {
+     "id": 26311
+    },
+    {
+     "id": 27480
+    },
+    {
+     "id": 10720
+    },
+    {
+     "id": 31074
+    },
+    {
+     "id": 33866
+    }
+   ],
+   "identity": "R",
+   "manaNeeded": "{1}",
+   "manaValueNeeded": 1,
+   "easyPrerequisites": "Reflection of Kiki-Jiki does not have summoning sickness.",
+   "notablePrerequisites": "An opponent cannot block at least one creature you control.",
+   "description": "Activate Reflection of KIki-Jiki by paying {1} and tapping it, creating a token copy of Combat Celebrant with haste.\nDeclare Combat Celebrant token and, if needed, an additional creature an opponent cannot block as attackers, choosing to exert Combat Celebrant as it attacks.\nWhen you attack, the token Combat Celebrant triggers, untapping all other creatures you control and causing you to get an additional combat phase after this one.\nWhen you deal combat damage, Professional Face-Breaker triggers, creating at least one Treasure token.\nActivate a Treasure by tapping and sacrificing it, adding one mana.\nRepeat.",
+   "notes": "",
+   "popularity": 3241,
+   "spoiler": false,
+   "bracketTag": "E",
+   "legalities": {
+    "commander": true,
+    "pauperCommanderMain": false,
+    "pauperCommander": false,
+    "oathbreaker": true,
+    "predh": false,
+    "standardBrawl": false,
+    "brawl": true,
+    "competitiveBrawl": true,
+    "alchemy": false,
+    "vintage": true,
+    "legacy": true,
+    "premodern": false,
+    "modern": true,
+    "pioneer": true,
+    "standard": false,
+    "pauper": false
+   },
+   "prices": {
+    "tcgplayer": "13.35",
+    "cardkingdom": "20.47",
+    "cardmarket": "13.72"
+   },
+   "variantCount": 16
+  }
+ ]
+}

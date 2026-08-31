@@ -20,6 +20,19 @@ scryfall-*.json
 spellbook-*.json
 cache/
 
+# ...but the RECORDED FIXTURES are not bulk data, they are the test suite.
+#
+# `spellbook-*.json` was catching `packages/clients/fixtures/`, so
+# `spellbook.test.ts` — which reads its fixture at module scope — failed with
+# ENOENT on every fresh clone, and the whole file failed to load rather than
+# skipping. The sibling Scryfall fixture escaped the same fate only because it
+# happens to be `.jsonl` rather than `.json`, which is luck, not design.
+#
+# AGENTS.md §4 requires tests to run against recorded fixtures and never the
+# live API, so these files have to be in the repository for that rule to mean
+# anything.
+!packages/clients/fixtures/**
+
 # Card imagery — never commit
 images/
 *.jpg
