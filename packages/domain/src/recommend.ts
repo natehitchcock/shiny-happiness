@@ -281,6 +281,11 @@ export const recommend = (input: RecommendInput): RecommendResult => {
         kind: 'fills-deficit',
         dimension: s.deficit.dimension,
         deficit: Math.abs(s.deficit.delta),
+        // Carried from the target the gap was measured against, so the reason
+        // says whose number this card is being suggested against (P4, doc 16).
+        // No new input to `recommend` was needed: `Deficit` already holds the
+        // whole `CompositionTarget`, which is where the source rides.
+        source: s.deficit.target.source ?? 'archetype',
       })
     }
     for (const flag of s.pooled.bracketFlags) {

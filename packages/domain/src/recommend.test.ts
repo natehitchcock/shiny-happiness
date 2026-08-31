@@ -214,6 +214,44 @@ describe('deficit groups', () => {
     expect(groupKeys(result)).toContain('fills-ramp')
     expect(result.groups.find((g) => g.key === 'fills-ramp')!.label).toMatch(/ramp/)
   })
+
+  /*
+   * Whose gap is being filled (doc 16, pillar P4).
+   *
+   * "Fills a ramp gap" and "fills the ramp target you set" are different claims.
+   * A card suggested against a number the builder typed is suggested on their
+   * authority, not the archetype's, and a reason that hides that is a reason
+   * they cannot audit when the suggestions start looking wrong.
+   */
+  it('says the gap is the archetype’s when nothing was overridden', () => {
+    const result = recommend(
+      baseInput({
+        pool: [pooled('rock', { roles: ['ramp'], card: card('rock', { primaryRole: 'ramp' }) })],
+      }),
+    )
+    const rec = result.groups.flatMap((g) => g.items)[0]!
+    expect(rec.reasons).toContainEqual(
+      expect.objectContaining({ kind: 'fills-deficit', source: 'archetype' }),
+    )
+  })
+
+  it('says the gap is the builder’s when the target was overridden', () => {
+    const result = recommend(
+      baseInput({
+        pool: [pooled('rock', { roles: ['ramp'], card: card('rock', { primaryRole: 'ramp' }) })],
+        targets: compositionTargets(
+          'midrange',
+          null,
+          { bracket: 3 },
+          { roles: { 'role:ramp': 20 } },
+        ),
+      }),
+    )
+    const rec = result.groups.flatMap((g) => g.items)[0]!
+    expect(rec.reasons).toContainEqual(
+      expect.objectContaining({ kind: 'fills-deficit', source: 'custom' }),
+    )
+  })
 })
 
 describe('every recommendation explains itself (pillar P4)', () => {

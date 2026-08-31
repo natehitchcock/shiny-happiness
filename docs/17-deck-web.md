@@ -1,7 +1,10 @@
 # 17 — The deck web
 
-**Status: scoped, not built.** Like [doc 16](16-archetype-customiser.md), this is
-a design to argue with before it costs anything. Open questions are at the end.
+**Status: scoped, not built.** As [doc 16](16-archetype-customiser.md) was until
+it shipped, this is a design to argue with before it costs anything. Open
+questions are at the end — and doc 16 §16.9 is worth reading first for the form
+answering them is expected to take: a decision, the reasoning, and a record of
+where the build diverged.
 
 A second way to look at one deck: every card as its art, every relationship as a
 line between two of them. The three-column workspace answers "what should I add

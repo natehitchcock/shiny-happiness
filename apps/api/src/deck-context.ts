@@ -14,6 +14,7 @@ import {
   buildComboIndex,
   compositionTargets,
   countComposition,
+  hasTargetOverrides,
   primaryRole,
 } from '@roundtable/domain'
 
@@ -31,6 +32,15 @@ export interface DeckContext {
   readonly comboIndex: ComboIndex
   readonly counts: CompositionCounts
   readonly targets: readonly CompositionTarget[]
+  /**
+   * The same targets as the archetype alone would have set them (doc 16).
+   *
+   * Identical to `targets` for a deck that overrides nothing, which is almost
+   * every deck. It exists so the customiser can show what it is overriding —
+   * the preset is the context for the number you are typing — and so the
+   * analysis can report both without the client recomputing anything.
+   */
+  readonly presetTargets: readonly CompositionTarget[]
   readonly snapshotId: string | null
   readonly printingFacts: ReadonlyMap<OracleId, PrintingFacts>
   /**
@@ -123,10 +133,33 @@ export const loadDeckContext = async (pool: Pool, deck: Deck): Promise<DeckConte
   for (const card of deckCards) cards.set(card.oracleId, card)
 
   const counts = countComposition(deck, cards, (card) => primaryRole(card.roles))
-  const targets = compositionTargets(deck.archetype, deck.archetypeSecondary, {
+  const targetOptions = {
     bracket: deck.targetBracket,
     averageManaValue: counts.averageManaValue,
-  })
+  }
+  const targets = compositionTargets(
+    deck.archetype,
+    deck.archetypeSecondary,
+    targetOptions,
+    deck.targetOverrides,
+  )
+  /*
+   * The same targets with the deck's overrides taken off (doc 16).
+   *
+   * Doc 16's interface argument is that the preset must be visible BEHIND every
+   * field: "a box showing only 36 cannot tell you the archetype wanted 34". The
+   * client cannot derive it — the value it needs is the preset after the bracket
+   * and curve modifiers, which depend on the deck's own average mana value — so
+   * it is computed here, from the same function and the same options, and can
+   * therefore never disagree with the live targets it sits beside.
+   *
+   * Cheap: `compositionTargets` is arithmetic over roughly a dozen entries and
+   * touches no IO. Skipped entirely for the common deck that overrides nothing,
+   * where the answer is the targets themselves.
+   */
+  const presetTargets = hasTargetOverrides(deck.targetOverrides)
+    ? compositionTargets(deck.archetype, deck.archetypeSecondary, targetOptions)
+    : targets
 
   const index = buildComboIndex(combos)
 
@@ -137,6 +170,7 @@ export const loadDeckContext = async (pool: Pool, deck: Deck): Promise<DeckConte
     comboIndex: index,
     counts,
     targets,
+    presetTargets,
     snapshotId,
     printingFacts,
     gameChangers,

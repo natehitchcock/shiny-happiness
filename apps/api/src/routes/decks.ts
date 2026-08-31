@@ -21,6 +21,7 @@ import type {
   DeckCommandBatch,
   DeckEntry,
   OracleId,
+  TargetOverrides,
 } from '@roundtable/domain'
 import {
   applyCommands,
@@ -338,7 +339,26 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
         budget?: { maxTotalUsd?: number | null; maxCardUsd?: number | null } | null
         status?: Deck['status']
         excludeUniversesBeyond?: boolean
+        targetOverrides?: TargetOverrides | null
       }
+
+      /*
+       * Targets are replaced WHOLESALE, never merged (doc 16).
+       *
+       * The object is small and the client always holds all of it — the sheet
+       * renders every row before it can change one. A merge protocol would be a
+       * second thing to get wrong, and it has no way to express a deletion:
+       * "reset the ramp row" and "leave the ramp row alone" are both an absent
+       * key, so a merging endpoint could never clear an override. Clearing is
+       * the requirement doc 16 leans hardest on — an override you cannot get
+       * rid of is a trap — so `null` and `{}` both mean "back to the preset".
+       *
+       * Note this deliberately does NOT reset on an archetype change: the two
+       * are independent columns in one statement and neither clears the other.
+       * See doc 16's answer to its own second open question.
+       */
+      const overrides =
+        'targetOverrides' in body ? JSON.stringify(body.targetOverrides ?? {}) : null
 
       // COALESCE keeps every unsupplied column as it was. Changing archetype moves
       // targets only — no statement here touches `deck_entries` (doc 14 §14.4).
@@ -353,6 +373,9 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
          budget_max_card     = CASE WHEN $7::boolean THEN $9 ELSE budget_max_card END,
          status              = COALESCE($10, status),
          exclude_universes_beyond = COALESCE($11, exclude_universes_beyond),
+         -- COALESCE, not a CASE flag: $13 is already null exactly when the key
+         -- is absent, because an explicit JSON null was turned into '{}' above.
+         target_overrides    = COALESCE($13::jsonb, target_overrides),
          updated_at          = now()
        WHERE id = $1 AND deleted_at IS NULL`,
         [
@@ -368,6 +391,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
           body.status ?? null,
           body.excludeUniversesBeyond ?? null,
           body.description ?? null,
+          overrides,
         ],
       )
       if ((rowCount ?? 0) === 0) return sendProblem(rep, notFound(`No deck with id ${id}`))

@@ -59,6 +59,52 @@ export const createDeckBody = {
   },
 } as const
 
+/**
+ * The per-deck target sheet (doc 16).
+ *
+ * `null` is accepted and means "clear it". That is not decoration: an override
+ * the user cannot get rid of is a trap, and `{}` alone would leave a client
+ * unable to say "back to the archetype" in a body whose other fields all treat
+ * absence as "leave alone".
+ *
+ * Counts are integers 0–99 because they are CARDS. A share would have to be
+ * multiplied by a deck size the sheet does not know, and doc 16 argues the
+ * point at length: builders think in "36 lands", not "34.2% of nonland spells".
+ *
+ * `roles` keys are unconstrained strings — they are `dimensionKey` values, and
+ * the vocabulary is `Role` × `CardType`, which is too large to enumerate here
+ * without restating two domain unions. `parseTargetOverrides` drops anything
+ * outside the key space on read, so a nonsense key costs itself and nothing
+ * more; enumerating it here would only move the same rejection earlier.
+ */
+const targetCount = { type: 'integer', minimum: 0, maximum: 99 } as const
+
+const targetOverrides = {
+  type: ['object', 'null'],
+  additionalProperties: false,
+  properties: {
+    roles: { type: 'object', additionalProperties: targetCount },
+    curve: {
+      type: 'object',
+      // Buckets 0–7 only, named one by one: `additionalProperties` cannot
+      // constrain a key's NUMERIC range, and an `8` silently kept here would be
+      // an override the curve never applies and the sheet cannot show.
+      additionalProperties: false,
+      properties: {
+        '0': targetCount,
+        '1': targetCount,
+        '2': targetCount,
+        '3': targetCount,
+        '4': targetCount,
+        '5': targetCount,
+        '6': targetCount,
+        '7': targetCount,
+      },
+    },
+    tolerance: { type: 'number', minimum: 0, maximum: 1 },
+  },
+} as const
+
 export const patchDeckBody = {
   type: 'object',
   additionalProperties: false,
@@ -79,6 +125,7 @@ export const patchDeckBody = {
     },
     status: { type: 'string', enum: ['active', 'archived'] },
     excludeUniversesBeyond: { type: 'boolean' },
+    targetOverrides,
   },
 } as const
 

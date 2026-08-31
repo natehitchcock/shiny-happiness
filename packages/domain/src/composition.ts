@@ -14,17 +14,46 @@ export type CompositionDimension =
 export const roleDimension = (role: Role): CompositionDimension => ({ kind: 'role', role })
 export const typeDimension = (type: CardType): CompositionDimension => ({ kind: 'type', type })
 
+/** Where a target's number came from (doc 16). */
+export type TargetSource = 'archetype' | 'custom'
+
 /** Always a range with an ideal marked — never a single number (doc 05 §5.4). */
 export interface CompositionTarget {
   readonly dimension: CompositionDimension
   readonly min: number
   readonly ideal: number
   readonly max: number
+  /**
+   * `custom` when the builder typed this ideal rather than inheriting it.
+   *
+   * Optional, so a caller that predates doc 16 keeps working unchanged
+   * (AGENTS.md R2) and every existing `CompositionTarget` literal still
+   * type-checks. It rides on the target rather than being passed alongside
+   * because the two consumers that need it — the meters and the `fills-deficit`
+   * reason — both already hold the target and nothing else. Pillar P4 is the
+   * point: "fills a ramp gap" and "fills the ramp target you set" are different
+   * claims and a recommendation must make the one that is true.
+   */
+  readonly source?: TargetSource
 }
 
 /** Stable string form, for map keys and the `fills-<dimension>` group key. */
 export const dimensionKey = (dimension: CompositionDimension): string =>
   dimension.kind === 'role' ? `role:${dimension.role}` : `type:${dimension.type}`
+
+/**
+ * The inverse of `dimensionKey`, for a key that came back from storage.
+ *
+ * `null` rather than a thrown error or a fabricated dimension: the caller is a
+ * per-deck override read out of `jsonb` (doc 16), and a key it cannot parse is
+ * one override to drop, not a deck to refuse to open. Kept next to
+ * `dimensionKey` so the two can never drift — a round-trip test holds them.
+ */
+export const dimensionFromKey = (key: string): CompositionDimension | null => {
+  if (key.startsWith('role:')) return roleDimension(key.slice('role:'.length) as Role)
+  if (key.startsWith('type:')) return typeDimension(key.slice('type:'.length) as CardType)
+  return null
+}
 
 /**
  * Every dimension a card counts toward — one role, and each of its types.

@@ -1,4 +1,6 @@
 import type { ArchetypeKey } from './archetype.js'
+import type { TargetSource } from './composition.js'
+import { CURVE_REFERENCE_SPELLS, type TargetOverrides } from './target-overrides.js'
 
 /**
  * Mana curve targets (ADR-0011).
@@ -50,6 +52,15 @@ export interface CurveBand {
   readonly ideal: number
   readonly min: number
   readonly max: number
+  /**
+   * `custom` when the builder pinned this bucket's count (doc 16).
+   *
+   * Optional for the same reason `CompositionTarget.source` is: additive, so
+   * every existing reader and every existing literal is untouched (AGENTS.md
+   * R2). The curve panel needs it to mark the buckets it must not present as
+   * the archetype's opinion.
+   */
+  readonly source?: TargetSource
 }
 
 export type CurveTarget = readonly CurveBand[]
@@ -72,9 +83,9 @@ export type CurveTarget = readonly CurveBand[]
  *
  * One scalar per archetype, not one per bucket. Ramp is the case that argues for
  * per-bucket (its early rocks are on a schedule; its payoffs are the opposite),
- * and it is knowingly not served well here. Doc 16 makes tolerance a single
- * per-deck setting, so splitting it now would design against a scoped feature to
- * fix one row.
+ * and it is knowingly not served well here. Doc 16 shipped tolerance as a single
+ * per-deck setting that REPLACES this one, so a ramp player who disagrees has a
+ * dial; splitting the table per bucket would still be designing against that.
  */
 const TOLERANCE: Record<ArchetypeKey, number> = {
   /** Pure schedule. Damage per turn is arithmetic and an unspent turn is gone. */
@@ -111,12 +122,21 @@ const TOLERANCE: Record<ArchetypeKey, number> = {
 /** Never narrower than this share, or a 2%-target bucket has a band of nothing. */
 const MIN_HALF_WIDTH = 0.015
 
-const banded = (weights: readonly number[], tolerance: number): CurveTarget => {
+const banded = (
+  weights: readonly number[],
+  tolerance: number,
+  custom: ReadonlySet<number> = new Set(),
+): CurveTarget => {
   const total = weights.reduce((a, b) => a + b, 0)
-  return weights.map((w) => {
+  return weights.map((w, bucket) => {
     const ideal = w / total
     const halfWidth = Math.max(ideal * tolerance, MIN_HALF_WIDTH)
-    return { ideal, min: Math.max(0, ideal - halfWidth), max: ideal + halfWidth }
+    return {
+      ideal,
+      min: Math.max(0, ideal - halfWidth),
+      max: ideal + halfWidth,
+      source: custom.has(bucket) ? ('custom' as const) : ('archetype' as const),
+    }
   })
 }
 
@@ -235,28 +255,101 @@ const SHAPES: Record<ArchetypeKey, readonly number[]> = {
 }
 
 /**
+ * How strict this archetype pair is on its own, before any per-deck override.
+ *
+ * Exported for the customiser (doc 16), which has to show the preset behind the
+ * value being typed — a tolerance slider that shows only the number you set
+ * cannot tell you the archetype wanted 0.35. The blend rule is the one
+ * `curveTarget` uses, stated once here so the two cannot drift.
+ */
+export const archetypeTolerance = (
+  archetype: ArchetypeKey,
+  secondary: ArchetypeKey | null = null,
+): number =>
+  secondary === null || secondary === archetype
+    ? TOLERANCE[archetype]
+    : Math.max(TOLERANCE[archetype], TOLERANCE[secondary])
+
+/**
+ * Fold the deck's own bucket counts into the archetype's shape (doc 16).
+ *
+ * SPARSE. A bucket the builder pinned becomes its count as a share of
+ * `CURVE_REFERENCE_SPELLS`; every bucket they did not keeps the archetype's
+ * shape, rescaled to fill whatever share is left over. So pinning "twelve
+ * two-drops" moves the two-drop bucket and leaves the relative shape of the
+ * other seven exactly as the archetype drew it — which is the whole point of a
+ * sparse override, and is why this is not a snapshot of eight numbers.
+ *
+ * Two degenerate inputs, both real:
+ *
+ *   * Counts summing past the reference. `rest` goes to zero and `banded`
+ *     renormalises what is left, so the RATIOS the builder typed survive and
+ *     the untouched buckets are squeezed out. That is the honest reading of
+ *     "40 two-drops in a 63-spell deck", and doc 03 §3.2's principle says the
+ *     user may knowingly cross their own line — the warning belongs in the UI,
+ *     not in a clamp here.
+ *   * Every bucket pinned to zero. There is no shape left to normalise, so the
+ *     archetype's is returned untouched rather than eight NaNs.
+ */
+const withCurveOverrides = (
+  weights: readonly number[],
+  overrides: Readonly<Record<number, number>>,
+): { readonly weights: readonly number[]; readonly custom: ReadonlySet<number> } => {
+  const custom = new Set<number>()
+  for (const [key, count] of Object.entries(overrides)) {
+    const bucket = Number(key)
+    if (Number.isInteger(bucket) && bucket >= 0 && bucket < CURVE_BUCKETS && count >= 0) {
+      custom.add(bucket)
+    }
+  }
+  if (custom.size === 0) return { weights, custom }
+
+  const total = weights.reduce((a, b) => a + b, 0)
+  const shares = weights.map((w) => (total === 0 ? 0 : w / total))
+  const pinnedShare = [...custom].reduce(
+    (sum, bucket) => sum + (overrides[bucket] ?? 0) / CURVE_REFERENCE_SPELLS,
+    0,
+  )
+  const restShare = Math.max(0, 1 - pinnedShare)
+  const restPreset = shares.reduce((sum, s, i) => (custom.has(i) ? sum : sum + s), 0)
+
+  const next = shares.map((share, bucket) =>
+    custom.has(bucket)
+      ? (overrides[bucket] ?? 0) / CURVE_REFERENCE_SPELLS
+      : restPreset === 0
+        ? 0
+        : (share * restShare) / restPreset,
+  )
+  if (next.reduce((a, b) => a + b, 0) === 0) return { weights, custom: new Set<number>() }
+  return { weights: next, custom }
+}
+
+/**
  * The target curve for a deck.
  *
  * A secondary archetype blends 70/30, the same ratio the role targets use
  * (doc 14 §14.1) — a hybrid deck should not get a curve neither half wants.
+ *
+ * `overrides` is the per-deck sheet (doc 16). Sparse: absent buckets keep the
+ * archetype's shape, and a deck that overrides nothing gets byte-identical
+ * output to the call that omits the argument entirely.
  */
 export const curveTarget = (
   archetype: ArchetypeKey,
   secondary: ArchetypeKey | null = null,
+  overrides?: TargetOverrides,
 ): CurveTarget => {
-  const primary = SHAPES[archetype]
-  if (secondary === null || secondary === archetype) {
-    return banded(primary, TOLERANCE[archetype])
-  }
+  const blended =
+    secondary === null || secondary === archetype
+      ? SHAPES[archetype]
+      : SHAPES[archetype].map((w, i) => w * 0.7 + (SHAPES[secondary][i] ?? 0) * 0.3)
 
-  const other = SHAPES[secondary]
-  // A hybrid gets the looser of the two tolerances: it is being asked to satisfy
-  // two shapes at once, so holding it to the stricter one punishes the blend.
-  const tolerance = Math.max(TOLERANCE[archetype], TOLERANCE[secondary])
-  return banded(
-    primary.map((w, i) => w * 0.7 + (other[i] ?? 0) * 0.3),
-    tolerance,
-  )
+  // The deck's own setting, where it has one, replaces the archetype's — it is
+  // the user saying how strict THIS deck is, which outranks a table.
+  const tolerance = overrides?.tolerance ?? archetypeTolerance(archetype, secondary)
+
+  const { weights, custom } = withCurveOverrides(blended, overrides?.curve ?? {})
+  return banded(weights, tolerance, custom)
 }
 
 /** The bucket a mana value falls in. 7 holds everything above it. */

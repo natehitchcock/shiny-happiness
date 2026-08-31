@@ -3,6 +3,7 @@ import type { Bracket } from './bracket.js'
 import type { Color } from './card.js'
 import type { DeckId, OracleId } from './ids.js'
 import type { Role } from './role.js'
+import type { TargetOverrides } from './target-overrides.js'
 
 /**
  * A card is in exactly one state relative to a deck (doc 02 §2.2).
@@ -61,6 +62,21 @@ export interface Deck {
   readonly archetype: ArchetypeKey
   /** Hybrid deck; targets blend 70/30 toward the primary (doc 14 §14.1). */
   readonly archetypeSecondary: ArchetypeKey | null
+  /**
+   * The role counts, curve buckets and tolerance this builder disagrees with the
+   * preset about (doc 16). Sparse; `{}` is a deck that accepts the archetype.
+   *
+   * Optional so that adding it is additive (AGENTS.md R2) and every existing
+   * `Deck` literal — there are dozens in the tests — still type-checks. Read it
+   * as `deck.targetOverrides ?? NO_TARGET_OVERRIDES`; absent and empty mean the
+   * same thing and no consumer should have to tell them apart.
+   *
+   * NOT part of `DeckCommand`. A target is a property of the deck, not an
+   * operation on its contents, and putting a slider through the command batch
+   * would make "I moved a target" undoable in the same queue as "I added a
+   * card" — two very different sizes of mistake sharing one Ctrl+Z.
+   */
+  readonly targetOverrides?: TargetOverrides
   /** Derived from the commanders; cached. */
   readonly colorIdentity: readonly Color[]
   readonly entries: readonly DeckEntry[]

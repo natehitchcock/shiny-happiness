@@ -38,9 +38,16 @@ POST   /api/v1/decks     { name, commanders, targetBracket, archetype,
                            archetypeSecondary? }                        → Deck
 GET    /api/v1/decks/:id                                                → Deck
 PATCH  /api/v1/decks/:id { name?, targetBracket?, archetype?,
-                           archetypeSecondary?, budget?, status? }      → Deck
+                           archetypeSecondary?, budget?, status?,
+                           targetOverrides? }                           → Deck
        Changing archetype moves targets only — it never adds or removes a
-       card (doc 14 §14.4).
+       card (doc 14 §14.4), and it does NOT clear targetOverrides
+       (doc 16 §16.9).
+       targetOverrides is REPLACED WHOLESALE, never merged: the object is
+       small and the client always holds all of it, and a merge could not
+       express a deletion — "reset ramp" and "leave ramp alone" are both
+       an absent key. `null` and `{}` both clear it, which is the way back
+       to the archetype.
 DELETE /api/v1/decks/:id                       soft delete, 30-day recovery
 POST   /api/v1/decks/:id/duplicate  { name? }  → Deck   full copy: entries,
                                                         origins, exclusions, locks
@@ -213,7 +220,14 @@ GET /api/v1/decks/:id/analysis
         byType: Record<CardType, number>,
         byManaValue: number[]
       },
+      // Each target additionally carries `locked`, `actual`, and — since
+      // doc 16 — `source: 'archetype' | 'custom'` and `preset: number | null`.
+      // `preset` is what the archetype wanted, whether or not it was
+      // overridden; `null` where the archetype names no such dimension at all,
+      // which is not the same claim as 0.
       targets: CompositionTarget[],
+      // The deck's own sparse overrides, echoed back for the customiser sheet.
+      targetOverrides: TargetOverrides,
       deficits: Array<{ dimension: CompositionDimension, delta: number }>,
       archetype: {
         declared: ArchetypeKey,
@@ -222,7 +236,11 @@ GET /api/v1/decks/:id/analysis
         confidence: number,           // 0..1
         drivers: CompositionDimension[]  // which dimensions drove the assessment
       },
-      curve: { averageManaValue: number, histogram: number[] },
+      // `target` bands carry `source` per bucket; `preset` is the archetype's
+      // own shape, equal to `target` for a deck that overrode nothing (doc 16).
+      curve: { averageManaValue: number, histogram: number[],
+               target: CurveBand[], preset: CurveBand[],
+               deltas: CurveDelta[], locked: number[] },
       colorBalance: { pips: Record<Color, number>, sources: Record<Color, number> },
       bracket: {
         target: Bracket,

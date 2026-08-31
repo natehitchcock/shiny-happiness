@@ -598,4 +598,342 @@ describeDb('API-02 contract', () => {
       expect(response.statusCode).toBe(404)
     })
   })
+
+  /**
+   * The archetype customiser end to end (doc 16).
+   *
+   * The domain tests prove the arithmetic; these prove the wire — that a number
+   * typed into `PATCH /decks/:id` reaches the targets the analysis reports and
+   * the recommendations are ordered by, and that it can be taken back off.
+   */
+  describe('per-deck target overrides (doc 16)', () => {
+    /** A deck of its own, so tuning it cannot disturb the shared fixture deck. */
+    const freshDeck = async (archetype = 'midrange'): Promise<{ id: string }> =>
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/decks',
+          payload: { name: 'Tuned', commanders: [KROV], targetBracket: 3, archetype },
+        })
+      ).json()
+
+    const analyse = async (id: string) =>
+      (await app.inject({ method: 'GET', url: `/api/v1/decks/${id}/analysis` })).json()
+
+    const idealOf = (
+      body: { targets: { dimension: { role?: string }; ideal: number }[] },
+      role: string,
+    ) => body.targets.find((t) => t.dimension.role === role)?.ideal
+
+    it('starts every deck on its archetype with nothing overridden', async () => {
+      const body = await analyse((await freshDeck()).id)
+      expect(body.targetOverrides).toEqual({})
+      expect(body.targets.every((t: { source: string }) => t.source === 'archetype')).toBe(true)
+      // With nothing overridden the preset IS the target, everywhere.
+      for (const t of body.targets) expect(t.preset).toBe(t.ideal)
+    })
+
+    it('moves the target a builder typed and leaves the others alone', async () => {
+      const fresh = await freshDeck()
+      const before = await analyse(fresh.id)
+
+      const patched = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { roles: { 'role:ramp': 17 } } },
+      })
+      expect(patched.statusCode).toBe(200)
+      expect(patched.json().targetOverrides).toEqual({ roles: { 'role:ramp': 17 } })
+
+      const after = await analyse(fresh.id)
+      expect(idealOf(after, 'ramp')).toBe(17)
+      // Sparse: every other row is still exactly what the archetype said, so
+      // this deck keeps inheriting later revisions of all of them.
+      expect(idealOf(after, 'draw')).toBe(idealOf(before, 'draw'))
+      expect(idealOf(after, 'land')).toBe(idealOf(before, 'land'))
+    })
+
+    it('says which targets are the builder’s and what the archetype wanted', async () => {
+      const fresh = await freshDeck()
+      const presetRamp = idealOf(await analyse(fresh.id), 'ramp')
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { roles: { 'role:ramp': 17 } } },
+      })
+
+      const body = await analyse(fresh.id)
+      const ramp = body.targets.find(
+        (t: { dimension: { role?: string } }) => t.dimension.role === 'ramp',
+      )
+      expect(ramp.source).toBe('custom')
+      // The preset stays visible behind the number, which is doc 16's whole
+      // interface argument: a box reading 17 cannot tell you it wanted 10.
+      expect(ramp.preset).toBe(presetRamp)
+      expect(
+        body.targets.find((t: { dimension: { role?: string } }) => t.dimension.role === 'draw')
+          .source,
+      ).toBe('archetype')
+    })
+
+    it('reports null rather than zero for a dimension the archetype never named', async () => {
+      // "The archetype wanted none of these" and "the archetype has no opinion
+      // about these" are different, and only one of them is true here.
+      const fresh = await freshDeck()
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { roles: { 'role:stax': 5 } } },
+      })
+      const stax = (await analyse(fresh.id)).targets.find(
+        (t: { dimension: { role?: string } }) => t.dimension.role === 'stax',
+      )
+      expect(stax.ideal).toBe(5)
+      expect(stax.preset).toBeNull()
+    })
+
+    it('moves the curve the panel draws, and keeps the preset beside it', async () => {
+      const fresh = await freshDeck()
+      const before = await analyse(fresh.id)
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { curve: { '6': 14 } } },
+      })
+      const after = await analyse(fresh.id)
+
+      expect(after.curve.target[6].ideal).toBeGreaterThan(before.curve.target[6].ideal)
+      expect(after.curve.target[6].source).toBe('custom')
+      expect(after.curve.target[5].source).toBe('archetype')
+      // The archetype's own shape survives alongside, for the sheet to show.
+      expect(after.curve.preset[6].ideal).toBeCloseTo(before.curve.target[6].ideal, 9)
+    })
+
+    it('judges the deck against the same tuned curve in both endpoints', async () => {
+      /*
+       * The two endpoints build their curve target from the same three
+       * arguments, and they MUST agree: an analysis panel saying the deck is
+       * fine at two, beside an ordering that is pushing two-drops down because
+       * it thinks the bucket is over-full, is worse than either alone. That is
+       * the reason `deck-context` exists at all, and the curve is the one target
+       * it does not carry.
+       *
+       * Observed through `curve-fit`, which the domain emits only for a card
+       * with nothing else to say for itself — and whose `delta` is read off the
+       * same `curveDeltas` the analysis reports.
+       */
+      const fresh = await freshDeck()
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/decks/${fresh.id}/commands`,
+        payload: {
+          commands: [PIECE_A, PIECE_B, RAMP].map((oracle) => ({
+            type: 'accept',
+            oracleId: oracle,
+            origin: 'manual',
+          })),
+          idempotencyKey: randomUUID(),
+          baseVersion: 1,
+        },
+      })
+
+      const curveFitDelta = async (): Promise<number | undefined> => {
+        const body = (
+          await app.inject({
+            method: 'POST',
+            url: `/api/v1/decks/${fresh.id}/recommendations`,
+            payload: {},
+          })
+        ).json()
+        return body.groups
+          .flatMap((g: { items: { reasons: { kind: string; delta?: number }[] }[] }) => g.items)
+          .flatMap((i: { reasons: { kind: string; delta?: number }[] }) => i.reasons)
+          .find((r: { kind: string }) => r.kind === 'curve-fit')?.delta
+      }
+
+      // Every fixture card sits at mana value two, so bucket two is where the
+      // deck actually is and the only bucket the assertion can be about.
+      const before = await analyse(fresh.id)
+      expect(await curveFitDelta()).toBe(before.curve.deltas[2].delta)
+      // Over-full at two before the override, so the numbers below are a real
+      // change rather than two zeroes agreeing by accident.
+      expect(before.curve.deltas[2].delta).toBeLessThan(0)
+
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { curve: { '2': 60 } } },
+      })
+
+      const after = await analyse(fresh.id)
+      expect(after.curve.deltas[2].delta).toBe(0)
+      expect(await curveFitDelta()).toBe(after.curve.deltas[2].delta)
+    })
+
+    it('reaches the recommendation reasons, not only the meters', async () => {
+      /*
+       * Pillar P4. The suggestion is now being made on the builder's authority
+       * rather than the archetype's, and the reason has to say so — otherwise
+       * the one number they could change is the one thing the explanation hides.
+       */
+      const fresh = await freshDeck()
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { roles: { 'role:ramp': 20 } } },
+      })
+      const body = (
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/decks/${fresh.id}/recommendations`,
+          payload: {},
+        })
+      ).json()
+
+      const reasons = body.groups
+        .flatMap((g: { items: { reasons: { kind: string; source?: string }[] }[] }) => g.items)
+        .flatMap((i: { reasons: { kind: string; source?: string }[] }) => i.reasons)
+        .filter((r: { kind: string }) => r.kind === 'fills-deficit')
+      expect(reasons.length).toBeGreaterThan(0)
+      expect(reasons.some((r: { source?: string }) => r.source === 'custom')).toBe(true)
+      // And every recommendation still explains itself at all (P4).
+      for (const group of body.groups) {
+        for (const item of group.items) expect(item.reasons.length).toBeGreaterThan(0)
+      }
+    })
+
+    it('can be cleared with an empty object', async () => {
+      const fresh = await freshDeck()
+      const before = await analyse(fresh.id)
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { roles: { 'role:ramp': 17 }, tolerance: 0.1 } },
+      })
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: {} },
+      })
+      const after = await analyse(fresh.id)
+      expect(after.targetOverrides).toEqual({})
+      expect(after.targets).toEqual(before.targets)
+    })
+
+    it('can be cleared with an explicit null', async () => {
+      // The way out has to be sayable in a body whose other fields all treat
+      // absence as "leave alone". An override you cannot remove is a trap.
+      const fresh = await freshDeck()
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { roles: { 'role:ramp': 17 } } },
+      })
+      const patched = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: null },
+      })
+      expect(patched.statusCode).toBe(200)
+      expect(patched.json().targetOverrides).toEqual({})
+    })
+
+    it('leaves the overrides alone when the patch does not mention them', async () => {
+      // Every other field on this endpoint behaves this way, and a target that
+      // silently reset when a deck was renamed would be indistinguishable from
+      // a bug the user could not describe.
+      const fresh = await freshDeck()
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { roles: { 'role:ramp': 17 } } },
+      })
+      const renamed = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { name: 'Renamed' },
+      })
+      expect(renamed.json().name).toBe('Renamed')
+      expect(renamed.json().targetOverrides).toEqual({ roles: { 'role:ramp': 17 } })
+    })
+
+    it('carries the overrides through an archetype change', async () => {
+      /*
+       * Doc 16's second open question, answered: FOLLOW, and say so loudly.
+       *
+       * Silently discarding numbers the builder typed is worse than carrying
+       * numbers they may not want, because only one of those is reversible —
+       * there is a reset for the second and nothing at all for the first.
+       */
+      const fresh = await freshDeck('midrange')
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { roles: { 'role:ramp': 17 } } },
+      })
+      const switched = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { archetype: 'control' },
+      })
+      expect(switched.json().archetype).toBe('control')
+      expect(switched.json().targetOverrides).toEqual({ roles: { 'role:ramp': 17 } })
+
+      const body = await analyse(fresh.id)
+      expect(idealOf(body, 'ramp')).toBe(17)
+      // The rest of the deck really did become a control deck, so the override
+      // is riding on top of the new archetype rather than pinning the old one.
+      expect(idealOf(body, 'draw')).toBe(
+        idealOf(await analyse((await freshDeck('control')).id), 'draw'),
+      )
+    })
+
+    it('replaces wholesale rather than merging', async () => {
+      // A merge protocol has no way to express a deletion: "reset ramp" and
+      // "leave ramp alone" are both an absent key.
+      const fresh = await freshDeck()
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { roles: { 'role:ramp': 17, 'role:draw': 4 } } },
+      })
+      const second = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${fresh.id}`,
+        payload: { targetOverrides: { roles: { 'role:ramp': 17 } } },
+      })
+      expect(second.json().targetOverrides).toEqual({ roles: { 'role:ramp': 17 } })
+    })
+
+    it('rejects a count that is not a whole card', async () => {
+      for (const roles of [{ 'role:ramp': -1 }, { 'role:ramp': 3.5 }, { 'role:ramp': 100 }]) {
+        const response = await app.inject({
+          method: 'PATCH',
+          url: `/api/v1/decks/${(await freshDeck()).id}`,
+          payload: { targetOverrides: { roles } },
+        })
+        expect(response.statusCode, JSON.stringify(roles)).toBe(400)
+      }
+    })
+
+    it('rejects a curve bucket that is not 0..7', async () => {
+      // Kept, an `8` would be an override the curve never applies and the sheet
+      // cannot show — an edit the builder made and can never find again.
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${(await freshDeck()).id}`,
+        payload: { targetOverrides: { curve: { '8': 4 } } },
+      })
+      expect(response.statusCode).toBe(400)
+    })
+
+    it('rejects a tolerance outside 0..1', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/decks/${(await freshDeck()).id}`,
+        payload: { targetOverrides: { tolerance: 1.5 } },
+      })
+      expect(response.statusCode).toBe(400)
+    })
+  })
 })
