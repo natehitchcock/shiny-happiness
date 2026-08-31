@@ -45,6 +45,26 @@ thumbnail per row triples the scroll length to answer a question nobody asks of
 them. The reasoning is in the ADR, and `apps/web/src/art.test.tsx` pins both
 halves so the absences read as decisions rather than omissions.
 
+**The client stops re-downloading cards it already has.** The workspace used to
+replace its whole card map on every recompute, so every accept, reject, filter
+change and auto-query tick re-hydrated the entire page — names, type lines,
+oracle text, mana costs, synergy tags, art URLs and prices for a 99-card deck
+plus its suggestions, measured at 186–190 ids per click. `apps/web/src/cardcache.ts`
+holds them keyed on `Recommendations.datasetSnapshotId`, which is the same
+invalidation the API's own `snapshot-cache.ts` uses one layer down and for the
+same reason: card data at oracle identity is immutable for a corpus, and the
+snapshot id changes exactly when the ingest writes. Measured in a browser on the
+same 110-card deck, three accepts went from **561 ids over 3 requests to 16**, a
+recompute with nothing new on the page makes **no request at all**, and opening a
+suggestion's preview went from two `/cards/:oracleId` requests to one — one click
+fires `open` twice, so the cache holds the in-flight promise rather than the
+resolved value. Prices are held on the same key on purpose, and the reasoning
+(including the rejected short-TTL alternative) is at the top of that file.
+
+The **501 art-less cards are gone** and several `apps/web` comments still said
+otherwise; they now read as the past tense doc 17 §17.2 established. The no-art
+code path stays — an unresolved printing is still a state the wire can express.
+
 The app is called **Lotus Wizard** in the interface. The name is tentative and
 **not cleared** — `LEGAL-01` owns that, and there is a real question to answer
 first: see doc 04 §4.6. Package scopes stay `@roundtable/*` until it is settled.

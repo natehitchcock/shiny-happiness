@@ -91,7 +91,13 @@ const deck: api.Deck = {
 }
 
 const withArt = new Map<string, api.ImageUris>([['o1', { artCrop: ART, normal: NORMAL }]])
-/** The 501-card case: no art on any printing, which is an answer, not a gap. */
+/**
+ * A printing with no resolved art — an answer, not a gap.
+ *
+ * 501 real cards took this path until the double-faced art fix; coverage is now
+ * 34,492 of 34,492 (doc 17 §17.2). Still tested, because the wire can still say
+ * it and a client that cannot draw it draws a broken image instead.
+ */
 const withoutArt = new Map<string, api.ImageUris>([['o1', { artCrop: null, normal: null }]])
 
 const hydrated = (images: Map<string, api.ImageUris>): api.Hydrated => ({

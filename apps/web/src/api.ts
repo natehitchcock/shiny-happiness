@@ -253,9 +253,16 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
  * which is why this is a second map rather than two more fields — the same
  * arrangement `prices` has had since API-01.
  *
- * Both members are nullable and 501 cards in the corpus are null in both: they
- * have no art on any printing. That is a real answer, not a missing one, and
- * the primitives draw a readable text panel for it.
+ * Both members are nullable, and null in both is a real answer rather than a
+ * missing one: the printing's art has not been resolved. The primitives draw a
+ * readable text panel for it.
+ *
+ * That used to be 501 real cards. It is none: the 501 were `transform` and
+ * `modal_dfc` layouts whose art the Scryfall mapper failed to read off
+ * `card_faces[0].image_uris`, and with that fixed the corpus is 34,492 of
+ * 34,492 (doc 17 §17.2). The nullability stays — an unresolved printing is
+ * still a state the wire can express, and collapsing it into an absent key is
+ * what put a broken image on screen before.
  */
 export interface ImageUris {
   artCrop: string | null

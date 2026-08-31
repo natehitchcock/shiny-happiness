@@ -100,8 +100,10 @@ describe('hydrate', () => {
   })
 
   it('keeps "this card has no art" as an answer rather than a gap', async () => {
-    // 501 cards have no art on any printing. Dropping the entry would make them
-    // indistinguishable from cards whose art has not arrived yet.
+    // A printing whose art is unresolved sends two nulls. Dropping the entry
+    // would make that indistinguishable from art that has not arrived yet.
+    // 501 real cards took this path until the double-faced art fix; the corpus
+    // is now 34,492 of 34,492 (doc 17 §17.2) and the state remains expressible.
     respond(200, {
       items: [{ oracleId: 'o1', name: 'Krenko, Mob Boss' }],
       prices: { o1: null },

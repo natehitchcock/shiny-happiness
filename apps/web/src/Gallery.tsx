@@ -41,8 +41,13 @@ const SCALE: PipScale = {
  * Three of the six carry real art and three carry none, on purpose. This page
  * exists to be LOOKED at, and both halves need looking at: the art path, which
  * is what the app spends most of its pixels on, and the no-art fallback, which
- * 501 cards in the corpus take and which no amount of test-passing proves is
- * legible.
+ * no amount of test-passing proves is legible.
+ *
+ * The fallback is drawn here even though no card in the corpus takes it any
+ * more — 501 did until the double-faced art fix, and coverage is now 34,492 of
+ * 34,492 (doc 17 §17.2). A printing whose art has not been resolved is still a
+ * state the API can send, and a path with no picture of it is a path nobody
+ * will notice has gone ugly.
  *
  * The URLs are Scryfall's own CDN, unaltered and at the sizes Scryfall
  * publishes — ADR-0021. They are addresses, not assets: nothing about them is
