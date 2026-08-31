@@ -3493,6 +3493,19 @@ export const Workspace = ({
    * it must not cause a render and it is written inside `load`.
    */
   const snapshotRef = useRef<string | null>(null)
+  /**
+   * The cards the name search last found, by id.
+   *
+   * Read by the pipeline's apply, which runs long after the click and holds
+   * only `hydrated.cards` — the deck and the suggestion feed. A card reached
+   * from "Cards named like…" is in neither, and if the server refuses it, it
+   * never joins the deck either. Without this the one route that reaches a
+   * rejection on purpose is the one route with no name to print.
+   *
+   * A ref, not state: it is read inside a callback and writing it must not
+   * cause a render.
+   */
+  const nearbyRef = useRef<ReadonlyMap<string, api.Card>>(new Map())
   /** The suggestions region, so the column legend can find the columns in it. */
   const suggestionsRef = useRef<HTMLElement>(null)
   /** The filter box — the last resort for focus when the feed empties out. */
@@ -3783,7 +3796,22 @@ export const Workspace = ({
        * one that explains the SHAPE of the problem, and the count says how much
        * of it there is.
        */
-      const refused = rejectionNotice(r.rejected, r.hydrated.cards)
+      /*
+       * The name-match cards are in the lookup too, and they are the ones that
+       * matter most.
+       *
+       * Measured in a browser: adding Black Lotus from "Cards named like…"
+       * produced "THAT CARD was not added — it is banned in Commander", because
+       * `hydrated.cards` only ever holds the deck and the suggestion feed. A
+       * card that came from `searchCards` is not in either, and a refused card
+       * never joins the deck — so the one route that reaches a rejection on
+       * purpose was the one route with no name to print.
+       *
+       * Hydration wins on a collision: it is the authority, and a name-match
+       * result is a snapshot of a search that may be several queries old.
+       */
+      const named = new Map<string, api.Card>([...nearbyRef.current, ...r.hydrated.cards])
+      const refused = rejectionNotice(r.rejected, named)
       if (refused !== null) setNotice(refused)
     },
   })
@@ -4507,6 +4535,20 @@ export const Workspace = ({
    * Sekki, Seasons' Guide?" without needing fuzzy matching in the database.
    */
   const [nearby, setNearby] = useState<{ term: string; items: api.Card[] } | null>(null)
+
+  /*
+   * Kept in a ref as well, so a rejection can name a card that only ever came
+   * from the name search. ACCUMULATED rather than replaced: the user may search
+   * again while the batch for the previous search's Add is still in flight, and
+   * the name they need is the one from the search they clicked in.
+   */
+  useEffect(() => {
+    if (nearby === null) return
+    nearbyRef.current = new Map([
+      ...nearbyRef.current,
+      ...nearby.items.map((c): [string, api.Card] => [c.oracleId, c]),
+    ])
+  }, [nearby])
 
   useEffect(() => {
     const term = query.trim()

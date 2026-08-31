@@ -310,6 +310,31 @@ describe('the preview at each width', () => {
     expect(css).toMatch(/@media \(min-width:\s*901px\)\s*\{\s*\.preview\s*\{/)
   })
 
+  it('puts the rail above the feed it overlays, and below the masthead', () => {
+    /*
+     * Measured in a browser: with no z-index on the rail, the feed's rows won
+     * the hit test through the middle of an open preview. `.card-row` is
+     * `position: relative` and `.act` carries `z-index: 1`, and `.region` has
+     * `container-type: inline-size` — layout containment, so each region is its
+     * own stacking context. The preview's own `z-index: 25` cannot help: it is
+     * inside the rail's context and can only order itself against the rail's
+     * other children.
+     *
+     * Below the masthead's 10 on purpose. The rail starts under the masthead so
+     * they never overlap, and a rail that could cover the deck switcher would
+     * be a worse bug than the one this fixes.
+     */
+    const rail = /\.region\.analysis\s*\{([^}]*)\}/.exec(css)
+    const railZ = /z-index:\s*(\d+)/.exec(rail?.[1] ?? '')
+    // The masthead is declared twice — a layout rule and, later, the sticky
+    // rule that carries the z-index. Take the one that sets it.
+    const mastheadZ = /\.masthead\s*\{[^}]*z-index:\s*(\d+)/.exec(css)
+    expect(railZ).not.toBeNull()
+    expect(mastheadZ).not.toBeNull()
+    expect(Number(railZ?.[1])).toBeGreaterThan(0)
+    expect(Number(railZ?.[1])).toBeLessThan(Number(mastheadZ?.[1]))
+  })
+
   it('keeps the rail from clipping what is meant to hang outside it', () => {
     // `.region.analysis` was `overflow: hidden`, which clipped both the overlay
     // and the panel a curve bar opens. The scroll body still owns its own

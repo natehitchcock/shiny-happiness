@@ -1300,6 +1300,26 @@ select {
   flex-direction: column;
   gap: var(--step);
   overflow: visible;
+  /*
+   * Above the suggestion feed, and only just.
+   *
+   * Measured in a browser, not reasoned about: with no z-index here the feed's
+   * rows won the hit test through the middle of the open preview — `.card-row`
+   * is `position: relative` and `.act` carries `z-index: 1`, and `.region` has
+   * `container-type: inline-size`, which applies layout containment and so
+   * makes each region its own stacking context. The preview's own `z-index: 25`
+   * cannot help: it is INSIDE this rail's context and can only order itself
+   * against the rail's other children.
+   *
+   * 5, deliberately below the masthead's 10. The rail starts at 62px, under the
+   * masthead, so the two never overlap — but a rail that could cover the deck
+   * switcher would be a worse bug than the one being fixed.
+   *
+   * Inert below 900px, where this rule's `position: sticky` is overridden back
+   * to `static` and `z-index` on a static element does nothing. The bottom
+   * sheet has its own `z-index: 30` on a fixed box and is unaffected.
+   */
+  z-index: 5;
 }
 
 .analysis-scroll {

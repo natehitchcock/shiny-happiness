@@ -335,14 +335,16 @@ describe('the name-match rows', () => {
       applied: [],
       rejected: [{ command: { type: 'accept', oracleId: 'gob' }, reason: { kind: 'banned' } }],
     })
-    mocked.hydrate.mockResolvedValue({
-      cards: new Map([
-        ['cmd', card({ oracleId: 'cmd', name: 'Krenko, Mob Boss' })],
-        ['gob', goblin],
-      ]),
-      prices: new Map(),
-      images: new Map(),
-    } satisfies api.Hydrated)
+    /*
+     * The hydration deliberately does NOT hold the goblin.
+     *
+     * Measured in a browser: adding Black Lotus from "Cards named like…" said
+     * "THAT CARD was not added — it is banned in Commander". `hydrated.cards`
+     * only ever holds the deck and the suggestion feed; a card that came from
+     * `searchCards` is in neither, and a REFUSED card never joins the deck — so
+     * the one route that reaches a rejection on purpose was the one route with
+     * no name to print. The name-match results are now in the lookup too.
+     */
     render(<Workspace deck={deck} />)
     await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
     await runFilter('Goblin Matron')
