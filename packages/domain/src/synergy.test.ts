@@ -718,3 +718,329 @@ describe('plus1-counter direction', () => {
     ).toContain('plus1-counter')
   })
 })
+
+/**
+ * ADR-0022. Every card below is real Scryfall oracle text.
+ *
+ * The tags exist because the model had no subject: "you discard a card" and
+ * "each opponent discards a card" were one tag, so the entire opponent-discard
+ * archetype — 481 producers against the 43 self-discard cards the tag was tuned
+ * for — was either untagged or tagged as its own opposite. Half the cases here
+ * are therefore MUST-NOT assertions: the split is only worth anything if the
+ * two sides stay apart.
+ */
+describe('deriveSynergy — whose event it is', () => {
+  const derive = (
+    name: string,
+    typeLine: string,
+    oracleText: string,
+    faces?: readonly string[],
+  ): SynergyProfile =>
+    deriveSynergy({
+      oracleId: oracleId(name),
+      typeLine,
+      oracleText,
+      ...(faces === undefined ? {} : { oracleTextFaces: faces }),
+    })
+
+  // The card the bug was reported on.
+  const HOPELESS_NIGHTMARE = derive(
+    'Hopeless Nightmare',
+    'Enchantment',
+    'When this enchantment enters, each opponent discards a card and loses 2 life.\nWhen this enchantment is put into a graveyard from the battlefield, scry 1.',
+  )
+  const MIND_ROT = derive('Mind Rot', 'Sorcery', 'Target player discards two cards.')
+  const THOUGHTSEIZE = derive(
+    'Thoughtseize',
+    'Sorcery',
+    'Target player reveals their hand. You choose a nonland card from it. That player discards that card. You lose 2 life.',
+  )
+  const FAITHLESS_LOOTING = derive(
+    'Faithless Looting',
+    'Sorcery',
+    'Draw two cards, then discard two cards.\nFlashback {2}{R}',
+  )
+
+  it('reads a card that makes OPPONENTS discard', () => {
+    expect(HOPELESS_NIGHTMARE.produces).toContain('opponent-discard')
+    expect(MIND_ROT.produces).toContain('opponent-discard')
+    expect(THOUGHTSEIZE.produces).toContain('opponent-discard')
+  })
+
+  it('does not call a hand attack a loot engine', () => {
+    // The whole reason ADR-0016 narrowed `discard` was that this was happening
+    // to 296 cards. Splitting the tag must not quietly undo that.
+    expect(HOPELESS_NIGHTMARE.produces).not.toContain('discard')
+    expect(MIND_ROT.produces).not.toContain('discard')
+    expect(THOUGHTSEIZE.produces).not.toContain('discard')
+  })
+
+  it('does not call a loot engine a hand attack', () => {
+    expect(FAITHLESS_LOOTING.produces).toContain('discard')
+    expect(FAITHLESS_LOOTING.produces).not.toContain('opponent-discard')
+  })
+
+  it('reads a wheel as BOTH, because it is', () => {
+    // "Each player discards" empties your hand and theirs. Claiming one and not
+    // the other would be false whichever one you picked.
+    const windfall = derive(
+      'Windfall',
+      'Sorcery',
+      'Each player discards their hand, then draws cards equal to the greatest number of cards a player had in hand as this spell resolved.',
+    )
+
+    expect(windfall.produces).toContain('discard')
+    expect(windfall.produces).toContain('opponent-discard')
+  })
+
+  it('does not read a punisher clause as YOU discarding', () => {
+    // "…unless they sacrifice a permanent of their choice OR DISCARD A CARD".
+    // The verb is a bare infinitive because its subject is "they", and the self
+    // rule read that as being addressed to the caster. This is the exact clause
+    // that put a self-discard tag on Tergrid's Lantern.
+    const hailfire = derive(
+      'Torment of Hailfire',
+      'Sorcery',
+      'Repeat the following process X times. Each opponent loses 3 life unless that player sacrifices a nonland permanent of their choice or discards a card.',
+    )
+    const court = derive(
+      'Court of Ambition',
+      'Enchantment',
+      'When this enchantment enters, you become the monarch.\nAt the beginning of your upkeep, each opponent loses 3 life unless they discard a card.',
+    )
+
+    expect(court.produces).toContain('opponent-discard')
+    expect(court.produces).not.toContain('discard')
+    expect(hailfire.produces).toContain('opponent-discard')
+    expect(hailfire.produces).toContain('opponent-sacrifice')
+  })
+
+  it('reads the payoffs the single tag could not reach', () => {
+    const megrim = derive(
+      'Megrim',
+      'Enchantment',
+      'Whenever an opponent discards a card, this enchantment deals 2 damage to that player.',
+    )
+    const wasteNot = derive(
+      'Waste Not',
+      'Enchantment',
+      'Whenever an opponent discards a creature card, create a 2/2 black Zombie creature token.\nWhenever an opponent discards a land card, add {B}{B}.',
+    )
+
+    expect(megrim.wants).toContain('opponent-discard')
+    expect(wasteNot.wants).toContain('opponent-discard')
+    // And madness is still the OTHER tag's payoff, not this one's.
+    expect(megrim.wants).not.toContain('discard')
+  })
+
+  it('reads an empty enemy hand as the payoff it is, and hellbent as the other one', () => {
+    const tinybones = derive(
+      'Tinybones, Trinket Thief',
+      'Legendary Creature — Skeleton Rogue',
+      'Deathtouch\nAt the beginning of each end step, if an opponent discarded a card this turn, you draw a card and you lose 1 life.\n{4}{B}{B}: Each opponent with no cards in hand loses 10 life.',
+    )
+    // Hellbent is the same sentence about YOU. It must not read as a hand
+    // attack payoff — that is the subject confusion this ADR exists to remove.
+    const jester = derive(
+      "Demon's Jester",
+      'Creature — Devil',
+      'Flying\nHellbent — This creature gets +2/+1 as long as you have no cards in hand.',
+    )
+
+    expect(tinybones.wants).toContain('opponent-discard')
+    expect(jester.wants).not.toContain('opponent-discard')
+  })
+
+  it('reads an edict as making an OPPONENT sacrifice', () => {
+    const edict = derive(
+      'Diabolic Edict',
+      'Instant',
+      'Target player sacrifices a creature of their choice.',
+    )
+    const fleshbag = derive(
+      'Fleshbag Marauder',
+      'Creature — Zombie Warrior',
+      'When this creature enters, each player sacrifices a creature of their choice.',
+    )
+    const gravePact = derive(
+      'Grave Pact',
+      'Enchantment',
+      'Whenever a creature you control dies, each other player sacrifices a creature of their choice.',
+    )
+
+    expect(edict.produces).toContain('opponent-sacrifice')
+    expect(fleshbag.produces).toContain('opponent-sacrifice')
+    expect(gravePact.produces).toContain('opponent-sacrifice')
+  })
+
+  it('does not call your own sacrifice outlet an edict', () => {
+    // `sacrifice-fodder` is the aristocrats tag and its outlet eats YOUR board.
+    // The imperative "Sacrifice a creature:" is addressed to the caster; only
+    // the inflected "sacrifices" has a third-party subject.
+    expect(deriveSynergy(ASHNODS_ALTAR).produces).not.toContain('opponent-sacrifice')
+    expect(deriveSynergy(BLOOD_ARTIST).wants).not.toContain('opponent-sacrifice')
+  })
+
+  it('does not read a card that eats its OWN tokens as an edict', () => {
+    const clamp = derive(
+      'Skullclamp',
+      'Artifact — Equipment',
+      'Equipped creature gets +1/-1.\nWhenever equipped creature dies, draw two cards.\nEquip {1}',
+    )
+    const elder = derive(
+      'Sakura-Tribe Elder',
+      'Creature — Snake Shaman',
+      'Sacrifice this creature: Search your library for a basic land card, put it onto the battlefield tapped, then shuffle.',
+    )
+
+    expect(clamp.produces).not.toContain('opponent-sacrifice')
+    expect(elder.produces).not.toContain('opponent-sacrifice')
+  })
+
+  it('reads a payoff for a sacrifice you do not control', () => {
+    const betrays = derive(
+      'It That Betrays',
+      'Creature — Eldrazi',
+      'Annihilator 2\nWhenever an opponent sacrifices a nontoken permanent, put that card onto the battlefield under your control.',
+    )
+    const devil = derive(
+      'Mayhem Devil',
+      'Creature — Devil',
+      'Whenever a player sacrifices a permanent, this creature deals 1 damage to any target.',
+    )
+
+    expect(betrays.wants).toContain('opponent-sacrifice')
+    expect(devil.wants).toContain('opponent-sacrifice')
+  })
+
+  /**
+   * The reported card, and the reason the model needed a subject at all.
+   *
+   * Both halves matter and they say different things. The front face is a pure
+   * payoff and the Lantern is a pure producer, so the correct answer is that
+   * Tergrid CAUSES and BENEFITS FROM both events. She is her own engine, and
+   * every version of this before ADR-0022 could express neither half.
+   */
+  describe('Tergrid, God of Fright // Tergrid’s Lantern', () => {
+    const FRONT =
+      'Menace\nWhenever an opponent sacrifices a nontoken permanent or discards a permanent card, you may put that card from a graveyard onto the battlefield under your control.'
+    const BACK =
+      "{T}: Target player loses 3 life unless they sacrifice a nonland permanent of their choice or discard a card.\n{3}{B}: Untap Tergrid's Lantern."
+    const tergrid = derive(
+      'Tergrid, God of Fright',
+      'Legendary Creature — God // Legendary Artifact',
+      `${FRONT}\n${BACK}`,
+      [FRONT, BACK],
+    )
+
+    it('benefits from both events, from the front face', () => {
+      expect(tergrid.wants).toContain('opponent-discard')
+      expect(tergrid.wants).toContain('opponent-sacrifice')
+    })
+
+    it('causes both events, from the Lantern', () => {
+      expect(tergrid.produces).toContain('opponent-discard')
+      expect(tergrid.produces).toContain('opponent-sacrifice')
+    })
+
+    it('is not reported as looting herself', () => {
+      // The Lantern makes an OPPONENT discard. The old rules put the self tag
+      // on her, which is how the front half's payoff went missing entirely.
+      expect(tergrid.produces).not.toContain('discard')
+    })
+
+    it('reads the payoff across an "or", but not across a comma', () => {
+      // "…sacrifices a nontoken permanent OR discards a permanent card" is one
+      // trigger condition naming two events. A comma is where the condition
+      // ends, and past it the sentence is describing an EFFECT — which for
+      // Painful Quandary means it produces the discard rather than paying off.
+      const quandary = derive(
+        'Painful Quandary',
+        'Enchantment',
+        'Whenever an opponent casts a spell, that player loses 5 life unless they discard a card.',
+      )
+
+      expect(quandary.produces).toContain('opponent-discard')
+      expect(quandary.wants).not.toContain('opponent-discard')
+    })
+  })
+
+  it('reads each face on its own, so no rule spans the // boundary', () => {
+    // SYNTHETIC TEXT, deliberately. No card in the corpus trips this — all 825
+    // multi-faced commander-legal cards derive identically split or joined —
+    // because a `[^.]` gap can only cross the join if the front face's last
+    // line has no full stop, and real oracle text ends its sentences. That is
+    // the measured reason this is safe today, not a reason it stays safe: the
+    // landfall rule below really does match across the newline, and only
+    // deriving per face is what stops it.
+    const front = 'Landfall — Whenever a land card'
+    const back = 'is put onto the battlefield, draw a card.'
+    const joined = derive('Straddler', 'Sorcery // Sorcery', `${front}\n${back}`)
+    const split = derive('Straddler', 'Sorcery // Sorcery', `${front}\n${back}`, [front, back])
+
+    expect(joined.produces).toContain('landfall')
+    expect(split.produces).not.toContain('landfall')
+  })
+
+  it('falls back to the whole text when the faces are not known', () => {
+    // `oracleTextFaces` is absent for a single-faced card AND for any row
+    // written before the column existed. Absence must not mean "no text".
+    expect(MIND_ROT.produces).toContain('opponent-discard')
+  })
+
+  it('pairs the new tags, and refuses the pairings that would rebuild the bug', () => {
+    expect(SYNERGY_TAGS).toContain('opponent-discard')
+    expect(SYNERGY_TAGS).toContain('opponent-sacrifice')
+
+    expect(interactsWith('opponent-discard')).toEqual(
+      expect.arrayContaining(['opponent-sacrifice', 'lifeloss']),
+    )
+    expect(interactsWith('opponent-sacrifice')).toEqual(
+      expect.arrayContaining(['opponent-discard', 'lifeloss', 'creature-death']),
+    )
+
+    // The rejected pairings, asserted so a later "obvious" addition has to
+    // argue with a test rather than slip through. Looting yourself does not
+    // feed Megrim, your tokens are not what an edict eats, and ADR-0016 already
+    // ruled that an opponent's graveyard is not the resource.
+    expect(interactsWith('opponent-discard')).not.toContain('discard')
+    expect(interactsWith('opponent-discard')).not.toContain('graveyard-creature')
+    expect(interactsWith('opponent-sacrifice')).not.toContain('sacrifice-fodder')
+  })
+})
+
+describe('synergyMatches — a card that is its own engine', () => {
+  // Tergrid produces AND wants `opponent-discard`. `synergyMatches` suppresses
+  // the weaker reading of a tag it has already matched, and that rule was
+  // written for `theme`; this is the test that says it does not reach further
+  // and silence one half of a self-contained engine.
+  const engine: SynergyProfile = {
+    produces: ['opponent-discard'],
+    wants: ['opponent-discard'],
+  }
+
+  it('keeps both readings when the deck both wants and produces the event', () => {
+    const deck: DeckSynergy = {
+      produces: new Map([['opponent-discard', 3] as const]),
+      wants: new Map([['opponent-discard', 2] as const]),
+    }
+
+    const directions = synergyMatches(engine, deck).map((m) => m.direction)
+    expect(directions).toContain('enables')
+    expect(directions).toContain('payoff')
+  })
+
+  it('does not additionally credit it with a theme it already enables', () => {
+    // One fact counted twice. The deck wants the event and the card provides
+    // it, which is the `enables` match; adding "and it wants what its
+    // neighbours want" on top would inflate the same card for the same reason.
+    const deck: DeckSynergy = {
+      produces: new Map(),
+      wants: new Map([['opponent-discard', 2] as const]),
+    }
+
+    const matches = synergyMatches(engine, deck)
+    expect(matches).toHaveLength(1)
+    expect(matches[0]?.direction).toBe('enables')
+  })
+})
