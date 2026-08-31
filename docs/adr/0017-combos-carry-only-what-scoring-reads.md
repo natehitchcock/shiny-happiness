@@ -95,6 +95,15 @@ Per-request combo transfer, measured:
 With the warm-instance cache on top, a five-colour deck pays 19.6 MB once rather
 than 71.9 MB per request.
 
+**Near-combo counts drop, and the new number is the honest one.** Scoping the
+set to the deck's identity was done for transfer, but it corrects a claim as
+well. A Krenko deck reported 305 "one card away" candidates before and 154
+after, because the unscoped set credited cards for being one piece short of
+combos whose missing piece is a colour the deck cannot play. Those combos can
+never be assembled, so the reason attached to those cards was a promise the deck
+could not keep — which Pillar P4 forbids. The suggestions themselves were always
+filtered by identity; it was the *reasons* that were counting the unreachable.
+
 **A future feature that wants to display steps must read the combo by id.** That
 is the intended shape: showing the execution of one combo is a detail view of
 one row, not something the scoring pass over a hundred thousand rows should
