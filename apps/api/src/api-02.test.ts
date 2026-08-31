@@ -37,6 +37,17 @@ const UNDECIDED = oracleId(randomUUID())
 const GAME_CHANGERS = [0, 1, 2, 3].map(() => oracleId(randomUUID()))
 /** A legendary Game Changer, so the command zone can be checked too. */
 const GC_COMMANDER = oracleId(randomUUID())
+/**
+ * Two cards for the barometers Wizards names but never quantifies (ADR-0018),
+ * plus the card that must NOT be counted with them.
+ *
+ * `NONLAND_WIPE` carries Ruinous Ultimatum's real text because "nonland"
+ * contains "land": it is the false positive the whole land rule is shaped
+ * around, and the endpoint is where it would reach a user.
+ */
+const EXTRA_TURN = oracleId(randomUUID())
+const LAND_DENIAL = oracleId(randomUUID())
+const NONLAND_WIPE = oracleId(randomUUID())
 
 const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   oracleId: id,
@@ -124,6 +135,21 @@ describeDb('API-02 contract', () => {
       card(GC_COMMANDER, 'Tergrid, Test Legend', {
         typeLine: 'Legendary Creature — God',
         gameChanger: true,
+      }),
+      card(EXTRA_TURN, 'Time Warp', {
+        typeLine: 'Sorcery',
+        types: ['sorcery'],
+        oracleText: 'Target player takes an extra turn after this one.',
+      }),
+      card(LAND_DENIAL, 'Armageddon', {
+        typeLine: 'Sorcery',
+        types: ['sorcery'],
+        oracleText: 'Destroy all lands.',
+      }),
+      card(NONLAND_WIPE, 'Ruinous Ultimatum', {
+        typeLine: 'Sorcery',
+        types: ['sorcery'],
+        oracleText: 'Destroy all nonland permanents your opponents control.',
       }),
     ])
     const combo: Combo = {
@@ -514,6 +540,112 @@ describeDb('API-02 contract', () => {
         expect(body.bracket.gameChangers).toEqual([GC_COMMANDER])
         expect(body.bracket.violations).toHaveLength(1)
         expect(body.bracket.violations[0].actual).toBe(1)
+      })
+
+      /*
+       * The three barometers Wizards names and does not quantify (ADR-0018).
+       *
+       * These are findings, not violations, and the two lists stay apart in the
+       * response for that reason: a violation is a published allowance broken,
+       * a finding is our own count of what the deck holds. A test that only
+       * checked the counts would pass just as happily if the two were merged,
+       * so the separation is asserted alongside them.
+       */
+      describe('barometer findings', () => {
+        const deckOf = async (targetBracket: number, oracleIds: readonly string[]) => {
+          const fresh = (
+            await app.inject({
+              method: 'POST',
+              url: '/api/v1/decks',
+              payload: {
+                name: `Barometers ${targetBracket}`,
+                commanders: [KROV],
+                targetBracket,
+                archetype: 'midrange',
+              },
+            })
+          ).json()
+          await app.inject({
+            method: 'POST',
+            url: `/api/v1/decks/${fresh.id}/commands`,
+            payload: {
+              commands: oracleIds.map((id) => ({
+                type: 'accept',
+                oracleId: id,
+                origin: 'manual',
+              })),
+              idempotencyKey: randomUUID(),
+              baseVersion: 1,
+            },
+          })
+          return (
+            await app.inject({ method: 'GET', url: `/api/v1/decks/${fresh.id}/analysis` })
+          ).json()
+        }
+
+        const finding = (
+          body: { bracket: { barometers: { findings: unknown[] } } },
+          name: string,
+        ) =>
+          body.bracket.barometers.findings.find(
+            (f) => (f as { barometer: string }).barometer === name,
+          ) as { severity: string; count: number; cards: string[]; combos: string[] } | undefined
+
+        it('errors on a card that takes an extra turn', async () => {
+          const body = await deckOf(3, [EXTRA_TURN])
+          const extra = finding(body, 'extra-turns')
+          expect(extra).toBeDefined()
+          expect(extra?.severity).toBe('error')
+          expect(extra?.count).toBe(1)
+          expect(extra?.cards).toEqual([EXTRA_TURN])
+        })
+
+        it('warns on land denial and leaves a nonland wipe out of the count', async () => {
+          const body = await deckOf(3, [LAND_DENIAL, NONLAND_WIPE])
+          const denial = finding(body, 'mass-land-denial')
+          expect(denial?.severity).toBe('warn')
+          expect(denial?.cards).toEqual([LAND_DENIAL])
+        })
+
+        it('warns on a two-card infinite the deck assembles', async () => {
+          const body = await deckOf(3, [PIECE_A, PIECE_B])
+          const infinite = finding(body, 'two-card-infinites')
+          expect(infinite?.severity).toBe('warn')
+          expect(infinite?.combos).toEqual(['combo-1'])
+        })
+
+        /*
+         * Unconditional on the bracket, and that is the ADR-0018 boundary in a
+         * test. Raising these only for brackets 1-3 would re-create the
+         * per-bracket table Wizards retired on 2025-10-21; a bracket 5 deck gets
+         * the same count, because the count is about the deck.
+         */
+        it('reports the same findings at bracket 5 as at bracket 1', async () => {
+          // All three barometers at once, because a gate could be put on any one
+          // of them and a deck holding only two would not notice.
+          const held = [EXTRA_TURN, LAND_DENIAL, PIECE_A, PIECE_B]
+          const low = await deckOf(1, held)
+          const high = await deckOf(5, held)
+          expect(low.bracket.barometers.findings).toHaveLength(3)
+          expect(high.bracket.barometers.findings).toEqual(low.bracket.barometers.findings)
+        })
+
+        it('keeps the findings out of `violations` and says whose reading they are', async () => {
+          const body = await deckOf(1, [EXTRA_TURN, LAND_DENIAL])
+          // Bracket 1 allows no Game Changers and this deck holds none, so a
+          // finding leaking into `violations` would be visible here and only
+          // here.
+          expect(body.bracket.violations).toEqual([])
+          expect(body.bracket.assessed).toBeNull()
+          expect(body.bracket.barometers.basis).toContain('not a Wizards bracket verdict')
+        })
+
+        it('reports an empty findings list for a deck that trips nothing', async () => {
+          const body = await deckOf(3, [RAMP])
+          expect(body.bracket.barometers.findings).toEqual([])
+          // Still sent, so a client can say what was looked for.
+          expect(body.bracket.barometers.basis).toBeTruthy()
+        })
       })
 
       it('flags a Game Changer among the recommendations it offers', async () => {

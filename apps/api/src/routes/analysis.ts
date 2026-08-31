@@ -3,10 +3,12 @@ import type { Pool } from 'pg'
 import { getDeck } from '@roundtable/db'
 import type { CardType, Color, CommanderInfo, OracleId, Role } from '@roundtable/domain'
 import {
+  BAROMETER_BASIS,
   BRACKET_DATA,
   NO_SINGLETON_EXCEPTIONS,
   acceptedSet,
   assessArchetype,
+  bracketFindings,
   bracketViolations,
   deckGameChangers,
   loadBracketRules,
@@ -119,10 +121,22 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
     const lockedByBucket = lockedCurve(deck, cards, counts.manaCurve.length)
     const lockedByDimension = lockedComposition(deck, cards, (c) => primaryRole(c.roles))
 
-    const assembled = deckCombos(comboIndex, accepted).map((comboId) => {
-      const combo = comboIndex.byId.get(comboId)
-      return { comboId, pieces: combo?.pieces ?? [], produces: combo?.produces ?? [] }
-    })
+    /*
+     * The combos this deck actually assembles, as combos.
+     *
+     * Resolved once and shared with the bracket barometers below, rather than
+     * resolved again there: the two-card-infinite finding and the `deckCombos`
+     * block of the response are the same claim about the same deck, and reading
+     * the index twice is how they would eventually stop agreeing.
+     */
+    const assembledCombos = deckCombos(comboIndex, accepted)
+      .map((comboId) => comboIndex.byId.get(comboId))
+      .filter((combo) => combo !== undefined)
+    const assembled = assembledCombos.map((combo) => ({
+      comboId: combo.id,
+      pieces: combo.pieces,
+      produces: combo.produces,
+    }))
 
     /*
      * Commander eligibility, from the corpus rather than from an empty map.
@@ -173,6 +187,12 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
      * exactly one of them, so a verdict here would be a guess dressed as an
      * answer. What CAN be said — this deck breaks the Game Changers allowance of
      * the bracket you chose — is said, with the arithmetic attached.
+     *
+     * `barometers` below is a different kind of claim and is kept apart from
+     * `violations` for exactly that reason. A violation is Wizards' rule broken;
+     * a finding is our own count of what the deck holds, carried with the
+     * sentence that says so. Merging the two lists would erase the distinction
+     * ADR-0018 exists to protect, and the client would have no way to redraw it.
      */
     const bracketRules = loadBracketRules(BRACKET_DATA, context.gameChangers)
     const deckOracleIds = [...accepted]
@@ -184,15 +204,36 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
       : []
     const bracketUnavailable = bracketRules.ok
       ? // Loaded, and still only one barometer deep. Named so the UI says which
-        // part is missing rather than implying the whole feature is off.
+        // part is missing rather than implying the whole feature is off — the
+        // findings under `bracket.barometers` count the other three barometers
+        // but cannot say what any bracket permits, which is what is missing.
         {
           key: 'bracket-assessment',
           reason:
-            'only the Game Changers allowance is checked. Wizards withdrew the tutor ' +
-            'restriction and publishes no current per-bracket value for mass land ' +
-            'denial, extra turns or two-card infinites, so no bracket is assessed',
+            'only the Game Changers allowance is checked against a published rule. ' +
+            'Wizards withdrew the tutor restriction and publishes no current ' +
+            'per-bracket value for mass land denial, extra turns or two-card ' +
+            'infinites, so those are reported as findings about the deck and no ' +
+            'bracket is assessed',
         }
       : { key: 'bracket-assessment', reason: bracketRules.error.message }
+
+    /*
+     * Our own reading of the three barometers Wizards names but never quantifies
+     * (ADR-0018) — counted over the deck's own cards and its assembled combos.
+     *
+     * Unconditional on the target bracket, deliberately. Gating them at bracket
+     * 3 and below would re-create the per-bracket table the 2025-10-21 update
+     * retired, which is the failure ADR-0006 exists to prevent; a count of what
+     * the deck contains is true at every bracket and claims nothing about any.
+     */
+    const barometers = bracketFindings({
+      cards: [...accepted].flatMap((oracleId) => {
+        const card = cards.get(oracleId)
+        return card === undefined ? [] : [card]
+      }),
+      assembled: assembledCombos,
+    })
 
     return {
       counts: {
@@ -261,6 +302,16 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
         // The offending cards themselves, so the UI can name them instead of
         // making the user find four Game Changers in a 100-card list.
         gameChangers: gameChangersInDeck,
+        /*
+         * The three barometers the format names but does not quantify.
+         *
+         * `basis` travels with the findings rather than sitting in a client
+         * constant, because it is the sentence that stops them reading as a
+         * bracket verdict, and a client that forgot to render it would turn our
+         * count into Wizards' ruling. It is sent whether or not there are any
+         * findings, so a deck with none still says what was looked for.
+         */
+        barometers: { basis: BAROMETER_BASIS, findings: barometers },
         // Where the allowance came from and when, carried to the client so the
         // provenance is visible in the product and not only in the repo.
         rules: bracketRules.ok
