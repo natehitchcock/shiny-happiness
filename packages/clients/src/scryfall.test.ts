@@ -272,6 +272,76 @@ describe('toPrinting', () => {
 
     expect(typeof printing?.reserved).toBe('boolean')
   })
+
+  /*
+   * Art, and the difference between two HALVES and two FACES.
+   *
+   * Found by playtest: 501 of the corpus's 890 `//` cards had no art anywhere,
+   * because Scryfall writes `image_uris` on the card object only for a card
+   * printed on ONE physical face. Split, adventure and flip cards are one face
+   * carrying two halves and keep their images there; `transform` and
+   * `modal_dfc` cards have two physical faces and their images live on
+   * `card_faces[]`. A mapper reading only the top level ingested every one of
+   * the latter with nothing to draw.
+   *
+   * The fixture is the whole argument, which is why these assert against the
+   * recorded record rather than against pasted URLs: it holds a transform, an
+   * MDFC and two splits, and they disagree about where the art is.
+   */
+  describe('art, which lives in two different places', () => {
+    const transform = cards.find((c) => c.layout === 'transform')!
+    const mdfc = cards.find((c) => c.layout === 'modal_dfc')!
+
+    it('reads a transforming card from its front face, where Scryfall puts it', () => {
+      // The record is the evidence for the rule, not just the setup.
+      expect(transform.image_uris).toBeUndefined()
+      const front = transform.card_faces?.[0]?.image_uris
+
+      const printing = toPrinting(transform)
+      expect(printing?.imageUris.normal).toBe(front?.['normal'])
+      expect(printing?.imageUris.artCrop).toBe(front?.['art_crop'])
+      // The defect said `''` here, which is how 501 cards came to have no art.
+      expect(printing?.imageUris.normal).not.toBe('')
+      expect(printing?.imageUris.artCrop).not.toBe('')
+    })
+
+    it('reads a modal double-faced card the same way', () => {
+      expect(mdfc.image_uris).toBeUndefined()
+      const printing = toPrinting(mdfc)
+
+      expect(printing?.imageUris.normal).toBe(mdfc.card_faces?.[0]?.image_uris?.['normal'])
+      expect(printing?.imageUris.normal).not.toBe('')
+    })
+
+    it('takes the FRONT face, because that is the side the card is', () => {
+      // The back is a different picture with a different name on it. Drawing it
+      // in a tile would show a card nobody searched for.
+      const back = transform.card_faces?.[1]?.image_uris
+      expect(back?.['normal']).toBeDefined()
+
+      expect(toPrinting(transform)?.imageUris.normal).not.toBe(back?.['normal'])
+    })
+
+    it('still reads a split card from the CARD, which has one physical face', () => {
+      // The regression guard on the fix: `Fire // Ice` was never broken, and a
+      // blanket "read the face" would have broken it — its faces carry no
+      // images at all.
+      const fire = byName('Fire // Ice')
+      expect(fire.card_faces?.[0]?.image_uris).toBeUndefined()
+
+      expect(toPrinting(fire)?.imageUris.normal).toBe(fire.image_uris?.['normal'])
+      expect(toPrinting(fire)?.imageUris.normal).not.toBe('')
+    })
+
+    it('leaves art empty when neither the card nor a face carries any', () => {
+      // Absence stays absence. `''` is what the DB layer stores as NULL and
+      // what `imageFor` reads as "draw the fallback panel".
+      const bare = { ...byName('Sol Ring') }
+      delete (bare as { image_uris?: unknown }).image_uris
+
+      expect(toPrinting(bare)?.imageUris).toEqual({ artCrop: '', normal: '' })
+    })
+  })
 })
 
 describe('rate limits (ADR-0009 Q1)', () => {

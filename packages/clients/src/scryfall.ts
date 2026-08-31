@@ -146,6 +146,8 @@ export interface ScryfallCard {
     power?: string
     toughness?: string
     loyalty?: string
+    /** Present only when the faces are two PHYSICAL faces — see `faceImages`. */
+    image_uris?: Record<string, string>
   }[]
 }
 
@@ -550,10 +552,53 @@ export const tallyPrinting = (into: Map<string, ProvenanceTally>, raw: ScryfallC
 export const isUniversesBeyondCard = (tally: ProvenanceTally | undefined): boolean =>
   tally !== undefined && tally.total > 0 && tally.total === tally.universesBeyond
 
+/**
+ * Where a printing's art lives, which depends on how many PHYSICAL faces it has.
+ *
+ * Scryfall puts `image_uris` on the card object for anything printed on one
+ * physical face — ordinary cards, and also split, adventure and flip cards,
+ * which are one face carrying two halves. `transform` and `modal_dfc` cards
+ * have two physical faces, so there is no single image OF THE CARD and the URLs
+ * live on `card_faces[]` instead. Reading only the top level is why 501 of the
+ * corpus's 890 `//` cards had no art at all on their default printing; checked
+ * on 2026-08-31 against the raw Scryfall record for every one of them, all 501
+ * are `transform` (401) or `modal_dfc` (100), none has a card-level
+ * `image_uris`, and all 501 carry both `normal` and `art_crop` on face 0.
+ *
+ * `Fire // Ice` is the contrast that fixes the shape of this: a split card DOES
+ * have top-level art, so a blanket "read the face" would have broken the cards
+ * that were already right.
+ *
+ * The `??` order is defensive rather than load-bearing, and no test pins it,
+ * because the two are mutually exclusive in Scryfall's data: checked across
+ * every layout with faces on 2026-08-31, `reversible_card`, `transform` and
+ * `modal_dfc` put images ONLY on the faces, while `split`, `adventure`, `flip`,
+ * `meld`, `mutate`, `prototype` and `case` put them ONLY on the card. Reversing
+ * the two operands is an equivalent mutant; a test asserting a preference
+ * between them would be asserting a case real data never produces.
+ *
+ * The FRONT face is the card. It is the side that enters the battlefield, the
+ * side Scryfall sorts and names the card by, and the side `default_printing`
+ * means when a caller asks "which card is this" — so it is what a tile, a
+ * detail panel and a deck-web art crop must draw.
+ *
+ * The BACK face's art is deliberately NOT carried. `Card.oracleTextFaces` is
+ * the precedent for per-face data, but it earned its place: `OracleText` draws
+ * both faces' rules, so there is a reader. Nothing reads a back image —
+ * `imageFor(card, level)` picks one asset from a single `{artCrop, normal}`
+ * pair and there is no flip affordance anywhere in the UI. Adding it would cost
+ * two `Printing` fields, two columns and a migration, a wire-contract change on
+ * `/cards/batch`, and would feed nobody. It belongs with the flip control, not
+ * before it.
+ */
+const faceImages = (raw: ScryfallCard): Record<string, string> | undefined =>
+  raw.image_uris ?? raw.card_faces?.[0]?.image_uris
+
 /** The printing carried alongside an oracle record. Prices are estimates only. */
 export const toPrinting = (raw: ScryfallCard): Printing | null => {
   if (raw.oracle_id === undefined || skipReason(raw) !== null) return null
   const usd = raw.prices?.['usd']
+  const images = faceImages(raw)
   return {
     printingId: printingId(raw.id),
     oracleId: oracleId(raw.oracle_id),
@@ -562,8 +607,8 @@ export const toPrinting = (raw: ScryfallCard): Printing | null => {
     collectorNumber: raw.collector_number ?? '',
     rarity: (raw.rarity ?? 'common') as Printing['rarity'],
     imageUris: {
-      artCrop: raw.image_uris?.['art_crop'] ?? '',
-      normal: raw.image_uris?.['normal'] ?? '',
+      artCrop: images?.['art_crop'] ?? '',
+      normal: images?.['normal'] ?? '',
     },
     // "Dangerously stale after 24 hours … consume at your own risk" (ADR-0009
     // Q7). Estimates only; never presented as a purchase price.
