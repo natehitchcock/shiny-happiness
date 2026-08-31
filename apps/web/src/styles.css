@@ -1475,22 +1475,39 @@ select {
 .name-matches .note {
   margin: 0 0 2px;
 }
-.near-names {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  color: var(--parchment);
-  font-size: 0.78rem;
-  line-height: 1.7;
+/*
+ * A name match is a suggestion row.
+ *
+ * `.near-names` and `.near-type` used to live here: a bare `<ul>` of text
+ * buttons that could open a preview and nothing else. They are gone because
+ * these rows are `.card-row` now and inherit the feed's whole layout — the
+ * point of the change was that finding your card should leave you able to act
+ * on it, and a second row idiom is exactly what stopped that.
+ *
+ * The block keeps a rule of its own so it reads as an answer to the SEARCH
+ * rather than as another group: a hairline down the left, the same one the
+ * combo list uses to say "this is a nested list".
+ */
+.name-matches .card-row {
+  border-left: 1px solid var(--rule);
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
-.near-names li {
-  display: flex;
-  gap: var(--step);
-  align-items: baseline;
-}
-.near-type {
+
+/*
+ * The place an Add would be, on a row that cannot have one.
+ *
+ * A disabled button was the other option and is worse: it takes no focus, so a
+ * keyboard user cannot reach it to find out why, and it shows no `title` on
+ * touch — a dead end wearing the costume of an action. The reason is stated
+ * beside the name instead; this only holds the column open so the costs above
+ * and below it still line up.
+ */
+.act-void {
+  min-width: 2.6rem;
+  text-align: center;
   color: var(--parchment-dim);
-  font-size: 0.68rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
 }
 /* The name cell is a click target for the whole row's text block, so it must
    fill the space it is given rather than only its glyphs. */

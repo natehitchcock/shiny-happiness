@@ -233,6 +233,154 @@ export const legalityText = (
 }
 
 /**
+ * A command the server refused, in words.
+ *
+ * The client used to throw the whole `rejected` array away. The consequence was
+ * a silent failure at the one place it hurts most: the optimistic overlay put
+ * the card in the deck on the click, the server refused it, the next response
+ * carried a deck without it, and `setPending([])` swept the overlay away. The
+ * card simply was not there, and nothing anywhere said why. That is reachable
+ * from the ordinary feed (a stale tab, a card banned since the last ingest) and
+ * it is reachable ON PURPOSE from the "Cards named like…" list, which exists to
+ * show cards that are NOT candidates for this deck.
+ *
+ * Named from the hydrated cards, exactly as `legalityText` does — a rejection
+ * that says "36 characters of uuid was refused" is not a reason.
+ *
+ * `kind` stays a plain string for the reason `LegalityProblem.kind` does: a
+ * newer server may reject for a reason this build has never heard of, and that
+ * has to degrade to readable English rather than to silence.
+ */
+export const rejectionText = (
+  r: { command: { type: string; oracleId?: string }; reason: { kind: string } },
+  cards: ReadonlyMap<string, api.Card>,
+): string => {
+  const name = r.command.oracleId === undefined ? undefined : cards.get(r.command.oracleId)?.name
+  const subject = name ?? 'That card'
+  switch (r.reason.kind) {
+    case 'color-identity':
+      return `${subject} was not added — it is outside your commander's colour identity.`
+    case 'not-singleton':
+      return `${subject} was not added — it is already in the deck, and Commander allows one copy.`
+    case 'banned':
+      return `${subject} was not added — it is banned in Commander.`
+    case 'not-legal-in-commander':
+      return `${subject} was not added — it is not legal in Commander.`
+    case 'previously-excluded':
+      // The one with a way out, so it says what the way out is (pillar P6 says
+      // we never re-suggest it; it does not say the user may never change
+      // their mind).
+      return `${subject} was not added — you rejected it. Put it back from the Rejected list.`
+    case 'unknown-card':
+      return `${subject} was not added — it is not in the card corpus.`
+    case 'is-commander':
+      return `${subject} is your commander, so it cannot be added again.`
+    case 'locked':
+      return `${subject} is locked, so it was left alone. Unlock it first.`
+    case 'not-in-deck':
+      return `${subject} is not in the deck, so there was nothing to change.`
+    case 'already-excluded':
+      return `${subject} was already rejected.`
+    case 'not-excluded':
+      return `${subject} was not rejected, so there was nothing to restore.`
+    default:
+      return `${subject}: the server refused that (${humanise(r.reason.kind).toLowerCase()}).`
+  }
+}
+
+/**
+ * A whole batch's refusals, as the one line the banner shows. `null` for a
+ * batch nothing was refused in — which is nearly every batch.
+ *
+ * The ONLY reader of `rejected`, and therefore the only place that has to
+ * tolerate its absence. `undefined` arrives from a run with no commands in it,
+ * and from a server that does not send the field; reading `.length` off it
+ * threw inside the pipeline's apply callback, which is an uncaught exception on
+ * a timer — nothing catches that, and it left the page part-way through a
+ * recompute with no error on screen.
+ *
+ * Only the first, plus a count. A batch can be a whole import, and forty
+ * sentences in a banner is a banner nobody reads: the first explains the SHAPE
+ * of the problem and the count says how much of it there is.
+ */
+export const rejectionNotice = (
+  rejected:
+    | readonly { command: { type: string; oracleId?: string }; reason: { kind: string } }[]
+    | undefined,
+  cards: ReadonlyMap<string, api.Card>,
+): string | null => {
+  const list = rejected ?? []
+  const first = list[0]
+  if (first === undefined) return null
+  const sentence = rejectionText(first, cards)
+  return list.length === 1
+    ? sentence
+    : `${sentence} (${plural(list.length - 1, 'other card')} too.)`
+}
+
+/**
+ * What a name-match row can actually do about this card.
+ *
+ * The "Cards named like…" list is the ONE place in the app that deliberately
+ * shows cards which are not candidates for this deck. Giving every row a plain
+ * Add would therefore give some of them a button that cannot work, and the
+ * server's refusal would arrive after the optimistic overlay had already shown
+ * the card landing in the deck. So the row decides up front what it can offer,
+ * and says why when the answer is "nothing".
+ *
+ * This is NOT a second copy of the legality rules. The server stays the
+ * authority and `rejectionText` reports anything this misses — a card banned
+ * since the last ingest, say, which nothing on the client can know. What is
+ * duplicated here is only the part that is cheap, local and certain: whether
+ * the card is already in this deck, and whether its colour identity fits inside
+ * the commander's. Getting either of those wrong costs a round trip and a
+ * banner, not a wrong deck.
+ *
+ * Order matters. A rejected card that is also outside the identity reports the
+ * identity, because that is the one the user cannot do anything about.
+ */
+export type NameMatchStatus = 'commander' | 'in-deck' | 'off-identity' | 'rejected' | 'addable'
+
+export const nameMatchStatus = (
+  card: { oracleId: string; colorIdentity: readonly string[] },
+  deck: { commanders: readonly string[]; colorIdentity: readonly string[] },
+  accepted: ReadonlySet<string>,
+  excluded: ReadonlySet<string>,
+): NameMatchStatus => {
+  if (deck.commanders.includes(card.oracleId)) return 'commander'
+  if (accepted.has(card.oracleId)) return 'in-deck'
+  // Colour identity is a subset test, not an intersection: a card is legal iff
+  // every colour it carries is one the commander carries (doc 02 §2.2).
+  if (card.colorIdentity.some((c) => !deck.colorIdentity.includes(c))) return 'off-identity'
+  if (excluded.has(card.oracleId)) return 'rejected'
+  return 'addable'
+}
+
+/** The same, as the phrase the row shows beside the name. */
+export const nameMatchNote = (
+  status: NameMatchStatus,
+  card: { colorIdentity: readonly string[] },
+  deck: { colorIdentity: readonly string[] },
+): string | null => {
+  switch (status) {
+    case 'commander':
+      return 'your commander'
+    case 'in-deck':
+      return 'already in your deck'
+    case 'off-identity': {
+      const off = card.colorIdentity.filter((c) => !deck.colorIdentity.includes(c))
+      // The offending letters, not just the verdict: "outside your colours" is
+      // a conclusion, and {B} is the fact that produced it.
+      return `outside your colour identity (${off.join('')})`
+    }
+    case 'rejected':
+      return 'you rejected this — Add puts it back'
+    case 'addable':
+      return null
+  }
+}
+
+/**
  * The name of a thing the server could not compute.
  *
  * `top-<type>` is a PLACEHOLDER the domain uses because the real key is one per
@@ -2233,6 +2381,21 @@ interface QueryResult {
    * run, arriving by a different route.
    */
   readonly extra: ReadonlyMap<string, readonly api.Recommendation[]>
+  /**
+   * Commands the server refused, carried back so the UI can say so.
+   *
+   * `sendCommands` has always returned these and the client has always dropped
+   * them. Dropping them is what made an illegal add SILENT: the optimistic
+   * overlay showed the card in the deck, the server said no, and the overlay
+   * was swept away by the response with nothing to explain the disappearance.
+   *
+   * Optional, because the WIRE is not the type — the same reason `images` is
+   * optional on `hydrate`. A run with no commands in it has nothing to report,
+   * and a server that omits the field must leave the client saying nothing
+   * rather than throwing inside the apply. `rejectionNotice` is the one place
+   * that reads it, and it is the one place that has to tolerate the absence.
+   */
+  readonly rejected?: readonly api.CommandResult['rejected'][number][] | undefined
 }
 
 /**
@@ -2936,6 +3099,8 @@ export const Workspace = ({
      * the settle was introduced.
      */
     let current = serverDeckRef.current ?? deckRef.current
+    /** What the server refused this round, so the UI can say what happened. */
+    let rejected: readonly api.CommandResult['rejected'][number][] | undefined
 
     /*
      * Retry a failed send before giving up on the user's clicks.
@@ -2967,6 +3132,7 @@ export const Workspace = ({
       try {
         const result = await sendWithRetry(current.id, body, current.version)
         current = result.deck
+        rejected = result.rejected
       } catch (error) {
         // A 409 means only that our version is behind — the clicks are still
         // valid. Re-read the deck and send them again, rather than dropping
@@ -3006,6 +3172,10 @@ export const Workspace = ({
         } else {
           const result = await sendWithRetry(fresh.id, rebased.replay, fresh.version)
           current = result.deck
+          // The rebase path rejects for exactly the same reasons the first
+          // attempt does, and a user whose card was refused after a conflict
+          // is owed the same sentence as one whose card was refused outright.
+          rejected = result.rejected
         }
       }
       serverDeckRef.current = current
@@ -3059,7 +3229,7 @@ export const Workspace = ({
       ],
       recs.datasetSnapshotId,
     )
-    return { deck: current, recs, analysis: ana, hydrated, extra }
+    return { deck: current, recs, analysis: ana, hydrated, extra, rejected }
   }, [])
 
   const pipeline = usePipeline<PendingCommand>({
@@ -3133,6 +3303,25 @@ export const Workspace = ({
       setColumnMatches(new Map(r.recs.columns.map((c) => [c.query, new Set(c.matched)])))
       setExtraItems(r.extra)
       setPending([])
+      /*
+       * Say what the server refused, before the overlay that showed it working
+       * disappears.
+       *
+       * `setPending([])` on the line above is what removes the card the user
+       * watched land in their deck. Without a sentence here that removal is the
+       * ONLY feedback a refusal produces, and it reads as the app losing the
+       * card rather than as the app declining to break a rule.
+       *
+       * Named from `r.hydrated.cards`, which is this run's own hydration and
+       * therefore holds the card that was just refused.
+       *
+       * Only the first, plus a count. A batch can be a whole import and a
+       * banner of forty sentences is a banner nobody reads; the first is the
+       * one that explains the SHAPE of the problem, and the count says how much
+       * of it there is.
+       */
+      const refused = rejectionNotice(r.rejected, r.hydrated.cards)
+      if (refused !== null) setNotice(refused)
     },
   })
 
@@ -3160,6 +3349,10 @@ export const Workspace = ({
   }, [deck.id])
 
   const act = (oracleId: string, type: PendingCommand['type']): void => {
+    // A new decision supersedes the last complaint. Leaving "X was not added"
+    // on screen while a different card lands successfully attaches the failure
+    // to the wrong action.
+    setNotice(null)
     // Applied to the view immediately. This is the whole point of the buffer:
     // the click is instant and the recompute catches up.
     setPending((current) => [...current, { type, oracleId }])
@@ -3840,6 +4033,18 @@ export const Workspace = ({
   )
 
   /**
+   * Rejected cards by id, for the name-match rows.
+   *
+   * From the OPTIMISTIC deck, like `acceptedIds`: a card rejected a moment ago
+   * has to offer "Add it back" rather than a plain Add on the very next render,
+   * or the click that follows is refused for `previously-excluded`.
+   */
+  const excludedIds = useMemo(
+    () => new Set(optimistic.entries.filter((e) => e.zone === 'excluded').map((e) => e.oracleId)),
+    [optimistic],
+  )
+
+  /**
    * The gold overlays, derived here rather than read from the analysis.
    *
    * The server sends `locked` counts too, but they only change when a recompute
@@ -4057,6 +4262,12 @@ export const Workspace = ({
       {notice !== null ? (
         <p className="banner note" role="status">
           {notice}
+          {/* A banner with no way out is a banner that becomes furniture. The
+              other one — `pipeline.error` — is cleared by the next successful
+              run, but this one can outlive the thing it is about. */}
+          <button className="act" onClick={() => setNotice(null)} aria-label="Dismiss this message">
+            OK
+          </button>
         </p>
       ) : null}
 
@@ -4415,16 +4626,91 @@ export const Workspace = ({
                   ? `Cards named like “${nearby.term}”`
                   : `No card is named “${nearby.term}”. Did you mean:`}
               </p>
-              <ul className="near-names">
-                {nearby.items.slice(0, 5).map((c) => (
-                  <li key={c.oracleId}>
-                    <button className="as-link" onClick={() => open(c.oracleId)}>
-                      {c.name}
-                    </button>
-                    <span className="near-type">{c.typeLine}</span>
-                  </li>
-                ))}
-              </ul>
+              {/*
+                Ordinary rows, not a list of names.
+                These were a `<ul>` of text buttons that could only open a
+                preview, so finding the card you were looking for left you with
+                nowhere to go: the one thing you wanted to do with it — put it
+                in the deck — was the one thing the list would not let you do.
+                They are `.card-row` now, so they carry the same name, type
+                line, cost, price and Add as a suggestion, and they sort into
+                the reader's existing habits rather than being a second idiom.
+                A row that CANNOT be added says so where the button would be
+                (`nameMatchStatus`), because this list deliberately contains
+                cards that are not candidates.
+              */}
+              {nearby.items.slice(0, 5).map((c) => {
+                const status = nameMatchStatus(c, deck, acceptedIds, excludedIds)
+                const note = nameMatchNote(status, c, deck)
+                return (
+                  <div className="card-row" data-row-id={c.oracleId} key={c.oracleId}>
+                    <span
+                      className="name-cell"
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest('.hint') === null) open(c.oracleId)
+                      }}
+                    >
+                      <button
+                        className="name as-link"
+                        onClick={() => open(c.oracleId)}
+                        aria-label={`Preview ${c.name}`}
+                      >
+                        {c.name}
+                        <span className="row-type">{c.typeLine}</span>
+                      </button>
+                      {note === null ? null : (
+                        <span className="reasons">
+                          <span className="reason" data-kind="not-a-candidate">
+                            {note}
+                          </span>
+                        </span>
+                      )}
+                    </span>
+                    {/* No price for these: they were found by `searchCards`,
+                        which is not a hydration, so `prices` has no entry and
+                        `usd` renders the em dash that means "not known". The
+                        preview reads it off the card's own printings. */}
+                    <Costs manaCost={c.manaCost} price={prices.get(c.oracleId)} />
+                    {inFlight.has(c.oracleId) ? (
+                      <span
+                        className="spinner"
+                        role="status"
+                        aria-label={`${c.name} added, updating suggestions`}
+                      />
+                    ) : status === 'addable' ? (
+                      <button
+                        className="act accept"
+                        onClick={() => act(c.oracleId, 'accept')}
+                        aria-label={`Add ${c.name}`}
+                      >
+                        Add
+                      </button>
+                    ) : status === 'rejected' ? (
+                      // Restore then accept, in one batch, exactly as the
+                      // Rejected list does — an `accept` on its own is refused
+                      // for `previously-excluded`, which is the silent failure
+                      // this whole change exists to remove.
+                      <button
+                        className="act accept"
+                        onClick={() => restoreIntoDeck(c.oracleId)}
+                        aria-label={`Add ${c.name} back to the deck`}
+                        title="You rejected this. Adding it puts it straight back into the deck."
+                      >
+                        Add
+                      </button>
+                    ) : (
+                      // Not a disabled button: a disabled control is unreachable
+                      // by keyboard and carries no explanation on touch, so it
+                      // is a dead end wearing the costume of an action. The row
+                      // states the reason beside the name instead, and this is
+                      // only the shape that keeps the columns lined up.
+                      <span className="act-void" aria-hidden="true">
+                        —
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           ) : null}
 
@@ -4432,9 +4718,26 @@ export const Workspace = ({
             <div className="empty-search">
               <p className="problem">Nothing in your suggestions matches “{query.trim()}”.</p>
               {nearby !== null && nearby.items.length > 0 ? (
+                /*
+                 * This used to name three reasons and imply they were the whole
+                 * list: "already in it, excluded, or outside your colour
+                 * identity". None of them is usually the reason. A card is in
+                 * the suggestion feed only once the scorer ranks it into one of
+                 * the groups above, and the commonest reason a real card is
+                 * missing is simply that nothing did — it is a fine card that
+                 * this deck has no particular use for. Stating three legal
+                 * disqualifications instead told the reader their deck or their
+                 * colours were at fault when neither was.
+                 *
+                 * The three are still worth naming, because each of them IS
+                 * sometimes the answer — and now every row above says which of
+                 * them applies to it, so this line only has to give the general
+                 * rule.
+                 */
                 <p className="note">
-                  The cards above are real — they are not candidates for this deck, being already in
-                  it, excluded, or outside your colour identity.
+                  The cards above are real. They are missing from the suggestions because nothing
+                  ranked them into a group — a card has to earn a place there. Each row says whether
+                  it can be added, and why not when it cannot.
                 </p>
               ) : nearby !== null ? (
                 <p className="note">No card with that name exists in the corpus either.</p>
