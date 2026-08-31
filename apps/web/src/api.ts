@@ -620,6 +620,26 @@ export interface Analysis {
       withinRange: boolean
     }[]
   }
+  /**
+   * What the deck's cards DEMAND against what its lands PRODUCE.
+   *
+   * Already on the wire since API-02 and never declared here, so nothing has
+   * ever rendered it. Optional for the usual reason — a server from before it
+   * sends nothing, and the panel must then draw nothing rather than crash on a
+   * property of undefined.
+   *
+   * The two halves are counted differently and are NOT interchangeable.
+   * `pips` counts `{W}` symbols in mana costs, so a card costing `{W}{W}`
+   * contributes two; `sources` counts ACCEPTED LAND CARDS whose colour
+   * identity includes the colour. Both are computed over `acceptedSet`, which
+   * is a `Set` of oracle ids — so `sources` counts ten Mountains once, and is
+   * therefore "how many distinct lands make this colour" and not "how many
+   * mana sources you have". The UI has to say which question it is answering.
+   */
+  colorBalance?: {
+    pips: Record<string, number>
+    sources: Record<string, number>
+  }
   legality: { legal: boolean; problems: LegalityProblem[] }
   /**
    * What the bracket system can and cannot say about this deck (ADR-0018).

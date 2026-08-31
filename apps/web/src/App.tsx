@@ -16,7 +16,10 @@ import {
 // brander shadowed by a local of the same name reads as a bug even when it is
 // not one.
 import { oracleId as asOracleId } from '@roundtable/domain'
-import { CardFace, ManaCost, OracleText, levelSpec } from '@roundtable/ui'
+// `IDENTITY_COLORS` rather than a hex in this file: Magic's five colours are
+// data the design system owns, and a second copy here is how the pie and the
+// mana symbols come to disagree about what blue is.
+import { CardFace, IDENTITY_COLORS, ManaCost, OracleText, levelSpec } from '@roundtable/ui'
 import type { CardView, Color } from '@roundtable/ui'
 import type { DeckCommand, SynergyTag } from '@roundtable/domain'
 import { DeckMenu } from './DeckMenu'
@@ -40,6 +43,15 @@ const dimensionKeyOf = (d: { role?: string; type?: string }): string =>
   d.role === undefined ? `type:${d.type ?? ''}` : `role:${d.role}`
 
 const dimensionName = (d: { role?: string; type?: string }): string => d.role ?? d.type ?? '—'
+
+/**
+ * The auto-query wait in whole seconds, for the one control that names it.
+ *
+ * Derived, never typed: the checkbox and its tooltip both read "four seconds"
+ * against a two-second constant, so the control that exists to tell you how
+ * long you have was wrong by a factor of two.
+ */
+const AUTO_QUERY_SECONDS = Math.round(AUTO_QUERY_MS / 1000)
 
 /** Prices are estimates, and the interface has to say so (ADR-0009 Q7). */
 const usd = (value: number | null | undefined): string =>
@@ -220,6 +232,154 @@ export const legalityText = (
     default:
       // A kind added after this build. Readable, and it still names the card.
       return name === undefined ? humanise(p.kind) : `${humanise(p.kind)} — ${name}`
+  }
+}
+
+/**
+ * A command the server refused, in words.
+ *
+ * The client used to throw the whole `rejected` array away. The consequence was
+ * a silent failure at the one place it hurts most: the optimistic overlay put
+ * the card in the deck on the click, the server refused it, the next response
+ * carried a deck without it, and `setPending([])` swept the overlay away. The
+ * card simply was not there, and nothing anywhere said why. That is reachable
+ * from the ordinary feed (a stale tab, a card banned since the last ingest) and
+ * it is reachable ON PURPOSE from the "Cards named like…" list, which exists to
+ * show cards that are NOT candidates for this deck.
+ *
+ * Named from the hydrated cards, exactly as `legalityText` does — a rejection
+ * that says "36 characters of uuid was refused" is not a reason.
+ *
+ * `kind` stays a plain string for the reason `LegalityProblem.kind` does: a
+ * newer server may reject for a reason this build has never heard of, and that
+ * has to degrade to readable English rather than to silence.
+ */
+export const rejectionText = (
+  r: { command: { type: string; oracleId?: string }; reason: { kind: string } },
+  cards: ReadonlyMap<string, api.Card>,
+): string => {
+  const name = r.command.oracleId === undefined ? undefined : cards.get(r.command.oracleId)?.name
+  const subject = name ?? 'That card'
+  switch (r.reason.kind) {
+    case 'color-identity':
+      return `${subject} was not added — it is outside your commander's colour identity.`
+    case 'not-singleton':
+      return `${subject} was not added — it is already in the deck, and Commander allows one copy.`
+    case 'banned':
+      return `${subject} was not added — it is banned in Commander.`
+    case 'not-legal-in-commander':
+      return `${subject} was not added — it is not legal in Commander.`
+    case 'previously-excluded':
+      // The one with a way out, so it says what the way out is (pillar P6 says
+      // we never re-suggest it; it does not say the user may never change
+      // their mind).
+      return `${subject} was not added — you rejected it. Put it back from the Rejected list.`
+    case 'unknown-card':
+      return `${subject} was not added — it is not in the card corpus.`
+    case 'is-commander':
+      return `${subject} is your commander, so it cannot be added again.`
+    case 'locked':
+      return `${subject} is locked, so it was left alone. Unlock it first.`
+    case 'not-in-deck':
+      return `${subject} is not in the deck, so there was nothing to change.`
+    case 'already-excluded':
+      return `${subject} was already rejected.`
+    case 'not-excluded':
+      return `${subject} was not rejected, so there was nothing to restore.`
+    default:
+      return `${subject}: the server refused that (${humanise(r.reason.kind).toLowerCase()}).`
+  }
+}
+
+/**
+ * A whole batch's refusals, as the one line the banner shows. `null` for a
+ * batch nothing was refused in — which is nearly every batch.
+ *
+ * The ONLY reader of `rejected`, and therefore the only place that has to
+ * tolerate its absence. `undefined` arrives from a run with no commands in it,
+ * and from a server that does not send the field; reading `.length` off it
+ * threw inside the pipeline's apply callback, which is an uncaught exception on
+ * a timer — nothing catches that, and it left the page part-way through a
+ * recompute with no error on screen.
+ *
+ * Only the first, plus a count. A batch can be a whole import, and forty
+ * sentences in a banner is a banner nobody reads: the first explains the SHAPE
+ * of the problem and the count says how much of it there is.
+ */
+export const rejectionNotice = (
+  rejected:
+    | readonly { command: { type: string; oracleId?: string }; reason: { kind: string } }[]
+    | undefined,
+  cards: ReadonlyMap<string, api.Card>,
+): string | null => {
+  const list = rejected ?? []
+  const first = list[0]
+  if (first === undefined) return null
+  const sentence = rejectionText(first, cards)
+  return list.length === 1
+    ? sentence
+    : `${sentence} (${plural(list.length - 1, 'other card')} too.)`
+}
+
+/**
+ * What a name-match row can actually do about this card.
+ *
+ * The "Cards named like…" list is the ONE place in the app that deliberately
+ * shows cards which are not candidates for this deck. Giving every row a plain
+ * Add would therefore give some of them a button that cannot work, and the
+ * server's refusal would arrive after the optimistic overlay had already shown
+ * the card landing in the deck. So the row decides up front what it can offer,
+ * and says why when the answer is "nothing".
+ *
+ * This is NOT a second copy of the legality rules. The server stays the
+ * authority and `rejectionText` reports anything this misses — a card banned
+ * since the last ingest, say, which nothing on the client can know. What is
+ * duplicated here is only the part that is cheap, local and certain: whether
+ * the card is already in this deck, and whether its colour identity fits inside
+ * the commander's. Getting either of those wrong costs a round trip and a
+ * banner, not a wrong deck.
+ *
+ * Order matters. A rejected card that is also outside the identity reports the
+ * identity, because that is the one the user cannot do anything about.
+ */
+export type NameMatchStatus = 'commander' | 'in-deck' | 'off-identity' | 'rejected' | 'addable'
+
+export const nameMatchStatus = (
+  card: { oracleId: string; colorIdentity: readonly string[] },
+  deck: { commanders: readonly string[]; colorIdentity: readonly string[] },
+  accepted: ReadonlySet<string>,
+  excluded: ReadonlySet<string>,
+): NameMatchStatus => {
+  if (deck.commanders.includes(card.oracleId)) return 'commander'
+  if (accepted.has(card.oracleId)) return 'in-deck'
+  // Colour identity is a subset test, not an intersection: a card is legal iff
+  // every colour it carries is one the commander carries (doc 02 §2.2).
+  if (card.colorIdentity.some((c) => !deck.colorIdentity.includes(c))) return 'off-identity'
+  if (excluded.has(card.oracleId)) return 'rejected'
+  return 'addable'
+}
+
+/** The same, as the phrase the row shows beside the name. */
+export const nameMatchNote = (
+  status: NameMatchStatus,
+  card: { colorIdentity: readonly string[] },
+  deck: { colorIdentity: readonly string[] },
+): string | null => {
+  switch (status) {
+    case 'commander':
+      return 'your commander'
+    case 'in-deck':
+      return 'already in your deck'
+    case 'off-identity': {
+      const off = card.colorIdentity.filter((c) => !deck.colorIdentity.includes(c))
+      // The offending letters, not just the verdict: "outside your colours" is
+      // a conclusion, and {B} is the fact that produced it.
+      return `outside your colour identity (${off.join('')})`
+    }
+    case 'rejected':
+      return 'you rejected this — Add puts it back'
+    case 'addable':
+      return null
   }
 }
 
@@ -639,16 +799,25 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  /**
-   * The same countdown the suggestion filter uses, on the same constant.
+  /*
+   * No countdown here. The commander search is committed by Enter or by the
+   * button, and by nothing else.
    *
-   * Two characters is the floor — one letter matches most of Magic — and below
-   * it nothing is pending, so nothing counts down.
+   * This screen ran the same two-second auto-query the suggestion filter has,
+   * and it behaved badly for the reason the two screens differ: a commander
+   * name is long and is typed in bursts, so the countdown expired mid-name
+   * over and over. Each expiry fired a search for a PREFIX, and because the
+   * result list below was never cleared, the page then showed a full list of
+   * matches for "Kren" while the box said "Krenko, Mob" — an answer to a
+   * question the user had already moved past, indistinguishable from an answer
+   * to the one they were asking.
+   *
+   * The suggestion filter keeps the countdown (it is a short query language,
+   * and the box is beside the list it filters). Here it is removed rather than
+   * defaulted off: there is no setting on this screen, so an off-by-default
+   * checkbox would have nowhere to live and the landing page would be the one
+   * place the preference could not be honoured.
    */
-  const auto = useAutoQuery(
-    { enabled: term.trim().length >= 2, draft: term, committed: query },
-    () => setQuery(term),
-  )
 
   useEffect(() => {
     if (query.trim().length < 2) {
@@ -659,6 +828,16 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
     }
     let cancelled = false
     setSearch('searching')
+    /*
+     * Drop the previous query's matches before asking for the next.
+     *
+     * Kept, they made the list read as the answer to whatever is in the box
+     * now. The button carries the spinner, so an empty list during the request
+     * is not a silent state — and `search === 'done'` gates the "Nothing found"
+     * line, so an in-flight search cannot flash it either.
+     */
+    setResults([])
+    setResultImages(new Map())
     void api
       /*
        * `is:commander`, not `type:legendary type:creature`.
@@ -753,10 +932,12 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
                 if (e.key === 'Enter') setQuery(term)
               }}
             />
+            {/* `remaining={null}`: nothing counts down here, so the button is
+                a magnifying glass and never a ring. */}
             <SearchButton
               what="search"
               onRun={() => setQuery(term)}
-              remaining={auto.remaining}
+              remaining={null}
               restartKey={term}
               busy={search === 'searching'}
             />
@@ -1259,18 +1440,27 @@ const Preview = ({
   }, [shownId])
 
   /*
-   * Escape closes it. Bound to the document rather than to the panel because
-   * the sheet is deliberately not modal — nothing behind it is inert, so focus
-   * can legitimately be outside it when the user gives up on it.
+   * Escape closes it, at every width.
+   *
+   * It used to be bound only when `sheet` was true, which was defensible while
+   * the panel was a block at the top of the rail: it covered nothing, so there
+   * was nothing to dismiss. It is an OVERLAY over the suggestion feed now, and
+   * a thing that covers your work has to have a keyboard way out — the Close
+   * button is a tab away from wherever you are, and Escape is the key everybody
+   * already presses.
+   *
+   * Bound to the document rather than to the panel because it is deliberately
+   * not modal: nothing behind it is inert, so focus can legitimately be outside
+   * it when the user gives up on it.
    */
   useEffect(() => {
-    if (shownId === null || !sheet) return
+    if (shownId === null) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [shownId, sheet, onClose])
+  }, [shownId, onClose])
 
   if (shown === null || shown === undefined) return null
   /*
@@ -1721,6 +1911,84 @@ const BracketCheck = ({
   )
 }
 
+/* ------------------------------------------------------- what is in a bar */
+
+/**
+ * The cards behind one bar, counted by the SERVER'S OWN RULE.
+ *
+ * The trap this exists to avoid, measured before it was written: the count in
+ * the bar and the list under the cursor have to agree, and the obvious
+ * client-side filter makes them disagree in two different ways.
+ *
+ *   DUPLICATES. `countComposition` iterates `acceptedSet(deck)`, which is a
+ *   `Set` of oracle ids — so thirty Mountains count ONCE. A filter over the
+ *   deck's entries would list thirty rows beside a bar reading 1. `ids` is
+ *   therefore the deduplicated set, and the caller passes `acceptedIds`, which
+ *   is built the same way and includes the commanders exactly as `acceptedSet`
+ *   does.
+ *
+ *   TWO DIMENSIONS AT ONCE. A composition dimension is a role OR a type, and a
+ *   creature that ramps is counted under both — so a card can legitimately
+ *   appear in two lists. `dimensionKeysOf` is imported from the domain rather
+ *   than reimplemented here, for the reason `lockedByDimension` already gives:
+ *   a second copy of the rule is a second answer to the same question.
+ *
+ * A card the client has not hydrated cannot be named, so it is omitted and the
+ * caller reports the shortfall rather than quietly showing a shorter list.
+ */
+export const cardsInDimension = (
+  ids: Iterable<string>,
+  cards: ReadonlyMap<string, api.Card>,
+  dimensionKey: string,
+): readonly api.Card[] => {
+  const out: api.Card[] = []
+  for (const id of ids) {
+    const card = cards.get(id)
+    if (card === undefined) continue
+    if (dimensionKeysOf(card).includes(dimensionKey)) out.push(card)
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * The same, for one mana-value bucket.
+ *
+ * Lands are excluded and bucket 7 is "7 or more", both because
+ * `countComposition` does exactly that — the curve is a count of SPELLS, and a
+ * deck's 36 lands at mana value 0 would otherwise be the tallest bar on it.
+ */
+export const cardsInBucket = (
+  ids: Iterable<string>,
+  cards: ReadonlyMap<string, api.Card>,
+  bucket: number,
+): readonly api.Card[] => {
+  const out: api.Card[] = []
+  for (const id of ids) {
+    const card = cards.get(id)
+    if (card === undefined || card.types.includes('land')) continue
+    if (Math.min(7, Math.max(0, Math.floor(card.manaValue))) === bucket) out.push(card)
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * What to say when the list and the bar do not agree. `null` when they do.
+ *
+ * They can legitimately differ. The bar is the last analysis the server
+ * computed and the list is the deck on screen right now, and between an accept
+ * and the recompute that follows it those are different decks; separately, a
+ * card this page has never hydrated has no name to show. Neither is a reason to
+ * show a number we cannot defend, so the honest thing is to show the count we
+ * CAN stand behind — the length of the list, which is the thing being looked
+ * at — and say what the other number is and why it differs.
+ */
+export const countCaveat = (listed: number, bar: number): string | null => {
+  if (listed === bar) return null
+  return listed < bar
+    ? `The bar counts ${String(bar)}. The ${String(bar - listed)} not listed are cards this page has not loaded, or were removed since the last recompute.`
+    : `The bar counts ${String(bar)} — it is from the last recompute, and these ${String(listed)} are the deck as it stands now.`
+}
+
 /** The host of a URL, for link text. The full URL stays on the `href`. */
 const hostOf = (url: string): string => {
   try {
@@ -1729,6 +1997,208 @@ const hostOf = (url: string): string => {
     // Not a URL we can parse; show it whole rather than an empty link.
     return url
   }
+}
+
+/**
+ * The cards behind one bar, as the panel a hover opens.
+ *
+ * Names only, as plain text. Buttons would be better if you could reach them,
+ * and on hover you cannot — moving the pointer off the trigger to click a name
+ * closes the panel it is in. `ComboList` made the same call for the same
+ * reason. The preview is a click away on the deck rail, which is where a reader
+ * who wants the card itself already goes.
+ *
+ * The COUNT IN THE HEADING is the length of this list, never the bar's number.
+ * They are usually the same and `countCaveat` says so when they are not; what
+ * must never happen is a heading claiming 12 above a list of 11, which is the
+ * failure this whole panel was written to avoid.
+ */
+const Breakdown = ({
+  title,
+  cards,
+  bar,
+}: {
+  title: string
+  cards: readonly api.Card[]
+  /** What the bar itself says, for the caveat. */
+  bar: number
+}): React.JSX.Element => {
+  const caveat = countCaveat(cards.length, bar)
+  return (
+    <>
+      <strong>
+        {title} — {plural(cards.length, 'card')}
+      </strong>
+      {cards.length === 0 ? (
+        <span className="hint-line dim">Nothing here yet.</span>
+      ) : (
+        cards.slice(0, 24).map((c) => (
+          <span className="hint-line" key={c.oracleId}>
+            {c.name}
+          </span>
+        ))
+      )}
+      {cards.length > 24 ? (
+        <span className="hint-line dim">and {cards.length - 24} more.</span>
+      ) : null}
+      {caveat === null ? null : <span className="hint-line dim">{caveat}</span>}
+    </>
+  )
+}
+
+/* ------------------------------------------------------------ colour pie */
+
+/** Full names, for the accessible summary. A lone "W" read aloud is a letter. */
+const COLOR_NAMES: Readonly<Record<string, string>> = {
+  W: 'white',
+  U: 'blue',
+  B: 'black',
+  R: 'red',
+  G: 'green',
+}
+
+/** One slice's wedge, from the centre. Angles in radians, 0 at three o'clock. */
+const wedge = (cx: number, cy: number, r: number, from: number, to: number): string => {
+  const at = (angle: number): string =>
+    `${(cx + r * Math.cos(angle)).toFixed(2)} ${(cy + r * Math.sin(angle)).toFixed(2)}`
+  const large = to - from > Math.PI ? 1 : 0
+  return `M ${String(cx)} ${String(cy)} L ${at(from)} A ${String(r)} ${String(r)} 0 ${String(large)} 1 ${at(to)} Z`
+}
+
+/**
+ * The colour demand of the deck's cards, as a pie.
+ *
+ * WHY A PIE AT ALL. It is a part-to-whole with at most five categories that sum
+ * to a meaningful total, which is the one case a pie answers better than a bar:
+ * "how much of my deck is blue" is a share, not a magnitude. That is the whole
+ * of the justification and it does not generalise — nothing else on this
+ * dashboard should become one.
+ *
+ * WHY THE COLOURS ARE NOT FIXED, AND WHAT IT COSTS.
+ *
+ * `IDENTITY_COLORS` fails a categorical-palette check, and the failures were
+ * measured rather than guessed:
+ *
+ *     [FAIL] Lightness band   #ede2c0 at L 0.913
+ *     [FAIL] Chroma floor     #ede2c0 (0.046), #a274ae (0.099) — read as grey
+ *     [WARN] CVD separation   #a274ae ↔ #2f74c8  ΔE 6.3 (protan)
+ *
+ * They are shipped anyway, because a player looking for their white pips needs
+ * the white slice to be white. Recolouring Magic's own five would fix the
+ * validator and break the chart: the reader's entire prior about what these
+ * colours mean is the thing that makes the picture instant.
+ *
+ * The codebase made this call once before, in `PIP_CVD_NOTE`, and justified it
+ * on the grounds that "L0 is a shape view, not a decision surface". That
+ * justification does NOT extend here — a pie read to decide a mana base is
+ * exactly a decision surface — so the cost is paid the other way the validator
+ * permits, with a secondary encoding that does not depend on hue at all:
+ *
+ *   * every slice is labelled with its colour LETTER and its COUNT, outside the
+ *     wedge where the page's own text contrast applies rather than the slice's;
+ *   * the slices are separated by a stroke in the page background, so adjacent
+ *     wedges have an edge and not just a hue change;
+ *   * the whole figure states every colour and count in its accessible name.
+ *
+ * Read the letters and the chart works with no colour vision at all. The hues
+ * are then a fast path for the readers who have them, which is what a secondary
+ * encoding is for.
+ */
+const ColorPie = ({
+  balance,
+}: {
+  balance: NonNullable<api.Analysis['colorBalance']>
+}): React.JSX.Element => {
+  const slices = (COLORS as readonly string[])
+    .map((c) => ({ color: c, pips: balance.pips[c] ?? 0, sources: balance.sources[c] ?? 0 }))
+    .filter((s) => s.pips > 0)
+  const total = slices.reduce((sum, s) => sum + s.pips, 0)
+
+  if (total === 0) {
+    // A colourless deck is a real answer, and an empty circle is not one.
+    return (
+      <p className="note">
+        No coloured mana symbols yet — the deck is empty, or everything in it is colourless.
+      </p>
+    )
+  }
+
+  const cx = 62
+  const cy = 62
+  const r = 44
+  const summary = slices
+    .map((s) => `${COLOR_NAMES[s.color] ?? s.color} ${String(s.pips)}`)
+    .join(', ')
+
+  let angle = -Math.PI / 2
+  return (
+    <div className="pie-block">
+      <svg
+        className="pie"
+        viewBox="0 0 124 124"
+        role="img"
+        aria-label={`Coloured mana symbols the deck's cards ask for: ${summary}. ${plural(total, 'symbol')} in total.`}
+      >
+        {slices.map((s) => {
+          const from = angle
+          const to = angle + (s.pips / total) * Math.PI * 2
+          angle = to
+          return (
+            // One colour, one slice, and a single-colour deck is a whole
+            // circle: the arc command degenerates at exactly 2π — start and end
+            // point are the same — and would draw nothing at all.
+            slices.length === 1 ? (
+              <circle key={s.color} cx={cx} cy={cy} r={r} fill={IDENTITY_COLORS[s.color]} />
+            ) : (
+              <path
+                key={s.color}
+                d={wedge(cx, cy, r, from, to)}
+                fill={IDENTITY_COLORS[s.color]}
+                /* The gap. In the page's own ground colour rather than a
+                   transparent stroke, so adjacent wedges are separated by an
+                   edge and not only by a hue change — which is the half of the
+                   figure a protan reader is relying on. */
+                stroke="var(--ink)"
+                strokeWidth={2}
+              />
+            )
+          )
+        })}
+      </svg>
+      {/*
+        The letter and the count for every slice, in reading order.
+        Beside the pie rather than on it: at a 230 px rail a thin wedge has no
+        room for text, and text ON a slice inherits that slice's contrast — the
+        white one is L 0.913 and would need a dark glyph while the blue needs a
+        light one. Out here the page's own parchment-on-ink contrast applies to
+        all five.
+      */}
+      <ul className="pie-key">
+        {slices.map((s) => (
+          <li key={s.color}>
+            <span className="pie-swatch" style={{ background: IDENTITY_COLORS[s.color] }} />
+            <span className="pie-letter">{s.color}</span>
+            <span className="pie-count">{s.pips}</span>
+            {/*
+              What the lands do about it.
+              Labelled as DISTINCT LANDS, which is the question the server
+              actually answers: `colorBalance.sources` is counted over
+              `acceptedSet`, a Set of oracle ids, so ten Mountains are one land.
+              Calling it "sources" would have made it a wrong answer to the
+              question a builder is really asking; naming it precisely makes it
+              a right answer to a narrower one, and the gap between the two
+              columns is still the thing worth looking at.
+            */}
+            <span className="pie-sources">{s.sources} lands</span>
+          </li>
+        ))}
+      </ul>
+      <p className="note">
+        Coloured symbols in your cards&rsquo; mana costs, and how many distinct lands make each
+        colour. A repeated basic counts once, here and in every bar above.
+      </p>
+    </div>
+  )
 }
 
 /**
@@ -1743,6 +2213,7 @@ const hostOf = (url: string): string => {
 const Curve = ({
   curve,
   locked,
+  cardsAt,
 }: {
   curve: api.Analysis['curve']
   /**
@@ -1752,12 +2223,26 @@ const Curve = ({
    * longer triggers one — so the gold has to come from the deck on screen.
    */
   locked: readonly number[]
+  /**
+   * Which cards are in a bucket, asked for only when a bar is opened.
+   *
+   * A function rather than eight precomputed arrays: seven of the eight are
+   * never looked at, and the deck is walked once per open instead of eight
+   * times per render.
+   */
+  cardsAt: (bucket: number) => readonly api.Card[]
 }): React.JSX.Element => {
   const peak = Math.max(1, ...curve.histogram, ...curve.deltas.map((d) => d.max))
 
   return (
     <>
-      <div className="curve" role="img" aria-label="Mana curve against the archetype target">
+      {/* No `role="img"` any more. It made every descendant presentational,
+          which was right for eight decorative divs and is a lie now that each
+          column is a button that opens the cards behind it — a screen reader
+          would be told the whole chart is one picture and never reach them. The
+          per-column accessible names carry the same numbers the image label
+          used to summarise. */}
+      <div className="curve">
         {curve.deltas.map((d) => {
           // The band decides, not the ideal: inside it the bucket is fine.
           const direction = d.withinRange ? 'balanced' : d.delta > 0 ? 'short' : 'over'
@@ -1770,39 +2255,53 @@ const Curve = ({
             : direction === 'short'
               ? `${plural(d.delta, 'card')} short of ${String(d.min)}`
               : `${plural(-d.delta, 'card')} over ${String(d.max)}`
+          const mv = `Mana value ${String(d.bucket)}${d.bucket === 7 ? ' or more' : ''}`
           return (
-            <div
-              className="curve-col"
+            /*
+             * The bar opens the cards in it.
+             *
+             * Through the existing `Hint`, not a second tooltip: it already has
+             * hover, tap-to-pin and Escape, and it is what the tag chips and
+             * the combo counts use. A `title` would have been a desktop-only
+             * feature wearing the costume of a general one, which is the exact
+             * mistake `Hint` was written to correct.
+             *
+             * The content is a thunk, so hovering one bar does not walk the
+             * deck for the other seven.
+             */
+            <Hint
               key={d.bucket}
-              title={`Mana value ${String(d.bucket)}${d.bucket === 7 ? '+' : ''}: ${String(d.actual)} cards, want ${String(d.min)}–${String(d.max)} — ${label}`}
-              aria-label={`Mana value ${String(d.bucket)}: ${String(d.actual)} cards (${String(locked[d.bucket] ?? 0)} locked), target range ${String(d.min)} to ${String(d.max)}, ${label}${pinned}`}
-              data-custom={curve.target[d.bucket]?.source === 'custom'}
+              className="curve-hint"
+              label={`${mv}: ${String(d.actual)} cards (${String(locked[d.bucket] ?? 0)} locked), target range ${String(d.min)} to ${String(d.max)}, ${label}${pinned}. Show them.`}
+              content={<Breakdown title={mv} cards={cardsAt(d.bucket)} bar={d.actual} />}
             >
-              {/* The acceptable range, drawn as a band rather than a line —
-                  anywhere inside it is fine, which is what a range means. */}
-              <div
-                className="curve-band"
-                style={{
-                  bottom: `${String((d.min / peak) * 100)}%`,
-                  height: `${String(((d.max - d.min) / peak) * 100)}%`,
-                }}
-              />
-              <div
-                className="curve-bar"
-                data-direction={direction}
-                style={{ height: `${String((d.actual / peak) * 100)}%` }}
-              >
-                {/* The committed portion. Gold is the colour of a decision
-                    everywhere in this app, so a locked card reads the same way
-                    in the curve as it does in the deck. */}
-                <div
-                  className="curve-locked"
+              <span className="curve-col" data-custom={curve.target[d.bucket]?.source === 'custom'}>
+                {/* The acceptable range, drawn as a band rather than a line —
+                    anywhere inside it is fine, which is what a range means. */}
+                <span
+                  className="curve-band"
                   style={{
-                    height: `${String(Math.min(100, ((locked[d.bucket] ?? 0) / Math.max(1, d.actual)) * 100))}%`,
+                    bottom: `${String((d.min / peak) * 100)}%`,
+                    height: `${String(((d.max - d.min) / peak) * 100)}%`,
                   }}
                 />
-              </div>
-            </div>
+                <span
+                  className="curve-bar"
+                  data-direction={direction}
+                  style={{ height: `${String((d.actual / peak) * 100)}%` }}
+                >
+                  {/* The committed portion. Gold is the colour of a decision
+                      everywhere in this app, so a locked card reads the same
+                      way in the curve as it does in the deck. */}
+                  <span
+                    className="curve-locked"
+                    style={{
+                      height: `${String(Math.min(100, ((locked[d.bucket] ?? 0) / Math.max(1, d.actual)) * 100))}%`,
+                    }}
+                  />
+                </span>
+              </span>
+            </Hint>
           )
         })}
       </div>
@@ -2203,6 +2702,21 @@ interface QueryResult {
    * run, arriving by a different route.
    */
   readonly extra: ReadonlyMap<string, readonly api.Recommendation[]>
+  /**
+   * Commands the server refused, carried back so the UI can say so.
+   *
+   * `sendCommands` has always returned these and the client has always dropped
+   * them. Dropping them is what made an illegal add SILENT: the optimistic
+   * overlay showed the card in the deck, the server said no, and the overlay
+   * was swept away by the response with nothing to explain the disappearance.
+   *
+   * Optional, because the WIRE is not the type — the same reason `images` is
+   * optional on `hydrate`. A run with no commands in it has nothing to report,
+   * and a server that omits the field must leave the client saying nothing
+   * rather than throwing inside the apply. `rejectionNotice` is the one place
+   * that reads it, and it is the one place that has to tolerate the absence.
+   */
+  readonly rejected?: readonly api.CommandResult['rejected'][number][] | undefined
 }
 
 /**
@@ -2472,6 +2986,122 @@ const ImportDialog = ({
  * ring still knows a query is coming and how long they have to stop it.
  */
 /**
+ * One column of the suggestion table.
+ *
+ * A union rather than the bare query string this used to be, because a column
+ * is about to stop always being a query: `impact` and `efficiency` are arriving
+ * as NAMED METRICS that are present by default and removable like any other
+ * column. They take part in the sort chain on exactly the same terms — no
+ * special tier, no exemption — so the difference has to live in the value and
+ * not in a second code path beside it.
+ *
+ * `metric` is a seam and nothing more. Nothing in this build creates one, and
+ * the numbers behind it are being computed in `packages/domain`; what is here
+ * is the shape that stops the sort, the legend and the request from each
+ * assuming a column is a string.
+ */
+export type Column =
+  | { readonly kind: 'query'; readonly query: string }
+  | { readonly kind: 'metric'; readonly metric: string; readonly label: string }
+
+/**
+ * The identity of a column, for React keys and for `columnMatches`.
+ *
+ * A query column keys on its own text, which is what the server echoes back on
+ * `Recommendations.columns[].query`. A metric keys under a prefix so a metric
+ * called `impact` and someone's query `impact` cannot collide.
+ */
+export const columnKey = (c: Column): string =>
+  c.kind === 'query' ? c.query : `metric:${c.metric}`
+
+/** What the legend chip says. */
+export const columnLabel = (c: Column): string => (c.kind === 'query' ? c.query : c.label)
+
+/**
+ * The subset the RECOMMENDATIONS REQUEST can carry.
+ *
+ * `columns` on the wire is a list of query strings the server evaluates per
+ * candidate (doc 10). A metric is not a query and the server does not evaluate
+ * it — its values ride on the recommendation itself — so sending its name would
+ * be asking the parser to read `impact` as a filter. One function, so the three
+ * places that build a request cannot each answer this differently.
+ */
+export const queryColumnsOf = (columns: readonly Column[]): readonly string[] =>
+  columns.filter((c) => c.kind === 'query').map((c) => c.query)
+
+/**
+ * Where one card sorts on one column. Lower is earlier.
+ *
+ * For a query the answer is binary and the ordering is "matches first", which
+ * is what promoting a filter to a column is asking for: keep everything, and
+ * bring the ones I asked about to the top.
+ *
+ * Ties are not broken here. That is the caller's job and it is the whole point
+ * of the feature — see `sortByColumns`.
+ */
+export const columnRank = (
+  column: Column,
+  oracleId: string,
+  matches: ReadonlyMap<string, ReadonlySet<string>>,
+): number => {
+  if (column.kind === 'query') {
+    return matches.get(column.query)?.has(oracleId) === true ? 0 : 1
+  }
+  /*
+   * A metric column has no ranking in this build.
+   *
+   * Deliberately 0 for every card rather than a guess: a metric whose values
+   * have not arrived must contribute NOTHING to the order, so the columns after
+   * it decide. Inventing an order from data we do not have would be worse than
+   * a column that does not sort yet — it would look like it worked.
+   */
+  return 0
+}
+
+/**
+ * Sort one group's rows by the columns, in the order they were added.
+ *
+ * Three rules, and the first outranks the other two:
+ *
+ *   GROUP ORDER IS UNTOUCHED (doc 05 §5.3, pillar P5). The groups are the app's
+ *   argument about what this deck needs, in the order it wants to make it, and
+ *   a sort that could move a row from "completes a combo" into "fills ramp"
+ *   would be re-deciding that argument on the strength of a text query. So this
+ *   sorts WITHIN a group and is never applied across them.
+ *
+ *   COLUMNS COMPOSE. The first column added is the primary sort, the second
+ *   breaks its ties, and so on — which is the only reading of "as a secondary
+ *   sort, maintaining the ordering of previous sorts" that survives a third
+ *   column being added.
+ *
+ *   SCORE IS THE LAST WORD. Two rows that every column agrees about keep the
+ *   order the server sent them in, which is descending score. Carried as an
+ *   explicit index rather than leaning on `Array.prototype.sort` being stable:
+ *   the guarantee holds in every engine this ships to, but a deterministic
+ *   order is the thing being promised and it should be visible in the code
+ *   that promises it.
+ */
+export const sortByColumns = <T extends { readonly oracleId: string }>(
+  items: readonly T[],
+  columns: readonly Column[],
+  matches: ReadonlyMap<string, ReadonlySet<string>>,
+): readonly T[] => {
+  if (columns.length === 0) return items
+  return items
+    .map((item, at) => ({ item, at }))
+    .sort((a, b) => {
+      for (const column of columns) {
+        const delta =
+          columnRank(column, a.item.oracleId, matches) -
+          columnRank(column, b.item.oracleId, matches)
+        if (delta !== 0) return delta
+      }
+      return a.at - b.at
+    })
+    .map((x) => x.item)
+}
+
+/**
  * The column queries, under the filter bar, each sitting over its own column.
  *
  * A chip that just says `mv<=3` in a row of chips makes you count ticks to work
@@ -2493,8 +3123,9 @@ const ColumnLegend = ({
   onRemove,
   measureRoot,
 }: {
-  columns: readonly string[]
-  onRemove: (query: string) => void
+  columns: readonly Column[]
+  /** By `columnKey`, so a metric and a query of the same text cannot collide. */
+  onRemove: (key: string) => void
   measureRoot: React.RefObject<HTMLElement | null>
 }): React.JSX.Element | null => {
   const barRef = useRef<HTMLDivElement>(null)
@@ -2546,22 +3177,38 @@ const ColumnLegend = ({
       style={aligned ? { height: `${String(columns.length * 1.4)}rem` } : undefined}
       aria-label="Columns"
     >
-      {columns.map((c, i) => (
-        <span
-          className="column-chip"
-          key={c}
-          style={
-            aligned
-              ? { right: `${String(insets[i] ?? 0)}px`, top: `${String(i * 1.4)}rem` }
-              : undefined
-          }
-        >
-          <code>{c}</code>
-          <button className="act" onClick={() => onRemove(c)} aria-label={`Remove the ${c} column`}>
-            ×
-          </button>
-        </span>
-      ))}
+      {columns.map((c, i) => {
+        const label = columnLabel(c)
+        // The chips are already in priority order, but "the order they happen
+        // to be in" is not something a reader can be expected to infer from a
+        // stack of chips — and it now decides what the list is sorted by. So
+        // the position is stated.
+        const rank = i === 0 ? 'sorts first' : `then by this${i > 1 ? ` (${String(i + 1)})` : ''}`
+        return (
+          <span
+            className="column-chip"
+            key={columnKey(c)}
+            style={
+              aligned
+                ? { right: `${String(insets[i] ?? 0)}px`, top: `${String(i * 1.4)}rem` }
+                : undefined
+            }
+          >
+            <span className="column-rank" aria-hidden="true">
+              {i + 1}
+            </span>
+            <code>{label}</code>
+            <button
+              className="act"
+              onClick={() => onRemove(columnKey(c))}
+              aria-label={`Remove the ${label} column — ${rank}`}
+              title={`Matches sort to the top; ${rank}. Remove this column.`}
+            >
+              ×
+            </button>
+          </span>
+        )
+      })}
     </div>
   )
 }
@@ -2771,14 +3418,21 @@ export const Workspace = ({
   const targetsBaselineRef = useRef<{ short: string[]; cuts: number } | null>(null)
   const [targetsChange, setTargetsChange] = useState<string | null>(null)
   /**
-   * Queries promoted to columns.
+   * The columns, in priority order. The ONLY copy of this list.
    *
-   * A column does NOT filter. It evaluates the query per row and shows a tick,
-   * so the ordering stays the general one — combo degree, synergy, curve — and
-   * the column is an extra fact about each card rather than a different list.
-   * That is the difference between "show me only X" and "which of these are X".
+   * A column still does not FILTER — every suggestion stays on screen and the
+   * column says which ones match, which is the difference between "show me only
+   * X" and "which of these are X". What it now also does is SORT: matches come
+   * first within each group, the second column breaks the first's ties, and the
+   * server's score has the last word. See `sortByColumns` for why the sort
+   * never crosses a group boundary.
+   *
+   * Every add and every remove goes through `addColumn` / `removeColumn` rather
+   * than calling the setter in place. That is not tidiness: this list is about
+   * to become a persisted field on the deck, and the two functions are where
+   * the PATCH will go. Scattered setters would be four places to remember.
    */
-  const [columns, setColumns] = useState<readonly string[]>([])
+  const [columns, setColumns] = useState<readonly Column[]>([])
   const [columnMatches, setColumnMatches] = useState<Map<string, Set<string>>>(new Map())
   const [draftQuery, setDraftQuery] = useState('')
   /**
@@ -2792,11 +3446,22 @@ export const Workspace = ({
    * deck state.
    */
   const [autoQuery, setAutoQuery] = useState<boolean>(
-    // On by default, and only off if the user turned it off. Absent is not the
-    // same as 'off': the first is "never expressed a view", the second is a
-    // decision, and defaulting the first to off meant most people never saw the
-    // feature at all.
-    () => localStorage.getItem('lw.autoQuery') !== 'off',
+    /*
+     * OFF by default, and only on if the user turned it on.
+     *
+     * It used to default on, on the argument that "absent" is not "off" and
+     * that a feature nobody switches on is a feature nobody sees. Playtesting
+     * settled it the other way: a query is expensive, the countdown fires while
+     * you are still reading the list it is about to replace, and a list that
+     * rearranges itself under the cursor is worse than one that waits. The
+     * button and Enter are both right there, and the ring around the button is
+     * what advertises the setting to anyone who wants it.
+     *
+     * Absent is still not the same as 'off' — it is "never expressed a view",
+     * and that now reads as the default rather than as a decision. Anyone who
+     * has ALREADY ticked the box has 'on' stored and keeps it.
+     */
+    () => localStorage.getItem('lw.autoQuery') === 'on',
   )
   useEffect(() => {
     localStorage.setItem('lw.autoQuery', autoQuery ? 'on' : 'off')
@@ -2808,7 +3473,7 @@ export const Workspace = ({
   const [notice, setNotice] = useState<string | null>(null)
   const deckRef = useRef(deck)
   const queryRef = useRef(query)
-  const columnsRef = useRef<readonly string[]>([])
+  const columnsRef = useRef<readonly Column[]>([])
   /** Groups the user has asked for more of. Read by `load` on every recompute. */
   const expandedRef = useRef<ReadonlySet<string>>(new Set())
   /**
@@ -2828,6 +3493,19 @@ export const Workspace = ({
    * it must not cause a render and it is written inside `load`.
    */
   const snapshotRef = useRef<string | null>(null)
+  /**
+   * The cards the name search last found, by id.
+   *
+   * Read by the pipeline's apply, which runs long after the click and holds
+   * only `hydrated.cards` — the deck and the suggestion feed. A card reached
+   * from "Cards named like…" is in neither, and if the server refuses it, it
+   * never joins the deck either. Without this the one route that reaches a
+   * rejection on purpose is the one route with no name to print.
+   *
+   * A ref, not state: it is read inside a callback and writing it must not
+   * cause a render.
+   */
+  const nearbyRef = useRef<ReadonlyMap<string, api.Card>>(new Map())
   /** The suggestions region, so the column legend can find the columns in it. */
   const suggestionsRef = useRef<HTMLElement>(null)
   /** The filter box — the last resort for focus when the feed empties out. */
@@ -2895,6 +3573,8 @@ export const Workspace = ({
      * the settle was introduced.
      */
     let current = serverDeckRef.current ?? deckRef.current
+    /** What the server refused this round, so the UI can say what happened. */
+    let rejected: readonly api.CommandResult['rejected'][number][] | undefined
 
     /*
      * Retry a failed send before giving up on the user's clicks.
@@ -2926,6 +3606,7 @@ export const Workspace = ({
       try {
         const result = await sendWithRetry(current.id, body, current.version)
         current = result.deck
+        rejected = result.rejected
       } catch (error) {
         // A 409 means only that our version is behind — the clicks are still
         // valid. Re-read the deck and send them again, rather than dropping
@@ -2965,6 +3646,10 @@ export const Workspace = ({
         } else {
           const result = await sendWithRetry(fresh.id, rebased.replay, fresh.version)
           current = result.deck
+          // The rebase path rejects for exactly the same reasons the first
+          // attempt does, and a user whose card was refused after a conflict
+          // is owed the same sentence as one whose card was refused outright.
+          rejected = result.rejected
         }
       }
       serverDeckRef.current = current
@@ -2974,7 +3659,9 @@ export const Workspace = ({
       api.getRecommendations(current.id, {
         limitPerGroup: 8,
         ...(queryRef.current === '' ? {} : { query: queryRef.current }),
-        ...(columnsRef.current.length > 0 ? { columns: columnsRef.current } : {}),
+        ...(queryColumnsOf(columnsRef.current).length > 0
+          ? { columns: queryColumnsOf(columnsRef.current) }
+          : {}),
       }),
       api.getAnalysis(current.id),
     ])
@@ -2995,7 +3682,7 @@ export const Workspace = ({
       current.id,
       expandedRef.current,
       queryRef.current,
-      columnsRef.current,
+      queryColumnsOf(columnsRef.current),
     )
 
     /*
@@ -3018,7 +3705,7 @@ export const Workspace = ({
       ],
       recs.datasetSnapshotId,
     )
-    return { deck: current, recs, analysis: ana, hydrated, extra }
+    return { deck: current, recs, analysis: ana, hydrated, extra, rejected }
   }, [])
 
   const pipeline = usePipeline<PendingCommand>({
@@ -3092,6 +3779,40 @@ export const Workspace = ({
       setColumnMatches(new Map(r.recs.columns.map((c) => [c.query, new Set(c.matched)])))
       setExtraItems(r.extra)
       setPending([])
+      /*
+       * Say what the server refused, before the overlay that showed it working
+       * disappears.
+       *
+       * `setPending([])` on the line above is what removes the card the user
+       * watched land in their deck. Without a sentence here that removal is the
+       * ONLY feedback a refusal produces, and it reads as the app losing the
+       * card rather than as the app declining to break a rule.
+       *
+       * Named from `r.hydrated.cards`, which is this run's own hydration and
+       * therefore holds the card that was just refused.
+       *
+       * Only the first, plus a count. A batch can be a whole import and a
+       * banner of forty sentences is a banner nobody reads; the first is the
+       * one that explains the SHAPE of the problem, and the count says how much
+       * of it there is.
+       */
+      /*
+       * The name-match cards are in the lookup too, and they are the ones that
+       * matter most.
+       *
+       * Measured in a browser: adding Black Lotus from "Cards named like…"
+       * produced "THAT CARD was not added — it is banned in Commander", because
+       * `hydrated.cards` only ever holds the deck and the suggestion feed. A
+       * card that came from `searchCards` is not in either, and a refused card
+       * never joins the deck — so the one route that reaches a rejection on
+       * purpose was the one route with no name to print.
+       *
+       * Hydration wins on a collision: it is the authority, and a name-match
+       * result is a snapshot of a search that may be several queries old.
+       */
+      const named = new Map<string, api.Card>([...nearbyRef.current, ...r.hydrated.cards])
+      const refused = rejectionNotice(r.rejected, named)
+      if (refused !== null) setNotice(refused)
     },
   })
 
@@ -3109,6 +3830,28 @@ export const Workspace = ({
     // ticks until something else happened to trigger a recompute.
   }, [query, columns, refresh])
 
+  /*
+   * The two ways the column list changes, and the only two.
+   *
+   * Everything that adds or removes a column goes through these. They do
+   * nothing today that an inline `setColumns` would not — the point is that the
+   * list is becoming a persisted deck field, and when it does, the PATCH goes
+   * here rather than in each of the call sites that would otherwise exist.
+   */
+  const addColumn = useCallback((column: Column): void => {
+    setColumns((current) =>
+      // Adding a column that is already there would give it two positions in
+      // the sort chain, which is two different answers to "what sorts first".
+      current.some((c) => columnKey(c) === columnKey(column)) ? current : [...current, column],
+    )
+  }, [])
+
+  const removeColumn = useCallback((key: string): void => {
+    // The survivors keep their relative order, so removing the primary sort
+    // promotes the second rather than reshuffling the rest.
+    setColumns((current) => current.filter((c) => columnKey(c) !== key))
+  }, [])
+
   // Basics never change for a deck — its colour identity is fixed by its
   // commanders — so this is fetched once rather than with every recompute.
   useEffect(() => {
@@ -3119,6 +3862,10 @@ export const Workspace = ({
   }, [deck.id])
 
   const act = (oracleId: string, type: PendingCommand['type']): void => {
+    // A new decision supersedes the last complaint. Leaving "X was not added"
+    // on screen while a different card lands successfully attaches the failure
+    // to the wrong action.
+    setNotice(null)
     // Applied to the view immediately. This is the whole point of the buffer:
     // the click is instant and the recompute catches up.
     setPending((current) => [...current, { type, oracleId }])
@@ -3622,6 +4369,28 @@ export const Workspace = ({
     [shownGroups, extraItems],
   )
 
+  /**
+   * The same groups, with each one's rows put in column order.
+   *
+   * The groups themselves are NOT reordered and no row moves between them
+   * (doc 05 §5.3, pillar P5) — the sort happens inside each heading, because
+   * the headings are the app's argument about what this deck needs and a text
+   * query does not get to re-decide that.
+   *
+   * Rows an expand fetched are folded in above, so they sort with everything
+   * else rather than sitting in a block at the end.
+   */
+  const sortedGroups = useMemo(
+    () =>
+      columns.length === 0
+        ? visibleGroups
+        : visibleGroups.map((g) => ({
+            ...g,
+            items: [...sortByColumns(g.items, columns, columnMatches)],
+          })),
+    [visibleGroups, columns, columnMatches],
+  )
+
   /** Whether anything is left to show under a heading, filters applied. */
   const rowsIn = (g: api.Group): number =>
     g.items.filter((item) => {
@@ -3720,7 +4489,12 @@ export const Workspace = ({
     // would be frozen at the deck they were chosen for.
     const keys = new Set([...expandedRef.current, key])
     expandedRef.current = keys
-    void expansionsFor(deckRef.current.id, new Set([key]), queryRef.current, columnsRef.current)
+    void expansionsFor(
+      deckRef.current.id,
+      new Set([key]),
+      queryRef.current,
+      queryColumnsOf(columnsRef.current),
+    )
       .then(async (fetched) => {
         const items = fetched.get(key) ?? []
         // These are cards nothing has hydrated, so their rows would read
@@ -3762,6 +4536,20 @@ export const Workspace = ({
    */
   const [nearby, setNearby] = useState<{ term: string; items: api.Card[] } | null>(null)
 
+  /*
+   * Kept in a ref as well, so a rejection can name a card that only ever came
+   * from the name search. ACCUMULATED rather than replaced: the user may search
+   * again while the batch for the previous search's Add is still in flight, and
+   * the name they need is the one from the search they clicked in.
+   */
+  useEffect(() => {
+    if (nearby === null) return
+    nearbyRef.current = new Map([
+      ...nearbyRef.current,
+      ...nearby.items.map((c): [string, api.Card] => [c.oracleId, c]),
+    ])
+  }, [nearby])
+
   useEffect(() => {
     const term = query.trim()
     // A bare name, not a fielded query. `t:creature` is a filter and has no
@@ -3795,6 +4583,18 @@ export const Workspace = ({
         ...optimistic.commanders,
         ...optimistic.entries.filter((e) => e.zone === 'accepted').map((e) => e.oracleId),
       ]),
+    [optimistic],
+  )
+
+  /**
+   * Rejected cards by id, for the name-match rows.
+   *
+   * From the OPTIMISTIC deck, like `acceptedIds`: a card rejected a moment ago
+   * has to offer "Add it back" rather than a plain Add on the very next render,
+   * or the click that follows is refused for `previously-excluded`.
+   */
+  const excludedIds = useMemo(
+    () => new Set(optimistic.entries.filter((e) => e.zone === 'excluded').map((e) => e.oracleId)),
     [optimistic],
   )
 
@@ -4016,6 +4816,12 @@ export const Workspace = ({
       {notice !== null ? (
         <p className="banner note" role="status">
           {notice}
+          {/* A banner with no way out is a banner that becomes furniture. The
+              other one — `pipeline.error` — is cleared by the next successful
+              run, but this one can outlive the thing it is about. */}
+          <button className="act" onClick={() => setNotice(null)} aria-label="Dismiss this message">
+            OK
+          </button>
         </p>
       ) : null}
 
@@ -4231,16 +5037,21 @@ export const Workspace = ({
               Exclude Universes Beyond
             </label>
 
+            {/* The delay is written from `AUTO_QUERY_MS`, not typed in.
+                Both of these said "four seconds" against a two-second constant
+                — the label had been left behind when the wait was shortened,
+                so the one control that tells you how long you have was lying
+                about it by a factor of two. */}
             <label
               className="check"
-              title="Stop typing and the filter runs by itself after four seconds. The ring around the magnifying glass shows how long is left; typing anything resets it."
+              title={`Stop typing and the filter runs by itself after ${AUTO_QUERY_SECONDS} seconds. The ring around the magnifying glass shows how long is left; typing anything resets it. Off by default — the button and Enter run it immediately.`}
             >
               <input
                 type="checkbox"
                 checked={autoQuery}
                 onChange={(e) => setAutoQuery(e.target.checked)}
               />
-              Auto query after 4 seconds
+              Auto query after {AUTO_QUERY_SECONDS} seconds
             </label>
 
             <label className="option-field">
@@ -4330,27 +5141,30 @@ export const Workspace = ({
               />
               <button
                 className="act"
-                disabled={draftQuery.trim() === '' || columns.includes(draftQuery.trim())}
+                disabled={
+                  draftQuery.trim() === '' ||
+                  columns.some((c) => c.kind === 'query' && c.query === draftQuery.trim())
+                }
                 onClick={() => {
-                  setColumns((c) => [...c, draftQuery.trim()])
+                  addColumn({ kind: 'query', query: draftQuery.trim() })
                   // Promoting a query to a column means "keep showing me
-                  // everything, just tell me which ones match", so the filter
-                  // itself is cleared.
+                  // everything, just sort the ones that match to the top", so
+                  // the filter itself is cleared.
                   setDraftQuery('')
                   setQuery('')
                 }}
-                aria-label="Show this query as a column instead of filtering by it"
-                title="Add as a column: keeps every suggestion and ranking, and ticks the ones that match"
+                aria-label="Show this query as a column, and sort by it, instead of filtering by it"
+                title={
+                  columns.length === 0
+                    ? 'Add as a column: keeps every suggestion, ticks the ones that match, and sorts them to the top of their group'
+                    : 'Add as a column: sorts within each group after the columns already here'
+                }
               >
                 + column
               </button>
             </div>
 
-            <ColumnLegend
-              columns={columns}
-              onRemove={(c) => setColumns((all) => all.filter((x) => x !== c))}
-              measureRoot={suggestionsRef}
-            />
+            <ColumnLegend columns={columns} onRemove={removeColumn} measureRoot={suggestionsRef} />
 
             {queryError !== null ? <p className="problem">{queryError}</p> : null}
           </div>
@@ -4369,16 +5183,91 @@ export const Workspace = ({
                   ? `Cards named like “${nearby.term}”`
                   : `No card is named “${nearby.term}”. Did you mean:`}
               </p>
-              <ul className="near-names">
-                {nearby.items.slice(0, 5).map((c) => (
-                  <li key={c.oracleId}>
-                    <button className="as-link" onClick={() => open(c.oracleId)}>
-                      {c.name}
-                    </button>
-                    <span className="near-type">{c.typeLine}</span>
-                  </li>
-                ))}
-              </ul>
+              {/*
+                Ordinary rows, not a list of names.
+                These were a `<ul>` of text buttons that could only open a
+                preview, so finding the card you were looking for left you with
+                nowhere to go: the one thing you wanted to do with it — put it
+                in the deck — was the one thing the list would not let you do.
+                They are `.card-row` now, so they carry the same name, type
+                line, cost, price and Add as a suggestion, and they sort into
+                the reader's existing habits rather than being a second idiom.
+                A row that CANNOT be added says so where the button would be
+                (`nameMatchStatus`), because this list deliberately contains
+                cards that are not candidates.
+              */}
+              {nearby.items.slice(0, 5).map((c) => {
+                const status = nameMatchStatus(c, deck, acceptedIds, excludedIds)
+                const note = nameMatchNote(status, c, deck)
+                return (
+                  <div className="card-row" data-row-id={c.oracleId} key={c.oracleId}>
+                    <span
+                      className="name-cell"
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest('.hint') === null) open(c.oracleId)
+                      }}
+                    >
+                      <button
+                        className="name as-link"
+                        onClick={() => open(c.oracleId)}
+                        aria-label={`Preview ${c.name}`}
+                      >
+                        {c.name}
+                        <span className="row-type">{c.typeLine}</span>
+                      </button>
+                      {note === null ? null : (
+                        <span className="reasons">
+                          <span className="reason" data-kind="not-a-candidate">
+                            {note}
+                          </span>
+                        </span>
+                      )}
+                    </span>
+                    {/* No price for these: they were found by `searchCards`,
+                        which is not a hydration, so `prices` has no entry and
+                        `usd` renders the em dash that means "not known". The
+                        preview reads it off the card's own printings. */}
+                    <Costs manaCost={c.manaCost} price={prices.get(c.oracleId)} />
+                    {inFlight.has(c.oracleId) ? (
+                      <span
+                        className="spinner"
+                        role="status"
+                        aria-label={`${c.name} added, updating suggestions`}
+                      />
+                    ) : status === 'addable' ? (
+                      <button
+                        className="act accept"
+                        onClick={() => act(c.oracleId, 'accept')}
+                        aria-label={`Add ${c.name}`}
+                      >
+                        Add
+                      </button>
+                    ) : status === 'rejected' ? (
+                      // Restore then accept, in one batch, exactly as the
+                      // Rejected list does — an `accept` on its own is refused
+                      // for `previously-excluded`, which is the silent failure
+                      // this whole change exists to remove.
+                      <button
+                        className="act accept"
+                        onClick={() => restoreIntoDeck(c.oracleId)}
+                        aria-label={`Add ${c.name} back to the deck`}
+                        title="You rejected this. Adding it puts it straight back into the deck."
+                      >
+                        Add
+                      </button>
+                    ) : (
+                      // Not a disabled button: a disabled control is unreachable
+                      // by keyboard and carries no explanation on touch, so it
+                      // is a dead end wearing the costume of an action. The row
+                      // states the reason beside the name instead, and this is
+                      // only the shape that keeps the columns lined up.
+                      <span className="act-void" aria-hidden="true">
+                        —
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           ) : null}
 
@@ -4386,9 +5275,26 @@ export const Workspace = ({
             <div className="empty-search">
               <p className="problem">Nothing in your suggestions matches “{query.trim()}”.</p>
               {nearby !== null && nearby.items.length > 0 ? (
+                /*
+                 * This used to name three reasons and imply they were the whole
+                 * list: "already in it, excluded, or outside your colour
+                 * identity". None of them is usually the reason. A card is in
+                 * the suggestion feed only once the scorer ranks it into one of
+                 * the groups above, and the commonest reason a real card is
+                 * missing is simply that nothing did — it is a fine card that
+                 * this deck has no particular use for. Stating three legal
+                 * disqualifications instead told the reader their deck or their
+                 * colours were at fault when neither was.
+                 *
+                 * The three are still worth naming, because each of them IS
+                 * sometimes the answer — and now every row above says which of
+                 * them applies to it, so this line only has to give the general
+                 * rule.
+                 */
                 <p className="note">
-                  The cards above are real — they are not candidates for this deck, being already in
-                  it, excluded, or outside your colour identity.
+                  The cards above are real. They are missing from the suggestions because nothing
+                  ranked them into a group — a card has to earn a place there. Each row says whether
+                  it can be added, and why not when it cannot.
                 </p>
               ) : nearby !== null ? (
                 <p className="note">No card with that name exists in the corpus either.</p>
@@ -4396,7 +5302,7 @@ export const Workspace = ({
             </div>
           ) : null}
 
-          {visibleGroups.map((g) => (
+          {sortedGroups.map((g) => (
             <div className={`group${isCollapsed(g) ? ' collapsed' : ''}`} key={g.key}>
               <div className="group-head">
                 <button
@@ -4533,19 +5439,22 @@ export const Workspace = ({
                             )}
                           </span>
                         </span>
-                        {columns.map((c) => (
-                          <span
-                            className="col-cell"
-                            key={c}
-                            data-match={columnMatches.get(c)?.has(item.oracleId) === true}
-                            title={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
-                            aria-label={`${c}: ${columnMatches.get(c)?.has(item.oracleId) === true ? 'yes' : 'no'}`}
-                          >
-                            {columnMatches.get(c)?.has(item.oracleId) === true
-                              ? '\u2713'
-                              : '\u00B7'}
-                          </span>
-                        ))}
+                        {columns.map((c) => {
+                          const matched =
+                            c.kind === 'query' &&
+                            columnMatches.get(c.query)?.has(item.oracleId) === true
+                          return (
+                            <span
+                              className="col-cell"
+                              key={columnKey(c)}
+                              data-match={matched}
+                              title={`${columnLabel(c)}: ${matched ? 'yes' : 'no'}`}
+                              aria-label={`${columnLabel(c)}: ${matched ? 'yes' : 'no'}`}
+                            >
+                              {matched ? '\u2713' : '\u00B7'}
+                            </span>
+                          )
+                        })}
                         <Costs
                           manaCost={cards.get(item.oracleId)?.manaCost}
                           price={prices.get(item.oracleId)}
@@ -4589,19 +5498,33 @@ export const Workspace = ({
         </section>
 
         <section className="region analysis" aria-label="Analysis">
-          <div className="analysis-scroll">
-            <Preview
-              card={inspect === null ? undefined : cards.get(inspect)}
-              detail={detail}
-              price={prices.get(inspect ?? '')}
-              images={images.get(inspect ?? '')}
-              onClose={closePreview}
-              accepted={acceptedIds}
-              lockedIds={lockedIds}
-              cards={cards}
-              sheet={singleColumn}
-            />
+          {/*
+            A sibling of the scroller, not the first thing inside it.
+            The preview used to sit at the top of the rail's scrolling body,
+            which meant opening a card pushed Composition, the bracket check and
+            the combo list off the screen — the dashboard you keep an eye on
+            while deciding disappeared at the exact moment you were deciding.
+            It is anchored to this rail's LEFT edge instead and overlays the
+            suggestion feed, so the rail can stay what it is for.
 
+            The move is in the SOURCE, once, and is never conditional on the
+            breakpoint. Moving an element at runtime would remount it — throwing
+            away the in-flight `/cards/{id}` request and reordering the document
+            for a screen reader — which is the same reason the sheet is a change
+            of box and not a change of parent.
+          */}
+          <Preview
+            card={inspect === null ? undefined : cards.get(inspect)}
+            detail={detail}
+            price={prices.get(inspect ?? '')}
+            images={images.get(inspect ?? '')}
+            onClose={closePreview}
+            accepted={acceptedIds}
+            lockedIds={lockedIds}
+            cards={cards}
+            sheet={singleColumn}
+          />
+          <div className="analysis-scroll">
             <h2 style={{ marginTop: '1.25rem' }}>
               Composition
               {/* The handle for doc 16's sheet, on the panel it edits rather
@@ -4647,37 +5570,58 @@ export const Workspace = ({
               const pct = Math.min(100, (r.actual / Math.max(1, r.ideal)) * 100)
               const lockedPct = Math.min(100, (r.locked / Math.max(1, r.ideal)) * 100)
               return (
-                <div className="meter" key={r.name}>
-                  <div className="meter-label">
-                    <span>
-                      {r.name}
-                      {/* Marked, because this bar is no longer the archetype's
-                          opinion — a builder has to be able to see which of
-                          these numbers are their own before trusting either. */}
-                      {r.source === 'custom' ? (
-                        <span className="target-mark" title="You set this target">
-                          {' ✎'}
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="delta">
-                      {r.locked > 0 ? `${String(r.locked)}\u25C6 ` : ''}
-                      {r.actual} / {r.ideal}
-                    </span>
-                  </div>
-                  <div
-                    className="meter-track"
-                    title={`${String(r.actual)} of a target ${String(r.ideal)} (range ${String(r.min)}–${String(r.max)}), ${String(r.locked)} locked${r.source === 'custom' ? `; you set this — the archetype wanted ${r.preset === null || r.preset === undefined ? 'nothing here' : String(r.preset)}` : ''}`}
-                  >
-                    <div
-                      className="meter-fill"
-                      data-short={!r.filled}
-                      style={{ width: `${pct}%` }}
+                // Same treatment as a curve bar, through the same `Hint`: "which
+                // cards are these?" is one question, and answering it two
+                // different ways in one rail would be two idioms for one idea.
+                // The `title` that used to sit on the track has moved into the
+                // trigger's accessible name, because a `title` is invisible on
+                // every touch device.
+                <Hint
+                  key={r.name}
+                  className="comp-hint"
+                  label={`${r.name}: ${String(r.actual)} of a target ${String(r.ideal)} (range ${String(r.min)} to ${String(r.max)}), ${String(r.locked)} locked${r.source === 'custom' ? `; you set this, the archetype wanted ${r.preset === null || r.preset === undefined ? 'nothing here' : String(r.preset)}` : ''}. Show them.`}
+                  content={
+                    <Breakdown
+                      title={r.name}
+                      cards={cardsInDimension(acceptedIds, cards, dimensionKeyOf(r.dimension))}
+                      bar={r.actual}
                     />
-                    {/* The committed part, in the same gold the curve uses. */}
-                    <div className="meter-locked" style={{ width: `${lockedPct}%` }} />
-                  </div>
-                </div>
+                  }
+                >
+                  {/* Spans, not divs: this is inside the hint's button now, and
+                      a div in a button is invalid and gets reparented by the
+                      parser. The layout is unchanged, `.meter` and its parts
+                      carry their own `display`. */}
+                  <span className="meter">
+                    <span className="meter-label">
+                      <span>
+                        {r.name}
+                        {/* Marked, because this bar is no longer the
+                            archetype's opinion: a builder has to be able to see
+                            which of these numbers are their own before trusting
+                            either. */}
+                        {r.source === 'custom' ? (
+                          <span className="target-mark" title="You set this target">
+                            {' \u270E'}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="delta">
+                        {r.locked > 0 ? `${String(r.locked)}\u25C6 ` : ''}
+                        {r.actual} / {r.ideal}
+                      </span>
+                    </span>
+                    <span className="meter-track">
+                      <span
+                        className="meter-fill"
+                        data-short={!r.filled}
+                        style={{ width: `${pct}%` }}
+                      />
+                      {/* The committed part, in the same gold the curve uses. */}
+                      <span className="meter-locked" style={{ width: `${lockedPct}%` }} />
+                    </span>
+                  </span>
+                </Hint>
               )
             })}
             {compositionRows.length === 0 && analysis !== null ? (
@@ -4685,6 +5629,20 @@ export const Workspace = ({
                 {hideSettledRoles ? 'Nothing short.' : 'Every role is locked in.'}
               </p>
             ) : null}
+
+            {/* Under the composition bars, because it answers the same shape of
+                question about a different axis: those say how the deck divides
+                by ROLE, this says how it divides by COLOUR. Guarded on the
+                field rather than on `analysis`, so a server from before
+                API-02 renders the panel without it instead of an empty box. */}
+            {analysis?.colorBalance === undefined ? null : (
+              <>
+                <h2 style={{ marginTop: '1.25rem' }}>Mana colours</h2>
+                <Boundary name="The colour pie">
+                  <ColorPie balance={analysis.colorBalance} />
+                </Boundary>
+              </>
+            )}
 
             {analysis !== null ? (
               <>
@@ -4760,7 +5718,14 @@ export const Workspace = ({
           {analysis !== null ? (
             <div className="analysis-pinned">
               <h2>Mana curve</h2>
-              <Curve curve={analysis.curve} locked={lockedByBucket} />
+              <Curve
+                curve={analysis.curve}
+                locked={lockedByBucket}
+                // `acceptedIds` is the client's copy of the domain's
+                // `acceptedSet` — deduplicated, commanders included — so the
+                // list under a bar is counted by the rule that produced the bar.
+                cardsAt={(bucket) => cardsInBucket(acceptedIds, cards, bucket)}
+              />
               <p className="note">
                 Average mana value {analysis.curve.averageManaValue.toFixed(2)}
               </p>

@@ -345,7 +345,16 @@ button {
 
 /* ---------------------------------------------------------------- meters */
 
+/*
+ * `display: block` because these are spans now.
+ *
+ * The whole meter sits inside the hint's button — a div in a button is invalid
+ * and the parser reparents it — so every part of it is a span carrying its own
+ * display. The visual result is identical; the difference is only that the bar
+ * can now be hovered, tapped and focused to show the cards it counts.
+ */
 .meter {
+  display: block;
   margin-bottom: var(--step);
 }
 
@@ -362,6 +371,7 @@ button {
 }
 
 .meter-track {
+  display: block;
   height: 4px;
   background: var(--ink-3);
   border-radius: 2px;
@@ -369,8 +379,50 @@ button {
 }
 
 .meter-fill {
+  display: block;
   height: 100%;
   background: var(--sage);
+}
+
+/*
+ * A composition bar opens the cards it counts.
+ *
+ * The trigger is the whole row, so it has to fill the rail rather than hug its
+ * text — `.hint` is `inline-flex` by default, which would shrink-wrap the bar
+ * to the width of the role name.
+ */
+.comp-hint {
+  display: block;
+  width: 100%;
+}
+
+.comp-hint .hint-trigger {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+/*
+ * The panel opens DOWNWARD and fits the rail exactly.
+ *
+ * `.analysis-scroll` is an `overflow-y: auto` box, which computes `overflow-x`
+ * to `auto` as well — so a 20rem popup anchored to the left of a 230 px rail is
+ * clipped, or worse, scrolls the dashboard sideways. Pinned to both edges
+ * instead, it can never be wider than the thing it is inside.
+ *
+ * Downward because the composition list runs down the top of the rail: the
+ * default upward direction would put the first role's panel off the top.
+ */
+.comp-hint .hint-pop {
+  top: calc(100% + 4px);
+  bottom: auto;
+  left: 0;
+  right: 0;
+  width: auto;
+  max-width: none;
+  max-height: 14rem;
+  overflow-y: auto;
 }
 
 .meter-fill[data-short='true'] {
@@ -589,6 +641,50 @@ select {
 }
 
 /*
+ * On a wide screen the preview hangs off the LEFT edge of the analysis rail and
+ * overlays the suggestion feed.
+ *
+ * It used to be the first block inside the rail's scroller, so opening a card
+ * pushed Composition, the bracket check and the combo list down and off the
+ * screen — the dashboard you keep an eye on while deciding vanished at the
+ * moment you were deciding. Anchored here it costs the rail nothing, and the
+ * rail gets to stay what it is for: composition and combos.
+ *
+ * `right: 100%` on a rail that is `position: sticky` — sticky is a positioned
+ * element, so it is the containing block, and the panel therefore tracks the
+ * rail's left edge however the grid is sized or the divider dragged. No
+ * measurement, no observer.
+ *
+ * `min-width: 901px`, not "not max-width: 900px": below 900 the panel is the
+ * bottom sheet and the two rule sets must never both apply. The gap at exactly
+ * 900.5px is not reachable — `.workspace` collapses at the same breakpoint the
+ * JS `SINGLE_COLUMN` query uses, and both are integers.
+ *
+ * The shadow is what says "on top of" rather than "beside": without it a panel
+ * sitting over the feed reads as a column of the layout, and the rows it is
+ * covering look deleted rather than obscured.
+ */
+@media (min-width: 901px) {
+  .preview {
+    position: absolute;
+    top: 0;
+    right: 100%;
+    /* Clear of the 1px grid rule between the two regions. */
+    margin-right: calc(var(--step) + 1px);
+    z-index: 25;
+    width: 21rem;
+    /* Never wider than the feed it covers: at the narrowest two-column layout
+       the middle region is around 300px, and a panel wider than its own
+       backdrop stops reading as an overlay. */
+    max-width: calc(100vw - 27rem);
+    max-height: calc(100vh - 78px);
+    overflow-y: auto;
+    margin-bottom: 0;
+    box-shadow: 0 12px 34px rgb(0 0 0 / 55%);
+  }
+}
+
+/*
  * On one column the preview is a bottom sheet, not the top of the rail.
  *
  * The defect: `.workspace` collapses to `1fr` below 900px, which puts the
@@ -786,6 +882,29 @@ select {
   margin: var(--step) 0 4px;
 }
 
+/*
+ * Each bar is now a hint trigger, so two wrappers sit between `.curve` and the
+ * column: the `.hint` span and the button inside it. Both have to stretch or
+ * the bars collapse to zero width — the column's own `flex: 1` is measured
+ * against a parent that is no longer `.curve`.
+ */
+.curve-hint {
+  flex: 1;
+  display: flex;
+  height: 100%;
+  min-width: 0;
+}
+
+.curve-hint .hint-trigger {
+  flex: 1;
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  /* A bar you can open is a pointer, not the `help` cursor the text hints use:
+     the panel it opens is a list of your own cards, not an explanation. */
+  cursor: pointer;
+}
+
 .curve-col {
   flex: 1;
   display: flex;
@@ -797,7 +916,23 @@ select {
   background: none;
   border: none;
   padding: 0;
-  cursor: default;
+}
+
+/*
+ * The panel hangs from the RIGHT edge of the bar and opens upward.
+ *
+ * Upward because the curve is pinned to the foot of the rail, where there is no
+ * room below it. Right-anchored because a bar is about an eighth of the rail
+ * wide: a left-anchored panel on bucket 7 would run off the screen edge, while
+ * right-anchored it grows leftward across the app, which the rail's
+ * `overflow: visible` now allows.
+ */
+.curve-hint .hint-pop {
+  left: auto;
+  right: 0;
+  max-width: 15rem;
+  max-height: 16rem;
+  overflow-y: auto;
 }
 
 /* Anchored to the baseline, rounded only at the data end. */
@@ -1144,6 +1279,18 @@ select {
  * them, and a dashboard you have to scroll back up to read is not doing its job.
  * It is a full-height column with a scrolling body and a pinned foot.
  */
+/*
+ * `overflow: visible`, not `hidden`.
+ *
+ * It was `hidden` as a belt-and-braces guard, and the braces do the work: the
+ * scrolling body is `.analysis-scroll` with its own `overflow-y: auto` and
+ * `min-height: 0`, and the pinned foot is `flex: 0 0 auto`, so nothing in
+ * normal flow can escape this box anyway.
+ *
+ * What `hidden` DID clip was the two things that are supposed to leave it: the
+ * panel a curve bar opens, and the preview, which is now anchored to this
+ * rail's left edge and overlays the suggestion feed.
+ */
 .region.analysis {
   position: sticky;
   top: 62px;
@@ -1152,7 +1299,27 @@ select {
   display: flex;
   flex-direction: column;
   gap: var(--step);
-  overflow: hidden;
+  overflow: visible;
+  /*
+   * Above the suggestion feed, and only just.
+   *
+   * Measured in a browser, not reasoned about: with no z-index here the feed's
+   * rows won the hit test through the middle of the open preview — `.card-row`
+   * is `position: relative` and `.act` carries `z-index: 1`, and `.region` has
+   * `container-type: inline-size`, which applies layout containment and so
+   * makes each region its own stacking context. The preview's own `z-index: 25`
+   * cannot help: it is INSIDE this rail's context and can only order itself
+   * against the rail's other children.
+   *
+   * 5, deliberately below the masthead's 10. The rail starts at 62px, under the
+   * masthead, so the two never overlap — but a rail that could cover the deck
+   * switcher would be a worse bug than the one being fixed.
+   *
+   * Inert below 900px, where this rule's `position: sticky` is overridden back
+   * to `static` and `z-index` on a static element does nothing. The bottom
+   * sheet has its own `z-index: 30` on a fixed box and is unaffected.
+   */
+  z-index: 5;
 }
 
 .analysis-scroll {
@@ -1187,6 +1354,80 @@ select {
 
 /* A deck can assemble dozens of combos; they get their own scroller so they
    cannot push everything else out of the rail. */
+/* ------------------------------------------------------------- colour pie */
+
+/*
+ * The pie and its key, side by side while there is room and stacked when there
+ * is not.
+ *
+ * The key is not decoration and is never dropped: it carries the letter and the
+ * count for every slice, which is the secondary encoding that makes this figure
+ * readable without colour vision (see `ColorPie` for the measured validator
+ * failures and why Magic's own colours are shipped anyway).
+ */
+.pie-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--step);
+  margin-bottom: var(--step);
+}
+
+.pie {
+  flex: 0 0 auto;
+  width: 6.5rem;
+  height: 6.5rem;
+}
+
+.pie-key {
+  flex: 1 1 7rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.72rem;
+}
+
+.pie-key li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1.6;
+}
+
+/* A second run at the hue, beside the letter it belongs to, so the key and the
+   chart are matched by position as well as by colour. */
+.pie-swatch {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  /* Against a dark ground the pale colours need no edge, but #2f74c8 and
+     #a274ae do — an 8px mark with no outline reads as a smudge. */
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
+}
+
+.pie-letter {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--parchment);
+  min-width: 0.8rem;
+}
+
+.pie-count {
+  font-family: var(--mono);
+  color: var(--parchment);
+  min-width: 1.4rem;
+  text-align: right;
+}
+
+.pie-sources {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--parchment-dim);
+  white-space: nowrap;
+}
+
 .combo-list {
   max-height: 12rem;
   overflow-y: auto;
@@ -1362,6 +1603,26 @@ select {
   color: var(--parchment);
 }
 
+/*
+ * Which column sorts first.
+ *
+ * A column no longer only ticks rows, it orders them — and the chips composing
+ * left to right is not something a reader can be expected to infer from a stack
+ * of chips. The digit says it. It is `aria-hidden`; the same fact is in the
+ * remove button's accessible name in words ("sorts first", "then by this"),
+ * because a lone "1" read aloud beside a query is not information.
+ *
+ * Dim, and in the mono face the other numbers on this screen use: it is an
+ * index, not a value, and it must not read as a count of matches.
+ */
+.column-rank {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--parchment-dim);
+  border-right: 1px solid var(--rule);
+  padding-right: 4px;
+}
+
 /* A column is a fact about a row, not a ranking, so it sits quietly beside the
    costs rather than competing with the reasons. */
 .col-cell {
@@ -1475,22 +1736,39 @@ select {
 .name-matches .note {
   margin: 0 0 2px;
 }
-.near-names {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  color: var(--parchment);
-  font-size: 0.78rem;
-  line-height: 1.7;
+/*
+ * A name match is a suggestion row.
+ *
+ * `.near-names` and `.near-type` used to live here: a bare `<ul>` of text
+ * buttons that could open a preview and nothing else. They are gone because
+ * these rows are `.card-row` now and inherit the feed's whole layout — the
+ * point of the change was that finding your card should leave you able to act
+ * on it, and a second row idiom is exactly what stopped that.
+ *
+ * The block keeps a rule of its own so it reads as an answer to the SEARCH
+ * rather than as another group: a hairline down the left, the same one the
+ * combo list uses to say "this is a nested list".
+ */
+.name-matches .card-row {
+  border-left: 1px solid var(--rule);
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
-.near-names li {
-  display: flex;
-  gap: var(--step);
-  align-items: baseline;
-}
-.near-type {
+
+/*
+ * The place an Add would be, on a row that cannot have one.
+ *
+ * A disabled button was the other option and is worse: it takes no focus, so a
+ * keyboard user cannot reach it to find out why, and it shows no `title` on
+ * touch — a dead end wearing the costume of an action. The reason is stated
+ * beside the name instead; this only holds the column open so the costs above
+ * and below it still line up.
+ */
+.act-void {
+  min-width: 2.6rem;
+  text-align: center;
   color: var(--parchment-dim);
-  font-size: 0.68rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
 }
 /* The name cell is a click target for the whole row's text block, so it must
    fill the space it is given rather than only its glyphs. */

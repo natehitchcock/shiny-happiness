@@ -51,7 +51,12 @@ beforeEach(() => {
   mocked.basicLands.mockResolvedValue({ items: [] })
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  // A test that fakes the clock must not leave it faked for the next one; a
+  // timed-out test never reaches its own cleanup.
+  vi.useRealTimers()
+})
 
 const type = async (text: string): Promise<void> => {
   const box = screen.getByLabelText('Commander') as HTMLInputElement
@@ -209,7 +214,7 @@ describe('the Start button, once a commander is chosen', () => {
   })
 })
 
-describe('the commander search runs on a countdown, like the filter', () => {
+describe('the commander search is committed, and never runs on its own', () => {
   it('does not search while you are still typing', async () => {
     render(<App />)
     await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
@@ -218,11 +223,50 @@ describe('the commander search runs on a countdown, like the filter', () => {
     expect(mocked.searchCards).not.toHaveBeenCalled()
   })
 
-  it('counts down, and the button says how long is left', async () => {
+  it('never starts a countdown on the landing page', async () => {
+    /*
+     * This screen used to run the same two-second auto-query the suggestion
+     * filter has. A commander name is long and is typed in bursts, so the
+     * countdown expired mid-name and searched for a PREFIX, over and over.
+     *
+     * Asserted through the button's own accessible name, which is the only
+     * place the countdown is visible to anyone.
+     */
     render(<App />)
     await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
     await type('Krenko')
-    await waitFor(() => expect(screen.getByLabelText(/runs on its own in/)).toBeDefined())
+    expect(screen.queryByLabelText(/runs on its own in/)).toBeNull()
+
+    // And it stays that way past the point the countdown would have fired.
+    // The timers go fake only AFTER the page has settled: `waitFor` polls on a
+    // timer of its own, so faking before the first render deadlocks it.
+    vi.useFakeTimers()
+    await act(async () => {
+      vi.advanceTimersByTime(10_000)
+    })
+    vi.useRealTimers()
+    expect(mocked.searchCards).not.toHaveBeenCalled()
+  })
+
+  it('drops the previous query’s matches before showing the next answer', async () => {
+    /*
+     * The stale-results half of the same defect. Searching "Kre" then "Krenko"
+     * left the "Kre" list on screen for the whole of the second request, so
+     * the page showed a full list of matches under a box that said something
+     * else — an answer to a question the user had moved past, and one they
+     * could not tell from an answer to the one they were asking.
+     */
+    mocked.searchCards.mockResolvedValue({ items: [card('Krenko, Mob Boss')] })
+    render(<App />)
+    await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
+    await typeAndSearch('Kre')
+    await waitFor(() => expect(screen.getByText('Krenko, Mob Boss')).toBeDefined())
+
+    // The next search never settles, so what is on screen during it is the
+    // whole question.
+    mocked.searchCards.mockReturnValue(new Promise(() => undefined))
+    await typeAndSearch('Krenko')
+    expect(screen.queryByText('Krenko, Mob Boss')).toBeNull()
   })
 
   it('searches when the button is clicked, without waiting out the countdown', async () => {
