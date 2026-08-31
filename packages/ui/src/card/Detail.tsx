@@ -75,7 +75,7 @@ export const Detail = ({
           // image is not selectable, translatable, or resizable by the reader,
           // and this is the level where someone is reading rather than scanning.
           <p className="rt-detail-oracle">
-            <OracleText text={card.oracleText} />
+            <OracleText text={card.oracleText} faces={card.oracleTextFaces} />
           </p>
         )}
 

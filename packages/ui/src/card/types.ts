@@ -35,6 +35,15 @@ export interface CardView {
   readonly colorIdentity?: readonly Color[] | undefined
   readonly typeLine?: string | undefined
   readonly oracleText?: string | undefined
+  /**
+   * `oracleText` split by card face, for a card that has more than one.
+   *
+   * Carried separately because the split cannot be recovered from the joined
+   * string: faces are joined with the same newline that separates two abilities
+   * of one face. Absent for a single-faced card, and for one hydrated before the
+   * field existed — both of which render as one face.
+   */
+  readonly oracleTextFaces?: readonly string[] | undefined
   readonly primaryRole?: string | undefined
   /** How many combos this card completes in the current deck. 0 for none. */
   readonly comboDegree?: number | undefined

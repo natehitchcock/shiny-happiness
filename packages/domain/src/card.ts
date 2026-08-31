@@ -66,6 +66,27 @@ export interface Card {
   readonly types: readonly CardType[]
   readonly oracleText: string
   /**
+   * The rules text of each face, for a card that has more than one.
+   *
+   * `oracleText` joins the faces with a newline — and a newline is also what
+   * Scryfall puts between two abilities of a SINGLE face, so the join is lossy.
+   * Fire // Ice arrives as three newline-separated chunks of which only the
+   * first boundary is a face change, and nothing downstream can tell which is
+   * which. Anything that wants to draw the boundary has to be handed the
+   * decomposition rather than re-derive it, because it cannot be re-derived.
+   *
+   * Kept beside `oracleText` rather than marked inside it with a sentinel such
+   * as `\n//\n`: role derivation, synergy derivation and the `oracle:` search
+   * predicate all run over `oracleText`, and a sentinel would put a line of
+   * text there that no card actually has, changing what those regexes read.
+   *
+   * Undefined for a single-faced card, and for any card ingested before this
+   * field existed — `[]` would be the wrong answer, since "one face" and "not
+   * known" are different claims. Where it is set, `join('\n')` reproduces
+   * `oracleText` exactly.
+   */
+  readonly oracleTextFaces?: readonly string[]
+  /**
    * Printed power and toughness, as TEXT.
    *
    * Magic prints `*`, `1+*` and `?`. A numeric field would have to store null

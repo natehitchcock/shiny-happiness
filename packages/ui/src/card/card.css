@@ -327,6 +327,43 @@
   border-color: var(--brass-dim);
 }
 
+/* ----------------------------------------------------------- rules text */
+
+/*
+ * One ability, one block.
+ *
+ * The abilities used to be separated by a literal newline and left to the
+ * caller to preserve with `white-space: pre-wrap`, which only the preview pane
+ * did — so at L2 and L3 a card with three abilities ran together into one
+ * paragraph. A block per ability is the separation stated where the abilities
+ * are made, rather than a rule every caller has to remember.
+ *
+ * The gap is in `em` and not pixels because this text is rendered at 12 px in
+ * the detail panel and smaller on an L2 face; a fixed gap would be a paragraph
+ * break in one place and a crack in the other.
+ */
+.rt-oracle-ability {
+  display: block;
+}
+.rt-oracle-ability + .rt-oracle-ability {
+  margin-block-start: 0.55em;
+}
+
+/*
+ * The line between two faces of a double-faced, split or adventure card.
+ *
+ * Without it the back face's text simply continued the front's, which reads as
+ * one more ability of the same card and is wrong — they are different sides.
+ * Drawn as a border on an empty block so it is a hairline rather than a
+ * character; the words that say the same thing to a screen reader are the
+ * `rt-sr` span inside it.
+ */
+.rt-oracle-facebreak {
+  display: block;
+  margin-block: 0.8em;
+  border-top: 1px solid var(--rule);
+}
+
 /* --------------------------------------------------------- mana symbols */
 
 /*

@@ -1022,9 +1022,12 @@ const Preview = ({
         ) : null}
       </p>
       {/* Oracle text is the card. Newlines are meaningful — they separate
-          abilities — so it is rendered pre-wrapped rather than collapsed. */}
+          abilities — and the faces are meaningful too, so both are handed to
+          the component: it spaces the abilities and rules a line between the
+          faces. `oracleTextFaces` is absent for a single-faced card and for one
+          ingested before the field existed, which both render as one face. */}
       <p className="oracle">
-        <OracleText text={shown.oracleText} />
+        <OracleText text={shown.oracleText} faces={shown.oracleTextFaces} />
       </p>
       <p className="note">
         {usd(price)} <span className="estimate">est.</span>

@@ -1,0 +1,17 @@
+-- Where one face of a card ends and the next begins.
+--
+-- `oracle_text` holds a double-faced card's two faces joined by a newline, and
+-- a newline is also what separates two abilities of a single face. Fire // Ice
+-- is stored as three newline-separated chunks of which only the first boundary
+-- is a face change, so the renderer had no way to tell the back face's text
+-- from the front's and ran them together as one paragraph.
+--
+-- Recorded as its own column rather than by writing a `//` marker into
+-- `oracle_text`: role derivation, synergy derivation and the `oracle:` search
+-- predicate all read that column, and a marker would be text no card has.
+--
+-- Nullable on purpose, and not `DEFAULT '{}'`. A single-faced card has no faces
+-- to list and a row written before this column existed has no answer, which are
+-- both "nothing to say" — whereas an empty array would read as "this card has
+-- zero faces", a claim that is false.
+ALTER TABLE cards ADD COLUMN oracle_text_faces text[];

@@ -69,7 +69,7 @@ export const CardFace = ({
             </span>
             <span className="rt-face-type">{card.typeLine ?? ''}</span>
             <span className="rt-face-oracle">
-              <OracleText text={card.oracleText ?? ''} empty="" />
+              <OracleText text={card.oracleText ?? ''} faces={card.oracleTextFaces} empty="" />
             </span>
           </div>
         ) : (

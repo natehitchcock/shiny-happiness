@@ -55,6 +55,24 @@ describe('card.css', () => {
     expect(strip).toMatch(/min-width:\s*0/)
   })
 
+  it('puts space between two abilities of the same face', () => {
+    // The DOM half is asserted in OracleText.test.tsx: each ability is its own
+    // block. This is the half that makes them read as separate paragraphs
+    // rather than as adjacent lines, which was the complaint.
+    expect(rule('.rt-oracle-ability')).toMatch(/display:\s*block/)
+    expect(rule('.rt-oracle-ability + .rt-oracle-ability')).toMatch(
+      /margin-block-start:\s*0?\.\d+em/,
+    )
+  })
+
+  it('draws a visible line between two faces', () => {
+    // A face break with no border is an invisible separator, which is the
+    // no-op this whole change exists to avoid.
+    const face = rule('.rt-oracle-facebreak')
+    expect(face).toMatch(/border-top:\s*1px solid/)
+    expect(face).toMatch(/display:\s*block/)
+  })
+
   it('reads its colours from the tokens rather than restating hexes', () => {
     // The contrast rules in tokens.ts only protect colours that came from
     // tokens.ts. A literal hex here would be a colour no test had looked at.

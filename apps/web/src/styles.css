@@ -603,10 +603,12 @@ select {
   vertical-align: middle;
 }
 
-/* Newlines separate abilities; collapsing them would run two abilities into
-   one sentence and change what the card says. */
+/* Newlines separate abilities, and `OracleText` now renders each ability as its
+   own block — so the pre-wrap that used to be what kept them apart is gone. It
+   was never enough anyway: the other two call sites for that component never set
+   it, and ran their abilities together. The separation belongs with the
+   component, not with one of its callers. */
 .oracle {
-  white-space: pre-wrap;
   font-size: 0.82rem;
   margin: var(--step) 0;
 }
