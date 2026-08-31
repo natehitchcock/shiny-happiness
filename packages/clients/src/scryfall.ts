@@ -47,7 +47,19 @@ export const delayFor = (path: string): number => RATE_LIMITS_MS[path] ?? RATE_L
 export interface ScryfallOptions {
   readonly userAgent?: string
   readonly fetchImpl?: typeof fetch
+  /**
+   * How the rate limiter waits. Injected so tests do not spend ten real seconds
+   * proving that twenty pages are fetched twenty times.
+   *
+   * A test that passed a no-op here would still be testing the pacing it cares
+   * about — that the limiter is CONSULTED, and with which delay — because the
+   * calls it records are the evidence. Sleeping for real would only test
+   * `setTimeout`.
+   */
+  readonly sleepImpl?: (ms: number) => Promise<void>
 }
+
+const realSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 const headers = (options: ScryfallOptions): Record<string, string> => ({
   'User-Agent': options.userAgent ?? 'Roundtable/0.1',
@@ -168,6 +180,110 @@ export async function* streamBulkCards(
   }
 }
 
+/** One page of `/cards/search`. Scryfall pages at 175 cards. */
+interface SearchPage {
+  readonly total_cards?: number
+  readonly has_more?: boolean
+  readonly next_page?: string
+  readonly data?: readonly { readonly oracle_id?: string }[]
+}
+
+/**
+ * `is:commander legal:commander`, as Scryfall's own search understands it.
+ *
+ * `unique=cards` and not the default `unique=art`: the default returns one row
+ * per printing, so a card with fourteen printings would arrive fourteen times
+ * and the twenty pages would become several hundred.
+ */
+export const COMMANDER_QUERY = 'is:commander legal:commander'
+
+const commanderSearchUrl = (): string =>
+  `${API}/cards/search?q=${encodeURIComponent(COMMANDER_QUERY)}&unique=cards`
+
+/**
+ * A runaway guard, not a limit anyone should reach.
+ *
+ * The query is twenty pages today. If Scryfall ever returns a `next_page` that
+ * loops, this stops rather than paging forever inside a deploy-time command —
+ * and it THROWS rather than returning what it has, because a truncated set is
+ * indistinguishable from a complete one at the call site and would silently
+ * mark three thousand real commanders ineligible.
+ */
+const MAX_SEARCH_PAGES = 100
+
+export interface CommanderSet {
+  /** Scryfall oracle ids of every card that may lead a deck. */
+  readonly oracleIds: ReadonlySet<string>
+  /** What Scryfall said the total was, for the caller to sanity-check. */
+  readonly totalCards: number | null
+  readonly pages: number
+}
+
+/**
+ * Every card Scryfall considers a legal commander (doc 04 §4.1, ADR-0009).
+ *
+ * This is the one question the bulk export cannot answer. ADR-0009 Q3 requires
+ * bulk data for anything resembling a crawl — "if you need to rapidly look up
+ * card names, prices, or resolve a large number of card images, you must use
+ * the bulk data files" — and the corpus ingest obeys that. But no field in
+ * `oracle_cards` says whether a card may lead a deck, so the alternative to
+ * these twenty requests is not a cheaper request, it is guessing.
+ *
+ * And guessing was measurably wrong, in both directions. `deriveCanBeCommander`
+ * reads the rule off the card's own text; run against this search over the
+ * whole corpus it agrees on 3,380 cards and disagrees on 36. It refuses 31 real
+ * commanders — every legendary Vehicle and Spacecraft, whose eligibility is
+ * written on none of them — and accepts 5 cards that cannot lead a deck at all,
+ * the meld backs, which are legendary creature cards Scryfall marks legal and
+ * nobody may cast. That is the whole argument for asking rather than deriving.
+ *
+ * Twenty requests once per ingest, paced at the 2/s ADR-0009 sets for search —
+ * ten seconds inside a command that already spends minutes downloading 200 MB.
+ *
+ * Throws on any failed page. The caller decides what to do without an answer;
+ * what it must not get is a partial set that looks whole.
+ */
+export const fetchCommanderOracleIds = async (
+  options: ScryfallOptions = {},
+): Promise<CommanderSet> => {
+  const doFetch = options.fetchImpl ?? fetch
+  const sleep = options.sleepImpl ?? realSleep
+
+  const oracleIds = new Set<string>()
+  let url: string | null = commanderSearchUrl()
+  let pages = 0
+  let totalCards: number | null = null
+
+  while (url !== null) {
+    // Before the request, not after, and skipped for the first: the limiter
+    // exists to space requests out, and there is nothing to space the first one
+    // from. `delayFor` rather than a literal, so the one table of Scryfall's
+    // published limits stays the only place they are written down.
+    if (pages > 0) await sleep(delayFor('/cards/search'))
+
+    const response = await doFetch(url, { headers: headers(options) })
+    if (!response.ok) {
+      // Includes the 404 Scryfall returns for a search that matches nothing,
+      // which for this query would mean the query itself has stopped working.
+      throw new Error(`Scryfall commander search responded ${response.status} on page ${pages + 1}`)
+    }
+    const body = (await response.json()) as SearchPage
+    pages += 1
+    totalCards = body.total_cards ?? totalCards
+
+    for (const card of body.data ?? []) {
+      if (card.oracle_id !== undefined) oracleIds.add(card.oracle_id)
+    }
+
+    if (pages >= MAX_SEARCH_PAGES && body.has_more === true) {
+      throw new Error(`Scryfall commander search exceeded ${MAX_SEARCH_PAGES} pages`)
+    }
+    url = body.has_more === true ? (body.next_page ?? null) : null
+  }
+
+  return { oracleIds, totalCards, pages }
+}
+
 const TYPE_WORDS: Readonly<Record<string, CardType>> = {
   creature: 'creature',
   instant: 'instant',
@@ -266,7 +382,18 @@ const LEGALITIES = new Set(['legal', 'not_legal', 'banned', 'restricted'])
  */
 export const toCard = (
   raw: ScryfallCard,
-  provenance: { readonly universesBeyond?: boolean } = {},
+  provenance: {
+    readonly universesBeyond?: boolean
+    /**
+     * Scryfall's own verdict on whether this card may lead a deck.
+     *
+     * Passed in rather than looked up, exactly like `universesBeyond`: both are
+     * facts about the whole corpus that one record cannot see, and the ingest
+     * is the only thing holding the whole corpus. Absent when the search could
+     * not be reached, and absence is what selects the fallback below.
+     */
+    readonly canBeCommander?: boolean
+  } = {},
 ): Card | null => {
   // `skipReason` covers the same ground, but the explicit check is what narrows
   // `oracle_id` from `string | undefined` for the compiler.
@@ -347,13 +474,30 @@ export const toCard = (
      * Whether this card may lead a deck, decided here rather than at the point
      * of use.
      *
-     * Derived at ingest like `roles` and `synergyProduces`, and for the same
+     * Stored at ingest like `roles` and `synergyProduces`, and for the same
      * reason: deck creation, the analysis endpoint and `is:commander` all need
      * the answer, and re-reading 34k type lines per request does not fit
-     * API-02's 200 ms budget. The reading itself is the domain's — this file
-     * maps Scryfall to `Card` and decides nothing about Magic.
+     * API-02's 200 ms budget.
+     *
+     * TWO sources, in order of authority, and which one answered is recorded on
+     * `IngestReport.commanderEligibility` rather than left for a reader to
+     * infer:
+     *
+     *   1. Scryfall's `is:commander`, fetched once per ingest and passed in.
+     *      It is the authority, and the only thing that knows a legendary
+     *      Vehicle may lead a deck.
+     *   2. `deriveCanBeCommander`, reading the rule off the card's own text.
+     *      Agrees with the search on 3,380 cards, and is the answer whenever
+     *      the search cannot be reached — an ingest that shipped no eligibility
+     *      at all would leave the API unable to reject Sol Ring again.
+     *
+     * `??` and not `||`: a fetched `false` is an answer and must not fall
+     * through to the derivation, which would put the two back in disagreement
+     * on exactly the 36 cards this fetch exists for — including the five meld
+     * backs, where the fetched answer is `false` and the derived one is `true`.
      */
-    canBeCommander: deriveCanBeCommander({ typeLine, oracleText, legalities }),
+    canBeCommander:
+      provenance.canBeCommander ?? deriveCanBeCommander({ typeLine, oracleText, legalities }),
     edhrecRank: raw.edhrec_rank ?? null,
     defaultPrinting: printingId(raw.id),
     roles: derived.roles,

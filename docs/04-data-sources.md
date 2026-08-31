@@ -47,9 +47,22 @@ plus **bulk data files** (all cards as one JSON download, regenerated daily).
   that programs needing lots of card data download the bulk files rather than
   crawling the API. Pull `oracle_cards` (one entry per oracle id — matches our
   domain model) nightly. `default_cards` only if printing-level data is needed.
-- **Rate limit anything else** to roughly 10 requests/second with a 50–100 ms
-  delay between calls, single-flight. The shared limiter in `packages/clients`
-  enforces this globally; adapters may not bypass it.
+- **Rate limit anything else** at the **per-endpoint** figures Scryfall
+  publishes, not one global number. `/cards/search`, `/cards/named`,
+  `/cards/random` and `/cards/collection` are **2/second (500 ms)** —
+  four times stricter than the "roughly 10/s" this section used to guess.
+  `/cards/manifest` is 10/minute. Everything else is 10/second (100 ms), and the
+  `*.scryfall.io` file origins have no limit at all. ADR-0009 quotes the source
+  and this paragraph is the correction it called for. The table lives in
+  `RATE_LIMITS_MS` in `packages/clients`; adapters read it through `delayFor`
+  and may not bypass it.
+- **The one permitted use of the search API is `is:commander`.** Bulk data
+  carries no field saying whether a card may lead a deck, so the choice is not
+  "search or bulk", it is "search or guess" — and guessing is wrong about the
+  36 cards it disagrees about — 31 legendary Vehicles and Spacecraft it refuses,
+  and 5 meld backs it wrongly accepts. `fetchCommanderOracleIds` pages that one
+  query, ~20 requests once per ingest, at the 2/s above. Any other use of search
+  for ingestion is still the crawl the first rule forbids.
 - **Send a descriptive `User-Agent` and an `Accept` header.** Anonymous or
   spoofed agents get blocked, correctly.
 - **Do not hotlink images at scale.** Fetch once, cache to our own object store,

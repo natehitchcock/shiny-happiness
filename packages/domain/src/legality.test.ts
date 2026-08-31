@@ -401,18 +401,48 @@ describe('deriveCanBeCommander', () => {
     ).toBe(false)
   })
 
-  it('refuses a legendary Vehicle — a known gap, not an oversight', () => {
-    // Shorikai, Genesis Engine is a real face commander and this says no. Its
-    // oracle text is indistinguishable from Heart of Kiran's, which is not a
-    // commander, so nothing in the data separates them. Asserting the rule from
-    // memory is what AGENTS.md §8 forbids; the gap is reported instead. Change
-    // this test the day the corpus carries a field that decides it.
+  it('refuses a legendary Vehicle, which is why this is only the fallback', () => {
+    /*
+     * Shorikai, Genesis Engine and Heart of Kiran are both real commanders, and
+     * this says no to both. Nothing in either card's text separates them from
+     * the Vehicles that are not — because nothing separates them at all: every
+     * legal legendary Vehicle may lead a deck, and no Vehicle says so.
+     *
+     * Pinned rather than fixed. The answer now comes from Scryfall's
+     * `is:commander` at ingest, and this function is what runs when that search
+     * cannot be reached. Bending it to accept Vehicles would be re-deriving a
+     * rule from memory, which is what got the earlier version of this comment
+     * confidently wrong about Heart of Kiran.
+     */
     expect(
       eligible(
         'Legendary Artifact — Vehicle',
         '{1}, {T}: Draw two cards, then discard a card.\nCrew 8',
       ),
     ).toBe(false)
+    expect(eligible('Legendary Artifact — Vehicle', 'Flying\nCrew 3')).toBe(false)
+  })
+
+  it('accepts a meld back, which is the fallback being wrong the other way', () => {
+    /*
+     * Brisela, Voice of Nightmares. A legendary creature card that Scryfall
+     * reports `legal` in Commander and that may not lead a deck — nor be in one
+     * — because a melded permanent is never a card anybody casts. Four others
+     * are the same shape: Hanweir, Mishra Lost to Phyrexia, Titania Gaea
+     * Incarnate, Ragnarok.
+     *
+     * Found by diffing this function against Scryfall's `is:commander` over the
+     * whole corpus, not by reading the cards, which is the point: what marks
+     * these is `layout: meld`, a Scryfall field. Nothing in the type line or the
+     * rules text distinguishes Brisela from any other legendary Angel, so this
+     * function — which is handed only the card — cannot see it and says yes.
+     *
+     * Asserted rather than fixed. The ingest takes Scryfall's `false` for these,
+     * and pretending otherwise here would hide a real limit of the fallback.
+     */
+    expect(eligible('Legendary Creature — Eldrazi Angel', 'Flying, first strike, vigilance')).toBe(
+      true,
+    )
   })
 })
 

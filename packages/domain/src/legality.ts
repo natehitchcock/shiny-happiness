@@ -105,12 +105,31 @@ const SELF_DECLARED = /can be your commanders?\b/i
  * and on a Background whose "it" means the creature choosing it, and every one
  * of those cards is `not_legal` in Commander.
  *
- * KNOWN GAP — legendary Vehicles. Twenty-six are legal in Commander and at
- * least one (Shorikai, Genesis Engine) is a real face commander, but nothing in
- * a Vehicle's oracle text distinguishes Shorikai from Heart of Kiran, which is
- * not a commander. Encoding "legendary Vehicles may lead a deck" would be
- * asserting a rule the data does not contain, so they are reported ineligible
- * and the gap is stated rather than guessed (AGENTS.md §8).
+ * THIS IS THE FALLBACK, not the authority. Scryfall's own `is:commander` is,
+ * and the ingest fetches it (`fetchCommanderOracleIds`); this runs only when
+ * that search cannot be reached.
+ *
+ * Measured against it over the whole 34,492-card corpus, this agrees on 3,380
+ * cards and disagrees on 36 — in BOTH directions, which is the part worth
+ * knowing:
+ *
+ *   - 31 it wrongly refuses: every legendary Vehicle and Spacecraft. Nothing in
+ *     their text says they may lead a deck, and the guess about WHICH of them
+ *     do was wrong as well — an earlier version of this comment reasoned that
+ *     Shorikai is a real commander while Heart of Kiran is not, and Scryfall
+ *     lists both, along with Parhelion II and the Titanic.
+ *   - 5 it wrongly accepts: the meld backs — Brisela, Hanweir, Mishra Lost to
+ *     Phyrexia, Titania Gaea Incarnate, Ragnarok. Each is a legendary creature
+ *     card that Scryfall reports `legal` in Commander, and none may lead a
+ *     deck, because a melded permanent is never a card you cast. What separates
+ *     them is `layout: meld`, which is a Scryfall field and not a fact about
+ *     Magic that the type line or the rules text carries — so this function,
+ *     which reads only the card, cannot see it.
+ *
+ * Both directions say the same thing: a rule that is not written on the card is
+ * not one to reconstruct from memory (AGENTS.md §8), it is one to go and ask
+ * about. This stays as written so that an ingest which cannot reach the search
+ * still produces an answer for 3,380 cards instead of none for any.
  */
 export const deriveCanBeCommander = (card: {
   readonly typeLine: string
