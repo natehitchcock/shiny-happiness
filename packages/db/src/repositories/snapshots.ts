@@ -17,6 +17,48 @@ export const liveSnapshotId = async (pool: Pool, source = 'scryfall'): Promise<s
   return rows[0]?.id ?? null
 }
 
+export interface LiveSnapshot {
+  readonly id: string
+  readonly cardCount: number
+  readonly comboCount: number
+  readonly createdAt: string
+}
+
+/**
+ * The live snapshot row, counts included — for `GET /api/v1/health`.
+ *
+ * The counts are read from THIS row rather than from `count(*)` on `cards` and
+ * `combos`. Not because the counts would be wrong — they are what ingest
+ * recorded — but because a health endpoint must stay cheap enough to poll: two
+ * sequential scans of 34k and 108k rows on a metered database (see
+ * `apps/api/src/corpus-cache.ts`) is not a check, it is load.
+ *
+ * One row, found through `dataset_snapshots_live_idx`.
+ */
+export const liveSnapshot = async (
+  pool: Pool,
+  source = 'scryfall',
+): Promise<LiveSnapshot | null> => {
+  const { rows } = await pool.query<{
+    id: string
+    card_count: number
+    combo_count: number
+    created_at: Date
+  }>(
+    `SELECT id, card_count, combo_count, created_at
+       FROM dataset_snapshots WHERE source = $1 AND is_live LIMIT 1`,
+    [source],
+  )
+  const row = rows[0]
+  if (row === undefined) return null
+  return {
+    id: row.id,
+    cardCount: row.card_count,
+    comboCount: row.combo_count,
+    createdAt: row.created_at.toISOString(),
+  }
+}
+
 /**
  * Record an ingest run, not yet live.
  *

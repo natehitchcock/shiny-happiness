@@ -4,6 +4,7 @@
  * Relative paths throughout: Vite proxies `/api` in development and the API is
  * same-origin in production, so no base URL is ever configured in the client.
  */
+import type { DeckCommand, DeckCommandBatch } from '@roundtable/domain'
 
 export interface Card {
   oracleId: string
@@ -154,11 +155,39 @@ export const deviceId = ((): string => {
  */
 export class ApiError extends Error {
   readonly status: number
-  constructor(message: string, status: number) {
+  /**
+   * The parsed response body, when there was one.
+   *
+   * A 409 is not a problem document: it carries the current deck AND the
+   * commands the server accepted while we were behind (doc 10 §10.3). Reducing
+   * every failure to a message string threw that away, which is why the 409
+   * handler could only re-read and re-send blindly.
+   */
+  readonly body: unknown
+  constructor(message: string, status: number, body: unknown = null) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.body = body
   }
+}
+
+/**
+ * The body of a 409 (doc 10 §10.3, doc 12 §12.7).
+ *
+ * `since` is the flat list of what we missed; `sinceBatches` is the same data
+ * grouped by version, each with the wall clock doc 12 §12.7's tie-break needs.
+ *
+ * `sinceComplete` is the one field that must not be ignored: `false` means the
+ * log does not cover the whole gap, so `since` is a partial account and the
+ * client must refetch rather than rebase against it. Optional because a server
+ * from before API-06 does not send it, and absent must read as "cannot tell".
+ */
+export interface CommandConflict {
+  deck: Deck
+  since: DeckCommand[]
+  sinceBatches?: DeckCommandBatch[]
+  sinceComplete?: boolean
 }
 
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
@@ -172,11 +201,14 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   })
   if (!response.ok) {
     // Errors are RFC 9457 problem+json (doc 10 §10.1); surface `detail`, which
-    // is the part written for a person.
-    const problem = (await response.json().catch(() => null)) as { detail?: string } | null
+    // is the part written for a person. The whole body is kept as well — a 409
+    // is not a problem document and its payload is what makes it recoverable.
+    const parsed: unknown = await response.json().catch(() => null)
+    const detail = (parsed as { detail?: string } | null)?.detail
     throw new ApiError(
-      problem?.detail ?? `Request failed (${String(response.status)})`,
+      detail ?? `Request failed (${String(response.status)})`,
       response.status,
+      parsed,
     )
   }
   return (await response.json()) as T
@@ -271,9 +303,17 @@ export interface CommandResult {
   rejected: { command: { type: string; oracleId?: string }; reason: { kind: string } }[]
 }
 
+/**
+ * Typed as the domain's own `DeckCommand`, not `unknown[]`.
+ *
+ * The queue the client sends and the batch the server applies are the same
+ * language (doc 10 §10.3) — and a 409 rebase compares one against the other, so
+ * a local re-spelling of the shape is how the two come to disagree about what a
+ * command meant.
+ */
 export const sendCommands = (
   id: string,
-  commands: unknown[],
+  commands: readonly DeckCommand[],
   baseVersion: number,
 ): Promise<CommandResult> =>
   request(`/decks/${id}/commands`, {

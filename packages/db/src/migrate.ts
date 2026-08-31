@@ -1,5 +1,6 @@
 import { readFile, readdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Pool, PoolClient } from 'pg'
 import { withTransaction } from './client.js'
 
@@ -22,6 +23,52 @@ export interface Migration {
 }
 
 const MIGRATION_FILE = /^(\d{4}_[a-z0-9_]+)\.(up|down)\.sql$/
+
+/**
+ * Where the `.sql` files live, relative to the compiled `dist/`.
+ *
+ * Defined here rather than in `testing.ts` so production code can name it
+ * without importing the test harness — the health endpoint needs the versions
+ * this build ships with in order to say which of them are unapplied.
+ */
+export const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations')
+
+/**
+ * The migration versions on disk, in order — names only.
+ *
+ * Deliberately not `loadMigrations`: that reads every file's SQL, and the
+ * health endpoint wants the list of names on a cold serverless invocation, not
+ * ~50 file reads. It also does not insist on a matching `.down.sql`, because
+ * reporting "you are three behind" must not fail on a half-written pair.
+ */
+export const migrationVersions = async (directory: string): Promise<string[]> => {
+  const versions = new Set<string>()
+  for (const file of await readdir(directory)) {
+    const match = MIGRATION_FILE.exec(file)
+    if (match !== null) versions.add(match[1]!)
+  }
+  return [...versions].sort()
+}
+
+/**
+ * The versions recorded as applied, or `null` when the table does not exist.
+ *
+ * Read-only, unlike the runner's own `appliedVersions`, which creates the table
+ * if it is missing. A health check must never perform DDL: the migration that
+ * is missing is the thing being diagnosed, and a check that writes schema is a
+ * check that changes the answer. `null` therefore means "not migrated at all",
+ * which is a real and reportable state rather than an error.
+ */
+export const appliedMigrations = async (pool: Pool): Promise<string[] | null> => {
+  const { rows: exists } = await pool.query<{ present: boolean }>(
+    "SELECT to_regclass('public.schema_migrations') IS NOT NULL AS present",
+  )
+  if (exists[0]?.present !== true) return null
+  const { rows } = await pool.query<{ version: string }>(
+    'SELECT version FROM schema_migrations ORDER BY version',
+  )
+  return rows.map((row) => row.version)
+}
 
 export const loadMigrations = async (directory: string): Promise<Migration[]> => {
   const files = await readdir(directory)

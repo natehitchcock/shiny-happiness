@@ -71,9 +71,28 @@ Load the corpus **before** the first request. An API pointed at an empty schema
 returns empty suggestion groups with no error, which looks like a scoring bug
 rather than a missing database.
 
-**5. Check it.** `GET /api/v1/decks` should return `{"items":[]}` — that
-exercises the function, the pool, the schema and the device-id fallback in one
-call. Then open the site and build a deck.
+**5. Check it.** `GET /api/v1/health` answers the two questions steps 3 and 4
+were about, in one call and with no credentials:
+
+```bash
+curl -s https://<deployment>/api/v1/health
+```
+
+```json
+{ "status": "ok",
+  "schema": { "applied": "0012_deck_command_log", "expected": "0012_deck_command_log",
+              "pending": [], "upToDate": true },
+  "corpus": { "loaded": true, "snapshotId": "…", "cardCount": 34492, "comboCount": 108046 },
+  "database": { "reachable": true } }
+```
+
+`"status": "ok"` means the schema is current **and** a corpus is live.
+`"degraded"` is still a `200` — the deployment is serving, it will just serve
+answers that look wrong; read `schema.pending` and `corpus.loaded` to see which.
+Only an unreachable database gives a `503`.
+
+Then `GET /api/v1/decks` should return `{"items":[]}` — that exercises the pool,
+the schema and the device-id fallback together. Open the site and build a deck.
 
 ## Two notes on `vercel.json`
 
@@ -113,9 +132,9 @@ This has already gone wrong once. Production sat four migrations behind for
 weeks, and the symptom was not an error — it was creatures with no printed
 power or toughness, because `0006` adds the columns and nothing had added them.
 A schema that is merely OLD serves nulls, and nulls render as absent rather than
-as broken. **Run `migrate status` against production whenever something is
-missing rather than wrong**; it is a five-second check that names the cause
-directly.
+as broken. **`GET /api/v1/health` now answers this from the browser**, with no
+credentials and no checkout — `schema.pending` names every unapplied migration.
+`migrate status` remains the local equivalent and is what you run to fix it.
 
 **Watch data transfer, not just storage.** The recommendation and analysis
 endpoints read the candidate pool and the combo set on every request, and the
@@ -138,26 +157,39 @@ fails to *load*. It carries no message, so the first thing to establish is
 whether the code or the environment is at fault:
 
 ```bash
-curl -H "x-vercel-protection-bypass: <secret>"      "https://<deployment>/api/v1/decks"
+curl -H "x-vercel-protection-bypass: <secret>"      "https://<deployment>/api/v1/health"
 ```
 
+- **`FUNCTION_INVOCATION_FAILED`** — the module itself failed to load, which the
+  handler cannot catch because the imports are static. That is a bundling
+  problem, not a configuration one: check that the build ran `pnpm build` before
+  the web build, so `apps/api/dist` and `packages/*/dist` exist for the function
+  to import.
 - **`{"title":"API unavailable","detail":"DATABASE_URL is not set…"}`** — the
   function loaded and told you what is missing. Set it and redeploy.
-- **`FUNCTION_INVOCATION_FAILED` still** — the module itself failed to load,
-  which the handler cannot catch because the imports are static. That is a
-  bundling problem, not a configuration one: check that the build ran
-  `pnpm build` before the web build, so `apps/api/dist` and `packages/*/dist`
-  exist for the function to import.
-- **`{"items":[]}`** — everything works; the database is simply empty. Run the
-  ingest (step 4).
+- **`503` with `"database":{"reachable":false,"code":"ENOTFOUND"}`** — the
+  function loaded and the database did not answer. `detail` names the
+  Postgres-related variables that ARE set, which is usually the whole story
+  (`POSTGRES_URL` set, `DATABASE_URL` not). It never carries the connection
+  string itself.
+- **`"status":"degraded"` with a non-empty `schema.pending`** — the deploy is
+  behind. See below.
+- **`"status":"degraded"` with `"corpus":{"loaded":false}`** — the schema is
+  current and the database is empty. Run the ingest (step 4).
 
 **A field that is missing rather than wrong** — every creature's power blank,
 every fuzzy name search finding nothing — is almost always a migration that was
-never applied, not a bug in the code that reads it:
+never applied, not a bug in the code that reads it. `schema.pending` in the
+health response names exactly which ones. To apply them:
 
 ```bash
 DATABASE_URL="$DATABASE_URL_UNPOOLED" pnpm --filter @roundtable/db migrate status
+DATABASE_URL="$DATABASE_URL_UNPOOLED" pnpm --filter @roundtable/db migrate up
 ```
+
+Then re-read `/api/v1/health`: `pending` should be empty and `applied` should
+match the head in `packages/db/migrations`. Remember that adding a column does
+not fill it — see the note above — so a `cards` migration means step 4 as well.
 
 `api/handler.test.ts` runs the same handler locally, so "the imports resolve and
 the env-missing path answers" is checked on every `pnpm test` rather than only

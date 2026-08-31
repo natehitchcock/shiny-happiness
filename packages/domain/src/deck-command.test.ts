@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Card, CardType, Color } from './card.js'
 import type { Deck, DeckEntry } from './deck.js'
-import { deckId, oracleId, printingId } from './ids.js'
-import { applyCommands, type CommandContext, type DeckCommand } from './deck-command.js'
+import { deckId, oracleId, printingId, type OracleId } from './ids.js'
+import {
+  applyCommands,
+  rebaseCommands,
+  type CommandContext,
+  type DeckCommand,
+} from './deck-command.js'
 
 const card = (name: string, opts: Partial<Card> = {}): Card => ({
   oracleId: oracleId(name),
@@ -429,5 +434,181 @@ describe('applyCommands — remove is an amount, not a judgement (ADR-0012)', ()
     )
 
     expect(outcome.rejected[0]?.reason).toMatchObject({ kind: 'is-commander' })
+  })
+})
+
+/**
+ * `rebaseCommands` — the client half of a 409 (API-06, doc 12 §12.7).
+ *
+ * Every case is stated as "two clients, one deck": what the OTHER client did
+ * goes in `since`, what THIS client queued goes in the first argument.
+ */
+describe('rebaseCommands', () => {
+  const id = (name: string): OracleId => oracleId(name)
+  const accept = (name: string): DeckCommand => ({
+    type: 'accept',
+    oracleId: id(name),
+    origin: 'manual',
+  })
+  const exclude = (name: string): DeckCommand => ({ type: 'exclude', oracleId: id(name) })
+  const restore = (name: string): DeckCommand => ({ type: 'restore', oracleId: id(name) })
+  const remove = (name: string): DeckCommand => ({ type: 'remove', oracleId: id(name) })
+  const lock = (name: string, locked: boolean): DeckCommand => ({
+    type: 'lock',
+    oracleId: id(name),
+    locked,
+  })
+
+  it('replays everything when nothing we touched changed', () => {
+    const queued = [accept('Sol Ring'), exclude('Counterspell')]
+
+    const out = rebaseCommands(queued, [accept('Lightning Bolt')])
+
+    expect(out.replay).toEqual(queued)
+    expect(out.superseded).toEqual([])
+    expect(out.overrides).toEqual([])
+  })
+
+  it('replays everything when `since` is empty', () => {
+    const queued = [accept('Sol Ring')]
+
+    expect(rebaseCommands(queued, []).replay).toEqual(queued)
+  })
+
+  it('drops an exclude the other client already made', () => {
+    const out = rebaseCommands([exclude('Sol Ring')], [exclude('Sol Ring')])
+
+    expect(out.replay).toEqual([])
+    expect(out.superseded).toHaveLength(1)
+    expect(out.superseded[0]?.reason).toBe('already-excluded')
+    expect(out.superseded[0]?.by).toEqual(exclude('Sol Ring'))
+  })
+
+  it('drops a restore for a card the other client already restored', () => {
+    const out = rebaseCommands([restore('Sol Ring')], [restore('Sol Ring')])
+
+    expect(out.replay).toEqual([])
+    expect(out.superseded[0]?.reason).toBe('not-excluded')
+  })
+
+  it('drops a remove when the other client excluded the card — every copy is gone', () => {
+    const out = rebaseCommands([remove('Sol Ring')], [exclude('Sol Ring')])
+
+    expect(out.replay).toEqual([])
+    expect(out.superseded[0]?.reason).toBe('no-copies-left')
+  })
+
+  it('drops a lock already set to the same value', () => {
+    const out = rebaseCommands([lock('Sol Ring', true)], [lock('Sol Ring', true)])
+
+    expect(out.replay).toEqual([])
+    expect(out.superseded[0]?.reason).toBe('already-set')
+  })
+
+  it('replays a lock set to the OTHER value, and reports it as an override', () => {
+    const out = rebaseCommands([lock('Sol Ring', false)], [lock('Sol Ring', true)])
+
+    expect(out.replay).toEqual([lock('Sol Ring', false)])
+    expect(out.overrides).toHaveLength(1)
+  })
+
+  it('drops a setRole asking for the roles already set', () => {
+    const roles: DeckCommand = { type: 'setRole', oracleId: id('Sol Ring'), roles: ['ramp'] }
+
+    const out = rebaseCommands([roles], [roles])
+
+    expect(out.replay).toEqual([])
+    expect(out.superseded[0]?.reason).toBe('already-set')
+  })
+
+  it('replays a setRole asking for different roles', () => {
+    const ours: DeckCommand = { type: 'setRole', oracleId: id('Sol Ring'), roles: ['ramp'] }
+    const theirs: DeckCommand = { type: 'setRole', oracleId: id('Sol Ring'), roles: ['draw'] }
+
+    const out = rebaseCommands([ours], [theirs])
+
+    expect(out.replay).toEqual([ours])
+    expect(out.overrides).toHaveLength(1)
+  })
+
+  it('distinguishes role lists by order, not only by membership', () => {
+    const ours: DeckCommand = { type: 'setRole', oracleId: id('X'), roles: ['ramp', 'draw'] }
+    const theirs: DeckCommand = { type: 'setRole', oracleId: id('X'), roles: ['draw', 'ramp'] }
+
+    expect(rebaseCommands([ours], [theirs]).replay).toEqual([ours])
+  })
+
+  /*
+   * Doc 12 §12.7's own example: the same card accepted here and excluded there.
+   * The accept still goes — pillar P6 binds the recommender, not the user — but
+   * it is reported, so a caller can say that a foreign edit was overridden.
+   */
+  it('replays an accept over the other client’s exclusion and reports the override', () => {
+    const out = rebaseCommands([accept('Sol Ring')], [exclude('Sol Ring')])
+
+    expect(out.replay).toEqual([accept('Sol Ring')])
+    expect(out.superseded).toEqual([])
+    expect(out.overrides).toHaveLength(1)
+    expect(out.overrides[0]?.by).toEqual(exclude('Sol Ring'))
+  })
+
+  it('reports excluding what the other client just accepted as an override', () => {
+    const out = rebaseCommands([exclude('Sol Ring')], [accept('Sol Ring')])
+
+    expect(out.replay).toEqual([exclude('Sol Ring')])
+    expect(out.overrides).toHaveLength(1)
+  })
+
+  it('replays a restore of what the other client just excluded', () => {
+    const out = rebaseCommands([restore('Sol Ring')], [exclude('Sol Ring')])
+
+    expect(out.replay).toEqual([restore('Sol Ring')])
+    expect(out.overrides).toHaveLength(1)
+  })
+
+  /*
+   * The rejected rule, asserted so it cannot be quietly "fixed" back in: a deck
+   * holds 34 Mountains and this function has no card data with which to tell a
+   * basic land from a singleton, so dropping the accept would lose a real copy.
+   */
+  it('never drops an accept just because the other client accepted the same card', () => {
+    const out = rebaseCommands([accept('Mountain')], [accept('Mountain')])
+
+    expect(out.replay).toEqual([accept('Mountain')])
+    expect(out.superseded).toEqual([])
+    expect(out.overrides).toEqual([])
+  })
+
+  it('reads the LAST foreign command for a card, not the first', () => {
+    // Excluded and then restored elsewhere: the card is not excluded any more,
+    // so our own restore has nothing left to do.
+    const out = rebaseCommands([restore('Sol Ring')], [exclude('Sol Ring'), restore('Sol Ring')])
+
+    expect(out.replay).toEqual([])
+    expect(out.superseded[0]?.reason).toBe('not-excluded')
+  })
+
+  it('keeps the queued order of whatever survives', () => {
+    const queued = [accept('A'), exclude('B'), accept('C')]
+
+    const out = rebaseCommands(queued, [exclude('B')])
+
+    expect(out.replay).toEqual([accept('A'), accept('C')])
+  })
+
+  it('passes a core-package command through — it names a bracket, not a card', () => {
+    const pkg: DeckCommand = { type: 'applyCorePackage', bracket: 3 }
+
+    const out = rebaseCommands([pkg], [exclude('Sol Ring')])
+
+    expect(out.replay).toEqual([pkg])
+  })
+
+  it('returns empty everything for an empty queue', () => {
+    expect(rebaseCommands([], [exclude('Sol Ring')])).toEqual({
+      replay: [],
+      superseded: [],
+      overrides: [],
+    })
   })
 })

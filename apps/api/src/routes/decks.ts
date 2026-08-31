@@ -3,7 +3,9 @@ import type { FastifyInstance } from 'fastify'
 import type { Pool, PoolClient } from 'pg'
 import {
   allCardNames,
+  appendCommandLog,
   applyBatch,
+  commandsSince,
   createDeck,
   findBasicLands,
   getCards,
@@ -16,6 +18,7 @@ import type {
   Card,
   Deck,
   DeckCommand,
+  DeckCommandBatch,
   DeckEntry,
   OracleId,
 } from '@roundtable/domain'
@@ -123,6 +126,47 @@ const recordReceipt = async (
      VALUES ($1, $2, $3::jsonb) ON CONFLICT (idempotency_key) DO NOTHING`,
     [idempotencyKey, deckIdValue, JSON.stringify(result)],
   )
+}
+
+/**
+ * The body of a `409` (doc 10 §10.3, doc 12 §12.7).
+ *
+ * `since` is flat because that is the shape doc 10 §10.3 pins and other agents
+ * are coding against. `sinceBatches` is the same data grouped the way the
+ * server actually applied it — one entry per version, each with the wall clock
+ * doc 12 §12.7's conflict rule needs. Both are derived from ONE read, so they
+ * cannot disagree; a second query for the flat view could observe a newer log.
+ *
+ * `sinceComplete: false` means the log does not cover the whole gap and the
+ * client must refetch rather than replay. Without it an empty `since` is a lie
+ * by omission — "nothing changed" and "I cannot tell you what changed" are the
+ * same three characters.
+ */
+interface ConflictBody {
+  readonly deck: Deck | null
+  readonly since: readonly DeckCommand[]
+  readonly sinceBatches: readonly DeckCommandBatch[]
+  readonly sinceComplete: boolean
+}
+
+const conflictBody = async (
+  pool: Pool,
+  id: string,
+  deck: Deck | null,
+  baseVersion: number,
+): Promise<ConflictBody> => {
+  // A deck that vanished between the version check and here has no history to
+  // report. `sinceComplete: false` sends the client to a refetch, which is
+  // where it will find the 404 for itself.
+  if (deck === null) return { deck, since: [], sinceBatches: [], sinceComplete: false }
+
+  const { batches, complete } = await commandsSince(pool, deckId(id), baseVersion, deck.version)
+  return {
+    deck,
+    since: batches.flatMap((b) => b.commands),
+    sinceBatches: batches,
+    sinceComplete: complete,
+  }
 }
 
 export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
@@ -378,10 +422,12 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
       const referenced = body.commands.flatMap((c) => ('oracleId' in c ? [c.oracleId] : []))
       const cards = await cardMap(pool, [...referenced, ...current.commanders])
 
-      const decided = applyCommands(current, body.commands, {
-        cards,
-        now: new Date().toISOString(),
-      })
+      // One instant for the whole batch: the entries it writes and the log row
+      // that explains them carry the same `addedAt`/`applied_at`, so a client
+      // reading `since` can line a command up with the entry it produced.
+      // `now()` in SQL would be transaction-start and would not match.
+      const now = new Date().toISOString()
+      const decided = applyCommands(current, body.commands, { cards, now })
 
       // A batch that applied nothing changes nothing. `deck.ts` defines version
       // as "bumped server-side per accepted command batch" — bumping for an
@@ -391,7 +437,7 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
       // unconditionally today, so this is the common case, not a corner one.
       if (decided.applied.length === 0) {
         if (current.version !== body.baseVersion) {
-          return rep.status(409).send({ deck: current, since: [] })
+          return rep.status(409).send(await conflictBody(pool, id, current, body.baseVersion))
         }
         const result = { deck: current, applied: [], rejected: decided.rejected }
         await recordReceipt(pool, body.idempotencyKey, id, result)
@@ -408,6 +454,15 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
           applied: decided.applied,
           rejected: decided.rejected,
         })
+        // Same transaction, same reason (API-06): a version bump the log cannot
+        // explain is a hole in `since`, and `commandsSince` would then report
+        // the whole gap as incomplete — every later client silently downgraded
+        // to a refetch, with nothing saying why.
+        //
+        // `baseVersion + 1` is the version this batch takes the deck TO;
+        // `applyBatch` bumps it after this callback returns, so reading it back
+        // here would give the version being left behind.
+        await appendCommandLog(client, deckId(id), body.baseVersion + 1, decided.applied, now)
         return decided
       })
 
@@ -419,14 +474,12 @@ export const registerDeckRoutes = (app: FastifyInstance, pool: Pool): void => {
           // The batch was applied to nothing: `applyBatch` checks the version under
           // `FOR UPDATE` before calling us, so a stale request cannot half-write.
           //
-          // `since` is empty and stays empty until API-06. Doc 10 §10.3 defines it
-          // as the commands the client has not seen, which needs an ordered
-          // per-deck command log keyed by version; the schema has no such table,
-          // and API-06 owns exactly this ("optimistic concurrency: baseVersion,
-          // 409 with since"). Returning the current deck is enough for a client to
-          // refetch and rebuild — it just cannot replay incrementally yet.
+          // `since` carries what the client missed, read from `deck_command_log`
+          // (API-06). The deck is re-read first and its version is what the gap
+          // is measured against, so the history and the deck in this response
+          // describe the same instant.
           const latest = await getDeck(pool, deckId(id))
-          return rep.status(409).send({ deck: latest, since: [] })
+          return rep.status(409).send(await conflictBody(pool, id, latest, body.baseVersion))
         }
 
         case 'applied': {

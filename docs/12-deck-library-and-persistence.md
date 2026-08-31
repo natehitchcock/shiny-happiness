@@ -177,11 +177,37 @@ against the new state** and re-sends. Deck commands are almost all commutative
 (accepting Sol Ring and accepting Lightning Bolt do not interact), so replay
 resolves silently in the overwhelming majority of cases.
 
+The history comes from `deck_command_log`, keyed by the version each batch took
+the deck to (ADR-0018). Two things follow that the client must honour:
+
+- **`sinceComplete: false` means refetch, not replay.** The log may not reach
+  back to the client's version — a deck edited before the log existed, or a gap
+  longer than the server will ship in one response. An empty `since` and an
+  unanswerable one are indistinguishable without this flag, and rebasing against
+  a partial history drops work the user did.
+- **Rebasing drops only what is already true.** `rebaseCommands` in
+  `packages/domain` removes a queued command whose intent the log shows already
+  achieved — excluding an already-excluded card, restoring one that is no longer
+  excluded — and replays everything else. That is not discarding a user action;
+  the state they asked for exists, and re-sending would earn a rejection that
+  reads as "your click failed" for a click that succeeded elsewhere. An `accept`
+  is never dropped: a deck legitimately holds 34 Mountains and the rebase has no
+  card data with which to tell a basic from a singleton.
+
 Genuinely conflicting commands — the same card accepted on one device and excluded
 on another — resolve to the **more recent user intent by wall-clock timestamp**,
 and the losing command is surfaced in the undo history as *"Not applied: excluded
 Sol Ring (changed on another device)"*. Never silently discard a user action;
 never pop a modal about it either.
+
+`sinceBatches[].appliedAt` is the foreign half of that comparison; `since` alone
+is a bare command list and carries no clock. **A live client never needs it** —
+every batch it is told about is already committed when its own request goes out,
+so its own intent is always the newer one. An offline queue does: a command
+typed at 09:00 and drained at 17:00 is *not* more recent than a foreign one from
+12:00. `rebaseCommands` therefore reports conflicts as `overrides` and replays
+them, rather than deciding them; the timestamp comparison and the undo-history
+entry above are `WEB-15`'s, which is where the queue and its clock live.
 
 **Offline.** The queue persists in IndexedDB and drains on reconnect. The deck is
 fully editable offline; only new recommendations need the network, and their
@@ -191,7 +217,8 @@ command bar when non-zero.
 ## 12.8 Snapshots
 
 Named, restorable points in a deck's history. Cheap to implement on top of the
-command log and worth having:
+command log — which now exists, as `deck_command_log` (ADR-0018) — and worth
+having:
 
 - **Automatic** before any bulk operation — applying or removing a core package,
   changing bracket, importing into an existing deck. Labelled with the operation.
@@ -208,7 +235,7 @@ back exactly.
 
 | Where | What | Why |
 | --- | --- | --- |
-| Postgres | Decks, entries, snapshots, workspace state | Source of truth |
+| Postgres | Decks, entries, snapshots, workspace state, the command log | Source of truth |
 | IndexedDB | Active deck replica, command queue, recent summaries, card data for the deck's colour identity | Offline and instant switching |
 | Redis | Recommendation results keyed by `(deckId, version, snapshotId, filters)` | The expensive computation, invalidated by `version` |
 

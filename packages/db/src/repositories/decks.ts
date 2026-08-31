@@ -3,6 +3,8 @@ import type {
   Bracket,
   Color,
   Deck,
+  DeckCommand,
+  DeckCommandBatch,
   DeckEntry,
   DeckId,
   OracleId,
@@ -256,6 +258,111 @@ export const applyBatch = async <T>(
     )
     return { kind: 'applied' as const, result, version: bumped[0]!.version }
   })
+
+/**
+ * Record what a batch did, so a client that was behind can be told (API-06).
+ *
+ * Takes a `PoolClient`, not a pool, and is meant to be called from INSIDE
+ * `applyBatch`'s callback: the log entry and the entry rewrite it describes must
+ * commit together. Written after the commit instead, a crash in the window
+ * leaves a version bump the log cannot explain — and an unexplained version is
+ * exactly the gap `since` exists to close, so the failure would be invisible
+ * until a client hit it.
+ *
+ * `version` is the version the deck REACHES, i.e. `baseVersion + 1`. It is
+ * passed in rather than read back from `decks`, because `applyBatch` bumps the
+ * version AFTER the callback runs; reading it here would return the old one.
+ *
+ * Only applied commands belong here. A rejected command changed nothing and
+ * replaying the server's refusals is worse than replaying nothing.
+ */
+export const appendCommandLog = async (
+  client: PoolClient,
+  deckId: DeckId,
+  version: number,
+  commands: readonly DeckCommand[],
+  appliedAt: string,
+): Promise<void> => {
+  await client.query(
+    `INSERT INTO deck_command_log (deck_id, version, commands, applied_at)
+     VALUES ($1, $2, $3::jsonb, $4)`,
+    [deckId, version, JSON.stringify(commands), appliedAt],
+  )
+}
+
+export interface CommandsSince {
+  readonly batches: readonly DeckCommandBatch[]
+  /**
+   * `true` only when `batches` covers the WHOLE gap between the client's
+   * version and the deck's.
+   *
+   * An empty `batches` is ambiguous on its own — "nothing happened" and "the
+   * log does not go back that far" look identical, and a client that assumes
+   * the first replays blindly over an edit it never saw. This is the flag that
+   * makes the difference visible, and a client must refetch rather than replay
+   * when it is false.
+   */
+  readonly complete: boolean
+}
+
+/**
+ * The default cap on how much history one `409` will carry.
+ *
+ * A client 500 versions behind is not incrementally reconcilable in any useful
+ * sense, and shipping 500 batches to say so costs more than the deck it is
+ * describing — on a metered database (see `apps/api/src/corpus-cache.ts`) that
+ * matters. Past the cap, `complete` is false and the client refetches, which is
+ * exactly what it did before this existed.
+ */
+export const SINCE_LIMIT = 200
+
+/**
+ * The commands accepted after `baseVersion`, oldest first.
+ *
+ * `currentVersion` is passed in rather than re-read: the caller has just read
+ * the deck under the same conditions, and reading it again here could observe a
+ * newer version than the deck it is about to return — making `complete` a claim
+ * about a deck the client will never see.
+ */
+export const commandsSince = async (
+  pool: Pool,
+  deckId: DeckId,
+  baseVersion: number,
+  currentVersion: number,
+  options: { readonly limit?: number } = {},
+): Promise<CommandsSince> => {
+  const expected = currentVersion - baseVersion
+  // A client at or ahead of the server has no gap to fill. Ahead is nonsense
+  // rather than merely empty, so it is reported as incomplete, not as "nothing
+  // happened" — the honest answer to a question that does not parse.
+  if (expected <= 0) return { batches: [], complete: expected === 0 }
+
+  const limit = options.limit ?? SINCE_LIMIT
+  const { rows } = await pool.query<{ version: number; commands: unknown; applied_at: Date }>(
+    `SELECT version, commands, applied_at FROM deck_command_log
+      WHERE deck_id = $1 AND version > $2
+      ORDER BY version
+      LIMIT $3`,
+    [deckId, baseVersion, limit],
+  )
+
+  const batches = rows.map((row) => ({
+    version: row.version,
+    appliedAt: row.applied_at.toISOString(),
+    commands: row.commands as readonly DeckCommand[],
+  }))
+
+  // Complete means every version in (baseVersion, currentVersion] is accounted
+  // for. Counting is not enough on its own — a deck that predates this table,
+  // or one whose log has been pruned, yields rows that are contiguous with each
+  // other but not with `baseVersion` — so the first version is checked too.
+  const complete =
+    batches.length === expected &&
+    batches[0]?.version === baseVersion + 1 &&
+    batches[batches.length - 1]?.version === currentVersion
+
+  return { batches, complete }
+}
 
 export interface DeckSummaryRow {
   readonly id: DeckId

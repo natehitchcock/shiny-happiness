@@ -29,10 +29,14 @@ vi.mock('./api', () => ({
   // other failure with `instanceof`, so a fake would defeat the test.
   ApiError: class ApiError extends Error {
     status: number
-    constructor(message: string, status: number) {
+    // The 409 body, which is where `since` arrives (API-06). A stub without it
+    // could not tell the rebase path from the blind-resend fallback.
+    body: unknown
+    constructor(message: string, status: number, body: unknown = null) {
       super(message)
       this.name = 'ApiError'
       this.status = status
+      this.body = body
     }
   },
 }))
@@ -497,6 +501,90 @@ describe('adding cards while a settle is running', () => {
     await waitFor(() => expect(attempts).toBe(2))
     // It re-read the deck to find the version it should have used.
     expect(mocked.getDeck).toHaveBeenCalled()
+  }, 20_000)
+
+  /*
+   * API-06. The 409 above carries no `since` — that is a server from before
+   * this shipped, and the fallback is the old blind re-send. This is the other
+   * half: when the server CAN say what changed, the client stops re-sending
+   * work another client already did.
+   */
+  it('does not re-send a rejection another client already made (API-06)', async () => {
+    let attempts = 0
+    mocked.sendCommands.mockImplementation(() => {
+      attempts += 1
+      if (attempts === 1) {
+        return Promise.reject(
+          new api.ApiError('Deck was modified by another request', 409, {
+            deck: { ...withEntries, version: 8 },
+            // The other client rejected the same card while we were behind.
+            since: [{ type: 'exclude', oracleId: 'o1' }],
+            sinceBatches: [
+              {
+                version: 8,
+                appliedAt: '2026-08-30T12:00:00.000Z',
+                commands: [{ type: 'exclude', oracleId: 'o1' }],
+              },
+            ],
+            sinceComplete: true,
+          }),
+        ) as ReturnType<typeof api.sendCommands>
+      }
+      return Promise.resolve({
+        deck: { ...withEntries, version: 9 },
+        results: [],
+      }) as ReturnType<typeof api.sendCommands>
+    })
+    mocked.getDeck.mockResolvedValue({ ...withEntries, version: 8 })
+
+    render(<Workspace deck={{ ...withEntries, version: 1 }} />)
+    await waitFor(() => expect(screen.getByLabelText(/^Reject /)).toBeDefined(), {
+      timeout: 5_000,
+    })
+    await act(async () => {
+      screen.getByLabelText(/^Reject /).click()
+    })
+    await new Promise((r) => setTimeout(r, 2_500))
+
+    // ONE send. The card is already rejected, so re-sending could only earn an
+    // `already-excluded` refusal that reads as "your click failed".
+    expect(attempts).toBe(1)
+    expect(mocked.getDeck).toHaveBeenCalled()
+  }, 20_000)
+
+  it('still re-sends when the server cannot account for the whole gap', async () => {
+    // `sinceComplete: false` — the log does not reach back to our version, so
+    // `since` is a partial account and dropping a command on the strength of it
+    // would drop work the user did.
+    let attempts = 0
+    mocked.sendCommands.mockImplementation(() => {
+      attempts += 1
+      if (attempts === 1) {
+        return Promise.reject(
+          new api.ApiError('Deck was modified by another request', 409, {
+            deck: { ...withEntries, version: 8 },
+            since: [{ type: 'exclude', oracleId: 'o1' }],
+            sinceComplete: false,
+          }),
+        ) as ReturnType<typeof api.sendCommands>
+      }
+      return Promise.resolve({
+        deck: { ...withEntries, version: 9 },
+        results: [],
+      }) as ReturnType<typeof api.sendCommands>
+    })
+    mocked.getDeck.mockResolvedValue({ ...withEntries, version: 8 })
+
+    render(<Workspace deck={{ ...withEntries, version: 1 }} />)
+    await waitFor(() => expect(screen.getByLabelText(/^Reject /)).toBeDefined(), {
+      timeout: 5_000,
+    })
+    await act(async () => {
+      screen.getByLabelText(/^Reject /).click()
+    })
+    await new Promise((r) => setTimeout(r, 2_500))
+
+    await waitFor(() => expect(attempts).toBe(2))
   }, 20_000)
 })
 
