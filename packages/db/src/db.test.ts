@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto'
 import type { Card, Combo, DeckId, OracleId } from '@roundtable/domain'
 import { buildComboIndex, comboDegree, comboId, deckId } from '@roundtable/domain'
 import { loadMigrations, migrateDown, migrateUp } from './index.js'
-import { combosContaining, combosWithin, insertCombos } from './repositories/combos.js'
+import {
+  combosContaining,
+  combosInIdentity,
+  combosWithin,
+  insertCombos,
+} from './repositories/combos.js'
 import {
   findEligibleCards,
   getCard,
@@ -393,6 +398,51 @@ describeDb('packages/db against real PostgreSQL', () => {
     it('returns nothing for a card in no combo', async () => {
       expect(await combosContaining(db.pool, [uuid()])).toEqual([])
       expect(await combosContaining(db.pool, [])).toEqual([])
+    })
+
+    /*
+     * Scoping the pull to the deck's colours, which is what took production
+     * down.
+     *
+     * `allCombos` moved the whole table on every recommendation and analysis
+     * request — 108,046 rows and 72 MB against the real corpus. On a metered
+     * database that exhausted a 5 GB monthly transfer quota in about sixty
+     * requests. A combo with a blue piece cannot be assembled in a mono-red
+     * deck, so the rows were not merely surplus, they were unusable.
+     */
+    describe('scoped to a colour identity', () => {
+      const red = uuid()
+      const blue = uuid()
+
+      beforeAll(async () => {
+        await upsertCards(db.pool, [
+          card('Red Piece', { oracleId: red, colorIdentity: ['R'] }),
+          card('Blue Piece', { oracleId: blue, colorIdentity: ['U'] }),
+        ])
+        await insertCombos(db.pool, [combo('all-red', [red]), combo('needs-blue', [red, blue])])
+      })
+
+      it('keeps a combo every piece of which is castable', async () => {
+        const found = await combosInIdentity(db.pool, ['R'])
+        expect(found.map((c) => c.id)).toContain('all-red')
+      })
+
+      it('drops a combo with a piece outside the identity', async () => {
+        const found = await combosInIdentity(db.pool, ['R'])
+        expect(found.map((c) => c.id)).not.toContain('needs-blue')
+      })
+
+      it('keeps it once the identity covers every piece', async () => {
+        const found = await combosInIdentity(db.pool, ['R', 'U'])
+        expect(found.map((c) => c.id)).toContain('needs-blue')
+      })
+
+      it('keeps a combo whose piece is not a known card', async () => {
+        // Deliberate: the filter can only reject a piece it can find, and this
+        // change is meant to move less data, not to change which combos exist.
+        // `elsewhere` is built from a bare uuid with no card row.
+        expect((await combosInIdentity(db.pool, ['R'])).map((c) => c.id)).toContain('elsewhere')
+      })
     })
 
     it('feeds the domain combo index, and degrees agree', async () => {

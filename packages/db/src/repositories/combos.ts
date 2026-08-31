@@ -1,4 +1,4 @@
-import type { Combo, ComboId, OracleId } from '@roundtable/domain'
+import type { Color, Combo, ComboId, OracleId } from '@roundtable/domain'
 import type { Pool } from 'pg'
 
 /**
@@ -81,5 +81,42 @@ export const combosWithin = async (pool: Pool, accepted: readonly OracleId[]): P
 
 export const allCombos = async (pool: Pool): Promise<Combo[]> => {
   const { rows } = await pool.query<ComboRow>('SELECT * FROM combos ORDER BY combo_id')
+  return rows.map(toCombo)
+}
+
+/**
+ * Combos every piece of which is castable in a colour identity.
+ *
+ * `allCombos` pulls the whole table — 108,046 rows, 72 MB on the wire — and the
+ * deck context did that on EVERY recommendation and analysis request. Against a
+ * database on the same machine that is merely wasteful; against a metered
+ * managed Postgres it exhausted a 5 GB monthly transfer quota in about sixty
+ * requests and took the deployment down.
+ *
+ * Colour identity is the right filter because it is the same rule the deck is
+ * built under (doc 03 §3.1): a combo with a single blue piece can never be
+ * assembled in a mono-red deck, so scoring it is work whose answer is fixed.
+ * Measured: mono-red 72 MB -> 2.1 MB, Mardu 72 MB -> 16.8 MB.
+ *
+ * A piece with NO card row is kept, not dropped: the `NOT EXISTS` can only
+ * reject a piece it can find, so an unknown piece has no identity to be outside
+ * of. That is deliberate — it is exactly what `allCombos` did — and this change
+ * is meant to move less data, not to quietly change which combos exist.
+ */
+export const combosInIdentity = async (
+  pool: Pool,
+  identity: readonly Color[],
+): Promise<Combo[]> => {
+  const { rows } = await pool.query<ComboRow>(
+    `SELECT * FROM combos co
+      WHERE NOT EXISTS (
+        SELECT 1
+          FROM unnest(co.pieces) AS piece
+          JOIN cards ca ON ca.oracle_id = piece
+         WHERE NOT (ca.color_identity <@ $1::char(1)[])
+      )
+      ORDER BY combo_id`,
+    [identity],
+  )
   return rows.map(toCombo)
 }

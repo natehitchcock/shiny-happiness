@@ -253,3 +253,35 @@ describe('the commander search runs on a countdown, like the filter', () => {
     expect(found.className).toContain('problem')
   })
 })
+
+/** The Start screen is what `App` renders when no deck is saved. */
+const showStart = async (): Promise<void> => {
+  render(<App />)
+  await waitFor(() => expect(screen.getByLabelText('Commander')).toBeDefined())
+}
+
+describe('the landing page names the product', () => {
+  it('puts the wordmark in the corner, as the page heading', async () => {
+    await showStart()
+
+    // Arriving at a page with no name on it and then finding one after the
+    // first click reads as two different products.
+    const wordmark = document.querySelector('.start-masthead .wordmark')
+    expect(wordmark?.textContent).toBe('Lotus Wizard')
+    expect(wordmark?.tagName).toBe('H1')
+  })
+
+  it('has exactly one h1, so the page has one answer to "what is this"', async () => {
+    await showStart()
+    expect(document.querySelectorAll('h1')).toHaveLength(1)
+    // The pitch is the subheading under the name, not a rival for it.
+    expect(screen.getByText('Build a Commander deck around combos and synergies').tagName).toBe(
+      'H2',
+    )
+  })
+
+  it('says what to do next in one short line', async () => {
+    await showStart()
+    expect(screen.getByText('Pick a commander to begin.')).toBeDefined()
+  })
+})

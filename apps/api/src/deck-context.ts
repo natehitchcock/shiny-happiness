@@ -1,12 +1,12 @@
 import type { Pool } from 'pg'
 import {
-  allCombos,
   findEligibleCards,
   getCards,
   liveSnapshotId,
   printingFactsForAll,
   type PrintingFacts,
 } from '@roundtable/db'
+import { cachedCombosInIdentity } from './combo-cache.js'
 import type {
   Card,
   ComboIndex,
@@ -73,12 +73,22 @@ const toPoolCard = (card: Card, facts: PrintingFacts | undefined): PoolCard => (
 export const loadDeckContext = async (pool: Pool, deck: Deck): Promise<DeckContext> => {
   const missing: { source: string; reason: string }[] = []
 
-  const [eligible, combos, snapshotId, printingFacts] = await Promise.all([
+  /*
+   * The snapshot id is read FIRST, on its own, because it is the combo cache's
+   * freshness key — the other three cannot start until it is known.
+   *
+   * It is one small row, and the alternative is fetching combos before knowing
+   * whether the held set is still good, which is the whole cost this avoids.
+   */
+  const snapshotId = await liveSnapshotId(pool)
+
+  const [eligible, combos, printingFacts] = await Promise.all([
     findEligibleCards(pool, deck.colorIdentity, {
       excludeUniversesBeyond: deck.excludeUniversesBeyond,
     }),
-    allCombos(pool),
-    liveSnapshotId(pool),
+    // Not every combo, and not on every request. See `combo-cache`: the
+    // unfiltered per-request query moved 72 MB and took production down.
+    cachedCombosInIdentity(pool, deck.colorIdentity, snapshotId),
     printingFactsForAll(pool),
   ])
 

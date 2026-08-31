@@ -450,112 +450,125 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
   }
 
   return (
-    <div className="start">
-      <h1>
-        Build a Commander deck around
-        <br />
-        the combos it can actually assemble.
-      </h1>
-      <p>Pick a commander. Every suggestion tells you why it is there.</p>
+    <>
+      {/* The same wordmark, in the same corner, as the workspace masthead.
+          Arriving at a page with no name on it and then finding one after the
+          first click reads as two different products. */}
+      <header className="start-masthead">
+        <h1 className="wordmark">
+          Lotus <span>Wizard</span>
+        </h1>
+      </header>
+      <div className="start">
+        {/* h2, not h1: the wordmark above is the page's heading, exactly as it
+            is in the workspace. Two h1s would be two answers to "what is this
+            page". */}
+        <h2>Build a Commander deck around combos and synergies</h2>
+        <p>Pick a commander to begin.</p>
 
-      <div className="field">
-        <label htmlFor="commander">Commander</label>
-        <div className="filter-bar">
-          <input
-            id="commander"
-            type="text"
-            value={chosen?.name ?? term}
-            placeholder="Search legendary creatures…"
-            onChange={(e) => {
-              setChosen(null)
-              setTerm(e.target.value)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') setQuery(term)
-            }}
-          />
-          <SearchButton
-            what="search"
-            onRun={() => setQuery(term)}
-            remaining={auto.remaining}
-            restartKey={term}
-            busy={search === 'searching'}
-          />
-        </div>
-      </div>
-
-      {chosen === null ? (
-        <div className="start-results">
-          {/* No "searching…" line here: the button IS the spinner, and saying
-              it in two places is one place too many. */}
-          {search === 'failed' ? (
-            <p className="problem">
-              {searchError} — the card search is not answering, so no commander can be picked yet.
-            </p>
-          ) : null}
-
-          {search === 'done' && results.length === 0 ? (
-            <p className="problem">
-              Nothing found.
-              <span className="note">
-                {' '}
-                No legendary creature matches “{query}”.
-                {noUB ? ' Universes Beyond cards are excluded — try unchecking that.' : ''}
-              </span>
-            </p>
-          ) : null}
-
-          {results.slice(0, 8).map((c) => (
-            <CardRow
-              key={c.oracleId}
-              card={c}
-              actions={[{ label: 'Choose', kind: 'accept', onClick: () => setChosen(c) }]}
+        <div className="field">
+          <label htmlFor="commander">Commander</label>
+          <div className="filter-bar">
+            <input
+              id="commander"
+              type="text"
+              value={chosen?.name ?? term}
+              placeholder="Search legendary creatures…"
+              onChange={(e) => {
+                setChosen(null)
+                setTerm(e.target.value)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') setQuery(term)
+              }}
             />
-          ))}
+            <SearchButton
+              what="search"
+              onRun={() => setQuery(term)}
+              remaining={auto.remaining}
+              restartKey={term}
+              busy={search === 'searching'}
+            />
+          </div>
         </div>
-      ) : null}
 
-      <div className="row">
-        <div className="field" style={{ flex: 1 }}>
-          <label htmlFor="archetype">Archetype</label>
-          <select id="archetype" value={archetype} onChange={(e) => setArchetype(e.target.value)}>
-            {ARCHETYPES.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
+        {chosen === null ? (
+          <div className="start-results">
+            {/* No "searching…" line here: the button IS the spinner, and saying
+              it in two places is one place too many. */}
+            {search === 'failed' ? (
+              <p className="problem">
+                {searchError} — the card search is not answering, so no commander can be picked yet.
+              </p>
+            ) : null}
+
+            {search === 'done' && results.length === 0 ? (
+              <p className="problem">
+                Nothing found.
+                <span className="note">
+                  {' '}
+                  No legendary creature matches “{query}”.
+                  {noUB ? ' Universes Beyond cards are excluded — try unchecking that.' : ''}
+                </span>
+              </p>
+            ) : null}
+
+            {results.slice(0, 8).map((c) => (
+              <CardRow
+                key={c.oracleId}
+                card={c}
+                actions={[{ label: 'Choose', kind: 'accept', onClick: () => setChosen(c) }]}
+              />
             ))}
-          </select>
+          </div>
+        ) : null}
+
+        <div className="row">
+          <div className="field" style={{ flex: 1 }}>
+            <label htmlFor="archetype">Archetype</label>
+            <select id="archetype" value={archetype} onChange={(e) => setArchetype(e.target.value)}>
+              {ARCHETYPES.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label htmlFor="bracket">Bracket</label>
+            <select
+              id="bracket"
+              value={bracket}
+              onChange={(e) => setBracket(Number(e.target.value))}
+            >
+              {[1, 2, 3, 4, 5].map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-        <div className="field" style={{ flex: 1 }}>
-          <label htmlFor="bracket">Bracket</label>
-          <select id="bracket" value={bracket} onChange={(e) => setBracket(Number(e.target.value))}>
-            {[1, 2, 3, 4, 5].map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </div>
+
+        <label className="check">
+          <input type="checkbox" checked={noUB} onChange={(e) => setNoUB(e.target.checked)} />
+          Exclude Universes Beyond cards
+        </label>
+
+        <button
+          className="primary"
+          disabled={chosen === null || busy}
+          onClick={create}
+          // A disabled button with no explanation is a dead end. This one is
+          // disabled for exactly one reason, so it can say so.
+          title={chosen === null ? 'Pick a commander first' : 'Create this deck'}
+        >
+          {busy ? 'Creating…' : 'Start building'}
+        </button>
+        {chosen === null ? <p className="note">Pick a commander to continue.</p> : null}
+        {error !== null ? <p className="problem">{error}</p> : null}
       </div>
-
-      <label className="check">
-        <input type="checkbox" checked={noUB} onChange={(e) => setNoUB(e.target.checked)} />
-        Exclude Universes Beyond cards
-      </label>
-
-      <button
-        className="primary"
-        disabled={chosen === null || busy}
-        onClick={create}
-        // A disabled button with no explanation is a dead end. This one is
-        // disabled for exactly one reason, so it can say so.
-        title={chosen === null ? 'Pick a commander first' : 'Create this deck'}
-      >
-        {busy ? 'Creating…' : 'Start building'}
-      </button>
-      {chosen === null ? <p className="note">Pick a commander to continue.</p> : null}
-      {error !== null ? <p className="problem">{error}</p> : null}
-    </div>
+    </>
   )
 }
 

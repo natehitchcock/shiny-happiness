@@ -346,13 +346,23 @@ select {
   font: inherit;
 }
 
+/* The landing page's own masthead. Shares `.wordmark` with the workspace, so
+   the name is in the same corner in the same type before and after the first
+   click; only the bar around it differs, because there is nothing else in it
+   yet to rule off. */
+.start-masthead {
+  padding: calc(var(--step) * 2) calc(var(--step) * 3);
+}
+
 .start {
   max-width: 560px;
-  margin: 12vh auto;
+  /* Less top margin than before: the masthead now occupies the space the
+     12vh was holding open. */
+  margin: 8vh auto;
   padding: 0 calc(var(--step) * 2);
 }
 
-.start h1 {
+.start h2 {
   font-family: var(--display);
   font-weight: 600;
   font-size: 2rem;
