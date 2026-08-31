@@ -1242,6 +1242,299 @@ const Preview = ({
   )
 }
 
+/* ------------------------------------------------------------ bracket check */
+
+/**
+ * The bracket surface (doc 03 §3.2, ADR-0018).
+ *
+ * Wizards publishes a per-bracket number for ONE of the five bracket
+ * barometers — Game Changers. The tutor restriction was withdrawn in October
+ * 2025, and mass land denial, extra turns and two-card infinites are named in
+ * prose with no permitted/forbidden value. So `assessed` is null and will stay
+ * null, and nothing here may render a verdict.
+ *
+ * That leaves two ways to be wrong, and both were rejected:
+ *
+ *   "Bracket 3 ✓"  — a lie. It would report one fifth of a check as the whole.
+ *   nothing at all — throws away the fifth that IS checkable, and leaves the
+ *                    Bracket selector on the landing page still doing nothing.
+ *
+ * What is drawn instead is arithmetic and an absence, side by side: the count
+ * the deck holds over the allowance the source publishes, then the four
+ * barometers BY NAME each marked as having no rule to check against. The four
+ * are rendered from the server's own nulls rather than from a list in this
+ * file — a client-side table of barometers would be the retired ruleset
+ * AGENTS.md §8 rejects, and would keep saying "no published rule" for a
+ * barometer Wizards had since published.
+ *
+ * Every claim opens (P4): the count expands into the card names, each of which
+ * opens the card; the allowance carries the URL it was read from and the date.
+ */
+
+/**
+ * The four barometers, in the order the source names them.
+ *
+ * LABELS only. Every value is read from `rules.targetBracket`, so this list
+ * cannot assert what any bracket permits — which is the point.
+ */
+const BAROMETERS = [
+  { key: 'twoCardInfinites', label: 'Two-card infinites' },
+  { key: 'extraTurnChaining', label: 'Extra turns' },
+  { key: 'massLandDenial', label: 'Mass land denial' },
+  { key: 'tutorDensity', label: 'Tutors' },
+] as const
+
+/**
+ * What the target bracket allows, or `null` when we cannot say.
+ *
+ * Preference order matters. `rules.targetBracket` is the published entry and is
+ * present whatever the deck holds. A violation names the allowance too, but
+ * ONLY when the deck has broken it — reading it alone would leave a legal deck
+ * able to say how many Game Changers it holds and not how many it may.
+ *
+ * There is deliberately no third fallback. A table of allowances in this file
+ * is a rejected PR (AGENTS.md §8), and "0" would be a fabricated rule.
+ */
+const gameChangerAllowance = (bracket: api.BracketReport): number | 'unlimited' | null =>
+  bracket.rules?.targetBracket?.gameChangersAllowed ?? bracket.violations[0]?.allowed ?? null
+
+/** `Bracket 3 (Upgraded)`, or just `Bracket 3` when the name was not sent. */
+const bracketNoun = (bracket: api.BracketReport): string => {
+  const name = bracket.rules?.targetBracket?.name
+  return name === undefined || name === null
+    ? `Bracket ${String(bracket.target)}`
+    : `Bracket ${String(bracket.target)} (${name})`
+}
+
+/**
+ * The chip in the masthead.
+ *
+ * Doc 03 §3.2 asks the header chip to carry the overage. It carries the count
+ * in every state, not only the failing one, because a chip that appears only
+ * when something is wrong makes its own absence read as a pass — which is the
+ * verdict this feature is not allowed to give.
+ *
+ * The over state is rust AND a marker glyph AND the numbers themselves. Rust
+ * and sage are not separable under deuteranopia (`packages/ui/src/tokens.ts`),
+ * so colour is never the only signal here.
+ */
+const BracketChip = ({
+  bracket,
+  onOpen,
+}: {
+  bracket: api.BracketReport
+  onOpen: () => void
+}): React.JSX.Element => {
+  const held = bracket.gameChangers.length
+  const allowed = gameChangerAllowance(bracket)
+  const over = bracket.violations.length > 0
+
+  const shown =
+    bracket.rules === null
+      ? 'NOT CHECKED'
+      : allowed === null
+        ? `${String(held)} GAME CHANGERS`
+        : allowed === 'unlimited'
+          ? `${String(held)} GAME CHANGERS · NO LIMIT`
+          : `${String(held)}/${String(allowed)} GAME CHANGERS`
+
+  // Spelled out rather than read as the abbreviation on screen: "3/3" is a
+  // date to a screen reader, and "BRACKET" in capitals can be spelled letter
+  // by letter.
+  const spoken =
+    bracket.rules === null
+      ? 'the Game Changers check is unavailable'
+      : allowed === null
+        ? plural(held, 'Game Changer')
+        : allowed === 'unlimited'
+          ? `${plural(held, 'Game Changer')}, and this bracket sets no limit`
+          : `${plural(held, 'Game Changer')} of ${String(allowed)} allowed`
+
+  return (
+    <button
+      className="bracket-chip"
+      data-over={over}
+      onClick={onOpen}
+      aria-label={`Bracket ${String(bracket.target)}: ${spoken}. Open the bracket check.`}
+    >
+      {over ? (
+        <span className="bracket-mark" aria-hidden="true">
+          !
+        </span>
+      ) : null}
+      <span className="meta">
+        BRACKET {bracket.target} · {shown}
+      </span>
+    </button>
+  )
+}
+
+/**
+ * The "Bracket check" panel in the analysis rail.
+ *
+ * `reason` is the server's own `bracket-assessment` sentence, not a paragraph
+ * written here. Two copies of the same disclaimer drift, and the server's is
+ * the one that changes when the check does — it also swaps itself for the
+ * loader's error when the corpus carries no Game Changers, which is a
+ * different missing thing and needs a different sentence.
+ */
+const BracketCheck = ({
+  bracket,
+  reason,
+  cards,
+  onInspect,
+  open,
+  onOpenChange,
+  headingRef,
+}: {
+  bracket: api.BracketReport
+  reason: string | undefined
+  cards: ReadonlyMap<string, Card>
+  onInspect: (oracleId: string) => void
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  headingRef: React.RefObject<HTMLHeadingElement | null>
+}): React.JSX.Element => {
+  const held = bracket.gameChangers.length
+  const allowed = gameChangerAllowance(bracket)
+  const published = bracket.rules?.targetBracket
+  const toggleRef = useRef<HTMLButtonElement>(null)
+
+  return (
+    <div
+      className="bracket-check"
+      onKeyDown={(e) => {
+        if (e.key !== 'Escape' || !open) return
+        // Consumed here so the innermost open thing is the one that closes:
+        // without this the same keypress also reaches the document listeners
+        // that dismiss the deck menu and any pinned hint.
+        e.stopPropagation()
+        onOpenChange(false)
+        // Focus would otherwise be left on a list item that no longer exists,
+        // which drops a keyboard user back at the top of the document.
+        toggleRef.current?.focus()
+      }}
+    >
+      <h2 style={{ marginTop: '1.25rem' }} tabIndex={-1} ref={headingRef}>
+        Bracket check
+      </h2>
+
+      {bracket.rules === null ? (
+        <p className="note">
+          The Game Changers allowance could not be read, so nothing is checked.
+        </p>
+      ) : (
+        <>
+          {/* The server's sentence, not one assembled here: it already reads
+              "Bracket 3 (Upgraded) allows 3 Game Changers; this deck has 4."
+              and re-deriving it would put the arithmetic in two places. */}
+          {bracket.violations.map((v) => (
+            <p className="problem" key={v.flag}>
+              {v.message}
+            </p>
+          ))}
+          {bracket.violations.length === 0 ? (
+            <p className="note">
+              {allowed === null
+                ? `This deck holds ${plural(held, 'Game Changer')}.`
+                : allowed === 'unlimited'
+                  ? `${bracketNoun(bracket)} sets no limit on Game Changers; this deck holds ${String(held)}.`
+                  : `${bracketNoun(bracket)} allows ${plural(allowed, 'Game Changer')}; this deck holds ${String(held)}.`}
+            </p>
+          ) : null}
+        </>
+      )}
+
+      {/* "3 Game Changers" that cannot be expanded into WHICH three is an
+          unopenable claim (P4). The list opens by default when the deck is
+          over its allowance — a problem should arrive with its evidence. */}
+      {held > 0 ? (
+        <>
+          <button
+            className="bracket-toggle"
+            ref={toggleRef}
+            aria-expanded={open}
+            aria-controls="bracket-changers"
+            onClick={() => onOpenChange(!open)}
+          >
+            <span className="bracket-caret" aria-hidden="true">
+              {open ? '▾' : '▸'}
+            </span>
+            {plural(held, 'Game Changer')} in this deck
+          </button>
+          {open ? (
+            <ul className="bracket-changers" id="bracket-changers">
+              {bracket.gameChangers.map((id) => (
+                <li key={id}>
+                  <button className="as-link" onClick={() => onInspect(id)}>
+                    {cards.get(id)?.name ?? id.slice(0, 8)}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      ) : null}
+
+      {/*
+       * The four-fifths that is not checkable, named rather than omitted.
+       *
+       * Rendered only when the published entry actually arrived. Drawing these
+       * rows from an absent `targetBracket` would be asserting "no published
+       * rule" from having received no data, which is the same mistake as
+       * asserting a pass.
+       */}
+      {published === undefined || published === null ? null : (
+        <ul className="bracket-barometers">
+          {BAROMETERS.map(({ key, label }) => {
+            const value = published[key]
+            return (
+              <li key={key}>
+                <span className="bracket-barometer">{label}</span>
+                <span className="bracket-nil">
+                  {/* A value here would mean Wizards had published one — and
+                      this app still has no check for it, so it says so rather
+                      than letting a rule imply the deck was measured. */}
+                  {value === null ? 'no published rule' : `${value}, not checked here`}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      {reason === undefined ? null : (
+        <p className="note bracket-why">
+          {/* Joined with a dash, not a full stop: the server's reason is a
+              sentence FRAGMENT and begins lower-case, so "No bracket assessed.
+              only the Game Changers…" reads as a typo rather than a clause. */}
+          <strong>No bracket assessed</strong> — {reason}
+        </p>
+      )}
+
+      {bracket.rules === null ? null : (
+        <p className="note bracket-source">
+          Allowance read from{' '}
+          <a href={bracket.rules.sourceUrl} target="_blank" rel="noreferrer">
+            {hostOf(bracket.rules.sourceUrl)}
+          </a>{' '}
+          on {bracket.rules.retrievedAt}.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** The host of a URL, for link text. The full URL stays on the `href`. */
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url).host
+  } catch {
+    // Not a URL we can parse; show it whole rather than an empty link.
+    return url
+  }
+}
+
 /**
  * The mana curve, actual against the archetype's target.
  *
@@ -2184,6 +2477,35 @@ export const Workspace = ({
   const [basics, setBasics] = useState<api.Card[]>([])
   const [importing, setImporting] = useState(false)
   const [tuningTargets, setTuningTargets] = useState(false)
+  /**
+   * Whether the Game Changers list is expanded.
+   *
+   * `null` is "the user has not said", which is not the same as closed: the
+   * list then follows the deck and opens itself when the deck is over its
+   * allowance, so the offending cards arrive with the complaint. Once the user
+   * has toggled it, their choice wins — including closing it while over.
+   */
+  const [bracketOpen, setBracketOpen] = useState<boolean | null>(null)
+  const bracketHeadingRef = useRef<HTMLHeadingElement>(null)
+  /**
+   * The chip's "why", opened.
+   *
+   * A claim the reader cannot interrogate is not a reason (P4), and on a phone
+   * the panel is a screen and a half below the masthead. Focus moves, not just
+   * the scroll position — a keyboard user who activates the chip and is left
+   * at the top of the document has been told nothing.
+   */
+  const revealBracket = (): void => {
+    setBracketOpen(true)
+    const heading = bracketHeadingRef.current
+    if (heading === null) return
+    // Deliberately not `behavior: 'smooth'`: an instant jump needs no
+    // prefers-reduced-motion guard and there is nothing to watch on the way.
+    // Optional call because jsdom does not implement `scrollIntoView`, and the
+    // focus move below is the half a keyboard user actually depends on.
+    heading.scrollIntoView?.({ block: 'nearest' })
+    heading.focus()
+  }
   const [hideSettledRoles, setHideSettledRoles] = useState(false)
   /**
    * What saving a target actually did, in words (doc 16).
@@ -3104,6 +3426,13 @@ export const Workspace = ({
         />
         <ProgressBar phase={pipeline.phase} progress={pipeline.progress} label={pipeline.label} />
         <span className="meta deck-count">{deckSize} / 100 CARDS</span>
+        {/* The bracket the builder chose was printed here as a bare number and
+            connected to nothing. It now carries the one check the format
+            publishes a rule for, and opens the panel that says what the other
+            four are (doc 03 §3.2). */}
+        {analysis?.bracket === undefined ? null : (
+          <BracketChip bracket={analysis.bracket} onOpen={revealBracket} />
+        )}
         <button className="act" onClick={() => setImporting(true)}>
           Import
         </button>
@@ -3808,6 +4137,26 @@ export const Workspace = ({
                   {analysis.archetype.assessed} ({Math.round(analysis.archetype.confidence * 100)}%
                   confidence) · avg mana value {analysis.curve.averageManaValue.toFixed(2)}
                 </p>
+
+                {analysis.bracket === undefined ? null : (
+                  <BracketCheck
+                    bracket={analysis.bracket}
+                    // The server's own account of what is missing. Looked up by
+                    // key rather than by position — `unavailable` also carries
+                    // data-source entries, and which of them are present varies
+                    // per deck (doc 10 §10.9).
+                    reason={
+                      analysis.unavailable.find((u) => u.key === 'bracket-assessment')?.reason
+                    }
+                    cards={cards}
+                    onInspect={open}
+                    // Open by default while the deck is over its allowance, and
+                    // whatever the user last chose after that.
+                    open={bracketOpen ?? analysis.bracket.violations.length > 0}
+                    onOpenChange={setBracketOpen}
+                    headingRef={bracketHeadingRef}
+                  />
+                )}
 
                 {analysis.deckCombos.length > 0 ? (
                   <>

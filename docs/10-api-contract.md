@@ -268,7 +268,12 @@ GET /api/v1/decks/:id/analysis
                                     // until every barometer has a rule (ADR-0018)
         violations: BracketViolation[],
         gameChangers: OracleId[],   // the deck's cards on Wizards' list
-        rules: { sourceUrl: string, retrievedAt: string } | null
+        rules: { sourceUrl: string, retrievedAt: string,
+                 // The TARGET bracket's published entry, whole. `violations`
+                 // names the allowance only when the deck breaks it, and the
+                 // four nulls are what lets a client say "the format publishes
+                 // no rule here" instead of naming the barometers itself.
+                 targetBracket: BracketRules | null } | null
       },
       deckCombos: Array<{ comboId, pieces: OracleId[], produces: ComboResult[] }>,
       legality: { legal: boolean, problems: LegalityProblem[] }

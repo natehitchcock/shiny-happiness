@@ -552,6 +552,45 @@ describeDb('API-02 contract', () => {
         expect(body.bracket.rules.sourceUrl).toMatch(/^https:\/\/magic\.wizards\.com\//)
         expect(body.bracket.rules.retrievedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/)
       })
+
+      it('carries the target bracket ENTRY, nulls included', async () => {
+        /*
+         * `violations` names the allowance only when the deck breaks it, so a
+         * deck inside its allowance could otherwise be told how many Game
+         * Changers it holds and never what it is allowed.
+         *
+         * The four nulls travel too, and they are the substance of ADR-0018:
+         * a client that receives them can say "the format publishes no rule
+         * here", which is a different claim from 'allowed'. A client that
+         * received only the number would have to name the other four
+         * barometers from memory — the hardcoded ruleset AGENTS.md §8 rejects.
+         */
+        const body = await deckHolding(3, 0)
+        expect(body.bracket.rules.targetBracket).toEqual({
+          bracket: 3,
+          name: 'Upgraded',
+          gameChangersAllowed: 3,
+          massLandDenial: null,
+          extraTurnChaining: null,
+          twoCardInfinites: null,
+          tutorDensity: null,
+        })
+      })
+
+      it('carries the entry of the bracket the DECK targets, not a fixed one', async () => {
+        // Reading bracket 3's row for every deck would tell a Bracket 1 builder
+        // they may run three Game Changers.
+        const body = await deckHolding(1, 0)
+        expect(body.bracket.rules.targetBracket.bracket).toBe(1)
+        expect(body.bracket.rules.targetBracket.gameChangersAllowed).toBe(0)
+      })
+
+      it('says "unlimited" at bracket 4 rather than a number', async () => {
+        // The difference between "room for more" and "no limit at all" is not
+        // recoverable from a count, and only this field carries it.
+        const body = await deckHolding(4, 4)
+        expect(body.bracket.rules.targetBracket.gameChangersAllowed).toBe('unlimited')
+      })
     })
 
     it('lists an assembled combo once both pieces are accepted', async () => {

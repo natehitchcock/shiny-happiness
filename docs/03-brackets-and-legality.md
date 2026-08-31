@@ -96,10 +96,28 @@ negotiated at the table, not by software.
 
 **Implemented so far:** the Game Changers count. `/decks/:id/analysis` returns
 `bracket.violations` for a deck over its target's allowance, `bracket.gameChangers`
-naming the cards, and `bracket.rules` carrying the source URL and retrieval date.
+naming the cards, and `bracket.rules` carrying the source URL, the retrieval date
+and the target bracket's published entry — the one allowance and the four nulls.
 `bracket.assessed` stays `null` — one barometer of five is not a verdict — and the
 `unavailable` entry says so. The mass-land-denial, extra-turn and two-card-infinite
 checks above wait on Wizards publishing a rule to check against.
+
+**And it is on screen.** The masthead chip carries the arithmetic in every state,
+not only the failing one — `BRACKET 3 · 4/3 GAME CHANGERS`, rust-bordered and
+marked when over — because a chip that appeared only on a violation would make
+its own absence read as the pass this system cannot give. It opens a **Bracket
+check** panel in the analysis rail which states the allowance, expands the count
+into the card names (each opening the card), lists the four barometers BY NAME
+against "no published rule", quotes the server's own account of why no bracket is
+assessed, and links the source URL with the date it was read. Nothing in it
+renders a tick, a "passes" or an assessed bracket; `apps/web/src/bracket.test.tsx`
+pins that as a property rather than trusting it.
+
+The four barometer rows are drawn from `bracket.rules.targetBracket`'s nulls, not
+from a list in the client: a barometer Wizards later publishes would appear on its
+own, and it would read "*value*, not checked here" — because this app has no check
+for it, and a rule shown without that qualifier implies the deck was measured
+against it.
 
 This is the correct behaviour for a rules framework that is explicitly a
 conversation aid rather than a ban list.

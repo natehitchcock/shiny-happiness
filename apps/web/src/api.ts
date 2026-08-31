@@ -405,6 +405,71 @@ export const getRecommendations = (
 ): Promise<Recommendations> =>
   request(`/decks/${id}/recommendations`, { method: 'POST', body: JSON.stringify(body) })
 
+/**
+ * One bracket rule the deck breaks (doc 03 §3.2).
+ *
+ * The counts travel beside the sentence so the interface can render the
+ * arithmetic — `4 / 3` — instead of parsing prose to find the numbers in it.
+ */
+export interface BracketViolation {
+  flag: string
+  bracket: number
+  allowed: number
+  actual: number
+  /** The offending cards, so the claim can be opened into names. */
+  cards: string[]
+  message: string
+}
+
+/**
+ * The target bracket's published entry, exactly as Wizards publishes it.
+ *
+ * Four of the five barometers are `null`, and `null` here means "the format
+ * publishes no rule", NOT "allowed" (ADR-0018). The distinction is the whole
+ * reason this arrives as data rather than as a client-side list: rendering a
+ * null says what is missing, and hardcoding the four names client-side would
+ * be the retired ruleset AGENTS.md §8 rejects.
+ *
+ * The permissions are typed as plain strings rather than the domain's union
+ * because every one of them is null today — narrowing a field nobody has seen
+ * a value for would be inventing the vocabulary Wizards has not published.
+ */
+export interface BracketRules {
+  bracket: number
+  name: string
+  gameChangersAllowed: number | 'unlimited'
+  massLandDenial: string | null
+  extraTurnChaining: string | null
+  twoCardInfinites: string | null
+  tutorDensity: string | null
+}
+
+export interface BracketReport {
+  /** The bracket the builder is aiming at. Their choice, never enforced. */
+  target: number
+  /**
+   * What the deck reads as — and it is `null`, permanently for now.
+   *
+   * One barometer of five is not a verdict (ADR-0018), so nothing in the
+   * interface may render a bracket pass. The `bracket-assessment` entry in
+   * `Analysis.unavailable` says which part is missing, in the server's own
+   * words, and that sentence is what the panel shows.
+   */
+  assessed: number | null
+  violations: BracketViolation[]
+  /** The deck's cards on Wizards' Game Changers list, as oracle ids. */
+  gameChangers: string[]
+  rules: {
+    sourceUrl: string
+    retrievedAt: string
+    /**
+     * Optional: a server from before this field sends provenance only, and
+     * the panel then falls back to the allowance a violation carries.
+     */
+    targetBracket?: BracketRules | null
+  } | null
+}
+
 export interface Analysis {
   counts: { total: number; byRole: Record<string, number> }
   targets: {
@@ -453,6 +518,14 @@ export interface Analysis {
     }[]
   }
   legality: { legal: boolean; problems: { kind: string; oracleId?: string }[] }
+  /**
+   * What the bracket system can and cannot say about this deck (ADR-0018).
+   *
+   * Optional because a server from before DATA-05 does not send it, and the
+   * panel must then say nothing rather than invent a check — the same reason
+   * `images` is optional on `hydrate`.
+   */
+  bracket?: BracketReport
   deckCombos: { comboId: string; pieces: string[]; produces: string[] }[]
   prices: {
     deckTotalUsd: number

@@ -2017,3 +2017,145 @@ select {
 .group.collapsed .group-head {
   opacity: 0.65;
 }
+
+/* ---------------------------------------------------------- bracket check */
+
+/*
+ * The bracket chip and its panel (doc 03 §3.2, ADR-0018).
+ *
+ * The alarm state is rust, and rust is NEVER the only signal: the chip also
+ * gains a `!` marker and prints the two numbers, because rust and sage sit at
+ * ΔE 4.5 under deuteranopia and `packages/ui/src/tokens.ts` requires a second
+ * signal anywhere they are used.
+ *
+ * The chip's own words are NOT rust. rust on ink is 4.20:1 — fine for the
+ * marker, which is a non-text indicator at a 3:1 floor, and under the 4.5:1
+ * body-text floor for a 0.72rem label. The border and the glyph carry the
+ * alarm; the label carries the numbers, in the `--parchment-dim` every other
+ * `.masthead .meta` uses (asserted 4.5:1 on `--ink-2`).
+ *
+ * `flex-wrap` and `max-width` because the widest state — `BRACKET 4 · 3 GAME
+ * CHANGERS · NO LIMIT` — is 298 px, and a 360 px masthead has 312 px of room.
+ * That is close enough that a slightly larger default font would push a
+ * horizontal scrollbar onto the whole document.
+ */
+.bracket-chip {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  max-width: 100%;
+  gap: calc(var(--step) * 0.5);
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: calc(var(--step) * 0.5) var(--step);
+  text-align: left;
+}
+
+.bracket-chip:hover {
+  background: var(--ink-3);
+}
+
+.bracket-chip[data-over='true'] {
+  border-color: var(--rust);
+  border-left-width: 3px;
+}
+
+.bracket-mark {
+  color: var(--rust);
+  font-weight: 700;
+}
+
+.bracket-check {
+  margin-bottom: var(--step);
+}
+
+/* The heading takes focus when the chip is used, so it needs a ring like any
+   other focus target — it is not reachable by Tab and would otherwise move
+   focus somewhere invisible. */
+.bracket-check h2:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+.bracket-toggle {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--step) * 0.5);
+  width: 100%;
+  background: none;
+  border: none;
+  padding: calc(var(--step) * 0.5) 0;
+  color: var(--parchment);
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.bracket-toggle:hover {
+  color: var(--brass);
+}
+
+.bracket-caret {
+  color: var(--parchment-dim);
+  font-size: 0.7rem;
+}
+
+.bracket-changers {
+  list-style: none;
+  margin: 0 0 var(--step);
+  padding-left: calc(var(--step) * 2);
+  border-left: 1px solid var(--rule);
+}
+
+.bracket-changers li {
+  padding: 1px 0;
+}
+
+.bracket-changers .as-link {
+  font-size: 0.78rem;
+}
+
+/*
+ * The four barometers with no rule to check against.
+ *
+ * Given real rows rather than a clause in a paragraph: they are four fifths of
+ * the bracket system, and a reader who skims prose would come away believing
+ * the Game Changers count was the whole check.
+ */
+.bracket-barometers {
+  list-style: none;
+  margin: var(--step) 0;
+  padding: 0;
+  font-size: 0.7rem;
+  border-top: 1px solid var(--rule);
+}
+
+.bracket-barometers li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--step);
+  padding: 2px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.bracket-barometer {
+  color: var(--parchment-dim);
+}
+
+.bracket-nil {
+  color: var(--parchment-dim);
+  font-style: italic;
+  text-align: right;
+}
+
+.bracket-why strong {
+  color: var(--parchment);
+}
+
+/* Where the number came from and when. Underlined rather than coloured: a
+   steel or brass link at this size would sit under the 4.5:1 text floor, and
+   parchment on ink is asserted at it. */
+.bracket-source a {
+  color: var(--parchment);
+  text-decoration: underline;
+}

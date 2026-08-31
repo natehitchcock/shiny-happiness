@@ -63,6 +63,17 @@ and the rest were replaced by prose turn counts. `bracket.assessed` is still
 in the repository at all — Scryfall's `game_changer` boolean carries it, and it
 matched the Wizards page card-for-card (53) on 2026-08-30.
 
+**And the builder can see it.** The masthead chip reads `BRACKET 3 · 4/3 GAME
+CHANGERS` and opens a **Bracket check** panel that names which Game Changers the
+deck holds, lists the four barometers it cannot check against "no published
+rule", and links the source URL and the date it was read. The chip shows the
+count in every state, because one that appeared only on a violation would make
+its own absence read as a pass. Nothing renders a tick or an assessed bracket.
+`bracket.rules` now also carries the target bracket's published entry, so a deck
+INSIDE its allowance can still be told what the allowance is — `violations` names
+it only when the deck breaks it, and a table of allowances in the client is a
+rejected PR (AGENTS.md §8). New optional field, so no ADR (R2). See doc 03 §3.2.
+
 > **A card re-ingest is required** before bracket checks answer. Migration `0011`
 > defaults every existing row to `game_changer = false`, and a corpus with no Game
 > Changers is refused by `loadBracketRules` rather than passing every deck

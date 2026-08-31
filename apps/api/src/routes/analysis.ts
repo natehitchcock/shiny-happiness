@@ -264,7 +264,27 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
         // Where the allowance came from and when, carried to the client so the
         // provenance is visible in the product and not only in the repo.
         rules: bracketRules.ok
-          ? { sourceUrl: bracketRules.value.sourceUrl, retrievedAt: bracketRules.value.retrievedAt }
+          ? {
+              sourceUrl: bracketRules.value.sourceUrl,
+              retrievedAt: bracketRules.value.retrievedAt,
+              /*
+               * The target bracket's published entry, sent WHOLE.
+               *
+               * `violations` carries the allowance only when the deck BREAKS
+               * it, so a deck inside its allowance could be told how many Game
+               * Changers it holds and not what it is allowed — and at bracket 4
+               * or 5 could not tell "room for more" from "no limit at all".
+               *
+               * Whole rather than just the one number the check uses, because
+               * the four nulls are the substance of ADR-0018. A client that
+               * renders them says "the format publishes no rule here"; a client
+               * handed only `gameChangersAllowed` would have to name the other
+               * four barometers from memory, which is the hardcoded ruleset
+               * AGENTS.md §8 rejects. If Wizards ever publishes one of them it
+               * appears here with no client change.
+               */
+              targetBracket: bracketRules.value.byBracket.get(deck.targetBracket) ?? null,
+            }
           : null,
       },
       prices: {
