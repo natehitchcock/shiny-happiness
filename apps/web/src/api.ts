@@ -13,6 +13,13 @@ export interface Card {
   typeLine: string
   types: string[]
   oracleText: string
+  /**
+   * The rules text of each face, for a multi-faced card. Absent for a card with
+   * one face, and for any row ingested before the column existed — the
+   * boundary between faces is unrecoverable from `oracleText`, which joins them
+   * with the newline that also separates two abilities of one face.
+   */
+  oracleTextFaces?: string[]
   /** Printed values, as text — Magic prints `*` and `1+*`. */
   power: string | null
   toughness: string | null

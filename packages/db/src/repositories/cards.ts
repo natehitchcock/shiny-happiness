@@ -12,6 +12,7 @@ interface CardRow {
   readonly type_line: string
   readonly types: string[]
   readonly oracle_text: string
+  readonly oracle_text_faces: string[] | null
   readonly power: string | null
   readonly toughness: string | null
   readonly loyalty: string | null
@@ -44,6 +45,11 @@ const toCard = (row: CardRow): Card => ({
   typeLine: row.type_line,
   types: row.types as Card['types'],
   oracleText: row.oracle_text,
+  // Null is not `[]`. A single-faced card has no faces to list; an empty array
+  // would claim it has zero, and the renderer keys the face rule off that.
+  ...(row.oracle_text_faces === null || row.oracle_text_faces === undefined
+    ? {}
+    : { oracleTextFaces: row.oracle_text_faces }),
   power: row.power,
   toughness: row.toughness,
   loyalty: row.loyalty,
@@ -87,6 +93,7 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
     type_line: c.typeLine,
     types: c.types,
     oracle_text: c.oracleText,
+    oracle_text_faces: c.oracleTextFaces ?? null,
     power: c.power,
     toughness: c.toughness,
     loyalty: c.loyalty,
@@ -111,12 +118,12 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
   const { rowCount } = await pool.query(
     `INSERT INTO cards (
        oracle_id, name, mana_cost, mana_value, color_identity, colors, produced_mana, type_line,
-       types, oracle_text, power, toughness, loyalty, power_num, toughness_num,
+       types, oracle_text, oracle_text_faces, power, toughness, loyalty, power_num, toughness_num,
        keywords, legality_commander, edhrec_rank,
        default_printing, roles, primary_role, universes_beyond,
        synergy_produces, synergy_wants)
      SELECT oracle_id, name, mana_cost, mana_value, color_identity, colors, produced_mana, type_line,
-            types, oracle_text, power, toughness, loyalty, power_num, toughness_num,
+            types, oracle_text, oracle_text_faces, power, toughness, loyalty, power_num, toughness_num,
             keywords, legality_commander, edhrec_rank,
             default_printing, roles, primary_role, universes_beyond,
             synergy_produces, synergy_wants
@@ -124,7 +131,7 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
          oracle_id uuid, name text, mana_cost text, mana_value real,
          color_identity char(1)[], colors char(1)[], produced_mana char(1)[],
          type_line text, types text[],
-         oracle_text text, power text, toughness text, loyalty text,
+         oracle_text text, oracle_text_faces text[], power text, toughness text, loyalty text,
          power_num integer, toughness_num integer,
          keywords text[], legality_commander text,
          edhrec_rank integer, default_printing uuid, roles text[], primary_role text,
@@ -135,6 +142,7 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
        colors = EXCLUDED.colors, produced_mana = EXCLUDED.produced_mana,
        type_line = EXCLUDED.type_line,
        types = EXCLUDED.types, oracle_text = EXCLUDED.oracle_text,
+       oracle_text_faces = EXCLUDED.oracle_text_faces,
        power = EXCLUDED.power, toughness = EXCLUDED.toughness,
        loyalty = EXCLUDED.loyalty, power_num = EXCLUDED.power_num,
        toughness_num = EXCLUDED.toughness_num,

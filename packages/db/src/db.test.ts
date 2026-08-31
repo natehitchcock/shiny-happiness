@@ -272,6 +272,40 @@ describeDb('packages/db against real PostgreSQL', () => {
       expect(back?.edhrecRank).toBe(7)
     })
 
+    it('round-trips the faces of a multi-faced card', async () => {
+      // The newline inside the second face is the point: it is an ability break
+      // within one face, and the array is what keeps it from being read as a
+      // second face. A column that flattened to text would lose exactly this.
+      const faces = ['Fire deals 2 damage.', 'Tap target permanent.\nDraw a card.']
+      const c = card('Fire // Ice', { oracleText: faces.join('\n'), oracleTextFaces: faces })
+      await upsertCards(db.pool, [c])
+      expect((await getCard(db.pool, c.oracleId))?.oracleTextFaces).toEqual(faces)
+    })
+
+    it('writes the faces onto a card that is already in the corpus', async () => {
+      // Not the same path as the test above, and this is the one that matters:
+      // the re-ingest that fills this column in meets 34k existing rows, so the
+      // faces arrive through ON CONFLICT DO UPDATE rather than through the
+      // INSERT. A column left out of that clause writes nothing for every card
+      // that already exists, which is all of them — and the insert-only test
+      // passes the whole time.
+      const id = uuid()
+      const faces = ['Fire deals 2 damage.', 'Tap target permanent.\nDraw a card.']
+      await upsertCards(db.pool, [card('Fire // Ice', { oracleId: id })])
+      await upsertCards(db.pool, [
+        card('Fire // Ice', { oracleId: id, oracleText: faces.join('\n'), oracleTextFaces: faces }),
+      ])
+      expect((await getCard(db.pool, id))?.oracleTextFaces).toEqual(faces)
+    })
+
+    it('reads a single-faced card back with no faces, not an empty list', async () => {
+      // NULL must not become `[]` on the way out: "one face" and "zero faces"
+      // are different claims, and the renderer rules a line off the difference.
+      const c = card('Sol Ring')
+      await upsertCards(db.pool, [c])
+      expect((await getCard(db.pool, c.oracleId))?.oracleTextFaces).toBeUndefined()
+    })
+
     it('round-trips a card with no printing resolved yet (ADR-0007)', async () => {
       const c = card('No Art Yet', { defaultPrinting: null })
       await upsertCards(db.pool, [c])

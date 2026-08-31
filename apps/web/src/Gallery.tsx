@@ -90,6 +90,30 @@ const FIXTURES: readonly CardView[] = [
     priceUsd: null,
   },
   {
+    /*
+     * A real split card, because it is the case the joined text cannot express.
+     * Ice has two abilities and Fire has one, so the string is three chunks with
+     * only the first boundary a face change — the whole reason the faces are
+     * carried separately. Here to be looked at: a face rule drawn in the wrong
+     * place still passes a test that only counts the rules.
+     */
+    oracleId: 'f6',
+    name: 'Fire // Ice',
+    manaCost: '{1}{R}',
+    manaValue: 4,
+    colorIdentity: ['U', 'R'],
+    typeLine: 'Instant // Instant',
+    oracleText:
+      'Fire deals 2 damage divided as you choose among one or two targets.\nTap target permanent.\nDraw a card.',
+    oracleTextFaces: [
+      'Fire deals 2 damage divided as you choose among one or two targets.',
+      'Tap target permanent.\nDraw a card.',
+    ],
+    primaryRole: 'removal',
+    priceUsd: 1.1,
+    reasons: ['Two spells on one card'],
+  },
+  {
     // Not a real card. Every mana symbol shape in one cost, including one the
     // parser cannot read — the point of this page is to be able to LOOK at the
     // awkward cases, and a hybrid that renders wrong is invisible in a test that

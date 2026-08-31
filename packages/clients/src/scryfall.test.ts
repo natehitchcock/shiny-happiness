@@ -114,6 +114,36 @@ describe('toCard', () => {
     expect(card?.oracleText.length).toBeGreaterThan(0)
   })
 
+  it('keeps the face boundary of a split card, which the join destroys', () => {
+    // Fire // Ice is the case that proves it cannot be recovered afterwards:
+    // Fire has one ability, Ice has two, and the join separates all three with
+    // the same newline. Splitting `oracleText` would rule a line in the wrong
+    // place; only the faces know where the boundary is.
+    const card = toCard(byName('Fire // Ice'))
+
+    expect(card?.oracleTextFaces).toHaveLength(2)
+    expect(card?.oracleTextFaces?.[0]).toMatch(/^Fire deals/)
+    expect(card?.oracleTextFaces?.[1]).toContain('\n')
+    // The invariant every consumer relies on: the faces reproduce the joined
+    // text exactly, so nothing derived from `oracleText` sees anything new.
+    expect(card?.oracleTextFaces?.join('\n')).toBe(card?.oracleText)
+    // And the joined text is still three newline-separated chunks, unmarked —
+    // no sentinel was smuggled into the field the synergy regexes read.
+    expect(card?.oracleText.split('\n')).toHaveLength(3)
+    expect(card?.oracleText).not.toContain('//')
+  })
+
+  it('leaves a single-faced card with no faces at all', () => {
+    // Not `[]`. "One face" and "not known" are both nothing to say, and an
+    // empty array would instead claim the card has zero faces.
+    expect(toCard(byName('Sol Ring'))?.oracleTextFaces).toBeUndefined()
+  })
+
+  it('keeps the faces of an adventure, which are halves of one physical card', () => {
+    const raw = cards.find((c) => c.name.startsWith('Bonecrusher Giant'))!
+    expect(toCard(raw)?.oracleTextFaces).toHaveLength(2)
+  })
+
   it('maps a transforming double-faced card', () => {
     const card = toCard(cards.find((c) => c.layout === 'transform')!)
 

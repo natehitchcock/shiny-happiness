@@ -267,10 +267,19 @@ export const toCard = (
   if (raw.oracle_id === undefined || skipReason(raw) !== null) return null
 
   const typeLine = raw.type_line ?? ''
-  // Split cards and MDFCs carry their text on faces; joining keeps role
-  // heuristics working on the whole card rather than an empty front.
-  const oracleText =
-    raw.oracle_text ?? (raw.card_faces ?? []).map((f) => f.oracle_text ?? '').join('\n') ?? ''
+  /*
+   * Split cards, MDFCs and adventures carry their text on faces; joining keeps
+   * role heuristics working on the whole card rather than an empty front.
+   *
+   * The faces are kept alongside the join as well, because the join throws away
+   * the only thing that says where one face ends: it uses a newline, which is
+   * also the separator between two abilities of one face. Reconstructing the
+   * boundary from the joined string afterwards is impossible, so it is recorded
+   * here at the one moment the answer is still known.
+   */
+  const faces =
+    raw.oracle_text === undefined ? (raw.card_faces ?? []).map((f) => f.oracle_text ?? '') : []
+  const oracleText = raw.oracle_text ?? faces.join('\n')
 
   /*
    * A double-faced card carries power on its FACES, not on the card.
@@ -315,6 +324,10 @@ export const toCard = (
     typeLine,
     types: parseTypes(typeLine),
     oracleText,
+    // Spread conditionally rather than assigned `undefined`: under
+    // `exactOptionalPropertyTypes` an absent key and an explicit `undefined`
+    // are different types, and "single-faced" is absence.
+    ...(faces.length > 1 ? { oracleTextFaces: faces } : {}),
     keywords: raw.keywords ?? [],
     // An unknown legality must not read as legal (the DB CHECK enforces this
     // too); anything unrecognised is treated as not legal.
