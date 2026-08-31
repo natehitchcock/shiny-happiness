@@ -89,6 +89,7 @@ const setNarrow = async (value: boolean): Promise<void> => {
 const deck: api.Deck = {
   id: 'd1',
   name: 'Test deck',
+  description: '',
   commanders: ['c1'],
   colorIdentity: ['R'],
   targetBracket: 3,

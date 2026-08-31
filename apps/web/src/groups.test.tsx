@@ -45,6 +45,7 @@ globalThis.ResizeObserver = NoopResizeObserver as unknown as typeof ResizeObserv
 const deck: api.Deck = {
   id: 'd1',
   name: 'Test deck',
+  description: '',
   commanders: ['c1'],
   colorIdentity: ['R'],
   targetBracket: 3,
@@ -94,6 +95,13 @@ const card = (oracleId: string, name: string): api.Card => ({
   primaryRole: 'wincon',
   edhrecRank: null,
   universesBeyond: false,
+  // Fields added to `Card` after this fixture was written. They were invisible
+  // until `apps/web` joined the typecheck — vitest does not typecheck.
+  power: null,
+  toughness: null,
+  loyalty: null,
+  synergyProduces: [],
+  synergyWants: [],
 })
 
 beforeEach(() => {

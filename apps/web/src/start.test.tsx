@@ -82,6 +82,13 @@ const card = (name: string): api.Card => ({
   primaryRole: 'wincon',
   edhrecRank: null,
   universesBeyond: false,
+  // Fields added to `Card` after this fixture was written. They were invisible
+  // until `apps/web` joined the typecheck — vitest does not typecheck.
+  power: null,
+  toughness: null,
+  loyalty: null,
+  synergyProduces: [],
+  synergyWants: [],
 })
 
 describe('picking a commander', () => {

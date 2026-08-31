@@ -2202,4 +2202,290 @@ select {
 .bracket-source a {
   color: var(--parchment);
   text-decoration: underline;
+
+/* -------------------------------------------------------------- deck web */
+
+/*
+ * Doc 17. A mode, not a panel: it replaces everything below the masthead, so
+ * the workspace grid is hidden rather than unmounted — a remount would throw
+ * away the in-flight recommendation request and re-run the whole pipeline on
+ * every toggle of a view that shows data already in memory.
+ *
+ * `[hidden]` needs saying because `.workspace` sets `display: grid`, which beats
+ * the UA stylesheet's `[hidden] { display: none }` on specificity.
+ */
+.workspace[hidden] {
+  display: none;
+}
+
+.deck-web {
+  padding: calc(var(--step) * 2) calc(var(--step) * 3);
+}
+
+.web-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--step);
+  margin-bottom: var(--step);
+}
+
+.web-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--step) * 2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.72rem;
+  color: var(--parchment-dim);
+}
+
+.web-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.web-count {
+  margin-left: auto;
+}
+
+.web-help {
+  font-size: 0.7rem;
+  margin: 0 0 var(--step);
+}
+
+.web-help kbd {
+  font-family: var(--mono);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 0 3px;
+}
+
+.web-frame {
+  position: relative;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--ink);
+  /* The masthead, the control bar and the help line, taken off the viewport so
+     the graph is as tall as what is left rather than pushing the page into a
+     scroll it can never usefully be scrolled in. */
+  height: calc(100vh - 210px);
+  min-height: 320px;
+  overflow: hidden;
+}
+
+.web-frame:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: -2px;
+}
+
+.web-svg {
+  width: 100%;
+  height: 100%;
+  /* The pointer owns panning and pinching; letting the browser scroll or
+     pinch-zoom the page underneath would fight it on every touch drag. */
+  touch-action: none;
+}
+
+/* --- edges. Colour is never the only encoding (doc 17 §17.3): the two kinds
+   also differ in line form and in whether they carry an arrowhead, and the
+   legend and the table name them in words. */
+
+.web-edge {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.web-edge[data-kind='combo'] {
+  stroke: var(--edge-combo);
+}
+
+/* Solid with an arrowhead, exactly as doc 17 §17.3 assigns it. The arrowhead is
+   the second signal, and it also carries the direction, which is the whole
+   content of this edge: A causes an event B benefits from. */
+.web-edge[data-kind='benefits'] {
+  stroke: var(--steel);
+}
+
+.web-arrowhead {
+  fill: var(--steel);
+}
+
+/* Focusing a card dims every edge that does not touch it. Doc 17 §17.6 calls
+   this the single most useful thing on the screen, and it is: it turns a
+   hairball into "these six cards, and why". */
+.web-edge[data-dim='true'] {
+  opacity: 0.07;
+}
+
+/* The edge `[` and `]` have stepped to. Brass, because it is the colour the
+   rest of the app uses for the thing the user has just decided to look at, and
+   it is not one of the two kind colours so it cannot be mistaken for one. */
+.web-edge[data-selected='true'] {
+  stroke: var(--brass);
+}
+
+.web-node {
+  cursor: pointer;
+}
+
+.web-node[data-dim='true'] {
+  opacity: 0.25;
+}
+
+.web-frame-line {
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+
+.web-node[data-commander='true'] .web-frame-line {
+  stroke: var(--brass);
+  stroke-width: 2;
+}
+
+/* Focus is a HALO outside the box, and the commander frame is on the box, so
+   the two brass marks are told apart by geometry rather than by hue — and a
+   focused commander still reads as both. The commander also carries its name
+   under it, which the other ninety-eight do not. */
+.web-node:focus {
+  outline: none;
+}
+
+.web-node:focus-visible .web-frame-line,
+.web-node[data-focused='true'] .web-frame-line {
+  stroke: var(--brass);
+  stroke-width: 3;
+}
+
+.web-noart {
+  fill: var(--ink-2);
+  stroke: var(--rule);
+}
+
+.web-noart-name {
+  fill: var(--parchment-dim);
+  font-family: var(--ui);
+  font-size: 7px;
+  dominant-baseline: middle;
+}
+
+.web-copies,
+.web-commander-name {
+  fill: var(--parchment);
+  font-family: var(--mono);
+  font-size: 8px;
+  paint-order: stroke;
+  stroke: var(--ink);
+  stroke-width: 2px;
+}
+
+.web-commander-name {
+  fill: var(--brass);
+  font-size: 9px;
+}
+
+.web-live {
+  position: absolute;
+  left: var(--step);
+  bottom: var(--step);
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--parchment-dim);
+  max-width: 50%;
+}
+
+.web-details {
+  position: absolute;
+  top: var(--step);
+  right: var(--step);
+  width: 230px;
+  max-height: calc(100% - var(--step) * 2);
+  overflow-y: auto;
+  padding: var(--step);
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.web-details-edges {
+  margin: var(--step) 0 0;
+  padding-left: 1rem;
+  font-size: 0.7rem;
+  color: var(--parchment-dim);
+}
+
+.web-table {
+  margin-top: calc(var(--step) * 2);
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.web-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.web-table caption {
+  text-align: left;
+  color: var(--parchment-dim);
+  font-size: 0.72rem;
+  padding-bottom: var(--step);
+}
+
+.web-table th,
+.web-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+
+.web-table th {
+  position: sticky;
+  top: 0;
+  background: var(--ink-2);
+  color: var(--parchment-dim);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+}
+
+/*
+ * Doc 08's mobile answer for this view, stated rather than guessed.
+ *
+ * A hundred 64 px nodes on a 375 px screen is a hairball at 20% zoom, so the
+ * narrow layout opens on the table instead of pretending the graph is legible —
+ * the table is the same data, and it is the half of doc 17 §17.7 that survives
+ * a phone. The graph is still there, still pannable, just shorter.
+ */
+@media (max-width: 640px) {
+  .web-frame {
+    height: 55vh;
+  }
+
+  /* Still absolute — it lives inside a frame that clips its overflow, so a
+     static box here would simply be cut off — but along the bottom edge, where
+     it does not cover the graph it is describing. */
+  .web-details {
+    top: auto;
+    bottom: var(--step);
+    left: var(--step);
+    right: var(--step);
+    width: auto;
+    max-height: 45%;
+  }
+
+  .web-live {
+    bottom: auto;
+    top: var(--step);
+    max-width: 70%;
+  }
+
+  .web-count {
+    margin-left: 0;
+  }
 }

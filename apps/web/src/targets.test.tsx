@@ -339,6 +339,12 @@ describe('the archetype customiser', () => {
             primaryRole: 'ramp',
             edhrecRank: null,
             universesBeyond: false,
+            // Added to `Card` after this fixture was written.
+            power: null,
+            toughness: null,
+            loyalty: null,
+            synergyProduces: [],
+            synergyWants: [],
           } as api.Card,
         ],
       ]),

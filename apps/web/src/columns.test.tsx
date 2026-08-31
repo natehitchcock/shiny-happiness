@@ -61,6 +61,7 @@ globalThis.ResizeObserver = NoopResizeObserver as unknown as typeof ResizeObserv
 const deck: api.Deck = {
   id: 'd1',
   name: 'Test deck',
+  description: '',
   commanders: ['c1'],
   colorIdentity: ['R'],
   targetBracket: 3,
@@ -145,6 +146,13 @@ beforeEach(() => {
           primaryRole: 'wincon',
           edhrecRank: null,
           universesBeyond: false,
+          // Added to `Card` after this fixture was written, and invisible
+          // until `apps/web` joined the typecheck.
+          power: null,
+          toughness: null,
+          loyalty: null,
+          synergyProduces: [],
+          synergyWants: [],
         },
       ],
     ]),
@@ -319,7 +327,7 @@ describe('locking a card', () => {
     // does not hold the screen up. While it is in flight the row shows a
     // spinner in place of the diamond, so a saved lock is distinguishable from
     // one still being retried; the confirmed state arrives with the response.
-    let release: ((v: unknown) => void) | null = null
+    let release: ((v: Awaited<ReturnType<typeof api.sendCommands>>) => void) | null = null
     mocked.sendCommands.mockReturnValue(
       new Promise((r) => {
         release = r
@@ -337,7 +345,8 @@ describe('locking a card', () => {
     await act(async () => {
       release?.({
         deck: { ...lockedDeck, entries: [{ oracleId: 'o1', zone: 'accepted', locked: true }] },
-        results: [],
+        applied: [],
+        rejected: [],
       })
       await Promise.resolve()
     })
@@ -438,7 +447,8 @@ describe('adding cards while a settle is running', () => {
       n += 1
       return Promise.resolve({
         deck: { ...withEntries, version: n },
-        results: [],
+        applied: [],
+        rejected: [],
       }) as ReturnType<typeof api.sendCommands>
     })
 
@@ -488,7 +498,8 @@ describe('adding cards while a settle is running', () => {
       }
       return Promise.resolve({
         deck: { ...withEntries, version: 9 },
-        results: [],
+        applied: [],
+        rejected: [],
       }) as ReturnType<typeof api.sendCommands>
     })
     mocked.getDeck.mockResolvedValue({ ...withEntries, version: 8 })
@@ -536,7 +547,8 @@ describe('adding cards while a settle is running', () => {
       }
       return Promise.resolve({
         deck: { ...withEntries, version: 9 },
-        results: [],
+        applied: [],
+        rejected: [],
       }) as ReturnType<typeof api.sendCommands>
     })
     mocked.getDeck.mockResolvedValue({ ...withEntries, version: 8 })
@@ -574,7 +586,8 @@ describe('adding cards while a settle is running', () => {
       }
       return Promise.resolve({
         deck: { ...withEntries, version: 9 },
-        results: [],
+        applied: [],
+        rejected: [],
       }) as ReturnType<typeof api.sendCommands>
     })
     mocked.getDeck.mockResolvedValue({ ...withEntries, version: 8 })

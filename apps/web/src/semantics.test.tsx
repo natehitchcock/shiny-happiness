@@ -45,6 +45,7 @@ globalThis.ResizeObserver = NoopResizeObserver as unknown as typeof ResizeObserv
 const deck: api.Deck = {
   id: 'd1',
   name: 'Test deck',
+  description: '',
   commanders: [],
   colorIdentity: ['R'],
   targetBracket: 3,

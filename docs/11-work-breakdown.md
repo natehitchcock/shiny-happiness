@@ -107,6 +107,28 @@ optional field (AGENTS.md R2). A recommendation filling a gap the builder
 invented now says so — "fills the ramp target you set", not "fills ramp gap" —
 because pillar P4 asks the reason to name the thing they can change.
 
+**The deck is a picture now, at `#web`.** [Doc 17](17-deck-web.md) is built: a
+second mode, entered from the masthead, that replaces everything below it with
+one node per card — the art crop — and one line per relationship. It makes **no
+requests**: every edge is computed in the browser from `synergyProduces` /
+`synergyWants` and `analysis.deckCombos`, which the workspace has already
+hydrated, so the `POST /decks/:id/web` endpoint doc 17 considered was not built
+and is not needed. The layout is a seeded force simulation that settles and
+stops; `prefers-reduced-motion` paints the converged positions directly.
+
+Its blocker was [ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md), which
+closed it as a side effect of shipping art for the preview panel.
+
+**Two of doc 17's four edge kinds were cut, on measurement.** Theme edges make a
+pile of the 99 most-played black cards look nearly five times more connected
+(1,061 edges) than a real themed 99 (226) — the inverse of the mess-versus-dust
+contrast the whole design rests on — and the deficit they claim to show is false
+under the interaction table `synergy.ts` already uses. Near-combo edges would
+introduce cards the deck does not contain into a view that is deliberately not
+editable. Doc 17 §17.10 has the numbers and §17.12 the rest of the divergences,
+including that the scoped "merge parallel edges" rule reduces 712 edges to 690
+rather than the order of magnitude claimed.
+
 **Is a deployment current?** `GET /api/v1/health` says so without credentials —
 the applied migration head, anything unapplied, and whether a corpus snapshot is
 live ([ADR-0019](adr/0019-health-endpoint-reports-the-applied-schema.md)). It
@@ -116,7 +138,7 @@ returned an error; see DEPLOYING.md.
 **Verify:**
 
 ```bash
-pnpm check          # lint + typecheck + 1132 tests
+pnpm check          # lint + typecheck + 1258 tests
 ```
 
 The integration tests need a real Postgres and SKIP (loudly) without one. The
@@ -325,7 +347,7 @@ The domain layer is done, so everything below is now unblocked in its own right.
 
 | Doc | What it is |
 | --- | --- |
-| [17 — The deck web](17-deck-web.md) | A second view of one deck: every card as its art, every relationship as a coloured line. Scoped, not built. Density is the whole problem — a real themed 99 has 1,011 benefits edges and 756 combos one card away — so the reduction rules and the validated four-colour edge palette are most of the document. Three open questions at the end. |
+| [17 — The deck web](17-deck-web.md) | A second view of one deck at `#web`: every card as its art, every relationship as a coloured line. **Built.** Density is the whole problem — a real themed 99 has 712 benefits edges and 689 combos one card away — and the scoped reduction rules turned out to reduce almost nothing, so edges are ranked by tag scarcity and cut at 400. Two edge kinds ship, not four: theme and near-combo were cut when the three open questions were answered, with numbers, in §17.10. §17.12 records where the build diverged. |
 
 [Doc 16, the archetype customiser](16-archetype-customiser.md), was in this table
 and is now **built** — roles, curve and tolerance, all three of its open

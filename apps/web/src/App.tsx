@@ -20,6 +20,9 @@ import type { CardView, Color } from '@roundtable/ui'
 import type { DeckCommand, SynergyTag } from '@roundtable/domain'
 import { DeckMenu } from './DeckMenu'
 import { Hint } from './Hint'
+import { DeckWeb } from './deckweb/DeckWeb'
+import { enterDeckWeb, leaveDeckWeb, useDeckWebMode } from './deckweb/route'
+import { readable } from './tags'
 import type { Card } from './api'
 
 /** Human-readable label for a composition dimension. */
@@ -733,24 +736,11 @@ interface DeckLine {
  * and a list that merged them would say both cards were "about" the same thing
  * while hiding that one is the other's answer.
  */
-const TAG_WORDS: Readonly<Record<string, string>> = {
-  'creature-death': 'a creature dying',
-  token: 'making tokens',
-  lifegain: 'gaining life',
-  lifeloss: 'opponents losing life',
-  'card-draw': 'drawing cards',
-  discard: 'discarding',
-  'graveyard-creature': 'creatures in the graveyard',
-  'artifact-etb': 'artifacts entering',
-  landfall: 'lands entering',
-  'plus1-counter': '+1/+1 counters',
-  'attack-trigger': 'attacking',
-  untap: 'untapping',
-  treasure: 'treasure',
-  'sacrifice-fodder': 'expendable bodies',
-}
-
-const readable = (tag: string): string => TAG_WORDS[tag] ?? tag.replace(/-/g, ' ')
+/*
+ * The table itself now lives in `./tags`, because the deck web (doc 17) names
+ * the same events in its edge descriptions and two vocabularies for one model
+ * is how "a creature dying" here becomes "creature death" there.
+ */
 
 const TagChip = ({
   tag,
@@ -2394,6 +2384,8 @@ export const Workspace = ({
   onNew?: () => void
 }): React.JSX.Element => {
   const [deck, setDeck] = useState(initial)
+  /** Doc 17 §17.1 — the deck web is a mode at `#web`, not a panel. */
+  const webMode = useDeckWebMode()
   const [groups, setGroups] = useState<api.Group[]>([])
   const [unavailable, setUnavailable] = useState<api.Unavailable[]>([])
   const [analysis, setAnalysis] = useState<api.Analysis | null>(null)
@@ -3381,6 +3373,20 @@ export const Workspace = ({
   }, [deck.commanders, accepted, cards])
 
   /**
+   * The order `Tab` walks the deck web's nodes in (doc 17 §17.6).
+   *
+   * Derived from `sections` — the very array the rail renders — rather than
+   * re-sorted in the web module. Doc 17 says tab order is DECK order because
+   * layout order is a physics accident, and "the order the user already knows
+   * from the list" is only true by construction if it is literally the list's
+   * own order. Two sorts agreeing today is two sorts drifting tomorrow.
+   */
+  const deckWebOrder = useMemo(
+    () => sections.flatMap((section) => section.lines.map((line) => line.oracleId)),
+    [sections],
+  )
+
+  /**
    * Which composition bars to show.
    *
    * A role drops out once it is FULLY LOCKED — every card counted toward it has
@@ -3439,6 +3445,16 @@ export const Workspace = ({
         <button className="act" onClick={exportDeck}>
           Export
         </button>
+        {/* Doc 17 §17.1: the web is entered from a control in the masthead and
+            left the same way. `aria-pressed` rather than two buttons, because
+            it is one thing being turned on and off. */}
+        <button
+          className="act"
+          aria-pressed={webMode}
+          onClick={() => (webMode ? leaveDeckWeb() : enterDeckWeb())}
+        >
+          Web
+        </button>
       </header>
 
       {tuningTargets && analysis !== null ? (
@@ -3492,7 +3508,25 @@ export const Workspace = ({
         </p>
       ) : null}
 
-      <div className="workspace">
+      {/* Doc 17. A MODE: it replaces everything below the masthead, entered and
+          left at `#web`. The workspace below is hidden rather than unmounted —
+          remounting it would drop the in-flight recommendation request and
+          re-run the whole pipeline to redraw data the web already holds. */}
+      {webMode ? (
+        <DeckWeb
+          deckId={deck.id}
+          deckName={deck.name}
+          order={deckWebOrder}
+          accepted={accepted.map((e) => e.oracleId)}
+          commanders={optimistic.commanders}
+          cards={cards}
+          combos={analysis?.deckCombos ?? []}
+          images={images}
+          onLeave={leaveDeckWeb}
+        />
+      ) : null}
+
+      <div className="workspace" hidden={webMode}>
         <section className="region" aria-label="Deck">
           <h2>Deck · {deckSize}</h2>
 
