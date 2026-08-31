@@ -29,6 +29,8 @@ import type { CardView } from '@roundtable/ui'
 import { buildDeckWeb, edgesAt, otherEnd, strokeWidth } from './model'
 import type { WebEdge, WebNode } from './model'
 import { layout } from './layout'
+import { canvasPoint, canvasVector, pinchTo, zoomBy } from './view'
+import type { Point } from './view'
 
 /**
  * The node box, from the shared level spec rather than a number typed here.
@@ -57,8 +59,13 @@ const NODE_H = Math.round(NODE_W * ART_CROP_ASPECT)
 const CANVAS_AREA = 2600 * 1700
 const DEFAULT_ASPECT = 2600 / 1700
 
-const MIN_SCALE = 0.25
-const MAX_SCALE = 4
+/**
+ * One arrow-key nudge, in canvas units.
+ *
+ * Outside the scale in the transform, so it is a fixed step across the drawing
+ * rather than a step that shrinks as the reader zooms in. Deliberate: at 4× a
+ * scaled step would crawl.
+ */
 const PAN_STEP = 60
 
 /**
@@ -308,9 +315,35 @@ export const DeckWeb = ({
     setAnnouncement('View reset.')
   }, [])
 
-  const zoomBy = useCallback((factor: number): void => {
-    setView((v) => ({ ...v, scale: Math.min(MAX_SCALE, Math.max(MIN_SCALE, v.scale * factor)) }))
-  }, [])
+  /**
+   * The zoom with no cursor behind it: the buttons and `+`/`−`.
+   *
+   * Anchored at the middle of the drawing. The middle is the only point a
+   * keypress can be said to be about — anchoring it at the last known mouse
+   * position was considered and rejected, because it makes a keyboard zoom
+   * lurch towards wherever the pointer happens to be resting, which is a place
+   * the reader is by definition not looking. `preserveAspectRatio` centres the
+   * whole viewBox in the pane, so the middle of the canvas is the middle of
+   * what is on screen without measuring anything.
+   */
+  const zoomFromCentre = useCallback(
+    (factor: number): void => {
+      setView((v) => zoomBy(v, factor, { x: canvas.width / 2, y: canvas.height / 2 }))
+    },
+    [canvas.width, canvas.height],
+  )
+
+  /**
+   * Where a client point falls on the canvas, and how far a client drag moves
+   * it.
+   *
+   * Both go through the SVG's own box rather than the window: the graph sits
+   * inside a padded section and the viewBox is thousands of units wide inside a
+   * pane of a few hundred pixels, so `clientX` is neither an offset into the
+   * drawing nor a count of canvas units. See `view.ts`.
+   */
+  const onCanvas = (element: SVGSVGElement, client: Point): Point =>
+    canvasPoint(client, element.getBoundingClientRect(), canvas)
 
   const describe = (oracleId: string): string => {
     const node = model.nodes.find((n) => n.oracleId === oracleId)
@@ -339,10 +372,10 @@ export const DeckWeb = ({
         break
       case '+':
       case '=':
-        zoomBy(1.25)
+        zoomFromCentre(1.25)
         break
       case '-':
-        zoomBy(0.8)
+        zoomFromCentre(0.8)
         break
       case '0':
         reset()
@@ -391,15 +424,22 @@ export const DeckWeb = ({
 
   // --- pointer pan and pinch, one code path for mouse and touch -----------
   const pointers = useRef(new Map<number, { x: number; y: number }>())
-  const pinch = useRef<{ distance: number; scale: number } | null>(null)
+  /** `at` is the last midpoint, on the canvas — see `onPointerMove`. */
+  const pinch = useRef<{ distance: number; scale: number; at: Point } | null>(null)
   const dragging = useRef<{ x: number; y: number; view: { x: number; y: number } } | null>(null)
+
+  const midpoint = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
 
   const onPointerDown = (event: ReactPointerEvent<SVGSVGElement>): void => {
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()]
       if (a !== undefined && b !== undefined) {
-        pinch.current = { distance: Math.hypot(a.x - b.x, a.y - b.y), scale: view.scale }
+        pinch.current = {
+          distance: Math.hypot(a.x - b.x, a.y - b.y),
+          scale: view.scale,
+          at: onCanvas(event.currentTarget, midpoint(a, b)),
+        }
       }
       dragging.current = null
       return
@@ -411,22 +451,38 @@ export const DeckWeb = ({
   const onPointerMove = (event: ReactPointerEvent<SVGSVGElement>): void => {
     if (!pointers.current.has(event.pointerId)) return
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
-    if (pointers.current.size >= 2 && pinch.current !== null) {
+    const gesture = pinch.current
+    if (pointers.current.size >= 2 && gesture !== null) {
       const [a, b] = [...pointers.current.values()]
       if (a === undefined || b === undefined) return
       const distance = Math.hypot(a.x - b.x, a.y - b.y)
-      const ratio = distance / Math.max(1, pinch.current.distance)
-      const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, pinch.current.scale * ratio))
-      setView((v) => ({ ...v, scale }))
+      const ratio = distance / Math.max(1, gesture.distance)
+      /*
+       * The scale comes from the gap between the fingers and the position from
+       * where that gap sits, so two fingers moving together pan and two fingers
+       * spreading zoom about the point between them. Scaling alone — which is
+       * what this did — grew the graph out of the canvas corner while the
+       * fingers were somewhere else entirely, and made a two-finger drag do
+       * nothing at all.
+       */
+      const at = onCanvas(event.currentTarget, midpoint(a, b))
+      setView((v) => pinchTo(v, gesture.scale * ratio, gesture.at, at))
+      pinch.current = { ...gesture, at }
       return
     }
     const drag = dragging.current
     if (drag === null) return
-    setView((v) => ({
-      ...v,
-      x: drag.view.x + (event.clientX - drag.x),
-      y: drag.view.y + (event.clientY - drag.y),
-    }))
+    // The travel in CANVAS units, not client pixels. Adding pixels to a
+    // translate measured in canvas units made the graph lag the cursor by
+    // whatever the viewBox happened to be scaled by — measured at 1.30 on a
+    // 2510 px pane, so the graph covered 77% of the distance the mouse did,
+    // and worse on a narrower pane where the canvas is scaled down further.
+    const moved = canvasVector(
+      { x: event.clientX - drag.x, y: event.clientY - drag.y },
+      event.currentTarget.getBoundingClientRect(),
+      canvas,
+    )
+    setView((v) => ({ ...v, x: drag.view.x + moved.x, y: drag.view.y + moved.y }))
   }
 
   const onPointerUp = (event: ReactPointerEvent<SVGSVGElement>): void => {
@@ -436,7 +492,11 @@ export const DeckWeb = ({
   }
 
   const onWheel = (event: ReactWheelEvent<SVGSVGElement>): void => {
-    zoomBy(event.deltaY < 0 ? 1.1 : 0.9)
+    // Anchored at the cursor: the card under the pointer is the one the reader
+    // is asking to see more of, and it is the only fixed point that does not
+    // require them to chase the graph back after every notch.
+    const at = onCanvas(event.currentTarget, { x: event.clientX, y: event.clientY })
+    setView((v) => zoomBy(v, event.deltaY < 0 ? 1.1 : 0.9, at))
   }
 
   useEffect(() => {
@@ -494,10 +554,10 @@ export const DeckWeb = ({
             : ''}
         </span>
 
-        <button className="act" onClick={() => zoomBy(0.8)} aria-label="Zoom out">
+        <button className="act" onClick={() => zoomFromCentre(0.8)} aria-label="Zoom out">
           −
         </button>
-        <button className="act" onClick={() => zoomBy(1.25)} aria-label="Zoom in">
+        <button className="act" onClick={() => zoomFromCentre(1.25)} aria-label="Zoom in">
           +
         </button>
         <button className="act" onClick={reset}>

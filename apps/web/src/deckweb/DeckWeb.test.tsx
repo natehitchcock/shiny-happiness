@@ -64,6 +64,55 @@ const draw = (over: Partial<Parameters<typeof DeckWeb>[0]> = {}): ReturnType<typ
 
 const node = (name: string | RegExp): HTMLElement => screen.getByRole('button', { name })
 
+const transformNow = (): string =>
+  document.querySelector('.web-edges')?.parentElement?.getAttribute('transform') ?? ''
+
+/** The view transform as numbers, so a test can do arithmetic on it. */
+const viewNow = (): { x: number; y: number; scale: number } => {
+  const found = /translate\((-?[\d.e-]+) (-?[\d.e-]+)\) scale\((-?[\d.e-]+)\)/.exec(transformNow())
+  if (found === null) throw new Error(`no view transform in ${transformNow()}`)
+  return { x: Number(found[1]), y: Number(found[2]), scale: Number(found[3]) }
+}
+
+const canvasSize = (): { width: number; height: number } => {
+  const box = (document.querySelector('.web-svg')?.getAttribute('viewBox') ?? '').split(' ')
+  return { width: Number(box[2]), height: Number(box[3]) }
+}
+
+/**
+ * Renders with a measurable pane, then hands back a way to place the SVG on the
+ * page.
+ *
+ * jsdom measures everything as zero, and a zoom that cannot find the pane can
+ * only fall back to the centre — which is exactly the answer the anchored-zoom
+ * bug also gives for a centred cursor. Nothing about anchoring can be tested
+ * without a pane that has a size and a position.
+ */
+const withPane = (): { svg: SVGSVGElement; place: (left: number, top: number) => void } => {
+  const original = Element.prototype.getBoundingClientRect
+  let placed: DOMRect | null = null
+  Element.prototype.getBoundingClientRect = function (this: Element): DOMRect {
+    if (this.classList.contains('web-frame')) return { width: 1000, height: 500 } as DOMRect
+    if (this.classList.contains('web-svg') && placed !== null) return placed
+    return original.call(this)
+  }
+  restore.push(() => (Element.prototype.getBoundingClientRect = original))
+  draw()
+  const svg = document.querySelector('.web-svg') as unknown as SVGSVGElement
+  return {
+    svg,
+    place: (left, top) => {
+      // Exactly half the canvas in each axis, so one client pixel is two canvas
+      // units and `meet` has no surplus to letterbox. Round numbers on purpose:
+      // the arithmetic under test should be checkable by hand.
+      const canvas = canvasSize()
+      placed = { left, top, width: canvas.width / 2, height: canvas.height / 2 } as DOMRect
+    },
+  }
+}
+
+const restore: (() => void)[] = []
+
 beforeEach(() => {
   // The layout settles synchronously, but the replay uses rAF; jsdom has one,
   // and the tests never depend on a frame having run.
@@ -72,6 +121,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  while (restore.length > 0) restore.pop()?.()
   vi.unstubAllGlobals()
   cleanup()
 })
@@ -169,8 +219,7 @@ describe('the edges', () => {
 
 describe('the keyboard, which is every pointer action’s equal (R4)', () => {
   const frame = (): HTMLElement => document.querySelector('.web-frame')!
-  const transform = (): string =>
-    document.querySelector('.web-edges')?.parentElement?.getAttribute('transform') ?? ''
+  const transform = transformNow
 
   it('pans with the arrow keys', () => {
     draw()
@@ -186,6 +235,55 @@ describe('the keyboard, which is every pointer action’s equal (R4)', () => {
     expect(transform()).toContain('scale(1.25)')
     fireEvent.keyDown(frame(), { key: '0' })
     expect(transform()).toContain('scale(1)')
+  })
+
+  it('zooms from the middle of the view, not from a corner and not from the cursor', () => {
+    /*
+     * The keyboard has no cursor, so the middle of the drawing is the only
+     * anchor that means anything — and anchoring it at wherever the mouse
+     * happens to be resting would make a keypress jump the graph to a place
+     * the reader was not looking at.
+     *
+     * The default canvas is 2600 × 1700, so its middle is (1300, 850) and one
+     * notch of 1.25 leaves translate(1300 − 1300×1.25, 850 − 850×1.25). The
+     * two axes differ, which is the point: an anchor that has been transposed
+     * or dropped gives a different pair, and the old behaviour gives (0, 0).
+     */
+    draw()
+    fireEvent.keyDown(frame(), { key: '+' })
+    const view = viewNow()
+    expect(view.scale).toBeCloseTo(1.25, 6)
+    expect(view.x).toBeCloseTo(-325, 4)
+    expect(view.y).toBeCloseTo(-212.5, 4)
+  })
+
+  it('comes back to where it started when zoomed in and out again', () => {
+    draw()
+    fireEvent.keyDown(frame(), { key: '+' })
+    fireEvent.keyDown(frame(), { key: '-' })
+    const view = viewNow()
+    expect(view.scale).toBeCloseTo(1, 6)
+    expect(view.x).toBeCloseTo(0, 4)
+    expect(view.y).toBeCloseTo(0, 4)
+  })
+
+  it('holds still at the zoom limit rather than creeping on every further press', () => {
+    // The silent half of the bug: the scale stops at 4 but a translate computed
+    // from the ratio that was ASKED for keeps sliding the graph off screen.
+    draw()
+    for (let i = 0; i < 12; i += 1) fireEvent.keyDown(frame(), { key: '+' })
+    expect(viewNow().scale).toBe(4)
+    const atTheLimit = transform()
+    for (let i = 0; i < 5; i += 1) fireEvent.keyDown(frame(), { key: '+' })
+    expect(transform()).toBe(atTheLimit)
+  })
+
+  it('resets the pan as well as the scale on 0', () => {
+    draw()
+    fireEvent.keyDown(frame(), { key: '+' })
+    fireEvent.keyDown(frame(), { key: 'ArrowRight' })
+    fireEvent.keyDown(frame(), { key: '0' })
+    expect(transform()).toBe('translate(0 0) scale(1)')
   })
 
   it('cycles the focused card’s connections with [ and ], and says which one', () => {
@@ -250,6 +348,146 @@ describe('the pointer, which the same actions answer to', () => {
     expect(
       document.querySelector('.web-edges')?.parentElement?.getAttribute('transform'),
     ).toContain('scale(1.1')
+  })
+})
+
+describe('zooming where the reader is pointing', () => {
+  /*
+   * The reported bug: the graph grew and shrank out of its top-left corner
+   * instead of out of the cursor, because the scale changed and the translate
+   * did not.
+   *
+   * The fixture is deliberately awkward. The pane sits at (40, 120) rather than
+   * at the page origin — the graph lives inside a padded section, and a
+   * calculation that forgets the offset is correct only for a drawing that
+   * fills the window. The pane is half the canvas in each axis, so a client
+   * pixel is two canvas units and an implementation that treats the two as
+   * interchangeable gets a different, wrong answer rather than the same one.
+   * The cursor is up and to the left, nowhere near the middle, because a zoom
+   * anchored at the middle of the view looks identical to a correct one when
+   * the cursor happens to be in the middle.
+   */
+  const cursor = { clientX: 240, clientY: 220 }
+  // (240 − 40) / 0.5 = 400 across, (220 − 120) / 0.5 = 200 down.
+  const under = { x: 400, y: 200 }
+
+  it('keeps the point under the cursor under the cursor, zooming in', () => {
+    const { svg, place } = withPane()
+    place(40, 120)
+    fireEvent.wheel(svg, { deltaY: -1, ...cursor })
+    const view = viewNow()
+    expect(view.scale).toBeCloseTo(1.1, 6)
+    // translate = anchor − (anchor − 0) × 1.1
+    expect(view.x).toBeCloseTo(-40, 4)
+    expect(view.y).toBeCloseTo(-20, 4)
+  })
+
+  it('keeps the point under the cursor under the cursor, zooming out', () => {
+    const { svg, place } = withPane()
+    place(40, 120)
+    fireEvent.wheel(svg, { deltaY: 1, ...cursor })
+    const view = viewNow()
+    expect(view.scale).toBeCloseTo(0.9, 6)
+    expect(view.x).toBeCloseTo(40, 4)
+    expect(view.y).toBeCloseTo(20, 4)
+  })
+
+  it('keeps that same card still over a long run of notches, not just one', () => {
+    // One notch can be right by luck; twenty compounds any error in the anchor
+    // into something the eye would have caught in the browser.
+    const { svg, place } = withPane()
+    place(40, 120)
+    for (let i = 0; i < 20; i += 1) fireEvent.wheel(svg, { deltaY: -1, ...cursor })
+    const view = viewNow()
+    expect(view.x + under.x * view.scale).toBeCloseTo(under.x, 3)
+    expect(view.y + under.y * view.scale).toBeCloseTo(under.y, 3)
+  })
+
+  it('answers two different cursor positions differently', () => {
+    // The one assertion the old behaviour cannot pass under any fixture.
+    const { svg, place } = withPane()
+    place(40, 120)
+    fireEvent.wheel(svg, { deltaY: -1, clientX: 100, clientY: 160 })
+    const near = viewNow()
+    fireEvent.keyDown(document.querySelector('.web-frame')!, { key: '0' })
+    fireEvent.wheel(svg, { deltaY: -1, clientX: 900, clientY: 480 })
+    const far = viewNow()
+    expect(near.scale).toBeCloseTo(far.scale, 6)
+    expect(near.x).not.toBeCloseTo(far.x, 1)
+    expect(near.y).not.toBeCloseTo(far.y, 1)
+  })
+
+  it('does not creep when the wheel keeps turning at the limit', () => {
+    const { svg, place } = withPane()
+    place(40, 120)
+    for (let i = 0; i < 20; i += 1) fireEvent.wheel(svg, { deltaY: -1, ...cursor })
+    expect(viewNow().scale).toBe(4)
+    const atTheLimit = transformNow()
+    for (let i = 0; i < 5; i += 1) fireEvent.wheel(svg, { deltaY: -1, ...cursor })
+    expect(transformNow()).toBe(atTheLimit)
+  })
+
+  it('zooms the on-screen buttons from the middle, cursor or no cursor', () => {
+    // Same anchor as the keyboard, and for the same reason: a button press is
+    // not a statement about where the mouse is resting.
+    draw()
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    expect(viewNow().x).toBeCloseTo(-325, 4)
+    expect(viewNow().y).toBeCloseTo(-212.5, 4)
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }))
+    expect(viewNow().scale).toBeCloseTo(1, 6)
+    expect(viewNow().x).toBeCloseTo(0, 4)
+    expect(viewNow().y).toBeCloseTo(0, 4)
+  })
+
+  it('pinches about the point between the two fingers', () => {
+    const { svg, place } = withPane()
+    place(40, 120)
+    ;(svg as unknown as { setPointerCapture: () => void }).setPointerCapture = () => undefined
+    // Two fingers 200 px apart, centred on the same off-centre point as above.
+    fireEvent.pointerDown(svg, { pointerId: 1, clientX: 140, clientY: 220 })
+    fireEvent.pointerDown(svg, { pointerId: 2, clientX: 340, clientY: 220 })
+    // Spread to 400 px without moving the midpoint: a doubling.
+    fireEvent.pointerMove(svg, { pointerId: 1, clientX: 40, clientY: 220 })
+    fireEvent.pointerMove(svg, { pointerId: 2, clientX: 440, clientY: 220 })
+    const view = viewNow()
+    expect(view.scale).toBeCloseTo(2, 6)
+    expect(view.x + under.x * view.scale).toBeCloseTo(under.x, 3)
+    expect(view.y + under.y * view.scale).toBeCloseTo(under.y, 3)
+  })
+
+  it('drags the graph at the speed of the cursor, not a third of it', () => {
+    /*
+     * The same coordinate-space mistake as the zoom, on the other gesture: the
+     * drag added CLIENT PIXELS to a translate measured in canvas units, so the
+     * graph followed the mouse at whatever fraction the viewBox happened to be
+     * scaled by — about a third on a laptop. Invisible in jsdom, where an
+     * unmeasurable pane makes the two units the same, which is why the older
+     * drag test above could not see it.
+     */
+    const { svg, place } = withPane()
+    place(40, 120)
+    ;(svg as unknown as { setPointerCapture: () => void }).setPointerCapture = () => undefined
+    fireEvent.pointerDown(svg, { pointerId: 1, clientX: 300, clientY: 300 })
+    fireEvent.pointerMove(svg, { pointerId: 1, clientX: 340, clientY: 330 })
+    const view = viewNow()
+    expect(view.x).toBeCloseTo(80, 4)
+    expect(view.y).toBeCloseTo(60, 4)
+  })
+
+  it('pans on two fingers that travel together without spreading', () => {
+    const { svg, place } = withPane()
+    place(40, 120)
+    ;(svg as unknown as { setPointerCapture: () => void }).setPointerCapture = () => undefined
+    fireEvent.pointerDown(svg, { pointerId: 1, clientX: 140, clientY: 220 })
+    fireEvent.pointerDown(svg, { pointerId: 2, clientX: 340, clientY: 220 })
+    fireEvent.pointerMove(svg, { pointerId: 1, clientX: 190, clientY: 260 })
+    fireEvent.pointerMove(svg, { pointerId: 2, clientX: 390, clientY: 260 })
+    const view = viewNow()
+    expect(view.scale).toBeCloseTo(1, 6)
+    // 50 px right and 40 px down, at two canvas units to the pixel.
+    expect(view.x).toBeCloseTo(100, 4)
+    expect(view.y).toBeCloseTo(80, 4)
   })
 })
 

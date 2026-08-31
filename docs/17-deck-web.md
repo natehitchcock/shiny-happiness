@@ -282,6 +282,23 @@ that rule is easiest to break, so it is stated as a table.
 | Card details | hover | tap | `Enter` on a focused node with no edge picked |
 | Reset view | button | button | `0` |
 
+**Every zoom holds one point still, and which point depends on how it was
+asked for.** The wheel holds the card under the cursor; a pinch holds the point
+between the fingers, so two fingers moving together pan and spreading them
+zooms about what is between them. The `+`/`−` buttons and keys hold the middle
+of the view, because a keypress and a button are not statements about where the
+mouse is resting — anchoring them at the last pointer position makes the graph
+lurch towards somewhere the reader is not looking. Scaling without moving the
+translate, which is what the first version did, grows the drawing out of its
+own top-left corner instead: measured on the 99-card aristocrats deck, eight
+notches at a card near the left edge carried that card 556 px right and 654 px
+down, off the pane entirely.
+
+At the zoom limits the translate is computed from the scale change that
+actually happened, not the one that was requested. Otherwise the scale stops at
+the limit while every further notch keeps sliding the graph, which looks like
+the view drifting on its own.
+
 `Enter` does the two jobs in that order, because §17.6 as scoped gave it to both
 and the order has to be stated somewhere: with no edge picked it describes the
 card, and after `[` or `]` has picked one it moves to the far end. Each step is
