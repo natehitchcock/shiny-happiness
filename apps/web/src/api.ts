@@ -54,6 +54,18 @@ export interface CardDetail extends Card {
     setName: string
     rarity: string
     priceUsd: number | null
+    /**
+     * Art for THIS printing. Already on the wire — `printingsFor` maps the
+     * `image_art_crop` / `image_normal` columns onto every row — the client
+     * type simply never declared it, so the preview had no source of art for a
+     * card that was never hydrated and drew an empty panel instead.
+     *
+     * Empty string, not null, for "this printing has no cached art": that is
+     * the shape `packages/db` writes (see `toPrinting`), and reading it as a
+     * URL would put `<img src="">` on screen. Optional because a server from
+     * before the printings ingest sends rows without it.
+     */
+    imageUris?: { artCrop: string; normal: string }
   }[]
   /**
    * Pieces carry their names so the preview can name a combo piece that is not
@@ -470,6 +482,40 @@ export interface BracketReport {
   } | null
 }
 
+/**
+ * One thing wrong with the deck, as `packages/domain`'s `LegalityProblem`
+ * arrives on the wire.
+ *
+ * A flat record with every discriminant's payload optional, rather than the
+ * domain's own tagged union restated here. Two reasons, and the second is the
+ * one that matters: this file holds the JSON the server sends and nothing else
+ * (see `TargetOverrides`), and a client-side union would REJECT a `kind` a
+ * newer server had added — the panel would fail to compile against a shape it
+ * could have rendered honestly. `kind` stays a plain string so an unknown one
+ * falls through to the humanising fallback instead of to a type error.
+ *
+ * Every payload field the domain declares is carried, because the panel needs
+ * them to write a sentence: "2 copies, and Commander allows 1" cannot be
+ * derived from `kind` alone, and printing `kind` alone is what it used to do.
+ */
+export interface LegalityProblem {
+  kind: string
+  /** The offending card, when the problem is about one. Never a name. */
+  oracleId?: string
+  /** `wrong-card-count`. */
+  actual?: number
+  expected?: number
+  /** `not-singleton`. */
+  copies?: number
+  allowed?: number
+  /** `too-many-commanders`. */
+  count?: number
+  /** `color-identity` — the colours the card has that the commander does not. */
+  offending?: string[]
+  /** `invalid-commander` / `invalid-partnership`, in the domain's own words. */
+  reason?: string
+}
+
 export interface Analysis {
   counts: { total: number; byRole: Record<string, number> }
   targets: {
@@ -517,7 +563,7 @@ export interface Analysis {
       withinRange: boolean
     }[]
   }
-  legality: { legal: boolean; problems: { kind: string; oracleId?: string }[] }
+  legality: { legal: boolean; problems: LegalityProblem[] }
   /**
    * What the bracket system can and cannot say about this deck (ADR-0018).
    *

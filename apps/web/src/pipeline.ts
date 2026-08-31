@@ -72,8 +72,15 @@ export interface PipelineOptions<T> {
    *
    * The items, not a count: "Adding 2 cards" is wrong when one of them is a
    * rejection, and a count cannot tell the difference.
+   *
+   * `undefined` means "I have nothing to say about this", and the phase-derived
+   * label below is used instead. That matters because this label is read out
+   * of an `aria-live` region: an implementation that had to return a string for
+   * an empty queue returned "Preparing…", so the live region announced work
+   * being prepared while the pipeline sat idle and while a filter recompute was
+   * actually running. A live region that lies is worse than no live region.
    */
-  readonly describe?: (items: readonly T[]) => string
+  readonly describe?: (items: readonly T[]) => string | undefined
 }
 
 const now = (): number => performance.now()

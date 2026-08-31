@@ -448,8 +448,11 @@ export const DeckWeb = ({
 
   const dimmed = focused !== null
 
+  // "graph" in the label, matching the masthead control that opens this. The
+  // class, the module and the `#web` route keep their names — this string is
+  // what the user is told the thing is called, and that has to be one word.
   return (
-    <section className="deck-web" aria-label={`Deck web for ${deckName}`}>
+    <section className="deck-web" aria-label={`Deck graph for ${deckName}`}>
       <div className="web-bar">
         <button className="act" onClick={onLeave}>
           Back to the list
@@ -770,7 +773,7 @@ const EdgeTable = ({
   <div className="web-table">
     <table>
       <caption>
-        Every connection the web draws
+        Every connection the graph draws
         {model.totalEdges > edges.length
           ? ` — ${String(edges.length)} of ${String(model.totalEdges)}, the rest below the drawing limit`
           : ''}
