@@ -9,6 +9,7 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "tsc -b && tsc -p tsconfig.tests.json && tsc -p apps/web/tsconfig.json",
+    "pretest": "turbo run build",
     "test": "vitest run",
     "lint": "eslint .",
     "format": "prettier --write .",
