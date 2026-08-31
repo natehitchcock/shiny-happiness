@@ -9,7 +9,6 @@ import {
   candidatesAffectedBy,
   comboDegree,
   combosContaining,
-  completedCombos,
   deckCombos,
   nearCombos,
 } from './combo-index.js'
