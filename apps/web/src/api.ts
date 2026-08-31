@@ -315,15 +315,23 @@ export const sendCommands = (
   id: string,
   commands: readonly DeckCommand[],
   baseVersion: number,
+  /**
+   * Supplied by the caller, NOT minted here.
+   *
+   * Doc 10 §10.1 makes a batch idempotent so a retry cannot double-apply, and
+   * this function used to generate a fresh uuid on every call — which meant a
+   * retry presented a NEW key and the server, correctly, treated it as a new
+   * batch. The retry path therefore defeated the exact property the key exists
+   * to provide: a 5xx that had in fact committed would be applied twice, and
+   * accepting a card twice is a real change to the deck.
+   *
+   * Whoever owns the retry owns the key, so it is a parameter.
+   */
+  idempotencyKey: string,
 ): Promise<CommandResult> =>
   request(`/decks/${id}/commands`, {
     method: 'POST',
-    body: JSON.stringify({
-      commands,
-      baseVersion,
-      // Every mutation is idempotent so a retry cannot double-apply (doc 10 §10.1).
-      idempotencyKey: crypto.randomUUID(),
-    }),
+    body: JSON.stringify({ commands, baseVersion, idempotencyKey }),
   })
 
 export interface Recommendations {

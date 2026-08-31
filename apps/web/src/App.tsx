@@ -1180,9 +1180,18 @@ const sendWithRetry = async (
   body: Parameters<typeof api.sendCommands>[1],
   version: number,
 ): ReturnType<typeof api.sendCommands> => {
+  /*
+   * One key for the whole retry loop, minted before the first attempt.
+   *
+   * This is the point of an idempotency key and it was being thrown away: a
+   * fresh uuid per attempt makes every retry a new batch to the server, so a
+   * 5xx that had actually committed got applied a second time. Generated here
+   * because this is the scope a retry spans.
+   */
+  const idempotencyKey = crypto.randomUUID()
   for (let attempt = 0; ; attempt += 1) {
     try {
-      return await api.sendCommands(deckId, body, version)
+      return await api.sendCommands(deckId, body, version, idempotencyKey)
     } catch (error) {
       const status = error instanceof api.ApiError ? error.status : 0
       const transient = status === 0 || status >= 500
