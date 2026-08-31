@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'
 import {
+  COMMANDER_QUERY,
   bulkDataEntry,
+  fetchCommanderOracleIds,
   isUniversesBeyondCard,
   skipReason,
   streamBulkCards,
@@ -50,6 +52,28 @@ import type { Card, Printing } from '@roundtable/domain'
  * bulk export precisely so we do not hammer it (ADR-0009).
  */
 
+/**
+ * Which source decided commander eligibility, and what it said.
+ *
+ * Recorded rather than inferred. Both sources write the same boolean into the
+ * same column, so nothing downstream can tell a fetched answer from a derived
+ * one — and the difference is 36 cards, including every legendary
+ * Vehicle. An operator reading the ingest output needs to know which run they
+ * are looking at before they trust a Shorikai deck being refused.
+ *
+ * Reported per RUN and not per card on purpose: when the fetch succeeds it
+ * decides every card in the corpus, and when it fails it decides none. There
+ * is no mixed state to record, so a column repeating one value 34,492 times
+ * would cost a migration to say what one line here already says.
+ */
+export interface CommanderEligibilityReport {
+  readonly source: 'scryfall-search' | 'derived-from-oracle-text'
+  /** How many cards Scryfall listed as commanders. Null when it was not asked. */
+  readonly fetched: number | null
+  /** Why the fetch was not used, when it was not. */
+  readonly reason: string | null
+}
+
 export interface IngestReport {
   readonly snapshotId: string
   readonly read: number
@@ -65,6 +89,7 @@ export interface IngestReport {
   /** Records that threw while mapping. Reported, never silently dropped. */
   readonly failed: readonly { readonly id: string; readonly reason: string }[]
   readonly sourceUpdatedAt: string
+  readonly commanderEligibility: CommanderEligibilityReport
 }
 
 export interface IngestOptions extends ScryfallOptions {
@@ -74,6 +99,73 @@ export interface IngestOptions extends ScryfallOptions {
   readonly onProgress?: (phase: 'printings' | 'cards', read: number) => void
 }
 
+/**
+ * A tripwire, not a threshold anyone tunes.
+ *
+ * `is:commander legal:commander` returns 3,411 today. If a future Scryfall
+ * changes what the predicate means, the search would still answer 200 with a
+ * complete, small, and wrong set — and a complete set is exactly what the
+ * pagination guard cannot catch, because nothing about it looks truncated.
+ * Writing it would mark thousands of real commanders ineligible and break deck
+ * creation for everyone.
+ *
+ * So a result this far below what the query has ever returned is treated as the
+ * query having stopped meaning what we think, and the ingest falls back to the
+ * derivation and says so. Deliberately an order of magnitude below 3,411 rather
+ * than just under it: this must never fire on Scryfall printing a normal set.
+ */
+const IMPLAUSIBLY_FEW_COMMANDERS = 1_000
+
+/**
+ * Scryfall's commander list, or nothing and the reason why.
+ *
+ * Never throws. A corpus ingest that aborted because one auxiliary query failed
+ * would leave the database with no cards at all, which is far worse than a
+ * corpus whose eligibility came from the fallback: the fallback is right about
+ * 3,380 of 3,411 cards, and the alternative is right about none of them.
+ *
+ * Exported for its own tests. Which source wins is the one decision in this
+ * file that has three outcomes and no database, and reaching it through
+ * `ingestScryfall` would mean downloading 200 MB of bulk data to check a
+ * branch.
+ */
+export const loadCommanderSet = async (
+  options: IngestOptions,
+): Promise<{
+  readonly ids: ReadonlySet<string> | null
+  readonly report: CommanderEligibilityReport
+}> => {
+  try {
+    const set = await fetchCommanderOracleIds(options)
+    if (set.oracleIds.size < IMPLAUSIBLY_FEW_COMMANDERS) {
+      return {
+        ids: null,
+        report: {
+          source: 'derived-from-oracle-text',
+          fetched: set.oracleIds.size,
+          reason:
+            `Scryfall returned only ${set.oracleIds.size} commanders across ${set.pages} ` +
+            `page(s), far below what "${COMMANDER_QUERY}" has ever matched; ` +
+            'treating the query as no longer meaning what we think',
+        },
+      }
+    }
+    return {
+      ids: set.oracleIds,
+      report: { source: 'scryfall-search', fetched: set.oracleIds.size, reason: null },
+    }
+  } catch (error) {
+    return {
+      ids: null,
+      report: {
+        source: 'derived-from-oracle-text',
+        fetched: null,
+        reason: error instanceof Error ? error.message : String(error),
+      },
+    }
+  }
+}
+
 export const ingestScryfall = async (
   pool: Pool,
   options: IngestOptions = {},
@@ -81,6 +173,16 @@ export const ingestScryfall = async (
   const batchSize = options.batchSize ?? 1000
   const snapshotId = randomUUID()
   await createSnapshot(pool, snapshotId, 'scryfall')
+
+  /*
+   * Asked for FIRST, before either bulk file is touched.
+   *
+   * Twenty paced requests take ten seconds, and doing them up front means a
+   * search outage is known before ~200 MB has been downloaded rather than
+   * after. It also keeps the decision in one place: by the time any card is
+   * mapped, which source is answering has already been settled for all of them.
+   */
+  const commanders = await loadCommanderSet(options)
 
   // ---- pass 1: every printing ----
   const printingsEntry = await bulkDataEntry('default_cards', options)
@@ -158,7 +260,16 @@ export const ingestScryfall = async (
 
     let card: Card | null = null
     try {
-      card = toCard(raw as ScryfallCard, { universesBeyond: ub })
+      card = toCard(raw as ScryfallCard, {
+        universesBeyond: ub,
+        // Spread, not `canBeCommander: undefined`: under
+        // `exactOptionalPropertyTypes` an absent key and an explicit undefined
+        // are different types, and "the search did not answer" is absence —
+        // which is what makes `toCard` fall back to the derivation.
+        ...(commanders.ids === null
+          ? {}
+          : { canBeCommander: commanders.ids.has(raw.oracle_id ?? '') }),
+      })
     } catch (error) {
       // A record that will not map is reported with its id. Silently dropping
       // ingest data is a rejected PR (AGENTS.md §8).
@@ -201,5 +312,6 @@ export const ingestScryfall = async (
     skippedNonPlayable,
     failed,
     sourceUpdatedAt: cardsEntry.updatedAt,
+    commanderEligibility: commanders.report,
   }
 }

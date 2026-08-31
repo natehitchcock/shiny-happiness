@@ -378,10 +378,13 @@ These are not divergences; they are cases §10.3 left open, decided during the
    Relentless Rats, Shadowborn Apostles, Persistent Petitioners or Nazgûl — every
    copy past the first is rejected `not-singleton`. The domain supports it; no
    table or config holds the list. Needs a data source.
-3. **Commander eligibility is unvalidated.** `POST /decks` checks that the
-   commanders exist and are not the same card twice, but nothing stores
-   `canBeCommander` or `partnerRule`, so `validateDeck`'s commander checks cannot
-   be fed and a non-legendary card can be a commander. Blocked on ingest.
+3. **Commander PARTNERSHIP is unvalidated.** `POST /decks` now refuses a card
+   that cannot be a commander — `cards.can_be_commander` is stored at ingest —
+   but nothing stores `partnerRule`, so whether two commanders may be paired is
+   not checked. `partner with` names another card by NAME and the mapper cannot
+   resolve that to an oracle id, so each commander of a pair is validated on its
+   own and the gap is named in `unavailable`. A Background is accepted as a
+   commander in its own right for the same reason.
 4. **`/cards/search` scans the card table** for a selective query, since the
    domain predicate decides after SQL narrows. Fine at fixture scale, not at
    ~30k cards; `API-08` owns the precomputed histograms that fix it.
@@ -403,11 +406,20 @@ These are not divergences; they are cases §10.3 left open, decided during the
    bracket needs the official rules and the Game Changers list, which `DATA-05`
    has not populated; asserting a verdict from an empty rules file is what
    AGENTS.md §8 rejects outright.
-4. **Commander legality checks are skipped** in `analysis.legality`. Nothing
-   stores `canBeCommander` or `partnerRule`, so `validateDeck` would report every
-   commander as `invalid-commander`. Those problems are filtered out and the gap
-   is named in `unavailable` rather than surfaced as a false failure. Every other
-   legality check — colour identity, singleton, banned, card count — is live.
+4. **Commander legality checks are live**, and only the pairing rule is not.
+   `validateDeck` is fed real eligibility from `cards.can_be_commander`, so a
+   deck already led by an ineligible card reports `invalid-commander`. Two
+   entries remain in `unavailable`, both conditional rather than blanket:
+   `commander-eligibility` when a commander's row predates migration 0010 and
+   has no answer yet, and `commander-partnership` on a two-commander deck. A
+   single-commander deck on an ingested corpus gets neither.
+
+   The stored flag comes from Scryfall's own `is:commander` search, fetched once
+   per ingest; `deriveCanBeCommander` in `packages/domain` is the fallback when
+   that search cannot be reached. The two agree on 3,380 of 3,411 and differ on
+   36 cards: the fallback refuses 31 legendary Vehicles and Spacecraft, and
+   accepts 5 meld backs that may not lead a deck. Which source answered is on
+   `IngestReport.commanderEligibility` and printed by the ingest CLI.
 5. **Printing-level fields are null in the candidate pool.** `priceUsd`,
    `rarity`, `setCode` and `reserved` on `PoolCard` are not hydrated for
    candidates, so budget filtering and `is:reserved` do not apply to

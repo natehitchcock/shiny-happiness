@@ -24,6 +24,28 @@ const runCards = async (pool: Pool, limit: number | undefined): Promise<void> =>
       `in ${((Date.now() - started) / 1000).toFixed(1)}s`,
   )
   console.log(`  ${report.universesBeyond} cards are Universes Beyond (every printing)`)
+  /*
+   * Which source decided commander eligibility, every run.
+   *
+   * Printed unconditionally rather than only on the fallback: "no warning" and
+   * "I did not look" are the same picture otherwise, and the two sources differ
+   * by 36 cards — every legendary Vehicle and Spacecraft, Shorikai among them,
+   * plus five meld backs. An operator who sees a Shorikai deck refused needs to
+   * be able to look back at this line and know which run produced the corpus.
+   */
+  const eligibility = report.commanderEligibility
+  if (eligibility.source === 'scryfall-search') {
+    console.log(`  commander eligibility from Scryfall search: ${eligibility.fetched ?? 0} cards`)
+  } else {
+    console.warn(
+      `  commander eligibility DERIVED from oracle text — the Scryfall search was not used: ` +
+        `${eligibility.reason ?? 'no reason recorded'}`,
+    )
+    console.warn(
+      '    31 legendary Vehicles and Spacecraft will be reported ineligible, and 5 meld ' +
+        'backs wrongly eligible, until an ingest reaches the search.',
+    )
+  }
   console.log(`  source updated ${report.sourceUpdatedAt}, snapshot ${report.snapshotId}`)
   if (report.skippedNoOracleId > 0 || report.skippedNonPlayable > 0) {
     console.log(

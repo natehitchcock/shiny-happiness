@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { deriveCanBeCommander } from '@roundtable/domain'
 import {
+  fetchCommanderOracleIds,
   isUniversesBeyondCard,
   tallyPrinting,
   type ProvenanceTally,
@@ -334,5 +336,202 @@ describe('Universes Beyond provenance (ADR-0011)', () => {
 
   it('carries provenance the caller computed', () => {
     expect(toCard(byName('Sol Ring'), { universesBeyond: true })?.universesBeyond).toBe(true)
+  })
+})
+
+/**
+ * The commander search, against RECORDED pages (AGENTS.md §4).
+ *
+ * Three real `/cards/search` responses, captured from
+ * `is:commander legal:commander&unique=cards` and trimmed to a handful of
+ * entries each. Everything except `data` is exactly as Scryfall sent it — the
+ * `next_page` links, `has_more`, and the 3,411 `total_cards` — because those
+ * envelope fields are the whole of what the pager reads.
+ *
+ * The cards kept in them are the ones that matter. Grist the derivation gets
+ * right; Heart of Kiran it gets wrong, and wrong in the direction nobody
+ * expects — a legendary Vehicle that reads like a bad commander, which Scryfall
+ * lists anyway.
+ */
+const searchPage = (name: string): unknown =>
+  JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', name), 'utf8'),
+  )
+
+const PAGE_1 = searchPage('scryfall-commander-search-page1.json')
+const PAGE_2 = searchPage('scryfall-commander-search-page2.json')
+const PAGE_LAST = searchPage('scryfall-commander-search-last.json')
+
+/** Heart of Kiran and Grist, by the oracle ids the fixtures carry. */
+const HEART_OF_KIRAN = 'e2ee410f-2467-4f1f-84a0-8a79faedc0b3'
+const GRIST = '0efb0d7e-dea0-4817-a243-15066e9ef333'
+
+interface Recorded {
+  readonly urls: string[]
+  readonly agents: (string | null)[]
+  readonly sleeps: number[]
+  readonly fetchImpl: typeof fetch
+  readonly sleepImpl: (ms: number) => Promise<void>
+}
+
+/**
+ * A fetch that serves a queue of recorded pages, and a sleep that records
+ * rather than waits.
+ *
+ * The pages are served in order rather than keyed by URL: each fixture is a
+ * real response, and sequencing them is the test's job. Which link the client
+ * actually followed is asserted separately, off `urls`.
+ */
+const recorder = (pages: readonly unknown[], status = 200): Recorded => {
+  const urls: string[] = []
+  const agents: (string | null)[] = []
+  const sleeps: number[] = []
+  let index = 0
+  return {
+    urls,
+    agents,
+    sleeps,
+    fetchImpl: ((input: string, init?: { headers?: Record<string, string> }) => {
+      urls.push(String(input))
+      agents.push(init?.headers?.['User-Agent'] ?? null)
+      const body = pages[Math.min(index, pages.length - 1)]
+      index += 1
+      return Promise.resolve({
+        ok: status >= 200 && status < 300,
+        status,
+        json: () => Promise.resolve(body),
+      } as unknown as Response)
+    }) as unknown as typeof fetch,
+    sleepImpl: (ms: number) => {
+      sleeps.push(ms)
+      return Promise.resolve()
+    },
+  }
+}
+
+describe('fetchCommanderOracleIds', () => {
+  it('walks every page and keeps the oracle id from each entry', async () => {
+    const rec = recorder([PAGE_1, PAGE_2, PAGE_LAST])
+
+    const set = await fetchCommanderOracleIds(rec)
+
+    expect(set.pages).toBe(3)
+    expect(set.oracleIds.size).toBe(11)
+    expect(set.oracleIds.has(GRIST)).toBe(true)
+    // Reported so the caller can sanity-check the shape of what it got.
+    expect(set.totalCards).toBe(3411)
+  })
+
+  it('carries the answer the oracle text cannot give', async () => {
+    // Heart of Kiran is a Legendary Artifact — Vehicle. `deriveCanBeCommander`
+    // says no, because nothing on the card says otherwise, and Scryfall says
+    // yes. This is the entire reason the fetch exists.
+    const rec = recorder([PAGE_1, PAGE_2, PAGE_LAST])
+
+    const set = await fetchCommanderOracleIds(rec)
+
+    expect(set.oracleIds.has(HEART_OF_KIRAN)).toBe(true)
+    expect(
+      deriveCanBeCommander({
+        typeLine: 'Legendary Artifact — Vehicle',
+        oracleText: 'Flying\nWhenever Heart of Kiran becomes tapped, ...\nCrew 3',
+        legalities: { commander: 'legal' },
+      }),
+    ).toBe(false)
+  })
+
+  it('asks for one row per card, not one per printing', async () => {
+    const rec = recorder([PAGE_LAST])
+
+    await fetchCommanderOracleIds(rec)
+
+    // Without `unique=cards` Scryfall returns a row per printing and the twenty
+    // pages become several hundred — the crawl ADR-0009 Q3 forbids.
+    expect(rec.urls[0]).toContain('unique=cards')
+    expect(rec.urls[0]).toContain(encodeURIComponent('is:commander legal:commander'))
+  })
+
+  it('follows the next_page Scryfall gives rather than building its own', async () => {
+    const rec = recorder([PAGE_1, PAGE_LAST])
+
+    await fetchCommanderOracleIds(rec)
+
+    // Scryfall's link carries `order`, `include_extras` and the page number.
+    // Reconstructing that from a page counter is how a pager drifts from the
+    // cursor the server actually issued.
+    expect(rec.urls[1]).toBe((PAGE_1 as { next_page: string }).next_page)
+  })
+
+  it('identifies this application on every request (ADR-0009 Q2)', async () => {
+    const rec = recorder([PAGE_1, PAGE_LAST])
+
+    await fetchCommanderOracleIds({ ...rec, userAgent: 'LotusWizard/9.9 (test)' })
+
+    expect(rec.agents).toEqual(['LotusWizard/9.9 (test)', 'LotusWizard/9.9 (test)'])
+  })
+
+  it('paces the pages at the 2/s ADR-0009 sets for search', async () => {
+    const rec = recorder([PAGE_1, PAGE_2, PAGE_LAST])
+
+    await fetchCommanderOracleIds(rec)
+
+    // Three pages, two gaps: there is nothing to space the first request from.
+    // Read off `delayFor` rather than written here a second time.
+    expect(rec.sleeps).toEqual([500, 500])
+    expect(rec.sleeps[0]).toBe(delayFor('/cards/search'))
+  })
+
+  it('throws on a failed page rather than returning a partial set', async () => {
+    // The dangerous failure. A short set looks exactly like a complete one at
+    // the call site, and writing it would mark thousands of real commanders
+    // ineligible — so there must be no way to receive one.
+    const rec = recorder([PAGE_1], 503)
+
+    await expect(fetchCommanderOracleIds(rec)).rejects.toThrow(/503/)
+  })
+
+  it('throws rather than paging forever when has_more never clears', async () => {
+    // PAGE_1 always says `has_more`, so this would loop until the process died
+    // inside a deploy-time command.
+    const rec = recorder([PAGE_1])
+
+    await expect(fetchCommanderOracleIds(rec)).rejects.toThrow(/exceeded/)
+    expect(rec.urls.length).toBeLessThanOrEqual(100)
+  })
+})
+
+describe('toCard commander provenance', () => {
+  const vehicle: ScryfallCard = {
+    id: '00000000-0000-0000-0000-0000000000aa',
+    oracle_id: HEART_OF_KIRAN,
+    name: 'Heart of Kiran',
+    type_line: 'Legendary Artifact — Vehicle',
+    oracle_text: 'Flying\nCrew 3',
+    legalities: { commander: 'legal' },
+  }
+
+  it('takes Scryfall’s yes over the derivation’s no', () => {
+    // The 31 Vehicles and Spacecraft this whole follow-up exists for.
+    expect(toCard(vehicle)?.canBeCommander).toBe(false)
+    expect(toCard(vehicle, { canBeCommander: true })?.canBeCommander).toBe(true)
+  })
+
+  it('takes Scryfall’s no over the derivation’s yes', () => {
+    // `??`, not `||`. A fetched `false` is an answer; falling through to the
+    // derivation on it would put the two sources back in disagreement on
+    // exactly the cards where they differ.
+    const legend = byName('Lord of the Nazgûl')
+    expect(toCard(legend)?.canBeCommander).toBe(true)
+    expect(toCard(legend, { canBeCommander: false })?.canBeCommander).toBe(false)
+  })
+
+  it('falls back to the derivation when the search did not answer', () => {
+    // An ingest that could not reach the search still has to write something,
+    // and the derivation agrees with Scryfall on 3,380 of 3,411. Writing nothing
+    // would leave the API unable to refuse Sol Ring again.
+    expect(toCard(byName('Lord of the Nazgûl'), { universesBeyond: false })?.canBeCommander).toBe(
+      true,
+    )
+    expect(toCard(byName('Sol Ring'), {})?.canBeCommander).toBe(false)
   })
 })
