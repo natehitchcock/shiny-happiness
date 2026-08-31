@@ -379,14 +379,59 @@ export interface CurveDelta {
  * Lands are excluded by the caller: a 36-land deck is not "over-full at zero",
  * and including them would swamp the shape.
  */
+/**
+ * Whole cards per bucket that sum to exactly `total`.
+ *
+ * Rounding each bucket on its own does not: eight shares that sum to 1, each
+ * rounded independently, land anywhere from 62 to 64 against a 63-spell
+ * reference. Six of the nine archetypes come out at 64, so the targets sheet
+ * greeted a builder who had changed nothing with "Curve total 64 of 63 spells —
+ * over", an amber warning against a deck they had not touched and could not
+ * clear without hand-editing a bucket.
+ *
+ * Largest remainder (Hamilton): floor everything, then hand the leftover cards
+ * to the buckets with the largest fractional parts. It is the standard fix for
+ * apportioning whole seats to fractional shares, and it keeps the property that
+ * matters here — the parts equal the whole, always.
+ *
+ * Ties break on bucket order so the answer is deterministic; two archetypes
+ * with the same shape must produce the same table every time (doc 05's
+ * determinism rule).
+ */
+export const apportion = (shares: readonly number[], total: number): readonly number[] => {
+  const exact = shares.map((share) => share * total)
+  const floors = exact.map((value) => Math.floor(value))
+  const counts = [...floors]
+
+  // Clamped at zero: floating-point shares can sum a hair over 1, and handing
+  // out a negative number of cards is not a thing.
+  let remaining = Math.max(0, total - floors.reduce((a, b) => a + b, 0))
+  const byRemainder = exact
+    .map((value, bucket) => ({ bucket, fraction: value - Math.floor(value) }))
+    .sort((a, b) => b.fraction - a.fraction || a.bucket - b.bucket)
+
+  for (const { bucket } of byRemainder) {
+    if (remaining <= 0) break
+    counts[bucket] = (counts[bucket] ?? 0) + 1
+    remaining -= 1
+  }
+  return counts
+}
+
 export const curveDeltas = (
   manaCurve: readonly number[],
   target: CurveTarget,
 ): readonly CurveDelta[] => {
   const total = manaCurve.reduce((a, b) => a + b, 0)
+  // Apportioned together, not rounded one at a time — the ideals have to add up
+  // to the deck's own spell count or the panel contradicts itself.
+  const ideals = apportion(
+    target.map((band) => band.ideal),
+    total,
+  )
   return target.map((band, bucket) => {
     const actual = manaCurve[bucket] ?? 0
-    const ideal = Math.round(band.ideal * total)
+    const ideal = ideals[bucket] ?? 0
     const min = Math.floor(band.min * total)
     const max = Math.ceil(band.max * total)
 

@@ -31,7 +31,14 @@ const IO_MODULES = [
 ]
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/dist-web/**', '**/.turbo/**', 'design/**', 'coverage/**'] },
+  {
+    //  holds one full checkout per running agent. Linting
+    // them lints the same files five times, reports another agent's
+    // in-progress code as this tree's problem, and — because each worktree has
+    // its own tsconfig — makes the type-aware rules fail outright with
+    // "multiple candidate TSConfigRootDirs".
+    ignores: ['**/dist/**', '**/dist-web/**', '**/.turbo/**', 'design/**', 'coverage/**', '.claude/**'],
+  },
 
   tseslint.configs.recommended,
 

@@ -3,12 +3,14 @@ import { ARCHETYPES } from './archetype.js'
 import type { CurveTarget } from './curve.js'
 import {
   CURVE_BUCKETS,
+  apportion,
   curveBucket,
   curveDeltas,
   curveDirection,
   curveFit,
   curveTarget,
 } from './curve.js'
+import { CURVE_REFERENCE_SPELLS } from './target-overrides.js'
 
 const flat = (n: number): number[] => new Array<number>(CURVE_BUCKETS).fill(n)
 
@@ -312,5 +314,65 @@ describe('curve ranges give wiggle room, and the room varies by archetype', () =
       expect(d.min).toBeLessThanOrEqual(d.ideal)
       expect(d.max).toBeGreaterThanOrEqual(d.ideal)
     }
+  })
+})
+
+describe('apportioning whole cards to fractional shares', () => {
+  /*
+   * The defect: eight shares summing to 1, each rounded on its own, do not sum
+   * to the reference. Six of the nine archetypes came out at 64 against 63, so
+   * the targets sheet showed "Curve total 64 of 63 spells — over" to a builder
+   * who had changed nothing and could not clear it without editing a bucket.
+   */
+  it('always hands out exactly the total, for every archetype', () => {
+    for (const archetype of ARCHETYPES) {
+      const shares = curveTarget(archetype).map((band) => band.ideal)
+      const counts = apportion(shares, CURVE_REFERENCE_SPELLS)
+      const sum = counts.reduce((a, b) => a + b, 0)
+      expect({ archetype, sum }).toEqual({ archetype, sum: CURVE_REFERENCE_SPELLS })
+    }
+  })
+
+  it('rounds each bucket to a neighbour of its exact share', () => {
+    // Apportionment may not invent a number: every count is the floor or the
+    // ceiling of that bucket's exact share, never further away.
+    const shares = curveTarget('midrange').map((band) => band.ideal)
+    const counts = apportion(shares, CURVE_REFERENCE_SPELLS)
+    counts.forEach((count, bucket) => {
+      const exact = (shares[bucket] ?? 0) * CURVE_REFERENCE_SPELLS
+      expect(count).toBeGreaterThanOrEqual(Math.floor(exact))
+      expect(count).toBeLessThanOrEqual(Math.ceil(exact))
+    })
+  })
+
+  it('is deterministic when two buckets have the same remainder', () => {
+    // Ties break on bucket order, so the same shape gives the same table every
+    // run — doc 05's determinism rule.
+    const even = [0.25, 0.25, 0.25, 0.25]
+    expect(apportion(even, 10)).toEqual(apportion(even, 10))
+    expect(apportion(even, 10)).toEqual([3, 3, 2, 2])
+  })
+
+  it('gives nothing away when the shares already divide exactly', () => {
+    expect(apportion([0.5, 0.5], 10)).toEqual([5, 5])
+    expect(apportion([1], 7)).toEqual([7])
+  })
+
+  it('survives a share list that sums a hair over one', () => {
+    // Floating point: three thirds do not add to exactly 1, and handing out a
+    // negative card is not a thing.
+    const thirds = [1 / 3, 1 / 3, 1 / 3]
+    const counts = apportion(thirds, 9)
+    expect(counts.reduce((a, b) => a + b, 0)).toBe(9)
+    expect(counts.every((c) => c >= 0)).toBe(true)
+  })
+
+  it('makes the curve panel add up to the deck it describes', () => {
+    // The same defect one level down: `curveDeltas`' ideals must total the
+    // deck's own nonland count, or the panel contradicts itself.
+    const deck = [1, 6, 12, 14, 10, 8, 5, 7]
+    const spells = deck.reduce((a, b) => a + b, 0)
+    const deltas = curveDeltas(deck, curveTarget('midrange'))
+    expect(deltas.reduce((sum, d) => sum + d.ideal, 0)).toBe(spells)
   })
 })
