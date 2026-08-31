@@ -1,6 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
-import { MIGRATIONS_DIR, appliedMigrations, liveSnapshot, migrationVersions } from '@roundtable/db'
+import {
+  MIGRATIONS_DIR,
+  appliedMigrations,
+  countCombos,
+  liveSnapshot,
+  migrationVersions,
+} from '@roundtable/db'
 
 /**
  * `GET /api/v1/health` — what a deployment is actually running.
@@ -140,6 +146,7 @@ export const buildHealth = async (pool: Pool): Promise<Health> => {
 
   let applied: readonly string[] | null
   let snapshot: Awaited<ReturnType<typeof liveSnapshot>> = null
+  let combos: number | null = null
   try {
     applied = await appliedMigrations(pool)
     // Guarded on the schema existing. `dataset_snapshots` is created by
@@ -149,7 +156,11 @@ export const buildHealth = async (pool: Pool): Promise<Health> => {
     // string instead of after `migrate up`. The snapshot read is separate from
     // the schema read on purpose: an empty corpus and a stale schema are
     // different faults with different fixes (DEPLOYING.md step 4 versus 3).
-    if (applied !== null) snapshot = await liveSnapshot(pool)
+    if (applied !== null) {
+      snapshot = await liveSnapshot(pool)
+      // Guarded the same way and for the same reason as the snapshot read.
+      combos = await countCombos(pool)
+    }
   } catch (error) {
     const code = errorCode(error)
     return {
@@ -205,7 +216,9 @@ export const buildHealth = async (pool: Pool): Promise<Health> => {
       loaded: snapshot !== null,
       snapshotId: snapshot?.id ?? null,
       cardCount: snapshot?.cardCount ?? null,
-      comboCount: snapshot?.comboCount ?? null,
+      // Counted, not read off the snapshot — see `countCombos`. The snapshot
+      // records what ONE ingest run wrote, and a cards run writes zero combos.
+      comboCount: combos,
       ingestedAt: snapshot?.createdAt ?? null,
     },
     database: { reachable: true },

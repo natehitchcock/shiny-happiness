@@ -95,6 +95,26 @@ export const combosWithin = async (pool: Pool, accepted: readonly OracleId[]): P
   return rows.map(toCombo)
 }
 
+/**
+ * How many combos are actually stored.
+ *
+ * For the health endpoint, which must not read the snapshot's `combo_count` for
+ * this: a CARDS ingest writes a fresh snapshot recording the cards it wrote and
+ * zero combos, because that run ingests no combos. The combos are still there —
+ * the snapshot is a record of one run, not an inventory — so health reported
+ * `comboCount: 0` beside `loaded: true` on a corpus holding 108,135 of them.
+ * A diagnostic that says the wrong thing is worse than one that says nothing.
+ *
+ * `count(*)` and not `reltuples`: measured at 60 ms against the real table on a
+ * managed Postgres versus 38 ms for the planner's estimate, and health is asked
+ * rarely and by someone who needs a true answer. Twenty-two milliseconds is not
+ * worth an approximation in the one endpoint whose job is to be believed.
+ */
+export const countCombos = async (pool: Pool): Promise<number> => {
+  const { rows } = await pool.query<{ n: string }>('SELECT count(*) AS n FROM combos')
+  return Number(rows[0]?.n ?? 0)
+}
+
 export const allCombos = async (pool: Pool): Promise<Combo[]> => {
   const { rows } = await pool.query<ComboRow>('SELECT * FROM combos ORDER BY combo_id')
   return rows.map(toCombo)

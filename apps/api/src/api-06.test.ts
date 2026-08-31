@@ -13,11 +13,12 @@ import {
   migrateDown,
   migrationVersions,
   promoteSnapshot,
+  insertCombos,
   setSnapshotCounts,
   upsertCards,
 } from '@roundtable/db'
 import type { Card, CardType, DeckCommand, OracleId } from '@roundtable/domain'
-import { oracleId, printingId, rebaseCommands } from '@roundtable/domain'
+import { comboId, oracleId, printingId, rebaseCommands } from '@roundtable/domain'
 import type { FastifyInstance } from 'fastify'
 import { buildServer } from './server.js'
 
@@ -394,9 +395,40 @@ describeDb('GET /api/v1/health', () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({
       status: 'ok',
-      corpus: { loaded: true, snapshotId: id, cardCount: 34_492, comboCount: 108_046 },
+      corpus: { loaded: true, snapshotId: id, cardCount: 34_492 },
       database: { reachable: true },
     })
+  })
+
+  it('counts the combos that exist, not the ones the last run wrote', async () => {
+    /*
+     * The defect this catches, seen on production within a minute of the
+     * endpoint going live: it reported `comboCount: 0` beside `loaded: true`
+     * on a corpus holding 108,135 combos.
+     *
+     * A snapshot records what ONE ingest run wrote. A cards ingest writes a
+     * fresh live snapshot with `combo_count: 0`, because that run ingests no
+     * combos — the combos are still in the table, untouched. Reading the count
+     * off the snapshot therefore says the combo corpus is empty every time
+     * anyone re-ingests cards, which is the most common maintenance action
+     * there is. A diagnostic that says the wrong thing is worse than one that
+     * says nothing.
+     */
+    await insertCombos(db.pool, [
+      {
+        id: comboId('health-1'),
+        pieces: [oracleId(randomUUID()), oracleId(randomUUID())],
+        produces: ['infinite-mana'],
+      },
+    ])
+
+    const id = randomUUID()
+    await createSnapshot(db.pool, id, 'scryfall')
+    // Exactly what a cards-only ingest leaves behind.
+    await setSnapshotCounts(db.pool, id, { cards: 34_492, combos: 0 })
+    await promoteSnapshot(db.pool, id, 'scryfall')
+
+    expect((await get()).json().corpus.comboCount).toBe(1)
   })
 
   it('is `degraded`, not `ok`, when the schema is current but no corpus is live', async () => {
