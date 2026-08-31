@@ -345,7 +345,16 @@ button {
 
 /* ---------------------------------------------------------------- meters */
 
+/*
+ * `display: block` because these are spans now.
+ *
+ * The whole meter sits inside the hint's button — a div in a button is invalid
+ * and the parser reparents it — so every part of it is a span carrying its own
+ * display. The visual result is identical; the difference is only that the bar
+ * can now be hovered, tapped and focused to show the cards it counts.
+ */
 .meter {
+  display: block;
   margin-bottom: var(--step);
 }
 
@@ -362,6 +371,7 @@ button {
 }
 
 .meter-track {
+  display: block;
   height: 4px;
   background: var(--ink-3);
   border-radius: 2px;
@@ -369,8 +379,50 @@ button {
 }
 
 .meter-fill {
+  display: block;
   height: 100%;
   background: var(--sage);
+}
+
+/*
+ * A composition bar opens the cards it counts.
+ *
+ * The trigger is the whole row, so it has to fill the rail rather than hug its
+ * text — `.hint` is `inline-flex` by default, which would shrink-wrap the bar
+ * to the width of the role name.
+ */
+.comp-hint {
+  display: block;
+  width: 100%;
+}
+
+.comp-hint .hint-trigger {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+/*
+ * The panel opens DOWNWARD and fits the rail exactly.
+ *
+ * `.analysis-scroll` is an `overflow-y: auto` box, which computes `overflow-x`
+ * to `auto` as well — so a 20rem popup anchored to the left of a 230 px rail is
+ * clipped, or worse, scrolls the dashboard sideways. Pinned to both edges
+ * instead, it can never be wider than the thing it is inside.
+ *
+ * Downward because the composition list runs down the top of the rail: the
+ * default upward direction would put the first role's panel off the top.
+ */
+.comp-hint .hint-pop {
+  top: calc(100% + 4px);
+  bottom: auto;
+  left: 0;
+  right: 0;
+  width: auto;
+  max-width: none;
+  max-height: 14rem;
+  overflow-y: auto;
 }
 
 .meter-fill[data-short='true'] {
@@ -786,6 +838,29 @@ select {
   margin: var(--step) 0 4px;
 }
 
+/*
+ * Each bar is now a hint trigger, so two wrappers sit between `.curve` and the
+ * column: the `.hint` span and the button inside it. Both have to stretch or
+ * the bars collapse to zero width — the column's own `flex: 1` is measured
+ * against a parent that is no longer `.curve`.
+ */
+.curve-hint {
+  flex: 1;
+  display: flex;
+  height: 100%;
+  min-width: 0;
+}
+
+.curve-hint .hint-trigger {
+  flex: 1;
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  /* A bar you can open is a pointer, not the `help` cursor the text hints use:
+     the panel it opens is a list of your own cards, not an explanation. */
+  cursor: pointer;
+}
+
 .curve-col {
   flex: 1;
   display: flex;
@@ -797,7 +872,23 @@ select {
   background: none;
   border: none;
   padding: 0;
-  cursor: default;
+}
+
+/*
+ * The panel hangs from the RIGHT edge of the bar and opens upward.
+ *
+ * Upward because the curve is pinned to the foot of the rail, where there is no
+ * room below it. Right-anchored because a bar is about an eighth of the rail
+ * wide: a left-anchored panel on bucket 7 would run off the screen edge, while
+ * right-anchored it grows leftward across the app, which the rail's
+ * `overflow: visible` now allows.
+ */
+.curve-hint .hint-pop {
+  left: auto;
+  right: 0;
+  max-width: 15rem;
+  max-height: 16rem;
+  overflow-y: auto;
 }
 
 /* Anchored to the baseline, rounded only at the data end. */
@@ -1144,6 +1235,18 @@ select {
  * them, and a dashboard you have to scroll back up to read is not doing its job.
  * It is a full-height column with a scrolling body and a pinned foot.
  */
+/*
+ * `overflow: visible`, not `hidden`.
+ *
+ * It was `hidden` as a belt-and-braces guard, and the braces do the work: the
+ * scrolling body is `.analysis-scroll` with its own `overflow-y: auto` and
+ * `min-height: 0`, and the pinned foot is `flex: 0 0 auto`, so nothing in
+ * normal flow can escape this box anyway.
+ *
+ * What `hidden` DID clip was the two things that are supposed to leave it: the
+ * panel a curve bar opens, and the preview, which is now anchored to this
+ * rail's left edge and overlays the suggestion feed.
+ */
 .region.analysis {
   position: sticky;
   top: 62px;
@@ -1152,7 +1255,7 @@ select {
   display: flex;
   flex-direction: column;
   gap: var(--step);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .analysis-scroll {

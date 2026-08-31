@@ -616,3 +616,285 @@ describe('a column sorts the suggestion feed', () => {
     ).toBe(true)
   })
 })
+
+// --------------------------------------------------------- bar breakdowns
+
+/**
+ * Hovering a curve bar or a composition bar shows the cards it counts.
+ *
+ * The trap, and the only reason these are not trivial: the count in the bar and
+ * the list under the cursor must agree. Two ways they can be made to disagree,
+ * both of them the obvious implementation.
+ */
+describe('what is behind a bar', () => {
+  const mountain = card({
+    oracleId: 'mtn',
+    name: 'Mountain',
+    manaCost: null,
+    manaValue: 0,
+    typeLine: 'Basic Land — Mountain',
+    types: ['land'],
+    primaryRole: 'land',
+    colorIdentity: [],
+  })
+  /** A creature that ramps, so it counts under BOTH `role:ramp` and `type:creature`. */
+  const ramper = card({
+    oracleId: 'ram',
+    name: 'Llanowar Elves',
+    manaValue: 1,
+    typeLine: 'Creature — Elf Druid',
+    types: ['creature'],
+    primaryRole: 'ramp',
+  })
+  const bolt = card({
+    oracleId: 'bolt',
+    name: 'Lightning Bolt',
+    manaValue: 1,
+    typeLine: 'Instant',
+    types: ['instant'],
+    primaryRole: 'removal',
+  })
+
+  const withDeck = (
+    entries: { oracleId: string; zone: 'accepted' | 'excluded'; locked: boolean }[],
+    all: api.Card[],
+  ): api.Deck => {
+    mocked.hydrate.mockResolvedValue({
+      cards: new Map([
+        ['cmd', card({ oracleId: 'cmd', name: 'Krenko, Mob Boss', manaValue: 4 })],
+        ...all.map((c): [string, api.Card] => [c.oracleId, c]),
+      ]),
+      prices: new Map(),
+      images: new Map(),
+    } satisfies api.Hydrated)
+    return { ...deck, entries }
+  }
+
+  /**
+   * Open a hint by its trigger's accessible name and read ITS panel.
+   *
+   * Scoped to the trigger's own `.hint`, not the first `.hint-pop` in the
+   * document: a click PINS the panel open, so opening a second one while the
+   * first is still pinned leaves two on screen and a document-wide query
+   * silently returns the wrong one.
+   */
+  const openHint = async (name: RegExp): Promise<string> => {
+    const trigger = screen.getByLabelText(name)
+    await act(async () => {
+      trigger.click()
+    })
+    return trigger.closest('.hint')?.querySelector('.hint-pop')?.textContent ?? ''
+  }
+
+  it('lists thirty Mountains once, because the bar counts them once', async () => {
+    /*
+     * THE MEASURED TRAP. `countComposition` iterates `acceptedSet(deck)`, which
+     * is a `Set` of oracle ids — so thirty Mountains are one land as far as
+     * every bar on this dashboard is concerned. A filter over the deck's
+     * ENTRIES would put thirty rows under a bar reading 1.
+     */
+    const thirty = Array.from({ length: 30 }, () => ({
+      oracleId: 'mtn',
+      zone: 'accepted' as const,
+      locked: false,
+    }))
+    mocked.getAnalysis.mockResolvedValue({
+      ...analysis,
+      targets: [
+        {
+          dimension: { role: 'land' },
+          ideal: 36,
+          min: 34,
+          max: 38,
+          locked: 0,
+          actual: 1,
+          source: 'archetype',
+        },
+      ],
+    })
+    render(<Workspace deck={withDeck(thirty, [mountain])} />)
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByLabelText(/^land:/)).toBeDefined())
+
+    const panel = await openHint(/^land:/)
+    expect(panel).toMatch(/land — 1 card/)
+    expect(panel.match(/Mountain/g)).toHaveLength(1)
+    // And the two numbers agree, so no caveat is printed.
+    expect(panel).not.toMatch(/The bar counts/)
+  })
+
+  it('counts a creature that ramps under both its role and its type', async () => {
+    // `dimensionKeysOf` yields a role key AND a type key per card, which is
+    // exactly why it is imported from the domain rather than reimplemented.
+    mocked.getAnalysis.mockResolvedValue({
+      ...analysis,
+      targets: [
+        {
+          dimension: { role: 'ramp' },
+          ideal: 10,
+          min: 8,
+          max: 12,
+          locked: 0,
+          actual: 1,
+          source: 'archetype',
+        },
+        {
+          dimension: { type: 'creature' },
+          ideal: 30,
+          min: 25,
+          max: 35,
+          locked: 0,
+          actual: 1,
+          source: 'archetype',
+        },
+      ],
+    })
+    render(
+      <Workspace
+        deck={withDeck([{ oracleId: 'ram', zone: 'accepted', locked: false }], [ramper])}
+      />,
+    )
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByLabelText(/^ramp:/)).toBeDefined())
+
+    expect(await openHint(/^ramp:/)).toMatch(/Llanowar Elves/)
+    expect(await openHint(/^creature:/)).toMatch(/Llanowar Elves/)
+  })
+
+  it('shows the cards at a mana value, and never a land', async () => {
+    // The curve is a count of SPELLS. A deck's lands would otherwise be the
+    // tallest bar on it, at mana value 0.
+    mocked.getAnalysis.mockResolvedValue({
+      ...analysis,
+      curve: {
+        ...analysis.curve,
+        deltas: [
+          {
+            bucket: 1,
+            actual: 2,
+            ideal: 8,
+            min: 6,
+            max: 10,
+            delta: 6,
+            withinRange: false,
+          },
+          {
+            bucket: 0,
+            actual: 0,
+            ideal: 2,
+            min: 0,
+            max: 4,
+            delta: 2,
+            withinRange: true,
+          },
+        ],
+        target: [],
+      },
+    })
+    render(
+      <Workspace
+        deck={withDeck(
+          [
+            { oracleId: 'ram', zone: 'accepted', locked: false },
+            { oracleId: 'bolt', zone: 'accepted', locked: false },
+            { oracleId: 'mtn', zone: 'accepted', locked: false },
+          ],
+          [ramper, bolt, mountain],
+        )}
+      />,
+    )
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByLabelText(/^Mana value 1:/)).toBeDefined())
+
+    const one = await openHint(/^Mana value 1:/)
+    expect(one).toMatch(/Mana value 1 — 2 cards/)
+    expect(one).toMatch(/Lightning Bolt/)
+    expect(one).toMatch(/Llanowar Elves/)
+
+    const zero = await openHint(/^Mana value 0:/)
+    // The Mountain is at mana value 0 and is a land, so it is in neither bar.
+    expect(zero).not.toMatch(/Mountain/)
+    expect(zero).toMatch(/Nothing here yet/)
+  })
+
+  it('says so, rather than lying, when the list and the bar cannot be made to agree', async () => {
+    /*
+     * The bar is the last analysis the SERVER computed; the list is the deck on
+     * screen now. Between an accept and the recompute that follows, and for any
+     * card this page has not hydrated, those are different numbers. The heading
+     * always counts the list — the thing being looked at — and the caveat names
+     * the other number and why it differs.
+     */
+    mocked.getAnalysis.mockResolvedValue({
+      ...analysis,
+      targets: [
+        {
+          dimension: { role: 'land' },
+          ideal: 36,
+          min: 34,
+          max: 38,
+          locked: 0,
+          // The server counted five; the client holds one.
+          actual: 5,
+          source: 'archetype',
+        },
+      ],
+    })
+    render(
+      <Workspace
+        deck={withDeck([{ oracleId: 'mtn', zone: 'accepted', locked: false }], [mountain])}
+      />,
+    )
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByLabelText(/^land:/)).toBeDefined())
+
+    const panel = await openHint(/^land:/)
+    // The heading counts what is actually listed…
+    expect(panel).toMatch(/land — 1 card/)
+    // …and the difference is stated rather than hidden.
+    expect(panel).toMatch(/The bar counts 5/)
+  })
+
+  it('is reachable by keyboard, and closes on Escape', async () => {
+    // R4. The trigger is a real button, so focus opens the panel and Escape
+    // dismisses a pinned one — the behaviour `Hint` already had for tag chips.
+    mocked.getAnalysis.mockResolvedValue({
+      ...analysis,
+      targets: [
+        {
+          dimension: { role: 'land' },
+          ideal: 36,
+          min: 34,
+          max: 38,
+          locked: 0,
+          actual: 1,
+          source: 'archetype',
+        },
+      ],
+    })
+    render(
+      <Workspace
+        deck={withDeck([{ oracleId: 'mtn', zone: 'accepted', locked: false }], [mountain])}
+      />,
+    )
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByLabelText(/^land:/)).toBeDefined())
+    const trigger = screen.getByLabelText(/^land:/) as HTMLButtonElement
+    expect(trigger.tagName).toBe('BUTTON')
+
+    await act(async () => {
+      trigger.focus()
+    })
+    expect(document.querySelector('.hint-pop')).not.toBeNull()
+
+    // Pinned by a click, then dismissed with Escape.
+    await act(async () => {
+      trigger.click()
+    })
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      trigger.blur()
+    })
+    expect(document.querySelector('.hint-pop')).toBeNull()
+  })
+})

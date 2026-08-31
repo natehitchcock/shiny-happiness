@@ -1899,6 +1899,84 @@ const BracketCheck = ({
   )
 }
 
+/* ------------------------------------------------------- what is in a bar */
+
+/**
+ * The cards behind one bar, counted by the SERVER'S OWN RULE.
+ *
+ * The trap this exists to avoid, measured before it was written: the count in
+ * the bar and the list under the cursor have to agree, and the obvious
+ * client-side filter makes them disagree in two different ways.
+ *
+ *   DUPLICATES. `countComposition` iterates `acceptedSet(deck)`, which is a
+ *   `Set` of oracle ids — so thirty Mountains count ONCE. A filter over the
+ *   deck's entries would list thirty rows beside a bar reading 1. `ids` is
+ *   therefore the deduplicated set, and the caller passes `acceptedIds`, which
+ *   is built the same way and includes the commanders exactly as `acceptedSet`
+ *   does.
+ *
+ *   TWO DIMENSIONS AT ONCE. A composition dimension is a role OR a type, and a
+ *   creature that ramps is counted under both — so a card can legitimately
+ *   appear in two lists. `dimensionKeysOf` is imported from the domain rather
+ *   than reimplemented here, for the reason `lockedByDimension` already gives:
+ *   a second copy of the rule is a second answer to the same question.
+ *
+ * A card the client has not hydrated cannot be named, so it is omitted and the
+ * caller reports the shortfall rather than quietly showing a shorter list.
+ */
+export const cardsInDimension = (
+  ids: Iterable<string>,
+  cards: ReadonlyMap<string, api.Card>,
+  dimensionKey: string,
+): readonly api.Card[] => {
+  const out: api.Card[] = []
+  for (const id of ids) {
+    const card = cards.get(id)
+    if (card === undefined) continue
+    if (dimensionKeysOf(card).includes(dimensionKey)) out.push(card)
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * The same, for one mana-value bucket.
+ *
+ * Lands are excluded and bucket 7 is "7 or more", both because
+ * `countComposition` does exactly that — the curve is a count of SPELLS, and a
+ * deck's 36 lands at mana value 0 would otherwise be the tallest bar on it.
+ */
+export const cardsInBucket = (
+  ids: Iterable<string>,
+  cards: ReadonlyMap<string, api.Card>,
+  bucket: number,
+): readonly api.Card[] => {
+  const out: api.Card[] = []
+  for (const id of ids) {
+    const card = cards.get(id)
+    if (card === undefined || card.types.includes('land')) continue
+    if (Math.min(7, Math.max(0, Math.floor(card.manaValue))) === bucket) out.push(card)
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * What to say when the list and the bar do not agree. `null` when they do.
+ *
+ * They can legitimately differ. The bar is the last analysis the server
+ * computed and the list is the deck on screen right now, and between an accept
+ * and the recompute that follows it those are different decks; separately, a
+ * card this page has never hydrated has no name to show. Neither is a reason to
+ * show a number we cannot defend, so the honest thing is to show the count we
+ * CAN stand behind — the length of the list, which is the thing being looked
+ * at — and say what the other number is and why it differs.
+ */
+export const countCaveat = (listed: number, bar: number): string | null => {
+  if (listed === bar) return null
+  return listed < bar
+    ? `The bar counts ${String(bar)}. The ${String(bar - listed)} not listed are cards this page has not loaded, or were removed since the last recompute.`
+    : `The bar counts ${String(bar)} — it is from the last recompute, and these ${String(listed)} are the deck as it stands now.`
+}
+
 /** The host of a URL, for link text. The full URL stays on the `href`. */
 const hostOf = (url: string): string => {
   try {
@@ -1907,6 +1985,53 @@ const hostOf = (url: string): string => {
     // Not a URL we can parse; show it whole rather than an empty link.
     return url
   }
+}
+
+/**
+ * The cards behind one bar, as the panel a hover opens.
+ *
+ * Names only, as plain text. Buttons would be better if you could reach them,
+ * and on hover you cannot — moving the pointer off the trigger to click a name
+ * closes the panel it is in. `ComboList` made the same call for the same
+ * reason. The preview is a click away on the deck rail, which is where a reader
+ * who wants the card itself already goes.
+ *
+ * The COUNT IN THE HEADING is the length of this list, never the bar's number.
+ * They are usually the same and `countCaveat` says so when they are not; what
+ * must never happen is a heading claiming 12 above a list of 11, which is the
+ * failure this whole panel was written to avoid.
+ */
+const Breakdown = ({
+  title,
+  cards,
+  bar,
+}: {
+  title: string
+  cards: readonly api.Card[]
+  /** What the bar itself says, for the caveat. */
+  bar: number
+}): React.JSX.Element => {
+  const caveat = countCaveat(cards.length, bar)
+  return (
+    <>
+      <strong>
+        {title} — {plural(cards.length, 'card')}
+      </strong>
+      {cards.length === 0 ? (
+        <span className="hint-line dim">Nothing here yet.</span>
+      ) : (
+        cards.slice(0, 24).map((c) => (
+          <span className="hint-line" key={c.oracleId}>
+            {c.name}
+          </span>
+        ))
+      )}
+      {cards.length > 24 ? (
+        <span className="hint-line dim">and {cards.length - 24} more.</span>
+      ) : null}
+      {caveat === null ? null : <span className="hint-line dim">{caveat}</span>}
+    </>
+  )
 }
 
 /**
@@ -1921,6 +2046,7 @@ const hostOf = (url: string): string => {
 const Curve = ({
   curve,
   locked,
+  cardsAt,
 }: {
   curve: api.Analysis['curve']
   /**
@@ -1930,12 +2056,26 @@ const Curve = ({
    * longer triggers one — so the gold has to come from the deck on screen.
    */
   locked: readonly number[]
+  /**
+   * Which cards are in a bucket, asked for only when a bar is opened.
+   *
+   * A function rather than eight precomputed arrays: seven of the eight are
+   * never looked at, and the deck is walked once per open instead of eight
+   * times per render.
+   */
+  cardsAt: (bucket: number) => readonly api.Card[]
 }): React.JSX.Element => {
   const peak = Math.max(1, ...curve.histogram, ...curve.deltas.map((d) => d.max))
 
   return (
     <>
-      <div className="curve" role="img" aria-label="Mana curve against the archetype target">
+      {/* No `role="img"` any more. It made every descendant presentational,
+          which was right for eight decorative divs and is a lie now that each
+          column is a button that opens the cards behind it — a screen reader
+          would be told the whole chart is one picture and never reach them. The
+          per-column accessible names carry the same numbers the image label
+          used to summarise. */}
+      <div className="curve">
         {curve.deltas.map((d) => {
           // The band decides, not the ideal: inside it the bucket is fine.
           const direction = d.withinRange ? 'balanced' : d.delta > 0 ? 'short' : 'over'
@@ -1948,39 +2088,53 @@ const Curve = ({
             : direction === 'short'
               ? `${plural(d.delta, 'card')} short of ${String(d.min)}`
               : `${plural(-d.delta, 'card')} over ${String(d.max)}`
+          const mv = `Mana value ${String(d.bucket)}${d.bucket === 7 ? ' or more' : ''}`
           return (
-            <div
-              className="curve-col"
+            /*
+             * The bar opens the cards in it.
+             *
+             * Through the existing `Hint`, not a second tooltip: it already has
+             * hover, tap-to-pin and Escape, and it is what the tag chips and
+             * the combo counts use. A `title` would have been a desktop-only
+             * feature wearing the costume of a general one, which is the exact
+             * mistake `Hint` was written to correct.
+             *
+             * The content is a thunk, so hovering one bar does not walk the
+             * deck for the other seven.
+             */
+            <Hint
               key={d.bucket}
-              title={`Mana value ${String(d.bucket)}${d.bucket === 7 ? '+' : ''}: ${String(d.actual)} cards, want ${String(d.min)}–${String(d.max)} — ${label}`}
-              aria-label={`Mana value ${String(d.bucket)}: ${String(d.actual)} cards (${String(locked[d.bucket] ?? 0)} locked), target range ${String(d.min)} to ${String(d.max)}, ${label}${pinned}`}
-              data-custom={curve.target[d.bucket]?.source === 'custom'}
+              className="curve-hint"
+              label={`${mv}: ${String(d.actual)} cards (${String(locked[d.bucket] ?? 0)} locked), target range ${String(d.min)} to ${String(d.max)}, ${label}${pinned}. Show them.`}
+              content={<Breakdown title={mv} cards={cardsAt(d.bucket)} bar={d.actual} />}
             >
-              {/* The acceptable range, drawn as a band rather than a line —
-                  anywhere inside it is fine, which is what a range means. */}
-              <div
-                className="curve-band"
-                style={{
-                  bottom: `${String((d.min / peak) * 100)}%`,
-                  height: `${String(((d.max - d.min) / peak) * 100)}%`,
-                }}
-              />
-              <div
-                className="curve-bar"
-                data-direction={direction}
-                style={{ height: `${String((d.actual / peak) * 100)}%` }}
-              >
-                {/* The committed portion. Gold is the colour of a decision
-                    everywhere in this app, so a locked card reads the same way
-                    in the curve as it does in the deck. */}
-                <div
-                  className="curve-locked"
+              <span className="curve-col" data-custom={curve.target[d.bucket]?.source === 'custom'}>
+                {/* The acceptable range, drawn as a band rather than a line —
+                    anywhere inside it is fine, which is what a range means. */}
+                <span
+                  className="curve-band"
                   style={{
-                    height: `${String(Math.min(100, ((locked[d.bucket] ?? 0) / Math.max(1, d.actual)) * 100))}%`,
+                    bottom: `${String((d.min / peak) * 100)}%`,
+                    height: `${String(((d.max - d.min) / peak) * 100)}%`,
                   }}
                 />
-              </div>
-            </div>
+                <span
+                  className="curve-bar"
+                  data-direction={direction}
+                  style={{ height: `${String((d.actual / peak) * 100)}%` }}
+                >
+                  {/* The committed portion. Gold is the colour of a decision
+                      everywhere in this app, so a locked card reads the same
+                      way in the curve as it does in the deck. */}
+                  <span
+                    className="curve-locked"
+                    style={{
+                      height: `${String(Math.min(100, ((locked[d.bucket] ?? 0) / Math.max(1, d.actual)) * 100))}%`,
+                    }}
+                  />
+                </span>
+              </span>
+            </Hint>
           )
         })}
       </div>
@@ -5193,37 +5347,58 @@ export const Workspace = ({
               const pct = Math.min(100, (r.actual / Math.max(1, r.ideal)) * 100)
               const lockedPct = Math.min(100, (r.locked / Math.max(1, r.ideal)) * 100)
               return (
-                <div className="meter" key={r.name}>
-                  <div className="meter-label">
-                    <span>
-                      {r.name}
-                      {/* Marked, because this bar is no longer the archetype's
-                          opinion — a builder has to be able to see which of
-                          these numbers are their own before trusting either. */}
-                      {r.source === 'custom' ? (
-                        <span className="target-mark" title="You set this target">
-                          {' ✎'}
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="delta">
-                      {r.locked > 0 ? `${String(r.locked)}\u25C6 ` : ''}
-                      {r.actual} / {r.ideal}
-                    </span>
-                  </div>
-                  <div
-                    className="meter-track"
-                    title={`${String(r.actual)} of a target ${String(r.ideal)} (range ${String(r.min)}–${String(r.max)}), ${String(r.locked)} locked${r.source === 'custom' ? `; you set this — the archetype wanted ${r.preset === null || r.preset === undefined ? 'nothing here' : String(r.preset)}` : ''}`}
-                  >
-                    <div
-                      className="meter-fill"
-                      data-short={!r.filled}
-                      style={{ width: `${pct}%` }}
+                // Same treatment as a curve bar, through the same `Hint`: "which
+                // cards are these?" is one question, and answering it two
+                // different ways in one rail would be two idioms for one idea.
+                // The `title` that used to sit on the track has moved into the
+                // trigger's accessible name, because a `title` is invisible on
+                // every touch device.
+                <Hint
+                  key={r.name}
+                  className="comp-hint"
+                  label={`${r.name}: ${String(r.actual)} of a target ${String(r.ideal)} (range ${String(r.min)} to ${String(r.max)}), ${String(r.locked)} locked${r.source === 'custom' ? `; you set this, the archetype wanted ${r.preset === null || r.preset === undefined ? 'nothing here' : String(r.preset)}` : ''}. Show them.`}
+                  content={
+                    <Breakdown
+                      title={r.name}
+                      cards={cardsInDimension(acceptedIds, cards, dimensionKeyOf(r.dimension))}
+                      bar={r.actual}
                     />
-                    {/* The committed part, in the same gold the curve uses. */}
-                    <div className="meter-locked" style={{ width: `${lockedPct}%` }} />
-                  </div>
-                </div>
+                  }
+                >
+                  {/* Spans, not divs: this is inside the hint's button now, and
+                      a div in a button is invalid and gets reparented by the
+                      parser. The layout is unchanged, `.meter` and its parts
+                      carry their own `display`. */}
+                  <span className="meter">
+                    <span className="meter-label">
+                      <span>
+                        {r.name}
+                        {/* Marked, because this bar is no longer the
+                            archetype's opinion: a builder has to be able to see
+                            which of these numbers are their own before trusting
+                            either. */}
+                        {r.source === 'custom' ? (
+                          <span className="target-mark" title="You set this target">
+                            {' \u270E'}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="delta">
+                        {r.locked > 0 ? `${String(r.locked)}\u25C6 ` : ''}
+                        {r.actual} / {r.ideal}
+                      </span>
+                    </span>
+                    <span className="meter-track">
+                      <span
+                        className="meter-fill"
+                        data-short={!r.filled}
+                        style={{ width: `${pct}%` }}
+                      />
+                      {/* The committed part, in the same gold the curve uses. */}
+                      <span className="meter-locked" style={{ width: `${lockedPct}%` }} />
+                    </span>
+                  </span>
+                </Hint>
               )
             })}
             {compositionRows.length === 0 && analysis !== null ? (
@@ -5306,7 +5481,14 @@ export const Workspace = ({
           {analysis !== null ? (
             <div className="analysis-pinned">
               <h2>Mana curve</h2>
-              <Curve curve={analysis.curve} locked={lockedByBucket} />
+              <Curve
+                curve={analysis.curve}
+                locked={lockedByBucket}
+                // `acceptedIds` is the client's copy of the domain's
+                // `acceptedSet` — deduplicated, commanders included — so the
+                // list under a bar is counted by the rule that produced the bar.
+                cardsAt={(bucket) => cardsInBucket(acceptedIds, cards, bucket)}
+              />
               <p className="note">
                 Average mana value {analysis.curve.averageManaValue.toFixed(2)}
               </p>

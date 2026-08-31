@@ -246,8 +246,17 @@ describe('the archetype customiser', () => {
     )
     render(<Workspace deck={deck} />)
     await waitFor(() => expect(screen.getByText('Adjust targets')).toBeTruthy())
-    const meter = screen.getByTitle(/you set this/)
-    expect(meter.getAttribute('title')).toMatch(/the archetype wanted 10/)
+    /*
+     * Read off the ACCESSIBLE NAME, not a `title`.
+     *
+     * The bar's numbers used to live in a `title` on the track. No touch
+     * browser shows a `title`, so the sentence explaining whose number this is
+     * was invisible on a phone. The bar is now a hint trigger — it opens the
+     * cards it counts — and that trigger's name carries the same sentence,
+     * which is a thing every device can reach.
+     */
+    const meter = screen.getByLabelText(/you set this/)
+    expect(meter.getAttribute('aria-label')).toMatch(/the archetype wanted 10/)
   })
 
   it('closes on Escape without saving', async () => {
