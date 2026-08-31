@@ -346,6 +346,18 @@ export const toCard = (
     universesBeyond: provenance.universesBeyond ?? false,
     synergyProduces: synergy.produces,
     synergyWants: synergy.wants,
+    /*
+     * Wizards' Game Changers list, carried on the card record we already
+     * download (DATA-05).
+     *
+     * Scryfall writes `game_changer: false` explicitly on cards that are not on
+     * the list (checked against Llanowar Elves on 2026-08-30), so the `?? false`
+     * is only for an older mirror predating the field — not the normal path.
+     *
+     * Unlike `universesBeyond` this needs no fold across printings: the list
+     * names cards, so the flag is oracle-level and one record answers it.
+     */
+    gameChanger: raw.game_changer ?? false,
   }
 }
 

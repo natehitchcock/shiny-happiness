@@ -31,6 +31,7 @@ const card = (name: string, over: Partial<Card> = {}): Card => ({
   roles: ['synergy'],
   primaryRole: 'synergy',
   universesBeyond: false,
+  gameChanger: false,
   synergyProduces: [],
   synergyWants: [],
   ...over,

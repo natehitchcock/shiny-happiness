@@ -26,6 +26,7 @@ const card = (name: string, opts: Partial<Card> = {}): Card => ({
   roles: opts.roles ?? ['ramp'],
   primaryRole: opts.primaryRole ?? 'ramp',
   universesBeyond: false,
+  gameChanger: false,
   synergyProduces: opts.synergyProduces ?? [],
   synergyWants: opts.synergyWants ?? [],
 })

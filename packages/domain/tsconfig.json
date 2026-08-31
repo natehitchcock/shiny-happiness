@@ -4,6 +4,9 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src/**/*"],
+  // `src/**/*` does not match `.json` on its own — TypeScript only picks JSON up
+  // from an explicit pattern. `bracket-rules.ts` imports the bracket data, so
+  // without this line the build cannot see the file it is importing.
+  "include": ["src/**/*", "src/**/*.json"],
   "exclude": ["src/**/*.test.ts"]
 }

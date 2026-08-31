@@ -25,6 +25,7 @@ interface CardRow {
   readonly universes_beyond: boolean
   readonly synergy_produces: string[]
   readonly synergy_wants: string[]
+  readonly game_changer: boolean
 }
 
 /** A printed value as an integer, or null if it is not one. */
@@ -62,6 +63,7 @@ const toCard = (row: CardRow): Card => ({
   universesBeyond: row.universes_beyond,
   synergyProduces: row.synergy_produces as Card['synergyProduces'],
   synergyWants: row.synergy_wants as Card['synergyWants'],
+  gameChanger: row.game_changer,
 })
 
 /**
@@ -113,6 +115,7 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
     universes_beyond: c.universesBeyond,
     synergy_produces: c.synergyProduces,
     synergy_wants: c.synergyWants,
+    game_changer: c.gameChanger,
   }))
 
   const { rowCount } = await pool.query(
@@ -121,12 +124,12 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
        types, oracle_text, oracle_text_faces, power, toughness, loyalty, power_num, toughness_num,
        keywords, legality_commander, edhrec_rank,
        default_printing, roles, primary_role, universes_beyond,
-       synergy_produces, synergy_wants)
+       synergy_produces, synergy_wants, game_changer)
      SELECT oracle_id, name, mana_cost, mana_value, color_identity, colors, produced_mana, type_line,
             types, oracle_text, oracle_text_faces, power, toughness, loyalty, power_num, toughness_num,
             keywords, legality_commander, edhrec_rank,
             default_printing, roles, primary_role, universes_beyond,
-            synergy_produces, synergy_wants
+            synergy_produces, synergy_wants, game_changer
        FROM jsonb_to_recordset($1::jsonb) AS x(
          oracle_id uuid, name text, mana_cost text, mana_value real,
          color_identity char(1)[], colors char(1)[], produced_mana char(1)[],
@@ -135,7 +138,8 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
          power_num integer, toughness_num integer,
          keywords text[], legality_commander text,
          edhrec_rank integer, default_printing uuid, roles text[], primary_role text,
-         universes_beyond boolean, synergy_produces text[], synergy_wants text[])
+         universes_beyond boolean, synergy_produces text[], synergy_wants text[],
+         game_changer boolean)
      ON CONFLICT (oracle_id) DO UPDATE SET
        name = EXCLUDED.name, mana_cost = EXCLUDED.mana_cost,
        mana_value = EXCLUDED.mana_value, color_identity = EXCLUDED.color_identity,
@@ -151,7 +155,8 @@ export const upsertCards = async (pool: Pool, cards: readonly Card[]): Promise<n
        roles = EXCLUDED.roles, primary_role = EXCLUDED.primary_role,
        universes_beyond = EXCLUDED.universes_beyond,
        synergy_produces = EXCLUDED.synergy_produces,
-       synergy_wants = EXCLUDED.synergy_wants`,
+       synergy_wants = EXCLUDED.synergy_wants,
+       game_changer = EXCLUDED.game_changer`,
     [JSON.stringify(payload)],
   )
   return rowCount ?? 0
@@ -306,6 +311,25 @@ export const findBasicLands = async (
     [colorIdentity],
   )
   return rows.map(toCard)
+}
+
+/**
+ * Every card on Wizards' Game Changers list, by oracle id (DATA-05).
+ *
+ * The whole list, not the deck's intersection with it: it is dozens of rows
+ * behind a partial index, and `loadBracketRules` wants the set so it can tell an
+ * un-ingested corpus (empty) from a deck that simply has none. Fetching only the
+ * deck's matches would make those two look identical, which is the failure this
+ * exists to avoid.
+ *
+ * Legality is deliberately not filtered. A banned card is still on the list, and
+ * a deck that somehow contains one should be told about both problems.
+ */
+export const gameChangerOracleIds = async (pool: Pool): Promise<OracleId[]> => {
+  const { rows } = await pool.query<{ oracle_id: string }>(
+    'SELECT oracle_id FROM cards WHERE game_changer',
+  )
+  return rows.map((r) => r.oracle_id as OracleId)
 }
 
 /**

@@ -46,13 +46,14 @@ const UNSUPPORTED_FIELDS: ReadonlyMap<QueryField, string> = new Map([
  *
  * These are values, not fields, so the field guard above never sees them: `is`
  * is a supported field, and `evaluateIs` reads them from `AnnotatedCandidate`
- * members that `asCandidate` has no data for. `is:gamechanger` needs
- * `brackets/rules.data.json`, which DATA-05 has not populated; left unguarded it
- * is the dangerous one, because `-is:gamechanger` would return every Game
- * Changer as though it were clean.
+ * members that `asCandidate` has no data for.
+ *
+ * `is:gamechanger` used to be listed here, and was the dangerous one, because
+ * `-is:gamechanger` returned every Game Changer as though it were clean. It is
+ * answerable now: DATA-05 put the flag on the card row, so `asCandidate` has
+ * real data and the negation is honest.
  */
 const UNSUPPORTED_IS: ReadonlyMap<string, string> = new Map([
-  ['gamechanger', 'needs the bracket rules, which DATA-05 has not populated'],
   ['reprint', 'printing-level, not decidable from oracle identity'],
   ['firstprint', 'printing-level, not decidable from oracle identity'],
 ])
@@ -100,7 +101,12 @@ const asCandidate = (card: Card, facts: PrintingFacts | undefined): AnnotatedCan
   comboDegree: 0,
   nearCombosAt1: 0,
   roles: card.roles,
-  bracketFlags: [],
+  // Only the Game Changers flag is derivable from one card: the other
+  // `BracketFlag` values are deck-relative (mass land denial and two-card
+  // infinites are properties of what the deck assembles, not of a card sitting
+  // alone in the corpus). Before DATA-05 this was `[]`, which made
+  // `is:gamechanger` answer false for every card in the corpus.
+  bracketFlags: card.gameChanger ? ['game-changer'] : [],
   priceUsd: facts?.priceUsd ?? null,
   rarity: facts?.rarity ?? null,
   setCode: facts?.setCode ?? null,

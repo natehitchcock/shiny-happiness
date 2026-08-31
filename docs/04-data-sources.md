@@ -208,9 +208,16 @@ Non-negotiable before any public deployment (task `LEGAL-01`):
 | --------------------- | ------------------------------- | --------------- | --------------------------- |
 | `ingest:cards`        | Scryfall bulk `oracle_cards`    | Daily           | Serve previous snapshot     |
 | `ingest:combos`       | Commander Spellbook export      | Daily           | Serve previous snapshot     |
-| `ingest:brackets`     | WotC bracket/Game Changers list | Weekly + manual | Serve checked-in file       |
+| `ingest:brackets`     | Not a job — see below           | —               | —                           |
 | `warm:stats`          | Own corpus, top ~500 commanders | Weekly, slow    | Feature degrades, app works |
 | `build:core-packages` | Internal, from stats corpus     | On stats change | Serve previous version      |
+
+There is no bracket ingest job, and the row above records that deliberately.
+The Game Changers list rides `ingest:cards` — Scryfall carries `game_changer` on
+every card record, so the list refreshes with the corpus and needs no separate
+source or cadence. The bracket *allowances* are a checked-in file with a source
+URL and retrieval date, revised by hand when Wizards revises them, which has been
+roughly twice a year ([ADR-0018](adr/0018-bracket-rules-and-game-changers.md)).
 
 Ingestion is **snapshot-and-swap**, never in-place mutation: build the new dataset
 alongside the live one and flip a pointer. A half-ingested card database that the

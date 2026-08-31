@@ -32,30 +32,43 @@ core packages, composition targets and candidate filtering.
 | 4 | Optimized | High power, no self-imposed restrictions |
 | 5 | cEDH | Competitive, metagame-driven, tuned to win |
 
-Brackets 1–3 carry restrictions in addition to power level — broadly, limits on
-**Game Changers** (a curated WotC list of high-impact cards), on mass land denial,
-on chained extra turns, and on two-card infinite combos. Bracket 4 and 5 lift the
-restrictions.
+Brackets 1–3 carry restrictions in addition to power level. The one Wizards still
+publishes as a per-bracket number is the limit on **Game Changers** (a curated
+WotC list of high-impact cards): brackets 1 and 2 allow none, bracket 3 allows up
+to three, brackets 4 and 5 are unlimited.
 
 > **Do not hardcode the specific numeric allowances or the Game Changers list
 > contents from memory.** Both are maintained by Wizards and have been revised
-> since introduction. Task `DATA-05` in the work breakdown owns fetching the
-> current official list and allowances into
-> `packages/domain/src/brackets/rules.data.json`, with the source URL and a
-> retrieval date in the file. Every bracket rule in code reads from that file.
+> since introduction. The allowances live in
+> `packages/domain/src/brackets/rules.data.json` with the source URL, the
+> retrieval date and the quoted wording; the Game Changers list is not in that
+> file at all — it is read from the corpus, where Scryfall's `game_changer`
+> boolean carries it. See [ADR-0018](adr/0018-bracket-rules-and-game-changers.md).
+
+**The other three barometers have no current per-bracket value, and the tutor
+restriction was withdrawn outright** in the October 2025 bracket update. Wizards
+replaced them with a prose expectation of how many turns a game should last
+(bracket 1 "at least nine turns before you win or lose", 2 "eight", 3 "six",
+4 "four", 5 "could end on any turn"), which states no permitted/forbidden
+verdict. They are `null` in the data file and in the type, and `null` means "the
+format publishes no rule here" — not "allowed". Modelling the turn counts is a
+design question that has not been taken up.
 
 ### Modelling
 
 ```ts
 type Bracket = 1 | 2 | 3 | 4 | 5
 
+type BracketPermission = 'forbidden' | 'discouraged' | 'allowed'
+
 interface BracketRules {
   bracket: Bracket
   gameChangersAllowed: number | 'unlimited'
-  massLandDenial: 'forbidden' | 'discouraged' | 'allowed'
-  extraTurnChaining: 'forbidden' | 'discouraged' | 'allowed'
-  twoCardInfinites: 'forbidden' | 'discouraged' | 'allowed'
-  tutorDensity: 'low' | 'moderate' | 'unrestricted'
+  // Null: Wizards publishes no current per-bracket value (ADR-0018).
+  massLandDenial: BracketPermission | null
+  extraTurnChaining: BracketPermission | null
+  twoCardInfinites: BracketPermission | null
+  tutorDensity: 'low' | 'moderate' | 'unrestricted' | null
 }
 
 type BracketFlag =
@@ -80,6 +93,13 @@ negotiated at the table, not by software.
   (exclude the offending card, or raise the target bracket).
 - `deckCombos(A)` (doc 02) is scanned for two-card infinites: any combo where
   `|pieces| == 2` and `produces` includes an infinite result.
+
+**Implemented so far:** the Game Changers count. `/decks/:id/analysis` returns
+`bracket.violations` for a deck over its target's allowance, `bracket.gameChangers`
+naming the cards, and `bracket.rules` carrying the source URL and retrieval date.
+`bracket.assessed` stays `null` — one barometer of five is not a verdict — and the
+`unavailable` entry says so. The mass-land-denial, extra-turn and two-card-infinite
+checks above wait on Wizards publishing a rule to check against.
 
 This is the correct behaviour for a rules framework that is explicitly a
 conversation aid rather than a ban list.

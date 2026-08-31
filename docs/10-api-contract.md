@@ -203,8 +203,11 @@ GET /api/v1/decks/:id/analysis
       colorBalance: { pips: Record<Color, number>, sources: Record<Color, number> },
       bracket: {
         target: Bracket,
-        assessed: Bracket,          // what the deck actually looks like
-        violations: BracketViolation[]
+        assessed: Bracket | null,   // what the deck actually looks like; null
+                                    // until every barometer has a rule (ADR-0018)
+        violations: BracketViolation[],
+        gameChangers: OracleId[],   // the deck's cards on Wizards' list
+        rules: { sourceUrl: string, retrievedAt: string } | null
       },
       deckCombos: Array<{ comboId, pieces: OracleId[], produces: ComboResult[] }>,
       legality: { legal: boolean, problems: LegalityProblem[] }
@@ -291,7 +294,8 @@ dependency that has not shipped rather than a disagreement with the contract:
 
 2. **`applyCorePackage` and `removeCorePackage` are always rejected**, with
    `reason.kind = 'unsupported'` naming the blocking task. Core packages need
-   `ING-05` to generate them and `DATA-05` for the official bracket rules.
+   `ING-05` to generate them; the bracket rules they also need now exist
+   ([ADR-0018](adr/0018-bracket-rules-and-game-changers.md)).
    Rejecting is deliberate: accepting the command and changing nothing would be
    the silent no-op AGENTS.md §1.4 forbids.
 
@@ -399,10 +403,14 @@ These are not divergences; they are cases §10.3 left open, decided during the
    `statistics` is present on **every** response — there is no corpus yet and no
    third-party one is coming (ADR-0008).
 3. **`GET /decks/:id/analysis` returns `bracket.assessed: null`** where §10.5
-   types it as `Bracket`, and adds its own `unavailable` array. Assessing a
-   bracket needs the official rules and the Game Changers list, which `DATA-05`
-   has not populated; asserting a verdict from an empty rules file is what
-   AGENTS.md §8 rejects outright.
+   types it as `Bracket`, and adds its own `unavailable` array. `violations` and
+   `gameChangers` ARE answered as of `DATA-05` — the Game Changers allowance is
+   fetched, quoted and checked. What stays null is the *assessment*: Wizards
+   publishes a per-bracket value for one barometer of five, and one dimension is
+   not a verdict ([ADR-0018](adr/0018-bracket-rules-and-game-changers.md)). The
+   `unavailable` entry names which part is missing. If the corpus carries no Game
+   Changers at all — a re-ingest has not run since migration `0011` — the whole
+   check reports unavailable rather than passing every deck vacuously.
 4. **Commander legality checks are skipped** in `analysis.legality`. Nothing
    stores `canBeCommander` or `partnerRule`, so `validateDeck` would report every
    commander as `invalid-commander`. Those problems are filtered out and the gap

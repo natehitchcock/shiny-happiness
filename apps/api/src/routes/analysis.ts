@@ -3,9 +3,13 @@ import type { Pool } from 'pg'
 import { getDeck } from '@roundtable/db'
 import type { CardType, Color, Role } from '@roundtable/domain'
 import {
+  BRACKET_DATA,
   NO_SINGLETON_EXCEPTIONS,
   acceptedSet,
   assessArchetype,
+  bracketViolations,
+  deckGameChangers,
+  loadBracketRules,
   deckCombos,
   deckId,
   findDeficits,
@@ -118,6 +122,40 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
     const report = validateDeck(deck, cards, new Map(), NO_SINGLETON_EXCEPTIONS)
     const problems = report.problems.filter((p) => p.kind !== 'invalid-commander')
 
+    /*
+     * Bracket checks (DATA-05).
+     *
+     * The Game Changers list comes from the corpus, the allowance from the
+     * fetched rules file. Commanders are counted too — a Game Changer in the
+     * command zone is the one you are least able to avoid drawing — and they
+     * need no separate term here because `acceptedSet` already seeds from them.
+     *
+     * `assessed` stays null even now. Deciding which bracket a deck IS needs all
+     * five barometers, and Wizards currently publishes a per-bracket value for
+     * exactly one of them, so a verdict here would be a guess dressed as an
+     * answer. What CAN be said — this deck breaks the Game Changers allowance of
+     * the bracket you chose — is said, with the arithmetic attached.
+     */
+    const bracketRules = loadBracketRules(BRACKET_DATA, context.gameChangers)
+    const deckOracleIds = [...accepted]
+    const gameChangersInDeck = bracketRules.ok
+      ? deckGameChangers(bracketRules.value, deckOracleIds)
+      : []
+    const violations = bracketRules.ok
+      ? bracketViolations(bracketRules.value, deck.targetBracket, deckOracleIds)
+      : []
+    const bracketUnavailable = bracketRules.ok
+      ? // Loaded, and still only one barometer deep. Named so the UI says which
+        // part is missing rather than implying the whole feature is off.
+        {
+          key: 'bracket-assessment',
+          reason:
+            'only the Game Changers allowance is checked. Wizards withdrew the tutor ' +
+            'restriction and publishes no current per-bracket value for mass land ' +
+            'denial, extra turns or two-card infinites, so no bracket is assessed',
+        }
+      : { key: 'bracket-assessment', reason: bracketRules.error.message }
+
     return {
       counts: {
         total: counts.total,
@@ -157,12 +195,16 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
       },
       bracket: {
         target: deck.targetBracket,
-        // `assessed` needs the official bracket rules and the Game Changers
-        // list, which DATA-05 has not populated; asserting a bracket from an
-        // empty rules file is exactly what AGENTS.md §8 rejects. Reported as
-        // unavailable instead of guessed.
         assessed: null,
-        violations: [],
+        violations,
+        // The offending cards themselves, so the UI can name them instead of
+        // making the user find four Game Changers in a 100-card list.
+        gameChangers: gameChangersInDeck,
+        // Where the allowance came from and when, carried to the client so the
+        // provenance is visible in the product and not only in the repo.
+        rules: bracketRules.ok
+          ? { sourceUrl: bracketRules.value.sourceUrl, retrievedAt: bracketRules.value.retrievedAt }
+          : null,
       },
       prices: {
         // Rounded to cents; summing floats over 100 cards drifts otherwise.
@@ -178,10 +220,7 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
       legality: { legal: problems.length === 0, problems },
       unavailable: [
         ...context.missing.map((m) => ({ key: m.source, reason: m.reason })),
-        {
-          key: 'bracket-assessment',
-          reason: 'brackets/rules.data.json is not populated (DATA-05)',
-        },
+        bracketUnavailable,
         {
           key: 'commander-legality',
           reason: 'commander eligibility is not stored yet; those checks are skipped',

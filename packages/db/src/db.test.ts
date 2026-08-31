@@ -11,6 +11,7 @@ import {
 } from './repositories/combos.js'
 import {
   findEligibleCards,
+  gameChangerOracleIds,
   getCard,
   getCards,
   searchCardsByName,
@@ -60,6 +61,7 @@ const card = (name: string, over: Partial<Card> = {}): Card => ({
   roles: ['synergy'],
   primaryRole: 'synergy',
   universesBeyond: false,
+  gameChanger: false,
   synergyProduces: [],
   synergyWants: [],
   ...over,
@@ -297,6 +299,51 @@ describeDb('packages/db against real PostgreSQL', () => {
       ])
       expect((await getCard(db.pool, id))?.oracleTextFaces).toEqual(faces)
     })
+
+    it('round-trips the Game Changers flag', async () => {
+      const c = card('Rhystic Study', { gameChanger: true })
+      await upsertCards(db.pool, [c])
+      expect((await getCard(db.pool, c.oracleId))?.gameChanger).toBe(true)
+    })
+
+    it('sets the Game Changers flag on a card that is already in the corpus', async () => {
+      // The path a re-ingest actually takes. Migration 0011 defaults 34k existing
+      // rows to false, so every one of them learns its flag through
+      // ON CONFLICT DO UPDATE and not through the INSERT. Leave the column out of
+      // that clause and the flag is never written for a single real card, while
+      // an insert-only test stays green throughout.
+      const id = uuid()
+      await upsertCards(db.pool, [card('Rhystic Study', { oracleId: id })])
+      await upsertCards(db.pool, [card('Rhystic Study', { oracleId: id, gameChanger: true })])
+      expect((await getCard(db.pool, id))?.gameChanger).toBe(true)
+    })
+
+    it('clears the Game Changers flag when Wizards removes a card from the list', async () => {
+      // Ten cards came off the list in one October update, so the flag has to be
+      // able to go back down. A clause that only ever ORs the flag upward would
+      // pass the test above and leave a removed card flagged forever.
+      const id = uuid()
+      await upsertCards(db.pool, [card('Food Chain', { oracleId: id, gameChanger: true })])
+      await upsertCards(db.pool, [card('Food Chain', { oracleId: id, gameChanger: false })])
+      expect((await getCard(db.pool, id))?.gameChanger).toBe(false)
+    })
+
+    it('lists exactly the Game Changers in the corpus', async () => {
+      const scratch = await createTestDatabase('gamechangers')
+      try {
+        // Its own database because the assertion is about the WHOLE corpus, and
+        // the shared one is full of cards other tests wrote.
+        expect(await gameChangerOracleIds(scratch.pool)).toEqual([])
+
+        const listed = card('Rhystic Study', { gameChanger: true })
+        await upsertCards(scratch.pool, [listed, card('Llanowar Elves')])
+        expect(await gameChangerOracleIds(scratch.pool)).toEqual([listed.oracleId])
+      } finally {
+        await scratch.drop()
+      }
+      // Same 60 s as the other test that builds its own database: creating and
+      // migrating one is well past the 5 s default.
+    }, 60_000)
 
     it('reads a single-faced card back with no faces, not an empty list', async () => {
       // NULL must not become `[]` on the way out: "one face" and "zero faces"
