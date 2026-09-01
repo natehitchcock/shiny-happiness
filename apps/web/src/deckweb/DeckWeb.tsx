@@ -122,6 +122,23 @@ const useCanvas = (ref: RefObject<HTMLDivElement | null>): { width: number; heig
   }
 }
 
+/**
+ * One card's art, as the wire sends it and this view reads it.
+ *
+ * Named rather than written out at each of its four use sites because it grew a
+ * third member: `back` is the other PHYSICAL face of a double-faced card
+ * (ADR-0027), and its ABSENCE — not a pair of nulls inside it — is what means
+ * "this card has one face". The details popover draws through `CardFace`, which
+ * offers a flip control exactly when the key is present, so dropping it here
+ * would make a transform card in the deck web the one place in the app that
+ * denies having another side.
+ */
+type WebImages = {
+  artCrop: string | null
+  normal: string | null
+  back?: WebImages
+}
+
 export interface DeckWebProps {
   readonly deckId: string
   readonly deckName: string
@@ -132,7 +149,7 @@ export interface DeckWebProps {
   readonly cards: ReadonlyMap<string, DeckWebCard>
   readonly combos: readonly { comboId: string; pieces: string[]; produces: string[] }[]
   /** Art, beside the cards and never on them (ADR-0021). */
-  readonly images: ReadonlyMap<string, { artCrop: string | null; normal: string | null }>
+  readonly images: ReadonlyMap<string, WebImages>
   readonly onLeave: () => void
 }
 
@@ -152,10 +169,7 @@ export interface DeckWebCard {
 
 const IDENTITY = new Set(['W', 'U', 'B', 'R', 'G'])
 
-const toView = (
-  card: DeckWebCard,
-  images: { artCrop: string | null; normal: string | null } | undefined,
-): CardView => ({
+const toView = (card: DeckWebCard, images: WebImages | undefined): CardView => ({
   oracleId: card.oracleId,
   name: card.name,
   manaCost: card.manaCost,
@@ -176,6 +190,17 @@ const toView = (
       : {
           ...(images.artCrop === null ? {} : { artCrop: images.artCrop }),
           ...(images.normal === null ? {} : { normal: images.normal }),
+        },
+  // The KEY carries the claim and the URLs only its content, so a present
+  // `back` becomes a present object even with nothing usable in it — that is
+  // "two faces, no picture", which is a different answer from "one face" and
+  // the one the flip control has to be able to read (ADR-0027).
+  backImageUris:
+    images?.back === undefined
+      ? undefined
+      : {
+          ...(images.back.artCrop === null ? {} : { artCrop: images.back.artCrop }),
+          ...(images.back.normal === null ? {} : { normal: images.back.normal }),
         },
 })
 
@@ -760,7 +785,7 @@ const Node = ({
   node: WebNode
   at: { x: number; y: number }
   card: DeckWebCard | undefined
-  images: { artCrop: string | null; normal: string | null } | undefined
+  images: WebImages | undefined
   focused: boolean
   reachable: boolean
   dim: boolean
@@ -855,7 +880,7 @@ const Details = ({
   edges,
 }: {
   card: DeckWebCard | undefined
-  images: { artCrop: string | null; normal: string | null } | undefined
+  images: WebImages | undefined
   node: WebNode | undefined
   edges: readonly WebEdge[]
 }): JSX.Element | null => {

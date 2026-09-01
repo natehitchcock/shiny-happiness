@@ -55,6 +55,7 @@ import {
   IMPACT_MAX,
   ManaCost,
   OracleText,
+  hasBackFace,
   levelSpec,
   metricValue,
 } from '@roundtable/ui'
@@ -128,6 +129,31 @@ const viewImageUris = (
 }
 
 /**
+ * The wire form of a card's BACK face, as `CardView` wants it (ADR-0027).
+ *
+ * The presence of the key is the structural fact and the URLs are only its
+ * content, so this returns `undefined` ONLY when the wire had no `back` member
+ * at all — "one physical face" — and an object in every other case, empty if
+ * neither URL resolved. That is deliberately not what `viewImageUris` does
+ * above: a front pair of two nulls collapses to `undefined`, because the
+ * primitives' test for "is there art here" is the absence of the object. The
+ * two functions answer different questions and a shared one could not.
+ *
+ * Nulls are dropped rather than forwarded, for the reason `viewImageUris` gives:
+ * `<img src={null}>` draws a broken image where the honest panel belongs.
+ */
+const viewBackImageUris = (
+  images: api.ImageUris | undefined,
+): { artCrop?: string; normal?: string } | undefined => {
+  const back = images?.back
+  if (back === undefined) return undefined
+  return {
+    ...(back.artCrop === null ? {} : { artCrop: back.artCrop }),
+    ...(back.normal === null ? {} : { normal: back.normal }),
+  }
+}
+
+/**
  * An API card as the `@roundtable/ui` primitives want it.
  *
  * The primitives take a view model rather than a `Card` on purpose (see
@@ -159,6 +185,7 @@ const cardView = (
   primaryRole: card.primaryRole,
   priceUsd: price,
   imageUris: viewImageUris(images),
+  backImageUris: viewBackImageUris(images),
 })
 
 /**
@@ -240,15 +267,36 @@ export const cheapestPrinting = (
  *
  * Empty strings are absence, not URLs: `packages/db` writes `''` for a printing
  * with no cached image, and `<img src="">` re-requests the page itself.
+ *
+ * The chosen printing's BACK face rides along (ADR-0027). Without it the flip
+ * control would appear for a card in the deck and vanish for the same card
+ * reached through "Cards named like…", which is the one route that deliberately
+ * shows cards the hydration maps never covered. The `back` KEY is forwarded
+ * only when the printing has one — absence means one physical face — while its
+ * `''` members become nulls exactly as the front's do.
  */
 export const artFromPrintings = (
-  printings: readonly { imageUris?: { artCrop: string; normal: string } }[],
+  printings: readonly {
+    imageUris?: { artCrop: string; normal: string }
+    backImageUris?: { artCrop: string; normal: string }
+  }[],
 ): api.ImageUris | undefined => {
   for (const p of printings) {
     const artCrop = p.imageUris?.artCrop ?? ''
     const normal = p.imageUris?.normal ?? ''
     if (artCrop === '' && normal === '') continue
-    return { artCrop: artCrop === '' ? null : artCrop, normal: normal === '' ? null : normal }
+    return {
+      artCrop: artCrop === '' ? null : artCrop,
+      normal: normal === '' ? null : normal,
+      ...(p.backImageUris === undefined
+        ? {}
+        : {
+            back: {
+              artCrop: p.backImageUris.artCrop === '' ? null : p.backImageUris.artCrop,
+              normal: p.backImageUris.normal === '' ? null : p.backImageUris.normal,
+            },
+          }),
+    }
   }
   return undefined
 }
@@ -2027,15 +2075,41 @@ const Preview = ({
    * price the moment its detail lands.
    */
   const printings = detail?.printings ?? []
-  // `viewImageUris` is the test for "is there art here at all": a hydrated
-  // entry with both members null is a card whose DEFAULT printing has no
-  // resolved art, and falling through to the printings is what gives it a
-  // picture when a non-default printing has one.
-  const art = viewImageUris(images) === undefined ? artFromPrintings(printings) : images
+  /*
+   * `viewImageUris` is the test for "is there art here at all": a hydrated
+   * entry with both members null is a card whose DEFAULT printing has no
+   * resolved art, and falling through to the printings is what gives it a
+   * picture when a non-default printing has one.
+   *
+   * `images.back` has to be part of that test (ADR-0027). A two-faced card
+   * whose art has not resolved arrives as `{ artCrop: null, normal: null, back:
+   * { artCrop: null, normal: null } }` — no picture, but it has told us the
+   * card HAS a second side, and falling through would discard that along with
+   * the nulls and leave the pane unable to tell it from Sol Ring.
+   *
+   * Merging the two sources field by field was the rejected alternative: it
+   * would let the pane draw one printing's front beside another printing's
+   * back, which is two different pieces of cardboard presented as one card.
+   */
+  const hydratedArt =
+    viewImageUris(images) === undefined && images?.back === undefined ? undefined : images
+  const art = hydratedArt ?? artFromPrintings(printings)
   const shownPrice = price ?? cheapestPrinting(printings)
   // Built once and read twice — the face draws from it, and the note line asks
   // it whether there is a face at all before deciding where the price goes.
   const view = cardView(shown, shownPrice, art)
+  /*
+   * Whether a card face is drawn at all.
+   *
+   * `view.imageUris !== undefined` was the whole test, and it collapsed
+   * ADR-0027's third state into its first: `viewImageUris` returns `undefined`
+   * for a printing whose art has not resolved, so a two-faced card with no
+   * picture drew no face — and therefore no flip control, in the one surface
+   * whose job is to say the card HAS another side. `hasBackFace` reads the key
+   * rather than the URLs, which is the distinction the wire went out of its way
+   * to carry, and `CardFace` draws its own honest panel behind the control.
+   */
+  const showsFace = view.imageUris !== undefined || hasBackFace(view)
   return (
     <aside
       ref={ref}
@@ -2106,7 +2180,7 @@ const Preview = ({
        * `mobileWidth` because that is where a narrow column usually comes from;
        * a 230 px rail is the same narrow column on a wider screen.
        */}
-      {view.imageUris === undefined ? null : (
+      {!showsFace ? null : (
         <div className="preview-art">
           {/*
             L3 "Detail", not L2 "Card".
@@ -2170,7 +2244,7 @@ const Preview = ({
             for. The art above is the default printing and the price is the
             cheapest one, and for about a third of the corpus those are two
             different cards (ADR-0021). */}
-        {view.imageUris === undefined ? `${usd(shownPrice)} ` : ''}
+        {showsFace ? '' : `${usd(shownPrice)} `}
         <span className="estimate">est.</span>{' '}
         {detail === null
           ? 'cheapest printing'

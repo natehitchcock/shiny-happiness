@@ -38,6 +38,24 @@ describe('card.css', () => {
     // a decision rather than being forgotten.
     expect(rule('.rt-tile:focus-visible')).toMatch(/outline:\s*2px solid/)
     expect(rule('.rt-face-image:focus-visible')).toMatch(/outline:\s*2px solid/)
+    // R4 again, for the flip control (ADR-0027). It is a real <button>, so the
+    // UA would draw something — but the UA ring on a dark panel is the thing
+    // this project already decided was not enough for the other two.
+    expect(rule('.rt-flip:focus-visible')).toMatch(/outline:\s*2px solid/)
+  })
+
+  it('leaves the flip control its own height rather than fixing one here', () => {
+    // The 44 px touch minimum is `HIT_TARGET_MIN` in presentation.ts and is set
+    // inline from it. A `min-height: 44px` here would be a second copy of doc
+    // 08 §8.3 that no test could tie back to the rule.
+    expect(rule('.rt-flip')).not.toMatch(/min-height:/)
+  })
+
+  it('lets the flip label wrap instead of hiding half of it', () => {
+    // The label names the face you are going to, which is the whole point of it
+    // under R4. Truncating it in a 150 px popover would truncate the name.
+    expect(rule('.rt-flip')).not.toMatch(/text-overflow:\s*ellipsis/)
+    expect(rule('.rt-flip')).not.toMatch(/white-space:\s*nowrap/)
   })
 
   it('offers a pointer cursor only on a face that can actually be activated', () => {

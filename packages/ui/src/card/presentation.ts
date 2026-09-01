@@ -8,7 +8,7 @@
  * requirements") assertable rather than a claim.
  */
 
-import type { CardView, Color } from './types.js'
+import type { CardSide, CardView, Color } from './types.js'
 
 export type ZoomLevel = 0 | 1 | 2 | 3
 
@@ -115,11 +115,22 @@ export const ART_CROP_ASPECT = 457 / 626
  * a string, so an empty string is a real spelling of "no art" in this codebase.
  * Passed through to an `<img>` it would resolve against the page URL and draw a
  * broken image exactly where the fallback panel was supposed to draw a name.
+ *
+ * `side` picks which PHYSICAL face to read (ADR-0027), and defaults to the
+ * front so that every existing call site keeps its exact present meaning — the
+ * front is the card, and nothing here moves it. Note what this function does
+ * NOT answer: a null back is not "this card has one face". Ask `hasBackFace`
+ * for that, which reads the KEY; this reads the URL, and the two are different
+ * questions for a two-faced card whose art never resolved.
  */
-export const imageFor = (card: CardView, level: ZoomLevel): string | null => {
+export const imageFor = (
+  card: CardView,
+  level: ZoomLevel,
+  side: CardSide = 'front',
+): string | null => {
   const { asset } = levelSpec(level)
   if (asset === null) return null
-  const url = card.imageUris?.[asset]
+  const url = side === 'back' ? card.backImageUris?.[asset] : card.imageUris?.[asset]
   return url === undefined || url === '' ? null : url
 }
 

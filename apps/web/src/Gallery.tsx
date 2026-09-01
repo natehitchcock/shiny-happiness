@@ -211,6 +211,86 @@ const FIXTURES: readonly CardView[] = [
     priceUsd: 0,
     reasons: ['Fixture only'],
   },
+  {
+    /*
+     * A real `transform` card, and the reason `Fire // Ice` sits two entries
+     * above it. Both have a `//` in their names and two entries in
+     * `oracleTextFaces`; only this one is printed on two pieces of cardboard,
+     * and only this one gets a flip control (ADR-0027). Seeing them on the same
+     * page is the check that the rule is the back ART being present and not the
+     * name or the text.
+     *
+     * The two URLs differ by one path segment — `/front/` against `/back/` —
+     * which is what makes "the picture changed" and "the picture is the other
+     * side" two different things to look at.
+     */
+    oracleId: 'f7',
+    name: 'Delver of Secrets // Insectile Aberration',
+    manaCost: '{U}',
+    manaValue: 1,
+    colorIdentity: ['U'],
+    typeLine: 'Creature — Human Wizard',
+    oracleText:
+      'At the beginning of your upkeep, look at the top card of your library. You may reveal that card. If an instant or sorcery card is revealed this way, transform Delver of Secrets.\nFlying',
+    oracleTextFaces: [
+      'At the beginning of your upkeep, look at the top card of your library. You may reveal that card. If an instant or sorcery card is revealed this way, transform Delver of Secrets.',
+      'Flying',
+    ],
+    primaryRole: 'wincon',
+    priceUsd: 0.35,
+    imageUris: {
+      artCrop:
+        'https://cards.scryfall.io/art_crop/front/6/9/6904ea20-e504-47da-95a0-08739fdde260.jpg?1783908173',
+      normal:
+        'https://cards.scryfall.io/normal/front/6/9/6904ea20-e504-47da-95a0-08739fdde260.jpg?1783908173',
+    },
+    backImageUris: {
+      artCrop:
+        'https://cards.scryfall.io/art_crop/back/6/9/6904ea20-e504-47da-95a0-08739fdde260.jpg?1783908173',
+      normal:
+        'https://cards.scryfall.io/normal/back/6/9/6904ea20-e504-47da-95a0-08739fdde260.jpg?1783908173',
+    },
+    reasons: ['A one-mana 3/2 flier, on a good day'],
+  },
+  {
+    /*
+     * Two physical faces and no picture of either — ADR-0027's third state.
+     *
+     * No card in the corpus takes this path today: all 1,393 printings with a
+     * back face have resolved art. It is drawn here for the same reason the
+     * no-art fallback two entries up is, and more urgently: this is the state
+     * that a design collapsing "no picture" into "no second face" would render
+     * as an ordinary card, and the only way to see that it has not been
+     * collapsed is to look at it. The control must still be here, and pressing
+     * it must change the panel.
+     */
+    oracleId: 'f8',
+    name: "Tergrid, God of Fright // Tergrid's Lantern",
+    manaCost: '{3}{B}{B}',
+    manaValue: 5,
+    colorIdentity: ['B'],
+    typeLine: 'Legendary Creature — God',
+    oracleText:
+      'Menace\nWhenever an opponent sacrifices a nontoken permanent or discards a permanent card, you may put that card onto the battlefield under your control.\n{T}: Each opponent loses 1 life unless they sacrifice a nonland permanent or discards a card.',
+    oracleTextFaces: [
+      'Menace\nWhenever an opponent sacrifices a nontoken permanent or discards a permanent card, you may put that card onto the battlefield under your control.',
+      '{T}: Each opponent loses 1 life unless they sacrifice a nonland permanent or discards a card.',
+    ],
+    primaryRole: 'engine',
+    priceUsd: 12.5,
+    imageUris: {
+      artCrop:
+        'https://cards.scryfall.io/art_crop/front/1/4/14dc88ee-bba9-4625-af0d-89f3762a0ead.jpg?1783928244',
+      normal:
+        'https://cards.scryfall.io/normal/front/1/4/14dc88ee-bba9-4625-af0d-89f3762a0ead.jpg?1783928244',
+    },
+    // Present and empty. ABSENT would mean one face; this means two faces whose
+    // back art has not resolved, which is a different claim and a different
+    // panel. The front resolving and the back not is the realistic shape of it:
+    // they are two separate assets on Scryfall's CDN.
+    backImageUris: {},
+    reasons: ['Takes what the table throws away'],
+  },
 ]
 
 const ENCODINGS: readonly PipEncoding[] = ['colorIdentity', 'manaValue', 'role', 'comboDegree']
@@ -326,7 +406,11 @@ export const Gallery = (): JSX.Element => {
 
           {level.level === 3 ? (
             <div className="gal-row">
-              {FIXTURES.slice(0, 3).map((card) => (
+              {/* The first three, plus the two double-faced ones at the end —
+                  the flip control only exists at this level and at L2, and a
+                  page that could not show it here would be the wrong page to
+                  check it on. */}
+              {[...FIXTURES.slice(0, 3), ...FIXTURES.slice(-2)].map((card) => (
                 <Detail
                   key={card.oracleId}
                   card={card}

@@ -13,6 +13,8 @@
 
 import type { JSX, KeyboardEvent } from 'react'
 import { CARD_ASPECT, HIT_TARGET_MIN, imageFor, levelSpec } from './presentation.js'
+import { faceName } from './flip.js'
+import { FaceNoArt, FlipButton, useCardSide } from './FlipButton.js'
 import { ComboBadge, IdentityStrip, ManaValue, Price } from './Badges.js'
 import { ManaCost } from './ManaCost.js'
 import { OracleText } from './OracleText.js'
@@ -37,7 +39,8 @@ export const CardFace = ({
   const spec = levelSpec(2)
   const w = width ?? spec.width
   const h = Math.round(w * CARD_ASPECT)
-  const image = imageFor(card, 2)
+  const { side, touched, hasBack, flip } = useCardSide(card)
+  const image = imageFor(card, 2, side)
 
   const activate = (): void => onActivate?.(card.oracleId)
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -81,7 +84,33 @@ export const CardFace = ({
         {...interactive}
         style={{ width: w, height: h, minWidth: HIT_TARGET_MIN, minHeight: HIT_TARGET_MIN }}
       >
-        {image === null ? (
+        {image !== null ? (
+          // The wrapper above already has this exact box, so the art lands into
+          // a space that was reserved for it rather than pushing the badge row
+          // and the actions down as it arrives.
+          //
+          // `alt` names the FACE, not the card: once the picture can change
+          // under a fixed panel, an alt reading "Delver of Secrets // Insectile
+          // Aberration" is the one part that cannot say which side is showing.
+          // For the single-faced majority `faceName` returns the whole name, so
+          // nothing about them moves.
+          <img
+            src={image}
+            alt={faceName(card, side)}
+            loading="lazy"
+            decoding="async"
+            width={w}
+            height={h}
+          />
+        ) : hasBack ? (
+          // Two physical faces and no picture of this one (ADR-0027's third
+          // state). The panel below is NOT used for it: that panel is the whole
+          // card — name, cost, type, both faces' rules — and it would say the
+          // same thing whichever face you were on, so the control would appear
+          // to do nothing. This one names the face you are looking at, which is
+          // what makes the flip visible when neither side has art.
+          <FaceNoArt card={card} side={side} />
+        ) : (
           // No printing resolved. The fallback is a real card-shaped panel with
           // the name and type line, not a placeholder graphic — an unresolved
           // card is still a card you may want to accept.
@@ -95,13 +124,22 @@ export const CardFace = ({
               <OracleText text={card.oracleText ?? ''} faces={card.oracleTextFaces} empty="" />
             </span>
           </div>
-        ) : (
-          // The wrapper above already has this exact box, so the art lands into
-          // a space that was reserved for it rather than pushing the badge row
-          // and the actions down as it arrives.
-          <img src={image} alt={card.name} loading="lazy" decoding="async" width={w} height={h} />
         )}
       </div>
+
+      {/*
+       * OUTSIDE `.rt-face-image`, deliberately.
+       *
+       * That frame takes `role="button"` when the app gives this component an
+       * `onActivate`, and a real `<button>` nested inside a `role="button"` is
+       * two controls claiming one region: the outer handler eats the click on
+       * some assistive technology, and the tab order grows a target that
+       * announces itself twice. An overlay pinned to the frame's corner was the
+       * other option and was rejected for that reason as much as for having to
+       * hold its contrast against whatever art is behind it — in flow, above
+       * the badges, it is legible over the panel's own ground at every width.
+       */}
+      {hasBack ? <FlipButton card={card} side={side} touched={touched} onFlip={flip} /> : null}
 
       <div className="rt-face-badges">
         <IdentityStrip colorIdentity={card.colorIdentity ?? []} />

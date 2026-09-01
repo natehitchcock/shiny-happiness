@@ -643,6 +643,48 @@ describe('leaving the mode', () => {
   })
 })
 
+describe('the details popover and a double-faced card (ADR-0027)', () => {
+  /*
+   * The popover draws through `CardFace`, so it inherits the flip control the
+   * detail surfaces got — but only if this view forwards the back face, and
+   * this view narrows the art map to its own type. The narrowing is exactly
+   * where a new member gets dropped without anything failing: the popover would
+   * simply show a transform card as having one side, which is the collapse
+   * ADR-0027 exists to prevent, in the one surface nothing else covers.
+   */
+  const DFC = 'https://cards.scryfall.io/normal/back/1/2/outlet.jpg?1783903215'
+
+  const withDfc = (back: { artCrop: string | null; normal: string | null } | undefined) =>
+    draw({
+      images: new Map([
+        ...IMAGES,
+        ['outlet', { artCrop: ART, normal: NORMAL, ...(back === undefined ? {} : { back }) }],
+      ]),
+    })
+
+  it('offers no flip control for a single-faced card', () => {
+    const { container } = withDfc(undefined)
+    fireEvent.focus(node('Viscera Seer'))
+    expect(container.querySelector('.web-details')).not.toBeNull()
+    expect(container.querySelector('.web-details .rt-flip')).toBeNull()
+  })
+
+  it('shows the back face when the printing has one', () => {
+    const { container } = withDfc({ artCrop: ART, normal: DFC })
+    fireEvent.focus(node('Viscera Seer'))
+    const flip = container.querySelector<HTMLButtonElement>('.web-details .rt-flip')
+    expect(flip).not.toBeNull()
+    fireEvent.click(flip!)
+    expect(container.querySelector('.web-details img')?.getAttribute('src')).toBe(DFC)
+  })
+
+  it('keeps the control when there is a second side and no picture of it', () => {
+    const { container } = withDfc({ artCrop: null, normal: null })
+    fireEvent.focus(node('Viscera Seer'))
+    expect(container.querySelector('.web-details .rt-flip')).not.toBeNull()
+  })
+})
+
 describe('the deck is not editable here (doc 17 §17.9)', () => {
   it('offers no accept, reject or lock control anywhere in the view', () => {
     // Deliberate scope, and the kind of scope that gets quietly filled in.

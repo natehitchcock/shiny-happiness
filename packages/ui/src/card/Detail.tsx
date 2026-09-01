@@ -13,6 +13,8 @@
 
 import type { JSX } from 'react'
 import { CARD_ASPECT, imageFor, levelSpec } from './presentation.js'
+import { faceName } from './flip.js'
+import { FaceNoArt, FlipButton, useCardSide } from './FlipButton.js'
 import { ComboBadge, IdentityStrip, ManaValue, Price, RoleDot } from './Badges.js'
 import { ManaCost } from './ManaCost.js'
 import { CardMetrics } from './CardMetrics.js'
@@ -45,7 +47,8 @@ export const Detail = ({
 }: DetailProps): JSX.Element => {
   const spec = levelSpec(3)
   const w = width ?? spec.width
-  const image = imageFor(card, 3)
+  const { side, touched, hasBack, flip } = useCardSide(card)
+  const image = imageFor(card, 3, side)
   const reasons = card.reasons ?? []
 
   return (
@@ -60,32 +63,63 @@ export const Detail = ({
       {actions}
 
       <div className="rt-detail-body">
-        {image === null ? null : (
-          /*
-           * `aspectRatio` as well as the width and height attributes.
-           *
-           * The attributes alone would be enough in a browser that leaves the
-           * image's intrinsic sizing alone, but `.rt-detail-image` sets
-           * `height: auto` so the panel can be narrower than `w` — and the
-           * moment a stylesheet touches the height, whether the box is still
-           * reserved depends on the UA rule that derives a ratio from the
-           * attributes. Stating the ratio makes it not depend on that: the
-           * space is held from first paint, and the rules text below does not
-           * jump up the panel while the art is still in flight.
-           *
-           * `1 / CARD_ASPECT` because CSS wants width-over-height and
-           * `CARD_ASPECT` is height-over-width.
-           */
-          <img
-            className="rt-detail-image"
-            src={image}
-            alt={card.name}
-            loading="lazy"
-            decoding="async"
-            width={w}
-            height={Math.round(w * CARD_ASPECT)}
-            style={{ aspectRatio: 1 / CARD_ASPECT }}
-          />
+        {/*
+         * The picture, the face it is of, and the way to the other one.
+         *
+         * The guard is `image === null && !hasBack`, not `image === null`.
+         * Rendering nothing whenever `imageFor` came back null was right while
+         * every card had one face; for a two-faced card whose art has not
+         * resolved it collapses ADR-0027's third state into its first — the
+         * card silently reads as having no other side, which is the exact
+         * failure the database CHECK constraint and the layout gate were built
+         * to make unspellable.
+         *
+         * A single-faced card with no art still draws nothing at all, which is
+         * unchanged: its name, cost, type line and rules text are all in this
+         * panel already, and a card-shaped "no picture" box would be a hole
+         * where nothing is missing.
+         */}
+        {image === null && !hasBack ? null : (
+          <>
+            {image === null ? (
+              // Two faces, no picture of this one. Never `<img src="">`, which
+              // re-requests the page and draws it broken.
+              <FaceNoArt card={card} side={side} />
+            ) : (
+              /*
+               * `aspectRatio` as well as the width and height attributes.
+               *
+               * The attributes alone would be enough in a browser that leaves
+               * the image's intrinsic sizing alone, but `.rt-detail-image` sets
+               * `height: auto` so the panel can be narrower than `w` — and the
+               * moment a stylesheet touches the height, whether the box is
+               * still reserved depends on the UA rule that derives a ratio from
+               * the attributes. Stating the ratio makes it not depend on that:
+               * the space is held from first paint, and the rules text below
+               * does not jump up the panel while the art is still in flight.
+               *
+               * `1 / CARD_ASPECT` because CSS wants width-over-height and
+               * `CARD_ASPECT` is height-over-width.
+               */
+              <img
+                className="rt-detail-image"
+                src={image}
+                // The FACE's name, not the card's. Once the picture can change
+                // under a fixed heading, an `alt` that always said "Delver of
+                // Secrets // Insectile Aberration" would be the one part of the
+                // panel that could not tell a reader which side they are on.
+                alt={faceName(card, side)}
+                loading="lazy"
+                decoding="async"
+                width={w}
+                height={Math.round(w * CARD_ASPECT)}
+                style={{ aspectRatio: 1 / CARD_ASPECT }}
+              />
+            )}
+            {hasBack ? (
+              <FlipButton card={card} side={side} touched={touched} onFlip={flip} />
+            ) : null}
+          </>
         )}
 
         <p className="rt-detail-type">{card.typeLine ?? ''}</p>
