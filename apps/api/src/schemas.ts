@@ -236,6 +236,21 @@ export const cardSearchQuery = {
     limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
     cursor: { type: 'string', maxLength: 500 },
   },
+  /*
+   * An unknown parameter is an ERROR, not something to ignore.
+   *
+   * The search field is `q`. Without this, `?name=Sol Ring` passed validation,
+   * `q` defaulted to '', and the endpoint answered 200 with an unfiltered first
+   * page — a caller got a plausible list of cards that had nothing to do with
+   * what they asked. That is worse than a 400, because it looks like a working
+   * search returning wrong results; it cost an agent a wrong diagnosis and was
+   * reported upwards as a broken endpoint before anyone read the route.
+   *
+   * The command schemas below have always done this. This one was simply
+   * missed, and being a GET is what made the omission expensive: a typo in a
+   * URL is a thing humans do.
+   */
+  additionalProperties: false,
 } as const
 
 const acceptCommand = {

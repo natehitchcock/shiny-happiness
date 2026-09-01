@@ -386,6 +386,24 @@ describeDb('API-01 contract', () => {
       expect(response.json().items.map((c: Card) => c.name)).toContain('Sol Ring')
     })
 
+    it('rejects a parameter it does not know, rather than ignoring it', async () => {
+      /*
+       * `?name=` is not a parameter here — the field is `q` — and without
+       * `additionalProperties: false` the schema accepted it, `q` defaulted to
+       * the empty string, and the endpoint answered with an unfiltered first
+       * page. A caller got 200 and a list of cards that had nothing to do with
+       * what they asked for, which is worse than an error: it looks like a
+       * working search returning wrong results. It cost an agent a wrong
+       * diagnosis and it was reported to the user as a broken endpoint.
+       */
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/cards/search?name=Sol%20Ring',
+      })
+
+      expect(response.statusCode).toBe(400)
+    })
+
     it('filters by colour identity', async () => {
       const response = await app.inject({ method: 'GET', url: '/api/v1/cards/search?colors=U' })
 
