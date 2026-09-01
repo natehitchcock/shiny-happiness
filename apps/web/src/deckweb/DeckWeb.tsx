@@ -197,6 +197,49 @@ const KIND_WORDS: Readonly<Record<WebEdge['kind'], string>> = {
   benefits: 'Benefits',
 }
 
+/**
+ * What the caller asked for, as a string — the model's dependency.
+ *
+ * The three list props arrive as `.map`, `.filter` and `?? []` results, so they
+ * are new arrays holding the same ids on every render of the component above.
+ * Keyed on identity, the model was rebuilt and the 300-tick simulation re-run
+ * whenever anything at all moved in the workspace behind the graph, and the
+ * settle animation went back to frame 0 with it. Measured in Chrome on the real
+ * 99-card deck, eight seconds of unrelated re-renders gave 31 restarts of an
+ * animation that takes 0.7 s and 515 replayed frames where 39 were wanted.
+ *
+ * `App` no longer churns them (see `deckWebAccepted` there), which is the fix
+ * for the cost; this is what makes the promise the component's own rather than
+ * a convention every future caller has to know about. Joining a hundred short
+ * strings is microseconds against the 15 ms simulation it guards.
+ *
+ * A ref holding the replay across renders was the other candidate and is worse:
+ * it would leave the model and the layout still recomputing, which is the
+ * expensive half, and would only hide the flicker they cause.
+ *
+ * `cards` is deliberately absent. It is a hydration map whose identity changes
+ * only when its contents do, so it stays a dependency in its own right —
+ * hashing every card's name and tags on every render would be real work bought
+ * with nothing.
+ *
+ * The lists are separated rather than concatenated so that moving an id from
+ * one of them to another is a different key: the whole point is to notice a
+ * real change, and `[a] + [b]` and `[a, b] + []` are the same deck only if you
+ * do not look at which list they are in.
+ */
+const deckContentKey = (input: {
+  readonly order: readonly string[]
+  readonly accepted: readonly string[]
+  readonly commanders: readonly string[]
+  readonly combos: readonly { comboId: string; pieces: string[] }[]
+}): string =>
+  [
+    input.order.join(','),
+    input.accepted.join(','),
+    input.commanders.join(','),
+    input.combos.map((c) => [c.comboId, ...c.pieces].join('+')).join(','),
+  ].join('|')
+
 export const DeckWeb = ({
   deckId,
   deckName,
@@ -225,9 +268,14 @@ export const DeckWeb = ({
   const frameRef = useRef<HTMLDivElement | null>(null)
   const canvas = useCanvas(frameRef)
 
+  // Rebuilt when the DECK changes, not when the props do. See `deckContentKey`.
+  const deckKey = deckContentKey({ order, accepted, commanders, combos })
   const model = useMemo(
     () => buildDeckWeb({ order, accepted, commanders, cards, combos }),
-    [order, accepted, commanders, cards, combos],
+    // The lists are read through the key, which is why they are not listed
+    // here — with them, the memo would be exactly the identity check the key
+    // exists to replace.
+    [deckKey, cards],
   )
 
   /**
@@ -237,6 +285,17 @@ export const DeckWeb = ({
    * `prefers-reduced-motion` the converged positions are painted directly —
    * doc 17 §17.5: the graph is the point, watching it wobble is not — and
    * recording 40 snapshots nobody will look at would be pure cost.
+   *
+   * The canvas is a DEPENDENCY and not just a value read inside. It was only
+   * read, and the effect of that was a graph fitted to a canvas nobody draws:
+   * `useCanvas` starts at the placeholder 3:2 aspect and the `ResizeObserver`
+   * reports the pane's real proportions a frame later, so the layout kept the
+   * placeholder's 2574 × 1716 while the viewBox became the pane's 3257 × 1357.
+   * Measured in Chrome on the real 99-card deck, that drew 8 of 99 nodes below
+   * the bottom edge of the drawing and left a third of its width empty. The
+   * aspect is quantised to a tenth precisely so this can be a dependency
+   * without a window drag re-running the simulation every frame — see
+   * `useCanvas`.
    */
   const settled = useMemo(
     () =>
@@ -250,7 +309,7 @@ export const DeckWeb = ({
           ...(reduced ? {} : { frames: 40 }),
         },
       ),
-    [model, deckId, reduced],
+    [model, deckId, reduced, canvas.width, canvas.height],
   )
 
   /*
