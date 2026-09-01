@@ -34,6 +34,14 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   'spell-cast': 'casting spells',
   'opponent-discard': 'opponents discarding',
   'opponent-sacrifice': 'opponents sacrificing',
+  // Two damage tags, and the words have to say which is which (ADR-0029).
+  // `player-damage` is damage aimed at a face; `damage` is the wider event that
+  // contains it and does not care where the damage landed. "Dealing damage" is
+  // deliberately not "burn" — an archetype does not slot after "causes", and the
+  // word `burn` lives in the search box instead, as a value alias in
+  // `normaliseTag`.
+  'player-damage': 'damage to opponents',
+  damage: 'dealing damage',
 }
 
 /**

@@ -60,6 +60,7 @@ export type SynergyTag =
   | 'opponent-discard'
   | 'opponent-sacrifice'
   | 'player-damage'
+  | 'damage'
 
 export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'creature-death',
@@ -82,6 +83,7 @@ export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'opponent-discard',
   'opponent-sacrifice',
   'player-damage',
+  'damage',
 ]
 
 /**
@@ -211,6 +213,46 @@ const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
    * every effect, which is not a relation between events at all.
    */
   ['player-damage', 'spell-cast'],
+
+  /*
+   * Dealing damage, wherever it lands (ADR-0029).
+   *
+   * `damage` ↔ `creature-death` is the pair this ADR exists to place, and
+   * placing it HERE rather than in the rules is the whole decision. Lethal
+   * damage destroys a creature (CR 704.5g), but "lethal" depends on a toughness
+   * the card cannot see — 3 damage kills 69.6% of the commander-legal creature
+   * corpus, 4 kills 85.7%, and there is no point on that slope where a producer
+   * rule could honestly promise a death. A pair claims something weaker and
+   * true: these two events feed each other. Burn is how a death-trigger deck
+   * gets deaths without a sacrifice outlet, and a Blood Artist is what makes the
+   * burn spell worth more than its damage.
+   *
+   * The unordered table can carry this because it already carries the same
+   * shape: `creature-death` ↔ `graveyard-creature` is one-way in the mechanics
+   * (deaths fill a yard; a yard causes no deaths) and reads true in both
+   * directions in English, which is the bar this table sets.
+   *
+   * `damage` ↔ `spell-cast` follows `player-damage`'s pairing on stronger
+   * evidence: 1,162 of the 2,740 producers are instants or sorceries, against
+   * the 489 of 1,576 that ADR-0023 counted.
+   *
+   * Four pairings were considered and REFUSED:
+   *
+   *   - `damage` ↔ `player-damage`. One is a strict subset of the other — all
+   *     1,576 `player-damage` producers produce `damage` too — and a tag does
+   *     not feed itself. This is ADR-0022's `discard` ↔ `opponent-discard`
+   *     refusal, one event over.
+   *   - `damage` ↔ `lifeloss`. ADR-0023 exists to refuse this and nothing here
+   *     changes it. A drain spell still deals no damage.
+   *   - `damage` ↔ `attack-trigger`. Combat damage is the thing the producer
+   *     rules are built to exclude.
+   *   - `damage` ↔ `plus1-counter`, considered on the strength of the enrage
+   *     dinosaurs, which almost all grow when damaged. That pairs a trigger
+   *     CONDITION with an effect, which ADR-0023 already ruled is not a relation
+   *     between events — admit it and every condition pairs with every effect.
+   */
+  ['damage', 'creature-death'],
+  ['damage', 'spell-cast'],
 ]
 
 const INTERACTIONS = ((): ReadonlyMap<SynergyTag, readonly SynergyTag[]> => {
@@ -283,6 +325,72 @@ const PRODUCES: readonly Rule[] = [
   // here and dropped at about 70% precision: the first as often points at an
   // enchantment, and a fight as often fails to deal lethal damage.
   { tag: 'creature-death', test: /\bdestroy all creatures\b/i },
+
+  /*
+   * Dealing damage is its own event (ADR-0029).
+   *
+   * `player-damage` (ADR-0023) reads damage aimed at a FACE, and it was the only
+   * damage this file could see. So every Flame Slash, Blasphemous Act, Anger of
+   * the Gods and Bolas loyalty ability — 1,269 commander-legal cards — dealt
+   * damage and said nothing about it.
+   *
+   * Folding damage into `creature-death` was written, measured and REJECTED.
+   * "Destroy target creature" always kills; "deals 3 damage to target creature"
+   * kills only if toughness is 3 or less, and the card cannot know. The corpus
+   * says how often, over the 17,514 commander-legal creatures that print a
+   * numeric toughness: 1 damage kills 21.6%, 2 kills 46.7%, 3 kills 69.6%, 4
+   * kills 85.7%, 10 kills 99.8%. There is no honest threshold in that table —
+   * it is a slope, and picking a point on it makes the tag claim a death the
+   * card does not promise. The user's ruling is the right one: damage is not
+   * creature death any more than it is life loss. It is its own event, and the
+   * relation to death is carried in `INTERACTION_PAIRS`, where a one-way causal
+   * link already lives (`creature-death` ↔ `graveyard-creature`).
+   *
+   * SUBJECT-AGNOSTIC, unlike `player-damage`, and that is the boundary: every
+   * one of the 1,576 `player-damage` producers also produces `damage` — checked
+   * card by card, zero exceptions — so `player-damage` is the strictly narrower
+   * event, kept because it alone carries ADR-0023's life-loss bridge. `damage`
+   * is what a doubler doubles and what an enrage trigger notices, neither of
+   * which cares where the damage landed.
+   *
+   * NOT restricted to spells, though the user's word for it was "spells that do
+   * damage". Measured: only 1,162 of the 2,740 producers (42%) are instants or
+   * sorceries, only 7 of the 48 amplifier payoffs restrict the source to one,
+   * and the card that prompted all of this is a planeswalker loyalty ability.
+   * A `spell-damage` tag would have missed the report it came from. The name
+   * matches the boundary that was drawn, not the one that read nicest.
+   *
+   * Requiring an AMOUNT is what excludes combat damage without a word about it,
+   * exactly as in ADR-0023: "deals combat damage to a player" states no number,
+   * so the word "combat" sits where this rule wants one. The clause is the unit
+   * and not the card — Balefire Dragon, Questing Beast and Sword of Fire and Ice
+   * are triggered by combat damage and their EFFECT is noncombat damage.
+   *
+   * "to you" is refused, for ADR-0023 §6's reason one subject over: 105 cards
+   * match on nothing else, and they are Ancient Tomb, Mana Vault, the painlands
+   * and the Talismans. Their damage is a cost, not a plan, and no damage deck
+   * plays them for it. The cost of the refusal is measured and is one card —
+   * Sorrow's Path, "deals 2 damage to you and each creature you control" —
+   * which is cheaper than a nested lookahead no test could pin.
+   *
+   * A matching `itself` exclusion was written and dropped: it moved exactly one
+   * card in the corpus, and a branch a test cannot fail on is machinery.
+   */
+  { tag: 'damage', test: /\bdeals (?:\d+|X|that much) damage to (?!you\b)/i },
+  // The amount trailing the target, which is how a variable is templated:
+  // "deals damage to each player equal to twice the number of nonbasic lands"
+  // (Price of Progress) and "deals damage equal to its power to target creature"
+  // — the fight half. Fight is refused as a `creature-death` producer two rules
+  // up, and is admitted here, because the two rules make different claims: that
+  // one says a creature dies and this one says damage was dealt.
+  {
+    tag: 'damage',
+    test: /\bdeals damage to [^.\n]{0,60}\bequal to\b|\bdeals damage equal to\b/i,
+  },
+  // The divided form names no amount per target at all — "5 damage divided as
+  // you choose among any number of target creatures" — which is why it could
+  // not be read as death and can be read as damage.
+  { tag: 'damage', test: /\bdamage divided\b/i },
 
   { tag: 'token', test: /\bcreate(s)? .{0,40}\btoken/i },
   { tag: 'sacrifice-fodder', test: /\bcreate(s)? .{0,40}\bcreature token/i },
@@ -490,6 +598,26 @@ const PRODUCES: readonly Rule[] = [
     tag: 'creature-etb',
     test: /\breturn target creature card from (your|a) graveyard to the battlefield\b/i,
   },
+  /*
+   * The other verb reanimation is written in (ADR-0029).
+   *
+   * Every reanimation rule in this file was built around "return … to the
+   * battlefield", and Scryfall templates half of them the other way: "PUT target
+   * creature card from a graveyard ONTO the battlefield". Reanimate, Rise from
+   * the Grave, Beacon of Unrest, Necromancy, Portal to Phyrexia, Debtors' Knell
+   * and Nicol Bolas's −4 all read that way and matched nothing at all.
+   *
+   * The graveyard is deliberately ANY graveyard here, unlike the `wants` rule
+   * below. Whose yard the card came out of does not change the fact that a
+   * creature entered the battlefield, which is the whole of what a blink or
+   * enters-trigger deck is asking for. 37 commander-legal cards; Gruesome
+   * Encore, Puppeteer Clique and Sepulchral Primordial are the ones this reaches
+   * and the `wants` side refuses.
+   */
+  {
+    tag: 'creature-etb',
+    test: /\bput target [^.\n]{0,40}?\bcreature\b[^.\n]{0,40}?\bcard from (?:a|your|an opponent's|target player's) graveyard onto the battlefield\b/i,
+  },
 
   // Casting an instant or sorcery IS the event a prowess or magecraft trigger
   // waits for, and the type line says so without any reading of the rules text.
@@ -586,6 +714,83 @@ const WANTS: readonly Rule[] = [
     tag: 'player-damage',
     test: /\bwhenever a[a-z ]{0,20}source you control deals (?:noncombat |excess )?damage to (?:an opponent|a player|another player|one or more of your opponents)\b|\bwhenever (?:an opponent|a player) is dealt (?:noncombat )?damage\b/i,
   },
+  // Bloodthirst, whose reminder text is a payoff sentence: "if an opponent was
+  // dealt damage this turn, this creature enters with N +1/+1 counters on it".
+  // It belongs here and not on `damage` (ADR-0029) because it names the subject:
+  // a Flame Slash aimed at a creature does not turn it on.
+  { tag: 'player-damage', test: /\bbloodthirst\b/i },
+  /*
+   * The payoffs for damage itself (ADR-0029), and the reason the tag is not
+   * inert. ADR-0023 predicted the opposite —
+   *
+   *   > A `permanent-damage` event would be the honest fix and nothing would
+   *   > pay it off.
+   *
+   * — and the prediction was made about a tag scoped to permanents. Read
+   * subject-agnostically the payoff class is 240 commander-legal cards, in four
+   * shapes, and each shape gets its own rule because each is a different card.
+   *
+   * ENRAGE and its cousins: "whenever this creature is dealt damage". 63 cards
+   * — Ripjaw Raptor, Boros Reckoner, Stuffy Doll, Brash Taunter, Spitemare — and
+   * the keyword is matched by name because Scryfall prints it with reminder
+   * text. These want damage pointed at their own side, which no other tag in
+   * this file can express.
+   */
+  { tag: 'damage', test: /\benrage\b|\bwhenever this creature is dealt damage\b/i },
+  // The same trigger moved onto somebody else's creature: Repercussion, Blazing
+  // Sunsteel, Fiendlash, Rite of Passage. 15 cards.
+  {
+    tag: 'damage',
+    test: /\bwhenever (?:a|an|another|one or more|equipped|enchanted)[a-z' ]{0,28}creatures? (?:you control )?(?:is|are) dealt damage\b/i,
+  },
+  /*
+   * The amplifiers, subject-agnostic. ADR-0023 wrote this rule requiring the
+   * damage to land on a player, because `player-damage` was the only damage tag
+   * there was; the cards themselves mostly do not say so. Fiery Emancipation
+   * reads "if a source you control would deal damage to a PERMANENT OR PLAYER,
+   * it deals triple that damage", and Furnace of Rath, Gratuitous Violence and
+   * City on Fire are the same sentence. 48 cards.
+   *
+   * They keep `player-damage` as well, and that is deliberate: one sentence,
+   * two events, which is the ruling ADR-0022 made about "each player discards".
+   *
+   * Asking for the CONSEQUENCE rather than the subject is ADR-0023's device and
+   * is kept for its reason: Ghosts of the Innocent halves the damage and
+   * Battletide Alchemist prevents it, and both match "would deal damage".
+   * Requiring "it deals double / triple / that much plus" refuses them.
+   */
+  {
+    tag: 'damage',
+    test: /\bwould deal (?:noncombat )?damage[^.\n]{0,70}\bit deals (?:double|triple|twice|that much damage plus)\b/i,
+  },
+  /*
+   * Toralf's event, which ADR-0023 named as found-and-not-done: "whenever a
+   * source you control deals EXCESS damage to a permanent". 30 cards carry
+   * "excess damage" and 16 more read "whenever a source you control deals
+   * damage" without naming a subject — Tamanoa, Chandra's Pyreling, Chandra's
+   * Incinerator, Quest for Pure Flame.
+   *
+   * The source has to be something other than the card itself, which is the
+   * refusal ADR-0023 made on Curiosity: an evasive creature hitting in combat is
+   * not something a burn spell can supply.
+   *
+   * `noncombat` is spelled out rather than allowed as any adjective, and the
+   * reason is a measured 176-card false positive: TRAMPLE's reminder text reads
+   * "(This creature can deal excess COMBAT damage to the player or planeswalker
+   * it's attacking.)" A permissive gap made Colossal Dreadmaw a burn payoff.
+   */
+  {
+    tag: 'damage',
+    test: /\bexcess (?:noncombat )?damage\b|\bwhenever a[a-z' ]{0,28}source you control deals (?:noncombat |excess )?damage\b/i,
+  },
+  // Removal that only works on something your deck already damaged, and the
+  // creatures that grow from it: "destroy target creature that was dealt damage
+  // this turn" is Witch's Mist, Avenging Arrow, Fathom Fleet Cutthroat and
+  // Ogre Siegebreaker. The word `creature` is what keeps bloodthirst out — that
+  // reminder text reads "if an OPPONENT was dealt damage this turn", which is
+  // the narrower event and belongs to `player-damage` below.
+  { tag: 'damage', test: /\bcreature[^.\n]{0,50}\bdealt damage this turn\b/i },
+
   { tag: 'card-draw', test: /\bwhenever you draw\b|\bif you.{0,20}drawn.{0,20}card\b/i },
   { tag: 'discard', test: /\bmadness\b|\bwhenever you discard\b/i },
 
@@ -648,6 +853,29 @@ const WANTS: readonly Rule[] = [
   {
     tag: 'graveyard-creature',
     test: /\breturn (target |up to one target |another target )?(creature|permanent) cards? from (your|a) graveyard\b/i,
+  },
+  /*
+   * The same missing verb, on the side that asks for a full graveyard
+   * (ADR-0029). The rules above already accept "a graveyard" as well as "your
+   * graveyard" — the diagnosis that they did not was wrong, and checking is
+   * what corrected it. What none of them accepts is "put … onto the
+   * battlefield", so 41 reanimation cards wanted nothing.
+   *
+   * Narrower than the `creature-etb` producer by one clause, and on purpose:
+   * only "a" or "your" graveyard, never "an opponent's". ADR-0016 ruled that an
+   * opponent's graveyard is not the resource this tag names and ADR-0022 kept
+   * that ruling, so a card that can only rob theirs — Gruesome Encore, Ink-Eyes,
+   * Sepulchral Primordial, 15 in all — is not evidence that a deck wants its own
+   * yard filled. "A graveyard" stays in because it includes yours.
+   *
+   * Not restricted to creature cards, for the reason the rules above give: this
+   * tag has meant the graveyard as a resource since `delve` and `threshold` were
+   * added to it. Restore, Nomad Mythmaker and Soul of Windgrace recur a land or
+   * an Aura and are built for the same deck.
+   */
+  {
+    tag: 'graveyard-creature',
+    test: /\bput [^.\n]{0,60}?\bcards? from (?:a|your) graveyard onto the battlefield\b/i,
   },
   { tag: 'graveyard-creature', test: /\bcast .{0,40}from your graveyard\b/i },
   { tag: 'graveyard-creature', test: /\bcards? in your graveyard\b/i },

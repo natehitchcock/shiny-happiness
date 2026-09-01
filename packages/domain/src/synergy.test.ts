@@ -1353,3 +1353,447 @@ describe('deriveSynergy — damage is not life loss (ADR-0023)', () => {
     })
   })
 })
+
+describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), typeLine, oracleText })
+  const deriveFaces = (name: string, typeLine: string, faces: readonly string[]): SynergyProfile =>
+    deriveSynergy({
+      oracleId: oracleId(name),
+      typeLine,
+      oracleText: faces.join('\n'),
+      oracleTextFaces: faces,
+    })
+
+  // Real oracle text throughout, abbreviated only where the tail is irrelevant.
+  const FLAME_SLASH = derive(
+    'Flame Slash',
+    'Sorcery',
+    'Flame Slash deals 4 damage to target creature.',
+  )
+  const RIPJAW_RAPTOR = derive(
+    'Ripjaw Raptor',
+    'Creature — Dinosaur',
+    'Enrage — Whenever this creature is dealt damage, draw a card.',
+  )
+  const FIERY_EMANCIPATION = derive(
+    'Fiery Emancipation',
+    'Enchantment',
+    'If a source you control would deal damage to a permanent or player, it deals triple that damage to that permanent or player instead.',
+  )
+
+  describe('the tag', () => {
+    it('is in the vocabulary, and is the twenty-first', () => {
+      expect(SYNERGY_TAGS).toContain('damage')
+      expect(SYNERGY_TAGS).toHaveLength(21)
+    })
+
+    it('is spelled as an event, not as an archetype', () => {
+      // `burn` is a deck, and the tag names have to slot after "causes" in the
+      // UI. The word a player types lives in the query alias instead — see
+      // `normaliseTag` and its test.
+      expect(SYNERGY_TAGS).not.toContain('burn')
+    })
+  })
+
+  describe('the producers', () => {
+    it('reads a burn spell pointed at a creature', () => {
+      expect(FLAME_SLASH.produces).toContain('damage')
+    })
+
+    it('reads a pinger, which no threshold would have let in', () => {
+      // The tag makes no claim about whether the creature dies, so the amount
+      // stops mattering. 1 damage is damage.
+      const embermage = derive(
+        'Wojek Embermage',
+        'Creature — Human Wizard',
+        '{T}: This creature deals 1 damage to target creature.',
+      )
+
+      expect(embermage.produces).toContain('damage')
+    })
+
+    it('reads X and "that much" as well as a printed number', () => {
+      const defiance = derive(
+        'Clan Defiance',
+        'Sorcery',
+        'Choose one or more —\n• Clan Defiance deals X damage to target creature with flying.\n• Clan Defiance deals X damage to target player or planeswalker.',
+      )
+      // Balefire Dragon is also the combat-damage ruling: its TRIGGER is combat
+      // damage and its EFFECT is not, and the clause is the unit (ADR-0023 §3).
+      const balefire = derive(
+        'Balefire Dragon',
+        'Creature — Dragon',
+        'Flying\nWhenever this creature deals combat damage to a player, it deals that much damage to each creature that player controls.',
+      )
+
+      expect(defiance.produces).toContain('damage')
+      expect(balefire.produces).toContain('damage')
+    })
+
+    it('reads a sweeper', () => {
+      const act = derive(
+        'Blasphemous Act',
+        'Sorcery',
+        'This spell costs {1} less to cast for each creature on the battlefield.\nBlasphemous Act deals 13 damage to each creature.',
+      )
+
+      expect(act.produces).toContain('damage')
+    })
+
+    it('reads the amount that trails its target', () => {
+      // "Deals damage to each player equal to…" and "deals damage equal to its
+      // power to…" put the number after the noun, and no rule looked there.
+      const price = derive(
+        'Price of Progress',
+        'Instant',
+        'Price of Progress deals damage to each player equal to twice the number of nonbasic lands that player controls.',
+      )
+      const way = derive(
+        "Nature's Way",
+        'Sorcery',
+        "Target creature you control gains vigilance and trample until end of turn. It deals damage equal to its power to target creature you don't control.",
+      )
+
+      expect(price.produces).toContain('damage')
+      expect(way.produces).toContain('damage')
+    })
+
+    it('reads damage divided among targets, which names no amount per target', () => {
+      const atarka = derive(
+        'Dragonlord Atarka',
+        'Legendary Creature — Elder Dragon',
+        'Flying, trample\nWhen Dragonlord Atarka enters, it deals 5 damage divided as you choose among any number of target creatures and/or planeswalkers your opponents control.',
+      )
+
+      expect(atarka.produces).toContain('damage')
+    })
+  })
+
+  describe('what the tag refuses', () => {
+    it('refuses damage a card deals to you as a cost', () => {
+      // 105 cards match on nothing else, and they are Ancient Tomb, Mana Vault,
+      // the painlands and the Talismans. A damage deck does not play them for
+      // the damage. Same ruling as ADR-0023 §6, one subject over.
+      const tomb = derive(
+        'Ancient Tomb',
+        'Land',
+        '{T}: Add {C}{C}. This land deals 2 damage to you.',
+      )
+      const vault = derive(
+        'Mana Vault',
+        'Artifact',
+        "This artifact doesn't untap during your untap step.\n{4}: Untap this artifact.\nAt the beginning of your upkeep, this artifact deals 1 damage to you.\n{T}: Add {C}{C}{C}.",
+      )
+
+      expect(tomb.produces).not.toContain('damage')
+      expect(vault.produces).not.toContain('damage')
+    })
+
+    it('refuses combat damage, because it never states an amount', () => {
+      const edric = derive(
+        'Edric, Spymaster of Trest',
+        'Legendary Creature — Elf Rogue',
+        'Whenever a creature deals combat damage to one of your opponents, its controller may draw a card.',
+      )
+
+      expect(edric.produces).not.toContain('damage')
+    })
+
+    it('refuses prevention, which is the opposite card', () => {
+      const medic = derive(
+        'Battlefield Medic',
+        'Creature — Human Cleric',
+        '{T}: Prevent the next X damage that would be dealt to target creature this turn, where X is the number of Clerics on the battlefield.',
+      )
+
+      expect(medic.produces).not.toContain('damage')
+    })
+
+    it('does not claim a creature dies', () => {
+      // The ruling this ADR turns on. 4 damage kills 85.7% of the commander-legal
+      // creature corpus and 3 kills 69.6% — a slope with no honest threshold on
+      // it — so the producer promises damage and the pair table carries the rest.
+      expect(FLAME_SLASH.produces).not.toContain('creature-death')
+    })
+  })
+
+  describe('the boundary against player-damage', () => {
+    it('claims both when the damage can reach a face', () => {
+      // `player-damage` is the strictly narrower event. All 1,576 of its
+      // producers produce `damage` too — checked card by card, no exceptions.
+      const bolt = derive(
+        'Lightning Bolt',
+        'Instant',
+        'Lightning Bolt deals 3 damage to any target.',
+      )
+      const tremors = derive(
+        'Impact Tremors',
+        'Enchantment',
+        'Whenever a creature you control enters, this enchantment deals 1 damage to each opponent.',
+      )
+
+      expect(bolt.produces).toEqual(expect.arrayContaining(['damage', 'player-damage']))
+      expect(tremors.produces).toEqual(expect.arrayContaining(['damage', 'player-damage']))
+    })
+
+    it('claims only the wider one when the damage cannot', () => {
+      expect(FLAME_SLASH.produces).toContain('damage')
+      expect(FLAME_SLASH.produces).not.toContain('player-damage')
+    })
+
+    it('leaves the life-loss split exactly where ADR-0023 put it', () => {
+      const bolt = derive(
+        'Lightning Bolt',
+        'Instant',
+        'Lightning Bolt deals 3 damage to any target.',
+      )
+      const exsanguinate = derive(
+        'Exsanguinate',
+        'Sorcery',
+        'Each opponent loses X life. You gain life equal to the life lost this way.',
+      )
+
+      expect(bolt.produces).not.toContain('lifeloss')
+      expect(exsanguinate.produces).not.toContain('damage')
+      expect(exsanguinate.produces).not.toContain('player-damage')
+    })
+  })
+
+  describe('the payoffs, which are why the tag is not inert', () => {
+    it('reads enrage', () => {
+      expect(RIPJAW_RAPTOR.wants).toContain('damage')
+    })
+
+    it('reads the same trigger on somebody else’s creature', () => {
+      const repercussion = derive(
+        'Repercussion',
+        'Enchantment',
+        "Whenever a creature is dealt damage, this enchantment deals that much damage to that creature's controller.",
+      )
+
+      expect(repercussion.wants).toContain('damage')
+    })
+
+    it('reads an amplifier, and gives it both damage tags', () => {
+      // One sentence, two events — the ruling ADR-0022 made about "each player
+      // discards". Fiery Emancipation triples damage at a permanent OR a player.
+      expect(FIERY_EMANCIPATION.wants).toEqual(expect.arrayContaining(['damage', 'player-damage']))
+    })
+
+    it('reads Toralf, whom ADR-0023 named as unreachable', () => {
+      const toralf = derive(
+        'Toralf, God of Fury',
+        'Legendary Creature — God',
+        'Trample\nWhenever a creature or planeswalker an opponent controls is dealt excess noncombat damage, Toralf deals damage equal to the excess to any target other than that permanent.',
+      )
+
+      expect(toralf.wants).toContain('damage')
+    })
+
+    it('does not read trample as a damage payoff', () => {
+      // Trample's reminder text says "excess COMBAT damage", and a permissive
+      // adjective gap in the rule above made all 176 trample creatures burn
+      // payoffs. Colossal Dreadmaw is the card that caught it.
+      const dreadmaw = derive(
+        'Colossal Dreadmaw',
+        'Creature — Dinosaur',
+        "Trample (This creature can deal excess combat damage to the player or planeswalker it's attacking.)",
+      )
+
+      expect(dreadmaw.wants).not.toContain('damage')
+      expect(dreadmaw.produces).not.toContain('damage')
+    })
+
+    it('reads removal that only works on something already damaged', () => {
+      const mist = derive(
+        "Witch's Mist",
+        'Artifact',
+        '{2}{B}, {T}: Destroy target creature that was dealt damage this turn.',
+      )
+
+      expect(mist.wants).toContain('damage')
+    })
+
+    it('gives bloodthirst to the narrower tag, because it names the subject', () => {
+      // "If an OPPONENT was dealt damage this turn". A Flame Slash aimed at a
+      // creature does not turn it on, so the wider tag would be a wrong match.
+      const ogre = derive(
+        'Blood Ogre',
+        'Creature — Vampire Warrior',
+        'Bloodthirst 1 (If an opponent was dealt damage this turn, this creature enters with a +1/+1 counter on it.)\nFirst strike',
+      )
+
+      expect(ogre.wants).toContain('player-damage')
+      expect(ogre.wants).not.toContain('damage')
+    })
+
+    it('refuses a payoff whose source can only be the card itself', () => {
+      // ADR-0023's Curiosity ruling. No burn spell has ever triggered it, so the
+      // deck cannot supply what it asks for.
+      const curiosity = derive(
+        'Curiosity',
+        'Enchantment — Aura',
+        'Enchant creature\nWhenever enchanted creature deals damage to an opponent, you may draw a card.',
+      )
+
+      expect(curiosity.wants).not.toContain('damage')
+    })
+
+    it('refuses damage prevention wearing a payoff sentence', () => {
+      const ghosts = derive(
+        'Ghosts of the Innocent',
+        'Creature — Spirit',
+        'If a source would deal damage to a permanent or player, it deals half that damage, rounded down, to that permanent or player instead.',
+      )
+
+      expect(ghosts.wants).not.toContain('damage')
+    })
+  })
+
+  describe('the pair table', () => {
+    it('pairs damage with creature deaths, which is where the entailment lives', () => {
+      // Lethal damage destroys a creature, but "lethal" depends on a toughness
+      // the card cannot see. A pair claims the weaker, true thing.
+      expect(interactsWith('damage')).toContain('creature-death')
+      expect(interactsWith('creature-death')).toContain('damage')
+    })
+
+    it('pairs damage with the spells most of it is cast from', () => {
+      // 1,162 of the 2,740 producers are instants or sorceries.
+      expect(interactsWith('damage')).toContain('spell-cast')
+    })
+
+    it('refuses to pair damage with the tag it contains', () => {
+      // A strict subset does not feed its superset. ADR-0022's `discard` ↔
+      // `opponent-discard` refusal, one event over.
+      expect(interactsWith('damage')).not.toContain('player-damage')
+      expect(interactsWith('player-damage')).not.toContain('damage')
+    })
+
+    it('refuses to pair damage with life loss, attacking, or counters', () => {
+      expect(interactsWith('damage')).not.toContain('lifeloss')
+      expect(interactsWith('damage')).not.toContain('attack-trigger')
+      expect(interactsWith('damage')).not.toContain('plus1-counter')
+    })
+  })
+
+  describe('reanimation that reaches into a graveyard', () => {
+    it('reads "put ... onto the battlefield", which no rule spelled', () => {
+      // The rules already accepted "a graveyard"; what none of them accepted was
+      // the verb. Every reanimation rule in the file was written around "return".
+      const reanimate = derive(
+        'Reanimate',
+        'Sorcery',
+        "Put target creature card from a graveyard onto the battlefield under your control. You lose life equal to that card's mana value.",
+      )
+
+      expect(reanimate.wants).toContain('graveyard-creature')
+      expect(reanimate.produces).toContain('creature-etb')
+    })
+
+    it('reads the ones that are not about creatures', () => {
+      // `graveyard-creature` is the graveyard-as-a-resource tag — its own
+      // comment says so — but `creature-etb` really is about creatures.
+      const restore = derive(
+        'Restore',
+        'Instant',
+        'Put target land card from a graveyard onto the battlefield under your control.',
+      )
+
+      expect(restore.wants).toContain('graveyard-creature')
+      expect(restore.produces).not.toContain('creature-etb')
+    })
+
+    it('does not claim your graveyard is full because you robbed theirs', () => {
+      // ADR-0016 ruled that an opponent's graveyard is not the resource and
+      // ADR-0022 kept that ruling. A card that only ever reaches into theirs
+      // still makes a creature enter, so it produces `creature-etb` — but it
+      // wants nothing from your own yard.
+      const encore = derive(
+        'Gruesome Encore',
+        'Sorcery',
+        "Put target creature card from an opponent's graveyard onto the battlefield under your control. It gains haste.",
+      )
+
+      expect(encore.produces).toContain('creature-etb')
+      expect(encore.wants).not.toContain('graveyard-creature')
+    })
+  })
+
+  describe('Nicol Bolas, the Ravager // Nicol Bolas, the Arisen — the reported card', () => {
+    const BOLAS = deriveFaces(
+      'Nicol Bolas, the Ravager // Nicol Bolas, the Arisen',
+      'Legendary Creature — Elder Dragon // Legendary Planeswalker — Bolas',
+      [
+        "Flying\nWhen Nicol Bolas enters, each opponent discards a card.\n{4}{U}{B}{R}: Exile Nicol Bolas, then return him to the battlefield transformed under his owner's control. Activate only as a sorcery.",
+        '+2: Draw two cards.\n−3: Nicol Bolas deals 10 damage to target creature or planeswalker.\n−4: Put target creature or planeswalker card from a graveyard onto the battlefield under your control.\n−12: Exile all but the bottom card of target player’s library.',
+      ],
+    )
+
+    it('reads the −3 as damage', () => {
+      expect(BOLAS.produces).toContain('damage')
+    })
+
+    it('does not read the −3 as damage at a face', () => {
+      // It can only ever be pointed at a permanent, which is exactly the half of
+      // the event `player-damage` was not built to see.
+      expect(BOLAS.produces).not.toContain('player-damage')
+    })
+
+    it('reads the −4 as reanimation, in both directions', () => {
+      expect(BOLAS.produces).toContain('creature-etb')
+      expect(BOLAS.wants).toContain('graveyard-creature')
+    })
+
+    it('keeps everything the front face already said', () => {
+      expect(BOLAS.produces).toEqual(
+        expect.arrayContaining(['card-draw', 'opponent-discard', 'damage', 'creature-etb']),
+      )
+    })
+
+    it('still says nothing about the −12, and that is the decision', () => {
+      // Library exile is not modelled, deliberately: there is no `mill` tag, and
+      // the ultimate is a win condition rather than an event another card in the
+      // deck pays off. Four produces, and no fifth.
+      expect(BOLAS.produces).toHaveLength(4)
+    })
+  })
+
+  describe('what a deck sees', () => {
+    it('offers a burn spell to a deck built on being damaged', () => {
+      const deck = deckSynergy([oracleId('Ripjaw Raptor')], [], (id) =>
+        id === oracleId('Ripjaw Raptor') ? RIPJAW_RAPTOR : undefined,
+      )
+
+      const match = synergyMatches(FLAME_SLASH, deck).find((m) => m.tag === 'damage')
+      expect(match?.direction).toBe('enables')
+      expect(match?.weight).toBe(COMMANDER_WEIGHT)
+    })
+
+    it('offers an amplifier to a deck that deals damage at creatures', () => {
+      // Before this change Fiery Emancipation only ever matched a deck that
+      // burned faces, so a creature-removal deck was told it had no payoff.
+      const deck = deckSynergy([oracleId('Flame Slash')], [], (id) =>
+        id === oracleId('Flame Slash') ? FLAME_SLASH : undefined,
+      )
+
+      expect(
+        synergyMatches(FIERY_EMANCIPATION, deck).find((m) => m.tag === 'damage')?.direction,
+      ).toBe('payoff')
+    })
+
+    it('does not offer a mana land to either', () => {
+      const tomb = derive(
+        'Ancient Tomb',
+        'Land',
+        '{T}: Add {C}{C}. This land deals 2 damage to you.',
+      )
+      const deck = deckSynergy([oracleId('Ripjaw Raptor')], [], (id) =>
+        id === oracleId('Ripjaw Raptor') ? RIPJAW_RAPTOR : undefined,
+      )
+
+      expect(synergyMatches(tomb, deck)).toEqual([])
+    })
+  })
+})
