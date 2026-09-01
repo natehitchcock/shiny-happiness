@@ -186,6 +186,157 @@ describe('the mana column', () => {
   })
 })
 
+/**
+ * The row, measured.
+ *
+ * Every number here is a `getBoundingClientRect().width` taken in Chrome on the
+ * running app against a real 86-card deck, at a width where nothing is shed —
+ * not a `min-width` read off this sheet, because several of these cells are
+ * wider than their declared floor once their font renders. They were uniform
+ * across all 76 suggestion rows and all 65 deck rows.
+ *
+ * The chrome is the row's own: `gap: var(--step)`, `padding: 6px var(--step)`,
+ * and `border: 1px solid transparent`, which counts because `* { box-sizing:
+ * border-box }` makes the container width include it.
+ */
+const measured = {
+  gap: 8,
+  padding: 16,
+  border: 2,
+  /** `.card-row .name` / `.card-row > .name-cell`, 5rem. */
+  nameFloor: 80,
+  /** The combo-degree hint, on a suggestion row only. */
+  badge: 24.8,
+  mana: 73.59,
+  metric: 49.59,
+  price: 54.39,
+  add: 36.28,
+  reject: 48.78,
+  lock: 27.19,
+  remove: 57.75,
+} as const
+
+/**
+ * The container width at which these cells plus a floored name exactly fill a row.
+ *
+ * `cells.length` gaps, not `cells.length - 1`: the name is a child too, so a row
+ * showing n fixed cells has n + 1 children and n gaps between them.
+ */
+const needs = (...cells: number[]): number =>
+  cells.reduce((a, b) => a + b, 0) +
+  cells.length * measured.gap +
+  measured.padding +
+  measured.border +
+  measured.nameFloor
+
+/** A CSS length in px. `rem` is 16px here: nothing in this app rescales the root. */
+const px = (length: string): number =>
+  Number.parseFloat(length) * (length.trim().endsWith('rem') ? 16 : 1)
+
+/** The `max-width` of the `@container` block whose first rule matches `selector`. */
+const shedsAt = (selector: RegExp): number => {
+  const found = new RegExp(
+    `@container \\(max-width:\\s*(\\d+)px\\)\\s*\\{\\s*${selector.source}`,
+  ).exec(css)
+  expect(found).not.toBeNull()
+  return Number(found?.[1])
+}
+
+/**
+ * The threshold is the last width at which the cell must already be gone.
+ *
+ * Two-sided on purpose, which pins it to a single integer rather than to "not
+ * obviously wrong": one pixel wider and the cell must still fit beside a floored
+ * name (so nothing is shed before the row asks for it), and at the threshold
+ * itself it must not (so nothing is kept at the name's expense). A test that
+ * only checked the second half would pass with every cell hidden at 4000px.
+ */
+const shedsExactlyWhenItMust = (threshold: number, need: number): void => {
+  expect(threshold + 1).toBeGreaterThanOrEqual(need)
+  expect(threshold).toBeLessThan(need)
+}
+
+/**
+ * The floor has to sit on whichever child the row actually flexes.
+ *
+ * This is the defect that outlived three passes over this sheet, because every
+ * test asked `.card-row .name` for its `min-width` and that declaration was
+ * right the whole time. A deck row flexes the name itself. A SUGGESTION row
+ * flexes the `.name-cell` wrapping the name and its reasons, and that cell was
+ * `min-width: 0` — so it collapsed under the name it holds. Measured in Chrome
+ * at a 340px feed container: cell 44px, name button 80px, overflowing 36px into
+ * the mana column, which paints over it because `.card-row > *:not(.name)`
+ * carries `z-index: 1`. At a 321px container the cell was 25px. The name was the
+ * one thing on the row that says which card the buttons act on, and it was the
+ * one thing being covered up.
+ *
+ * So this looks the layout up the way the layout does: find the child that
+ * grows, ask THAT one for its floor.
+ */
+describe('whichever child a row flexes is the child that carries the floor', () => {
+  /** The `flex-grow` a child resolves to, defaulting to the initial `0`. */
+  const grows = (child: Element): boolean => {
+    const flex = winner(child, 'flex')?.value
+    if (flex === undefined) return Number.parseFloat(winner(child, 'flex-grow')?.value ?? '0') > 0
+    // `flex: 1` is `1 1 0%`; `flex: 0 0 auto` is itself. The first number is grow.
+    return Number.parseFloat(flex.split(/\s+/)[0] ?? '0') > 0
+  }
+
+  const shapes = {
+    'a deck row': `
+      <div class="card-row">
+        <span class="name as-link">Skirk Prospector</span>
+        <span class="mana">{1}{R}</span>
+        <span class="cash">$0.34</span>
+        <button class="act lock">Lock</button>
+        <button class="act exclude">Remove</button>
+      </div>`,
+    'a suggestion row': `
+      <div class="card-row">
+        <span class="hint degree-hint">2</span>
+        <span class="name-cell"
+          ><button class="name as-link">Skirk Prospector</button
+          ><span class="reasons"><span class="reason">ramps</span></span></span>
+        <span class="mana">{1}{R}</span>
+        <span class="metric-cell" data-metric="impact">6.13</span>
+        <span class="metric-cell" data-metric="efficiency">3.07</span>
+        <span class="cash">$0.34</span>
+        <button class="act accept">Add</button>
+        <button class="act exclude">Reject</button>
+      </div>`,
+  }
+
+  it.each(Object.entries(shapes))('%s floors the child it flexes', (_name, markup) => {
+    document.body.innerHTML = `<section class="region">${markup}</section>`
+    const row = document.querySelector('.card-row')!
+    const flexible = [...row.children].filter(grows)
+
+    // Exactly one, or the deficit is shared and the name's share is unbounded.
+    expect(flexible.map((c) => c.className)).toHaveLength(1)
+
+    const floor = winner(flexible[0]!, 'min-width')?.value
+    expect(floor).toBeDefined()
+    expect(floor).not.toBe('0')
+    expect(Number.parseFloat(floor ?? '0')).toBeGreaterThan(0)
+  })
+
+  it('floors both shapes at the same width, so one derivation covers both', () => {
+    /*
+     * The shedding thresholds below are all derived from ONE number, `5rem`. If
+     * the two shapes could floor at different widths, half of those thresholds
+     * would be derived from a floor that is not the one being honoured — and
+     * nothing would say which half.
+     */
+    document.body.innerHTML = `<section class="region">${shapes['a deck row']}</section>`
+    const deck = winner(document.querySelector('.card-row > .name')!, 'min-width')?.value
+    document.body.innerHTML = `<section class="region">${shapes['a suggestion row']}</section>`
+    const feed = winner(document.querySelector('.card-row > .name-cell')!, 'min-width')?.value
+    expect(deck).toBe(feed)
+    // And it is the number the derivations below use.
+    expect(px(deck ?? '0')).toBe(measured.nameFloor)
+  })
+})
+
 describe('a deck row never loses the card name', () => {
   /*
    * Measured on the running app before the fix: at a 230 px deck rail the name
@@ -219,6 +370,14 @@ describe('a deck row never loses the card name', () => {
     expect(Number.parseFloat(value ?? '0')).toBeGreaterThan(0)
   })
 
+  /*
+   * A deck row is `:not(:has(.name-cell))` — see the suggestion-row block below
+   * for why the two shapes shed at different widths and why the selector is the
+   * shape rather than the panel.
+   */
+  const price = (): number => shedsAt(/\.card-row:not\(:has\(\.name-cell\)\) \.cash/)
+  const mana = (): number => shedsAt(/\.card-row:not\(:has\(\.name-cell\)\) \.mana/)
+
   it('lets the price step aside before the name does', () => {
     // A CONTAINER query, not a media query: the rail's width comes from the
     // workspace grid and the draggable divider, so the viewport does not know
@@ -226,18 +385,33 @@ describe('a deck row never loses the card name', () => {
     // rail, and show it on a phone.
     expect(css).toMatch(/container-type:\s*inline-size/)
     expect(css).toMatch(
-      /@container[^{]*max-width:\s*320px[^{]*\{\s*\.card-row \.cash\s*\{\s*display:\s*none/,
+      new RegExp(
+        `@container \\(max-width: ${String(price())}px\\)\\s*\\{\\s*` +
+          `\\.card-row:not\\(:has\\(\\.name-cell\\)\\) \\.cash\\s*\\{\\s*display:\\s*none`,
+      ),
     )
   })
 
   it('drops the mana cost only at a width below the price threshold', () => {
     // Order matters: the price is an estimate that goes stale in a day and is
     // repeated in the deck total, so it goes first.
-    const cash = /@container \(max-width:\s*(\d+)px\)\s*\{\s*\.card-row \.cash/.exec(css)
-    const mana = /@container \(max-width:\s*(\d+)px\)\s*\{\s*\.card-row \.mana/.exec(css)
-    expect(cash).not.toBeNull()
-    expect(mana).not.toBeNull()
-    expect(Number(mana?.[1])).toBeLessThan(Number(cash?.[1]))
+    expect(mana()).toBeLessThan(price())
+  })
+
+  it('sheds each of them exactly where the name would otherwise give way', () => {
+    /*
+     * DERIVED, and this is the derivation. A deck row is name, mana cost, price,
+     * lock and remove; the two thresholds are the widths at which the price and
+     * then the mana cost stop fitting beside a name at its 5rem floor.
+     *
+     * These numbers used to be 320 and 250, which are neither row's. Measured in
+     * Chrome before the change: at a 331px rail container — a 1600px viewport,
+     * ordinary — the price was still shown and the Remove button finished 12px
+     * OUTSIDE the rail, on top of the feed. The spill reached 21px at 251.
+     */
+    const { mana: m, price: p, lock, remove } = measured
+    shedsExactlyWhenItMust(price(), needs(m, p, lock, remove))
+    shedsExactlyWhenItMust(mana(), needs(m, lock, remove))
   })
 })
 
@@ -251,17 +425,10 @@ describe('a deck row never loses the card name', () => {
  * in jsdom, measures nothing, because jsdom reports every box as 0×0.
  */
 describe('a suggestion row sheds its numbers in a stated order', () => {
-  const threshold = (selector: RegExp): number => {
-    const found = new RegExp(
-      `@container \\(max-width:\\s*(\\d+)px\\)\\s*\\{\\s*${selector.source}`,
-    ).exec(css)
-    expect(found).not.toBeNull()
-    return Number(found?.[1])
-  }
-
-  const efficiency = (): number => threshold(/\.card-row \.metric-cell\[data-metric='efficiency'\]/)
-  const impact = (): number => threshold(/\.card-row \.metric-cell\[data-metric='impact'\]/)
-  const price = (): number => threshold(/\.card-row \.cash/)
+  const efficiency = (): number => shedsAt(/\.card-row \.metric-cell\[data-metric='efficiency'\]/)
+  const impact = (): number => shedsAt(/\.card-row \.metric-cell\[data-metric='impact'\]/)
+  const price = (): number => shedsAt(/\.card-row:has\(\.name-cell\) \.cash/)
+  const mana = (): number => shedsAt(/\.card-row:has\(\.name-cell\) \.mana/)
 
   it('drops efficiency first, then impact', () => {
     // The derived rate goes before the quantity it is derived from: impact is
@@ -283,23 +450,55 @@ describe('a suggestion row sheds its numbers in a stated order', () => {
     expect(impact()).toBeGreaterThan(price())
   })
 
+  it('drops the mana cost last of the four', () => {
+    // What you pay every game, against three numbers that are commentary on it.
+    expect(mana()).toBeLessThan(price())
+  })
+
   it('never keeps a number at the cost of the card’s name', () => {
     /*
-     * Both thresholds are DERIVED, and this is the derivation. Measured in a
-     * browser on a real deck: 25px combo badge, 74 mana, 50 per metric cell,
-     * 54 price, 36 Add, 49 Reject, 8px gaps and 16px of row padding. Each
-     * threshold is one pixel below the width at which the name would be pushed
-     * under its 5rem floor to keep that cell.
+     * All four thresholds are DERIVED, and this is the derivation, executable so
+     * it cannot drift from the sheet. A suggestion row is the combo badge, the
+     * name cell, the mana cost, the metric cells, the price, Add and Reject; each
+     * threshold is the last width at which that cell has to be gone already for
+     * the name to keep its 5rem.
+     *
+     * The two metric thresholds moved by two pixels here (489→491, 431→433) and
+     * the movement is the row's border: `* { box-sizing: border-box }` means the
+     * container width has to pay for `border: 1px solid transparent` on each
+     * side, and the earlier derivation left it out. Measured in Chrome at a 490px
+     * feed container with efficiency still shown, the name cell was 79px — one
+     * pixel under its floor, which nothing could see while the floor was on an
+     * element the row does not flex.
      */
-    const fixed = 25 + 74 + 54 + 36 + 49
-    const nameFloor = 80
-    const rowPadding = 16
-    const gap = 8
-    const cell = 50
-    const withBoth = fixed + 2 * cell + 7 * gap + rowPadding + nameFloor
-    const withImpact = fixed + cell + 6 * gap + rowPadding + nameFloor
-    expect(efficiency()).toBe(withBoth - 1)
-    expect(impact()).toBe(withImpact - 1)
+    const { badge, mana: m, metric, price: p, add, reject } = measured
+    shedsExactlyWhenItMust(efficiency(), needs(badge, m, metric, metric, p, add, reject))
+    shedsExactlyWhenItMust(impact(), needs(badge, m, metric, p, add, reject))
+    shedsExactlyWhenItMust(price(), needs(badge, m, p, add, reject))
+    shedsExactlyWhenItMust(mana(), needs(badge, m, add, reject))
+  })
+
+  it('asks for more room than a deck row does, because it carries more', () => {
+    /*
+     * TWO FAMILIES OF THRESHOLD, ON PURPOSE. Both shapes are `.card-row` and both
+     * have a `.cash` and a `.mana`, so for a long time both were shed by one pair
+     * of numbers — 320 and 250 — which were the deck rail's, and were wrong for
+     * it too. A suggestion row carries a combo badge, Add and Reject where a deck
+     * row carries lock and remove: 110px against 85, plus a gap. It reaches the
+     * name's floor a full 33px of container earlier, every time.
+     *
+     * The alternative was one shared pair at the suggestion row's numbers. It was
+     * rejected on measurement: the deck rail's container is one 1fr track of
+     * `minmax(230px, 1fr) minmax(0, 2.4fr) minmax(230px, 1fr)`, which puts it at
+     * 286px on an ordinary 1400px laptop — above the deck row's own mana
+     * threshold and below the suggestion row's, so a shared number would strip
+     * the mana cost off every deck row on that screen to solve a problem the deck
+     * rail does not have.
+     */
+    const deckPrice = shedsAt(/\.card-row:not\(:has\(\.name-cell\)\) \.cash/)
+    const deckMana = shedsAt(/\.card-row:not\(:has\(\.name-cell\)\) \.mana/)
+    expect(price()).toBeGreaterThan(deckPrice)
+    expect(mana()).toBeGreaterThan(deckMana)
   })
 
   it('puts the shedding rules after the rules they override', () => {
@@ -310,10 +509,15 @@ describe('a suggestion row sheds its numbers in a stated order', () => {
      * was dead the whole time — the four-column comment in this sheet recorded
      * it as a defect belonging to whoever owned the row.
      *
+     * The `:has()` in the shedding selectors now wins on specificity as well, so
+     * order is no longer the only thing holding this up. It is still asserted:
+     * the day someone drops the `:has()` for a shared threshold again, order is
+     * all that is left.
+     *
      * `.cash` never had the problem: its base rule declares no `display`.
      */
     const base = css.search(/\.card-row \.mana \{[^}]*display:\s*flex/)
-    const shed = css.search(/@container \(max-width:\s*\d+px\)\s*\{\s*\.card-row \.mana/)
+    const shed = css.search(/@container \(max-width:\s*\d+px\)\s*\{\s*\.card-row[^{]*\.mana/)
     expect(base).toBeGreaterThan(-1)
     expect(shed).toBeGreaterThan(base)
   })
@@ -539,30 +743,43 @@ describe('the detail pane as a fourth column', () => {
 
   it('asks the deck rail for the width it actually needs, not the one it declares', () => {
     /*
-     * The grid's own floor for the side rails is 230px, and the deck rail cannot
-     * hold it: measured in Chrome, at 230px the deck row's Remove button finishes
-     * 58px OUTSIDE the column, on top of the feed. The spill reaches zero at
-     * 310px.
+     * The grid's own floor for the side rails is 230px, and the deck rail asks
+     * for more. It used to ask for 310 because that was where the row stopped
+     * SPILLING — with the mana rule dead, at 230px the Remove button finished
+     * 58px outside the column, on top of the feed.
      *
-     * The cause is a defect in the row, not in the grid — the
-     * `@container (max-width: 250px)` rule meant to drop the mana column on a
-     * cramped rail never fires, because `.card-row .mana { display: flex }` is
-     * declared later at equal specificity and wins the cascade. That is somebody
-     * else's fix. What this pins is that the four-column layout does not build a
-     * threshold on a floor the rail cannot stand on.
+     * That rule fires now, and the rail's own thresholds are derived, so a spill
+     * is no longer what sets this floor: a deck row that has shed its price and
+     * its mana cost holds its name down to a 231px column. The floor asked for
+     * here is the narrower thing — the width at which the rail can still SHOW the
+     * mana cost, which is the one number on a deck row that is not repeated
+     * somewhere else on the page. One pixel less and the four-column layout would
+     * be paying 336px for a detail panel by taking the mana column off every row
+     * behind it.
+     *
+     * Read off the sheet rather than written down, so retuning the rail's
+     * threshold moves this with it. `.region` pads `calc(var(--step) * 2)` a
+     * side, so the column is 32px wider than its query container.
      */
-    expect(floorPx(tracks()[0] ?? '')).toBeGreaterThanOrEqual(310)
+    const railMana = shedsAt(/\.card-row:not\(:has\(\.name-cell\)\) \.mana/)
+    expect(floorPx(tracks()[0] ?? '')).toBeGreaterThanOrEqual(railMana + 1 + 32)
   })
 
   it('opens the column only where all four columns still fit', () => {
     /*
      * The derivation, executable so it cannot drift from the comment beside it.
      *
-     * Every floor here was measured on the running app rather than read off a
-     * `minmax`: 400px for the feed, below which `.card-row .name` is already at
-     * its 5rem minimum and the name button is wider than the cell holding it;
-     * 310px for the deck rail, above; 230px for the analysis rail, which does
-     * hold its declared floor. The detail column is the panel's own 21rem.
+     * Every floor here comes from the row rather than from a `minmax`: the feed
+     * is the width at which a suggestion row would drop its price, 32px of region
+     * padding above that threshold; the deck rail is the track asserted above;
+     * 230px for the analysis rail, which does hold its declared floor. The detail
+     * column is the panel's own 21rem.
+     *
+     * The feed's floor used to be 400px, and 400 meant "the width below which the
+     * name is crushed". It cannot mean that any more — the name is floored at
+     * every width now — so the number is re-derived from the last cell the feed
+     * can afford to lose rather than left standing with a reason that no longer
+     * describes it.
      *
      * The scrollbar allowance is not slop. Chrome resolves a media query against
      * `innerWidth`, which on Windows includes the classic scrollbar that the
@@ -570,7 +787,7 @@ describe('the detail pane as a fourth column', () => {
      * `clientWidth` 2545 with `(min-width: 2546px)` matching.
      */
     const four = tracks()
-    const feedFloor = 400
+    const feedFloor = shedsAt(/\.card-row:has\(\.name-cell\) \.cash/) + 32
     const scrollbar = 17
     const gaps = 3 // three 1px rules between four columns
     const layout = threshold() - scrollbar
@@ -583,12 +800,21 @@ describe('the detail pane as a fourth column', () => {
     /*
      * The reflow cost, bounded rather than hoped about. The feed narrows when
      * the column opens, and a feed that drops its price column the moment you
-     * click a card would be a worse experience than the overlay was. So the
-     * threshold has to leave the feed above the width at which the container
-     * query trips, with the panel open — which is exactly why the floor above
-     * is the name's 400px and not the price query's own number.
+     * click a card would be a worse experience than the overlay was.
+     *
+     * This is the same number the test above uses as the feed's floor, and that
+     * is the point rather than an oversight: the feed's floor IS the price, and
+     * the reason it is the price is this promise. The two tests fail together and
+     * say different things about why, which is what a reader arriving at a red
+     * threshold needs.
+     *
+     * The metric cells are a different matter and are not covered here. Opening
+     * the pane does hide both of them — 394px of container against the 433 impact
+     * alone needs — and that cost is stated where the thresholds are derived. The
+     * panel draws both numbers in full for the card being decided.
      */
-    const priceQuery = /@container \(max-width:\s*(\d+)px\)\s*\{\s*\.card-row \.cash/.exec(sheet)
+    const priceQuery =
+      /@container \(max-width:\s*(\d+)px\)\s*\{\s*\.card-row:has\(\.name-cell\) \.cash/.exec(sheet)
     expect(priceQuery).not.toBeNull()
     // `.region` pads `calc(var(--step) * 2)` a side and `--step` is 0.5rem, so
     // the query container is 32px narrower than its column.

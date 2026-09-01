@@ -111,11 +111,11 @@ button {
 }
 
 /*
- * The name never shrinks to nothing.
+ * The name never shrinks to nothing, ON WHICHEVER CHILD THE ROW FLEXES.
  *
- * It was `min-width: 0`, which let it absorb the whole deficit when the rail
- * got narrow: measured at a 230 px deck rail, the name was 0 px wide while the
- * mana cost (74), price (54), lock (27) and remove (58) held 213 px between
+ * It was `min-width: 0`, which let the name absorb the whole deficit when the
+ * rail got narrow: measured at a 230 px deck rail, the name was 0 px wide while
+ * the mana cost (74), price (54), lock (27) and remove (58) held 213 px between
  * them. The row still had its controls and no longer said which card they
  * acted on — the least important things on the row pushed out the only one
  * that identifies it.
@@ -123,10 +123,35 @@ button {
  * 5rem is about eight characters plus the ellipsis: enough to tell two cards
  * apart, and short enough that it is only reached when the rail is genuinely
  * cramped. Below that the controls give way instead — see the container query.
+ *
+ * TWO SELECTORS BECAUSE THERE ARE TWO ROW SHAPES, and the floor belongs on the
+ * one the row actually flexes. A deck row flexes the name itself. A suggestion
+ * row flexes the `.name-cell` that wraps the name and its reasons, and while
+ * the floor sat only on `.name` that cell was free to collapse under the thing
+ * it holds: measured in Chrome at a 340px feed container, the cell was 44px
+ * wide, the button inside held its 80px and overflowed 36px into the mana
+ * column — which PAINTS OVER IT, because `.card-row > *:not(.name)` carries
+ * `z-index: 1` for the row-wide click overlay. So the readable name was the
+ * cell's 44px, 25px at a 321px container, while the price and both buttons kept
+ * every pixel they asked for. The declaration below was correct the whole time
+ * and was on the wrong element.
+ *
+ * ONE RULE RATHER THAN THE SAME LENGTH WRITTEN TWICE. Every shedding threshold
+ * further down is derived from this number; a second copy that could drift from
+ * it would leave half of those thresholds derived from a floor nothing honours,
+ * and nothing to say which half.
+ *
+ * Rejected: `.card-row > *:first-child`. It is the same element today on both
+ * shapes and stops being it the moment a row grows a leading badge — which the
+ * suggestion row already has.
  */
+.card-row > .name,
+.card-row > .name-cell {
+  min-width: 5rem;
+}
+
 .card-row .name {
   flex: 1 1 auto;
-  min-width: 5rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -250,46 +275,94 @@ button {
  * Nothing here hides a metric cell from the DECK rail, because the rail's rows
  * have none — they are cards, not recommendations.
  *
- * THE TWO NUMBERS ARE DERIVED, not chosen. Measured in a browser on a real
- * deck, a feed row holds: 25px of combo badge, 74 of mana, 50 per metric cell,
- * 54 of price, 36 of Add, 49 of Reject, seven 8px gaps and 16px of its own
- * padding. Each threshold is the width one below the point at which the name
- * would have to give way for the cell to stay:
+ * EVERY NUMBER IS DERIVED, not chosen. Measured in Chrome on a real 86-card deck
+ * with `getBoundingClientRect`, uniform across all 76 suggestion rows and all 65
+ * deck rows:
  *
- *   490px  everything fits, name exactly at its 5rem floor  → hide below, 489
- *   432px  the same without efficiency, name back at 5rem   → hide below, 431
+ *   combo badge 24.8    mana 73.59    metric cell 49.59    price 54.39
+ *   Add 36.28   Reject 48.78    lock 27.19    remove 57.75
  *
- * So neither metric is ever kept at the price of the name, which is the one
- * thing on a row that says which card the buttons act on.
+ * plus 8px between every pair of children, 16px of row padding, and 2px of the
+ * row's own `border: 1px solid transparent` — which counts, because
+ * `* { box-sizing: border-box }` makes the container width pay for it. A row
+ * showing n fixed cells has n + 1 children and so n gaps. Each threshold is the
+ * last width at which that cell must ALREADY be gone for the name to keep its
+ * 5rem, which makes it `ceil(what the row needs) - 1`:
+ *
+ *   491.02  badge + mana + both metrics + price + Add + Reject  → hide at 491
+ *   433.43  the same without efficiency                          → hide at 433
+ *   375.84  the same without either metric                       → hide at 375
+ *   313.45  the same without the price                           → hide at 313
+ *
+ * The first two were 489 and 431 and are two pixels wider now. The two pixels
+ * are the border: at a 490px container with efficiency still shown, the name
+ * cell measured 79px — one under its floor. Nothing could see that while the
+ * floor was declared on an element the row does not flex.
+ *
+ * TWO FAMILIES, AND THE SPLIT IS THE POINT. Both shapes are `.card-row` and both
+ * carry a `.cash` and a `.mana`, so one pair of numbers — 320 and 250 — used to
+ * shed both. They were the deck rail's, and they were wrong for it too: measured
+ * before this change, a 331px rail container (a 1600px viewport, ordinary) still
+ * showed the price and finished the Remove button 12px OUTSIDE the rail, over
+ * the feed. A suggestion row carries a combo badge, Add and Reject where a deck
+ * row carries lock and remove — 110px against 85, plus a gap — so it reaches the
+ * name's floor 33px of container earlier, every single time.
+ *
+ * Rejected: one shared pair at the suggestion row's numbers, which would also
+ * have fixed the rail's spill. The deck rail is one 1fr track of
+ * `minmax(230px, 1fr) minmax(0, 2.4fr) minmax(230px, 1fr)`, which puts its
+ * container at 286px on an ordinary 1400px laptop — above the deck row's own
+ * mana threshold and below the suggestion row's. A shared number would take the
+ * mana cost off every deck row on that screen to solve a problem the deck rail
+ * does not have.
+ *
+ * Rejected: a marker class on each row, or on the region. `:has(.name-cell)` is
+ * the difference itself rather than a label for it, so a new row shape gets the
+ * right thresholds by being the right shape, and no site can be missed. The
+ * `:has()` also lifts these above `.card-row .mana { display: flex }` on
+ * specificity, so the ordering below is belt as well as braces.
  *
  * WHAT THIS COSTS, stated because it is the visible consequence: at the 1320px
- * viewport where the detail pane takes a column of its own, the feed is 426px
- * wide and its query container 394, so opening a card hides BOTH metric cells.
- * It cannot be avoided by narrowing them — the widest value this can hold is
- * 41px, and even at that size the pair needs 474px against the 394 available.
- * The pane that caused the squeeze is drawing both numbers in full, with their
- * tiers and their working, for the card being decided.
+ * viewport where the detail pane takes a column of its own, the feed's query
+ * container is 394px, so opening a card hides BOTH metric cells. It cannot be
+ * avoided by narrowing them — the widest value this can hold is 41px, and even
+ * at that size the pair needs 474px against the 394 available. The pane that
+ * caused the squeeze is drawing both numbers in full, with their tiers and their
+ * working, for the card being decided. The price survives it, which is the
+ * promise `styles.test.ts` pins.
  */
-@container (max-width: 489px) {
+@container (max-width: 491px) {
   .card-row .metric-cell[data-metric='efficiency'] {
     display: none;
   }
 }
 
-@container (max-width: 431px) {
+@container (max-width: 433px) {
   .card-row .metric-cell[data-metric='impact'] {
     display: none;
   }
 }
 
-@container (max-width: 320px) {
-  .card-row .cash {
+@container (max-width: 375px) {
+  .card-row:has(.name-cell) .cash {
     display: none;
   }
 }
 
-@container (max-width: 250px) {
-  .card-row .mana {
+@container (max-width: 342px) {
+  .card-row:not(:has(.name-cell)) .cash {
+    display: none;
+  }
+}
+
+@container (max-width: 313px) {
+  .card-row:has(.name-cell) .mana {
+    display: none;
+  }
+}
+
+@container (max-width: 280px) {
+  .card-row:not(:has(.name-cell)) .mana {
     display: none;
   }
 }
@@ -779,42 +852,47 @@ select {
  * WHY 1320px. Arithmetic, not taste, and every floor in it was measured in
  * Chrome on a real 86-card deck rather than read off a `minmax`:
  *
- *   deck rail        310px   the width its row stops overflowing at
- *   suggestions      400px   the width its name stops being crushed at
+ *   deck rail        313px   the narrowest that still shows its mana cost
+ *   suggestions      407px   the narrowest that still shows its price
  *   detail           336px   21rem, the width the panel already is
  *   analysis rail    230px   the shipped floor; measured clean at it
  *   three 1px rules    3px
  *   ------------------------
- *                   1279px   of layout viewport
+ *                   1289px   of layout viewport
  *
- * The FEED's 400px, because the obvious candidate is wrong. The container
- * queries above drop the price at a 320px row box and the mana cost at 250px,
- * and both were set for the deck rail's rows. A suggestion row carries more: a
- * combo-degree hint, a name with a type line under it, the mana cost, the price,
- * Add and Reject. Measured, that row needs a 400px column before
- * `.card-row .name` stops being squeezed past its 5rem floor — at 390px the name
- * button is 80px wide inside a 62px cell and starts running under the mana
- * column. A row whose name is two characters wide is not a usable column no
- * matter what else it still shows, so the floor is the name's and not the price
- * query's 353px.
+ * BOTH ROW FLOORS ARE NOW THE LAST CELL THE ROW CAN AFFORD TO LOSE, and neither
+ * is the name any more. They used to be: the feed's was 400px, "the width its
+ * name stops being crushed at", and the rail's 310px, "the width its row stops
+ * overflowing at". The name is floored at every width now — see the row section
+ * above — so a column narrower than these is no longer unreadable, only poorer,
+ * and "poorer" is a thing this layout can measure. `.region` pads
+ * `calc(var(--step) * 2)` a side, so each column is 32px wider than the query
+ * container the thresholds are written against.
  *
- * The DECK rail's 310px, which is why this track does NOT keep the grid's
- * `minmax(230px, 1fr)` here. At 230px the deck row's Remove button finishes 58px
- * OUTSIDE the column, on top of the feed; measured, the spill reaches zero at
- * 310px. The cause is a live defect in the row and not in this grid: the
- * `@container (max-width: 250px)` rule that is supposed to drop the mana column
- * on a cramped rail is dead, because `.card-row .mana { display: flex }` is
- * declared later at equal specificity and wins. That belongs to whoever owns the
- * row, but a threshold derived from a floor the rail cannot actually hold would
- * be a number that only looked derived, so the four-column layout asks for the
- * width the rail really needs. It is also why the deck rail is never worse inside
- * this layout than it is outside it.
+ * The FEED's 407px is its price threshold, 375 + 32. Below it a suggestion row
+ * shows a name, a mana cost and two buttons and nothing else, and the price is
+ * the last number on it that the deck total does not already say.
+ *
+ * The DECK rail's 313px is its mana threshold, 280 + 32, plus the pixel that
+ * puts it above rather than on the line. It is why this track does NOT keep the
+ * grid's `minmax(230px, 1fr)`. The rail could in fact hold 231px now — a deck row
+ * that has shed both numbers keeps its name down to there — but a four-column
+ * layout that pays for a detail panel by taking the mana cost off every row
+ * behind it has spent the space badly. The mana cost is what you pay every game.
+ *
+ * The visible cost of asking for 313: between 1320px and about 1375px the deck
+ * rail's own 1fr track is narrower than that, so opening a card ADDS the mana
+ * column to the rail. A column that appears is the mild direction of that fault
+ * and the band is 55px wide. Holding the track at 310 instead would move the
+ * fault the other way and make it permanent — every viewport above 1375 would
+ * LOSE the rail's mana cost on open, which is the reflow this file spends a
+ * threshold to avoid on the feed.
  *
  * Then the scrollbar. Chrome resolves a media query against `innerWidth`, which
  * on Windows includes the classic scrollbar the layout viewport never gets —
  * measured on the running app at `clientWidth` 2545 while `(min-width: 2546px)`
- * matched. That is +15 to +17px depending on the user's setting. 1279 + 17 =
- * 1296, rounded up to 1320 so a wider scrollbar or a sub-pixel track cannot land
+ * matched. That is +15 to +17px depending on the user's setting. 1289 + 17 =
+ * 1306, rounded up to 1320 so a wider scrollbar or a sub-pixel track cannot land
  * a column exactly on its floor.
  *
  * WHY THE COLUMN COMES AND GOES. The alternative — reserving the track
@@ -822,10 +900,12 @@ select {
  * feed at every moment to hold a space for a panel that is closed most of the
  * time, which is the opposite of getting value out of the space. The price of
  * the choice made here is that the feed reflows when a card is clicked, and the
- * threshold is what bounds that: at 1320px the feed goes from 711px to 426px,
- * and BOTH are above the 353px at which the price column would drop. The rows
- * re-truncate their names; no column appears or disappears. That is the whole
- * reason the feed's floor had to be the name's.
+ * threshold is what bounds that: at 1320px the feed's query container goes from
+ * about 679px to 389, and BOTH are above the 375 at which the price drops. The
+ * two metric cells do go — 389 is below even the 433 impact alone asks for, and
+ * that cost is stated where the thresholds are derived — but the price stays and
+ * the names only re-truncate. That is the whole reason the feed's floor is the
+ * price's threshold and not the row's structural minimum of 264px.
  *
  * No transition on the track. `grid-template-columns` does animate, and the
  * displacement would be easier to follow if it did — but the feed is several
@@ -838,7 +918,7 @@ select {
  */
 @media (min-width: 1320px) {
   .workspace[data-detail='open'] {
-    grid-template-columns: minmax(310px, 1fr) minmax(0, 2.4fr) 21rem minmax(230px, 1fr);
+    grid-template-columns: minmax(313px, 1fr) minmax(0, 2.4fr) 21rem minmax(230px, 1fr);
   }
 
   /*
@@ -2110,10 +2190,17 @@ select {
 /* --------------------------------------------- openable combo detail */
 
 /* The name and its reasons were one button; the reasons moved out so one of
-   them can open a panel. This keeps the pair filling the row as before. */
+   them can open a panel. This keeps the pair filling the row as before.
+
+   No `min-width: 0` here any more. It was doing the job `min-width: 5rem` does
+   in the row section above — letting the cell shrink past its content so the
+   name can ellipsise — and doing it without a stop, so the cell collapsed under
+   the 80px name it holds and the mana column painted over the overflow. The
+   floor lives up there, beside the deck row's, because the two must be the same
+   number. 5rem is still well below this cell's min-content width, so the
+   ellipsis engages exactly as the zero did. */
 .name-cell {
   flex: 1;
-  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
