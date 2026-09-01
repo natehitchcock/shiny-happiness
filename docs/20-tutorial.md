@@ -71,9 +71,10 @@ coordinates or nth-child. The layout genuinely moves: three columns normally, a
 below 900px. A tour pinned to positions would describe a layout the reader is
 not looking at.
 
-**Consequence: a step whose anchor is not on screen is skipped, not faked.**
-Below 900px the regions stack and the detail pane is a sheet, so the tour must
-either re-word those steps or drop them. **Open question Q2.**
+**Consequence: a step whose anchor is not on screen is scrolled to, not
+faked.** Below 900px the regions stack and the detail pane is a sheet, so each
+step brings its own region into view first — see A2. A step whose anchor does
+not exist at all is skipped rather than pointed at emptily.
 
 ### D4. Seen-state lives in `localStorage`
 
@@ -95,49 +96,76 @@ region steps until there is a workspace.
 
 ---
 
-## 20.4 The masthead is getting crowded — flagging it now
+## 20.4 The masthead — resolved
 
-The button row currently holds **Import, Export, Graph**. This spec adds
-**Quickbuild** (doc 19) and **Help**, making five, on a row that already
-competes with the deck name and the bracket chip for masthead width.
+The row held **Import, Export, Graph**, and this spec plus doc 19 would have
+made it five. It does not: **Import and Export move behind an overflow menu**
+and the row keeps the three working tools — Graph, Quickbuild, Help. See A1.
 
-That is a real design problem and it is not this spec's to solve alone, but it
-should be decided before two more buttons land rather than after. Options worth
-weighing: an overflow menu for the rarely-used ones (Import/Export are
-session-bookends, not working tools); icon-only with accessible names at narrow
-widths; or moving Help into an existing surface entirely. **Open question Q1.**
-
----
-
-## 20.5 Open questions — for the reviewer
-
-**Q1. Where does Help actually go?** See §20.4. A fifth masthead button may be
-one too many, and Help is the least-used of the five by construction — it is the
-button you press once.
-
-**Q2. What does the tour do below 900px?** The regions stack into one column and
-the detail pane becomes a bottom sheet, so "each region on the screen" is not
-literally true — they are not on the screen at once. Re-word the steps for a
-stacked layout, scroll each region into view as its step arrives, or offer a
-shorter tour on small screens.
-
-**Q3. Does it wait for Quickbuild?** Step 7 points at a button that does not
-exist yet (doc 19 is also a draft). Either this ships after Quickbuild, or it
-ships with six steps and gains the seventh later. Shipping six and adding one is
-cheap; shipping a step pointing at nothing is not an option.
-
-**Q4. Does the tour survive a reload mid-way?** If someone closes the tab at
-step 3, do they resume at 3, restart, or never see it again? "Never again" risks
-a first-time user losing the tour to a stray refresh; "resume" needs the step
-index persisted, which is more state than the feature is worth. Recommend
-**restart on next commander selection, once** — but it is a judgement call.
-
-**Q5. Is once-per-browser right for a shared machine?** `lw.deviceId` already
-treats the browser as the identity, so this is consistent — but it means the
-second person to use a machine gets no tour. Consistency probably wins; noting
-it because Help exists precisely as the escape hatch.
+Two things follow. The row now grows by one button rather than three, so the
+crowding question does not return at seven. And **Help must be genuinely
+findable**, because A4 makes it the only route back to a tour someone lost to a
+refresh — which is precisely why Help stays on the row and Import/Export are the
+pair that leaves it.
 
 ---
+
+## 20.5 Answered questions
+
+All five were decided by the product owner on 2026-09-01. Recorded with the
+reasoning, and with the costs each answer accepts.
+
+### A1. Import and Export move behind an overflow menu
+
+The row keeps **Graph, Quickbuild and Help** — the working tools — and gains a
+menu holding Import and Export, which are session bookends rather than things
+you reach for while building.
+
+This is the answer that stops the row growing again at seven. It also changes a
+constraint another piece of work is building to: the masthead is being made to
+stack at narrow widths, and it should now be designed around **three buttons and
+a menu**, not five buttons.
+
+### A2. Each step scrolls its region into view
+
+One tour everywhere, seven steps on every screen size. Below 900px the regions
+stack, so each step scrolls its own region into view before highlighting it —
+the tour teaches the layout the reader actually has rather than describing one
+they do not.
+
+`prefers-reduced-motion` applies to the scroll as much as to the highlight: an
+instant jump, not a glide, for a reader who asked for none.
+
+Rejected: a shorter small-screen tour, which is two tours to keep in sync as the
+app changes.
+
+### A3. The tutorial waits for Quickbuild, and ships all seven steps
+
+**This makes doc 19 a hard dependency.** The tutorial does not begin until the
+Quickbuild button exists, and ships complete rather than gaining a step later.
+
+The cost, stated: the tutorial is now blocked on a feature that had six open
+questions of its own. Four are answered; the build is under way. If Quickbuild
+slips, this slips with it — that is the accepted trade for shipping one
+coherent tour instead of a six-step tour and a follow-up.
+
+### A4. Opening the tour once counts as seen
+
+The flag is set when the tour **opens**, not when it completes. Someone who
+closes the tab at step 3 does not get it again automatically.
+
+The accepted cost is real and was chosen with it stated: a stray refresh at step
+1 silently costs a first-time user the entire tour. **Help is the mitigation,
+and this raises the bar on A1** — Help has to be genuinely findable, because it
+is now the only route back to the tour for anyone who loses it.
+
+### A5. Once per browser, via `localStorage`
+
+Consistent with `lw.deviceId` (ADR-0014) and `lw.cutThreshold`, which already
+treat the browser as the identity. Key: `lw.tutorialSeen`.
+
+On a shared machine the second person gets no tour. Consistency wins, and Help
+is again the escape hatch.
 
 ## 20.6 Accessibility (R4) — binding
 
