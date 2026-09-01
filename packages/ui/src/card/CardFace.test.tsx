@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CardFace } from './CardFace.js'
 import { CARD_ASPECT, levelSpec } from './presentation.js'
@@ -162,5 +162,74 @@ describe('CardFace — actions', () => {
     // the primitive has to leave room for them or the loop breaks.
     render(<CardFace card={card()} actions={<button type="button">Add</button>} />)
     expect(screen.getByText('Add')).toBeDefined()
+  })
+})
+
+/**
+ * The workspace's preview panel draws its picture through this component, so
+ * this is where the flip control reaches the app. All three of ADR-0027's
+ * states are covered: one face, two faces with art, two faces without.
+ */
+describe('CardFace — the flip control', () => {
+  const twoFaced = (over: Partial<CardView> = {}): CardView =>
+    card({
+      oracleId: 'tergrid',
+      name: "Tergrid, God of Fright // Tergrid's Lantern",
+      imageUris: { normal: 'front.jpg' },
+      backImageUris: { normal: 'back.jpg' },
+      ...over,
+    })
+
+  it('offers nothing to flip on a card with one physical face', () => {
+    const { container } = render(<CardFace card={card()} />)
+    expect(container.querySelector('.rt-flip')).toBeNull()
+  })
+
+  it('swaps the picture for the back face and names it', () => {
+    render(<CardFace card={twoFaced()} />)
+    expect(screen.getByRole('img').getAttribute('src')).toBe('front.jpg')
+    expect(screen.getByRole('img').getAttribute('alt')).toBe('Tergrid, God of Fright')
+    fireEvent.click(screen.getByRole('button', { name: /Show the back face/ }))
+    expect(screen.getByRole('img').getAttribute('src')).toBe('back.jpg')
+    expect(screen.getByRole('img').getAttribute('alt')).toBe("Tergrid's Lantern")
+  })
+
+  it('keeps the control outside the frame that can itself be a button', () => {
+    // A <button> inside a role="button" is a nested interactive control: the
+    // outer one swallows the click on some assistive technology and the tab
+    // order gets a target announced as "button, button". The flip control is a
+    // SIBLING of `.rt-face-image` for that reason, not an overlay inside it.
+    const { container } = render(<CardFace card={twoFaced()} onActivate={vi.fn()} />)
+    const frame = container.querySelector('.rt-face-image')
+    const flip = container.querySelector('.rt-flip')
+    expect(frame?.getAttribute('role')).toBe('button')
+    expect(flip).not.toBeNull()
+    expect(frame?.contains(flip)).toBe(false)
+  })
+
+  it('does not activate the card when the flip control is pressed', () => {
+    // The regression the arrangement above exists to stop: pressing "show the
+    // back" must not also open the card's details.
+    const onActivate = vi.fn()
+    render(<CardFace card={twoFaced()} onActivate={onActivate} />)
+    fireEvent.click(screen.getByRole('button', { name: /Show the back face/ }))
+    expect(onActivate).not.toHaveBeenCalled()
+    expect(screen.getByRole('img').getAttribute('src')).toBe('back.jpg')
+  })
+
+  it('draws the honest panel, not a broken image, when there is no picture of the back', () => {
+    render(<CardFace card={twoFaced({ backImageUris: {} })} />)
+    fireEvent.click(screen.getByRole('button', { name: /Show the back face/ }))
+    expect(screen.queryByRole('img')).toBeNull()
+    expect(screen.getByText('No picture of this face.')).toBeDefined()
+    expect(screen.getByText("Tergrid's Lantern")).toBeDefined()
+  })
+
+  it('keeps the readable text fallback for a single-faced card with no art', () => {
+    // Unchanged. That panel carries the name, cost, type line and rules text,
+    // which is right in a grid where nothing else says them.
+    const { container } = render(<CardFace card={card({ imageUris: undefined })} />)
+    expect(container.querySelector('.rt-face-text')).not.toBeNull()
+    expect(container.querySelector('.rt-noart')).toBeNull()
   })
 })

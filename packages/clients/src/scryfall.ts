@@ -597,7 +597,8 @@ export const isUniversesBeyondCard = (tally: ProvenanceTally | undefined): boole
  * `{artCrop, normal}` pair, there was no flip affordance in the UI, and the two
  * `Printing` fields, two columns, migration and `/cards/batch` contract change
  * would have fed nobody. That condition was "it belongs with the flip control,
- * not before it", and the flip control is being built, so the cost is now paid.
+ * not before it"; the flip control shipped in ADR-0030, `imageFor` takes a face
+ * now, and this is what feeds it.
  * The front is untouched by that: everything above still holds, and every
  * existing reader still gets the front face and only the front face.
  */

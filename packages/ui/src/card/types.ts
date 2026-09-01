@@ -28,6 +28,16 @@ import type { EfficiencyView, ImpactRoleView, ImpactView } from './metrics.js'
 
 export type Color = 'W' | 'U' | 'B' | 'R' | 'G'
 
+/**
+ * Which PHYSICAL face of a card a surface is drawing (ADR-0027).
+ *
+ * Not the same thing as `oracleTextFaces`, which counts HALVES: `Fire // Ice`
+ * has two of those and one face, and offering to flip it would be offering to
+ * show its own right-hand side. A `CardSide` of `'back'` is only ever reachable
+ * for a card whose `backImageUris` is present.
+ */
+export type CardSide = 'front' | 'back'
+
 export interface CardView {
   readonly oracleId: string
   readonly name: string
@@ -64,6 +74,39 @@ export interface CardView {
    * an empty string as absence.
    */
   readonly imageUris?:
+    | {
+        readonly artCrop?: string | undefined
+        readonly normal?: string | undefined
+      }
+    | undefined
+  /**
+   * The BACK face's art, for a card printed on two PHYSICAL faces (ADR-0027).
+   *
+   * `imageUris` above is the front, and the front is the card — it is what a
+   * tile, a deck-web crop and the first paint of every detail surface draw.
+   * This never replaces it; it is the other side, carried so a flip control has
+   * something to show.
+   *
+   * THE KEY IS THE STRUCTURAL FACT AND THE URLS ARE ONLY THE CONTENT, which is
+   * the whole reason this is a separate optional member rather than two more
+   * entries inside `imageUris`:
+   *
+   *   - absent — one physical face. Nine cards in ten. No flip control.
+   *   - present, with URLs — two faces, and we have the picture.
+   *   - present, with nothing usable in it — two faces, no picture. The control
+   *     still has to be drawn, over an honest panel rather than a broken image.
+   *
+   * Nesting it under `imageUris` was the rejected shape: `apps/web` collapses a
+   * front pair with no URLs in it to `undefined` outright (see `viewImageUris`),
+   * so a two-faced card whose FRONT art had not resolved would have lost its
+   * back face along with it — the third state silently becoming the first.
+   *
+   * The members are individually optional, matching `imageUris`, because the
+   * mapping from the wire drops a null rather than forwarding it: `''` and
+   * `null` both mean "no cached asset", and `<img src="">` re-requests the page
+   * and draws it broken. `imageFor(card, level, 'back')` is the reader.
+   */
+  readonly backImageUris?:
     | {
         readonly artCrop?: string | undefined
         readonly normal?: string | undefined

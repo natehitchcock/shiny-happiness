@@ -45,13 +45,25 @@ thumbnail per row triples the scroll length to answer a question nobody asks of
 them. The reasoning is in the ADR, and `apps/web/src/art.test.tsx` pins both
 halves so the absences read as decisions rather than omissions.
 
-**The back face of a double-faced card is now carried, and NOT yet drawn.**
-Ingest, schema (migration 0016), the repositories and both card routes carry it
-end to end — [ADR-0027](adr/0027-the-back-face-rides-beside-the-front.md) — as a
-new optional field, so the front is untouched and nothing existing changed
-shape. The flip control that reads it is separate work and does not exist yet;
-`apps/web/src/api.ts` declares `ImageUris.back` and `printings[].backImageUris`
-so it has something typed to read.
+**The back face of a double-faced card is carried, and now drawn.** Ingest,
+schema (migration 0016), the repositories and both card routes carry it end to
+end — [ADR-0027](adr/0027-the-back-face-rides-beside-the-front.md) — as a new
+optional field, so the front is untouched and nothing existing changed shape.
+
+**There is a flip control** —
+[ADR-0030](adr/0030-the-picture-flips-and-the-text-does-not.md). It is three
+shared pieces in `packages/ui/src/card/` (`useCardSide`, `FlipButton`,
+`FaceNoArt`) that `Detail` and `CardFace` each drop into their own layout, so
+the preview panel, the start screen's commander confirmation, the deck web's
+details popover and the L3 gallery all get one implementation. `Tile` does not
+get one: at 72 px a 44 px target would cover the art it exists to reveal, and
+the whole tile is already the button that opens the card.
+
+The **picture** flips; the **rules text** does not. `OracleText` has always
+drawn both faces at once with the boundary ruled, and hiding half of it on flip
+would take away information the reader has today. The flip **resets** when the
+surface moves to another card — the front is the card, and the panel's heading
+names the front.
 
 **It is empty until a card ingest runs.** The URLs come off
 `card_faces[1].image_uris` in the Scryfall bulk export and cannot be backfilled
@@ -62,10 +74,13 @@ which of those two states a database is in, and fails rather than passing
 quietly on empty columns.
 
 The distinction that shape exists to keep: **absent means one physical face**,
-present-with-empty means there IS a second side whose art did not resolve. A
-flip control draws no button for the first and a button over the fallback panel
-for the second, so collapsing them would make a `transform` card with a missing
-image indistinguishable from Sol Ring.
+present-with-empty means there IS a second side whose art did not resolve. The
+flip control draws no button for the first and a button over an honest "no
+picture of this face" panel for the second, so collapsing them would make a
+`transform` card with a missing image indistinguishable from Sol Ring. Two
+places had collapsed them and are fixed in ADR-0030: `Detail` drew nothing at
+all when the art was missing, and the preview drew its card face only when the
+FRONT art had resolved.
 
 **The client stops re-downloading cards it already has.** The workspace used to
 replace its whole card map on every recompute, so every accept, reject, filter
