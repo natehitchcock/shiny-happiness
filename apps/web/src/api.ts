@@ -72,6 +72,15 @@ export interface CardDetail extends Card {
      * before the printings ingest sends rows without it.
      */
     imageUris?: { artCrop: string; normal: string }
+    /**
+     * The back face of THIS printing, when it has two physical faces
+     * (ADR-0027). Absent for the single-faced majority; `''` inside a present
+     * pair means the art did not resolve, on the same terms as `imageUris`.
+     *
+     * Declared, not yet drawn — see `ImageUris.back` further down for why the
+     * type lands before the flip control does.
+     */
+    backImageUris?: { artCrop: string; normal: string }
   }[]
   /**
    * Pieces carry their names so the preview can name a combo piece that is not
@@ -370,6 +379,27 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
 export interface ImageUris {
   artCrop: string | null
   normal: string | null
+  /**
+   * The BACK face, for a card printed on two physical faces (ADR-0027).
+   *
+   * DECLARED, not yet drawn. The server sends it and this is what lets the
+   * client see it; the flip control that reads it is a separate piece of work,
+   * and until it exists nothing in `apps/web` looks at this field. Declaring it
+   * here rather than with that work keeps the wire type honest about what
+   * arrives — an undeclared field is one the next reader has to rediscover from
+   * the server source.
+   *
+   * ABSENT means one physical face, which is most cards. PRESENT with nulls
+   * means there IS a second side and its art has not resolved — a flip control
+   * should draw its button over the same fallback panel `imageFor` already
+   * draws for a missing front, not hide itself.
+   *
+   * Optional also because a server from before ADR-0027 never sends it.
+   */
+  back?: {
+    artCrop: string | null
+    normal: string | null
+  }
 }
 
 export const searchCards = (

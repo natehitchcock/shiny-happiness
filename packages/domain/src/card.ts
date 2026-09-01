@@ -167,6 +167,33 @@ export interface Printing {
     readonly artCrop: string
     readonly normal: string
   }
+  /**
+   * The BACK face's art, for a card printed on two PHYSICAL faces.
+   *
+   * `imageUris` above is the front, and the front is the card — the side that
+   * enters the battlefield and the side a tile, a detail panel and a deck-web
+   * crop must draw. This is the other one, carried so a flip control has
+   * something to show; it is never a substitute for the front.
+   *
+   * ABSENT means the card has one physical face. Nine cards in ten are that,
+   * and an always-present pair of empty strings would make every ordinary card
+   * claim to have a back with no picture.
+   *
+   * PRESENT means there is a back face. Its members are then `''` on the same
+   * "no cached art" terms as `imageUris` — so a transform card whose back art
+   * failed to resolve is `{ artCrop: '', normal: '' }`, which is a different
+   * claim from absence and the one a flip control has to be able to read: it
+   * still has a back, we just cannot draw it.
+   *
+   * Optional rather than `| null` to match `oracleTextFaces`, the existing
+   * precedent for per-face data: a printing ingested before this field existed
+   * has no answer, and absence is the right shape for "not known" as well as
+   * for "there is none".
+   */
+  readonly backImageUris?: {
+    readonly artCrop: string
+    readonly normal: string
+  }
   readonly priceUsd: number | null
   readonly reserved: boolean
 }

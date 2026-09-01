@@ -17,7 +17,8 @@
     "clean": "tsc -b --clean",
     "start": "node dist/main.js",
     "baseline": "node dist/efficiency-baseline.js",
-    "impact-roles": "node dist/impact-by-role.js"
+    "impact-roles": "node dist/impact-by-role.js",
+    "back-face-art": "node dist/back-face-art-check.js"
   },
   "dependencies": {
     "@roundtable/clients": "workspace:*",

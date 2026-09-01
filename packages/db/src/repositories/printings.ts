@@ -10,28 +10,61 @@ interface PrintingRow {
   readonly rarity: string
   readonly image_art_crop: string | null
   readonly image_normal: string | null
+  readonly image_back_art_crop: string | null
+  readonly image_back_normal: string | null
   readonly price_usd: string | null
   readonly reserved: boolean
 }
 
-const toPrinting = (row: PrintingRow): Printing => ({
-  printingId: row.printing_id as PrintingId,
-  oracleId: row.oracle_id as OracleId,
-  setCode: row.set_code,
-  setName: row.set_name,
-  collectorNumber: row.collector_number,
-  rarity: row.rarity as Printing['rarity'],
-  imageUris: {
-    // Empty string, not null: the column is nullable until ING-04 populates the
-    // cache, and the client's type says these are strings.
-    artCrop: row.image_art_crop ?? '',
-    normal: row.image_normal ?? '',
-  },
-  // numeric(10,2) arrives as a string from pg; Number() it once, here, rather
-  // than leaving every caller to remember.
-  priceUsd: row.price_usd === null ? null : Number(row.price_usd),
-  reserved: row.reserved,
-})
+/**
+ * The back face's art, or nothing at all when the card has one physical face.
+ *
+ * The two columns hold three states (migration 0016): both NULL is "no second
+ * side", both set is "there is a second side", and `''` inside a set pair is
+ * "there is a second side and its art did not resolve". Only the first becomes
+ * absence here — collapsing the third into it would make a transform card with
+ * a missing image indistinguishable from Sol Ring, which is the one distinction
+ * these columns exist to keep.
+ *
+ * A half-written pair cannot reach this: `printings_back_face_pair` refuses it.
+ * Both are still tested rather than just one, so this stays correct if a future
+ * migration ever relaxes that constraint.
+ */
+const toBackImageUris = (row: PrintingRow): Printing['backImageUris'] =>
+  row.image_back_art_crop === null && row.image_back_normal === null
+    ? undefined
+    : {
+        // `?? ''` for the same reason the front uses it: `Printing.imageUris`
+        // is typed as strings, and `''` is this layer's spelling of "no art".
+        artCrop: row.image_back_art_crop ?? '',
+        normal: row.image_back_normal ?? '',
+      }
+
+const toPrinting = (row: PrintingRow): Printing => {
+  const back = toBackImageUris(row)
+  return {
+    printingId: row.printing_id as PrintingId,
+    oracleId: row.oracle_id as OracleId,
+    setCode: row.set_code,
+    setName: row.set_name,
+    collectorNumber: row.collector_number,
+    rarity: row.rarity as Printing['rarity'],
+    imageUris: {
+      // Empty string, not null: the column is nullable until ING-04 populates the
+      // cache, and the client's type says these are strings.
+      artCrop: row.image_art_crop ?? '',
+      normal: row.image_normal ?? '',
+    },
+    // Spread, not `backImageUris: back`: under `exactOptionalPropertyTypes` an
+    // absent key and an explicit `undefined` are different types, and "one
+    // physical face" is absence.
+    ...(back === undefined ? {} : { backImageUris: back }),
+    // numeric(10,2) arrives as a string from pg; Number() it once, here, rather
+    // than leaving every caller to remember.
+    priceUsd: row.price_usd === null ? null : Number(row.price_usd),
+    reserved: row.reserved,
+  }
+}
 
 export const printingsFor = async (pool: Pool, oracleId: OracleId): Promise<Printing[]> => {
   const { rows } = await pool.query<PrintingRow>(
@@ -60,24 +93,43 @@ export const upsertPrintings = async (
     rarity: p.rarity,
     image_art_crop: p.imageUris.artCrop === '' ? null : p.imageUris.artCrop,
     image_normal: p.imageUris.normal === '' ? null : p.imageUris.normal,
+    /*
+     * The back pair is written VERBATIM — `''` is NOT collapsed to NULL, which
+     * is the opposite of the two lines above and the one place this table
+     * spells absence two different ways on purpose.
+     *
+     * On the front, NULL and `''` both mean "no art" and NULL is the tidier of
+     * the two. On the back, NULL is already spoken for: it means "this card has
+     * no second side" (migration 0016). Collapsing here would erase the back
+     * face of every double-faced card whose art failed to resolve and report it
+     * as single-faced, which is precisely the state the columns were added to
+     * be able to express.
+     */
+    image_back_art_crop: p.backImageUris?.artCrop ?? null,
+    image_back_normal: p.backImageUris?.normal ?? null,
     price_usd: p.priceUsd,
     reserved: p.reserved,
   }))
 
   const { rowCount } = await pool.query(
     `INSERT INTO printings (printing_id, oracle_id, set_code, set_name, collector_number,
-                            rarity, image_art_crop, image_normal, price_usd, reserved)
+                            rarity, image_art_crop, image_normal, image_back_art_crop,
+                            image_back_normal, price_usd, reserved)
      SELECT printing_id, oracle_id, set_code, set_name, collector_number,
-            rarity, image_art_crop, image_normal, price_usd, reserved
+            rarity, image_art_crop, image_normal, image_back_art_crop,
+            image_back_normal, price_usd, reserved
        FROM jsonb_to_recordset($1::jsonb) AS x(
          printing_id uuid, oracle_id uuid, set_code text, set_name text,
          collector_number text, rarity text, image_art_crop text, image_normal text,
+         image_back_art_crop text, image_back_normal text,
          price_usd numeric(10,2), reserved boolean)
      ON CONFLICT (printing_id) DO UPDATE SET
        oracle_id = EXCLUDED.oracle_id, set_code = EXCLUDED.set_code,
        set_name = EXCLUDED.set_name, collector_number = EXCLUDED.collector_number,
        rarity = EXCLUDED.rarity, image_art_crop = EXCLUDED.image_art_crop,
-       image_normal = EXCLUDED.image_normal, price_usd = EXCLUDED.price_usd,
+       image_normal = EXCLUDED.image_normal,
+       image_back_art_crop = EXCLUDED.image_back_art_crop,
+       image_back_normal = EXCLUDED.image_back_normal, price_usd = EXCLUDED.price_usd,
        reserved = EXCLUDED.reserved`,
     [JSON.stringify(payload)],
   )
@@ -111,6 +163,22 @@ export interface PrintingFacts {
    * broken image.
    */
   readonly imageUris: {
+    readonly artCrop: string | null
+    readonly normal: string | null
+  }
+  /**
+   * The default printing's BACK face, for a card with two physical faces.
+   *
+   * ABSENT for the nine cards in ten that have one face — which is why this is
+   * optional rather than a second always-present pair of nulls. Its own members
+   * are nullable on the same terms as `imageUris` above: present-with-nulls is
+   * "there is a second side and its art has not resolved", and a flip control
+   * draws its fallback panel for that rather than no button at all.
+   *
+   * Carried for ADR-0027. Nothing read a back image before the flip control, so
+   * nothing carried one; see migration 0016 for the state encoding underneath.
+   */
+  readonly backImageUris?: {
     readonly artCrop: string | null
     readonly normal: string | null
   }
@@ -158,6 +226,8 @@ export const printingFactsForAll = async (pool: Pool): Promise<Map<OracleId, Pri
     reserved: boolean
     image_art_crop: string | null
     image_normal: string | null
+    image_back_art_crop: string | null
+    image_back_normal: string | null
   }>(
     // The CTE is the query this used to be, unchanged, so the price/rarity/set
     // answers cannot have moved. Both joins are LEFT so the row set stays
@@ -174,7 +244,8 @@ export const printingFactsForAll = async (pool: Pool): Promise<Map<OracleId, Pri
         ORDER BY oracle_id, price_usd NULLS LAST
      )
      SELECT ch.oracle_id, ch.price_usd, ch.reserved, ch.rarity, ch.set_code,
-            d.image_art_crop, d.image_normal
+            d.image_art_crop, d.image_normal,
+            d.image_back_art_crop, d.image_back_normal
        FROM cheapest ch
        LEFT JOIN cards c ON c.oracle_id = ch.oracle_id
        LEFT JOIN printings d ON d.printing_id = c.default_printing`,
@@ -191,6 +262,26 @@ export const printingFactsForAll = async (pool: Pool): Promise<Map<OracleId, Pri
           artCrop: imageUrl(r.image_art_crop),
           normal: imageUrl(r.image_normal),
         },
+        /*
+         * PRESENCE is decided by the columns, CONTENT by `imageUrl`.
+         *
+         * Both NULL means the card has one physical face, so there is no key at
+         * all — a flip control asks "is there a back?" and absence is the
+         * answer. Anything else means there IS a back, and then a stored `''`
+         * becomes `null` exactly as it does on the front: an `''` on the wire
+         * reaches an `<img src>` and draws a broken image where the fallback
+         * panel belongs. So `{artCrop: null, normal: null}` is a real and
+         * different answer from absence — "there is a second side, we have no
+         * picture of it".
+         */
+        ...(r.image_back_art_crop === null && r.image_back_normal === null
+          ? {}
+          : {
+              backImageUris: {
+                artCrop: imageUrl(r.image_back_art_crop),
+                normal: imageUrl(r.image_back_normal),
+              },
+            }),
       },
     ]),
   )

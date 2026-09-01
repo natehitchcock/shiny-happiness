@@ -159,6 +159,29 @@ const asCandidate = (card: Card, facts: PrintingFacts | undefined): AnnotatedCan
 interface ImageUris {
   readonly artCrop: string | null
   readonly normal: string | null
+  /**
+   * The BACK face, for a card printed on two physical faces (ADR-0027).
+   *
+   * A NEW OPTIONAL FIELD, which is what keeps it from breaking anyone: a client
+   * built before it ignores the key, and every existing reader still finds the
+   * front exactly where it has always been. The front is the card and nothing
+   * here moves it.
+   *
+   * ABSENT means one physical face — nine cards in ten, and the reason this is
+   * not a second always-present pair of nulls: every ordinary card would
+   * otherwise claim to have a back with no picture, and the payload would carry
+   * two extra nulls per card on the route the client calls at least twice per
+   * user action.
+   *
+   * PRESENT means there is a back. Its own members are then null on the same
+   * terms as the front's: "there is a second side and its art has not
+   * resolved", which a flip control draws a fallback panel for rather than no
+   * button at all.
+   */
+  readonly back?: {
+    readonly artCrop: string | null
+    readonly normal: string | null
+  }
 }
 
 /**
@@ -179,7 +202,20 @@ const imagesFor = (
   facts: ReadonlyMap<OracleId, PrintingFacts>,
 ): Record<string, ImageUris> => {
   const images: Record<string, ImageUris> = {}
-  for (const id of ids) images[id] = facts.get(id)?.imageUris ?? NO_IMAGES
+  for (const id of ids) {
+    const printing = facts.get(id)
+    if (printing === undefined) {
+      images[id] = NO_IMAGES
+      continue
+    }
+    // Spread, so a single-faced card has no `back` KEY rather than a null one.
+    // `NO_IMAGES` is deliberately not extended with a back: an id the corpus
+    // does not know has not told us how many faces it has.
+    images[id] = {
+      ...printing.imageUris,
+      ...(printing.backImageUris === undefined ? {} : { back: printing.backImageUris }),
+    }
+  }
   return images
 }
 

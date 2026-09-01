@@ -41,6 +41,16 @@ const GAME_CHANGER = oracleId(randomUUID())
  * makes the two queries disagree, and therefore what makes them a test.
  */
 const HIGH_IMPACT = oracleId(randomUUID())
+/**
+ * Two PHYSICAL faces, so the wire has something to flip to (ADR-0027).
+ *
+ * Two of them, because one would not be a test: `DFC` has back art and
+ * `DFC_BLIND` has a back face whose art did not resolve. A fixture holding only
+ * the first cannot tell the "no back" answer from the "back, no picture" one,
+ * which is the whole distinction the field exists to carry.
+ */
+const DFC = oracleId(randomUUID())
+const DFC_BLIND = oracleId(randomUUID())
 
 const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   oracleId: id,
@@ -964,10 +974,20 @@ describeDb('API-01 contract', () => {
     const DEFAULT_NORMAL = 'https://cards.scryfall.io/normal/front/9/1/sol-default.jpg?1'
     const CHEAP_ART = 'https://cards.scryfall.io/art_crop/front/0/0/sol-cheap.jpg?1'
     const CHEAP_NORMAL = 'https://cards.scryfall.io/normal/front/0/0/sol-cheap.jpg?1'
+    const DFC_FRONT_ART = 'https://cards.scryfall.io/art_crop/front/2/2/delver.jpg?1'
+    const DFC_FRONT_NORMAL = 'https://cards.scryfall.io/normal/front/2/2/delver.jpg?1'
+    const DFC_BACK_ART = 'https://cards.scryfall.io/art_crop/back/2/2/delver.jpg?1'
+    const DFC_BACK_NORMAL = 'https://cards.scryfall.io/normal/back/2/2/delver.jpg?1'
 
     beforeAll(async () => {
+      await upsertCards(db.pool, [
+        card(DFC, 'Delver of Testing // Insectile Assertion', { canBeCommander: false }),
+        card(DFC_BLIND, 'Transforming Card Whose Back Art Failed', { canBeCommander: false }),
+      ])
       const sol = await getCard(db.pool, SOL)
       const counter = await getCard(db.pool, COUNTER)
+      const dfc = await getCard(db.pool, DFC)
+      const blind = await getCard(db.pool, DFC_BLIND)
       const printing = (
         over: Partial<Printing> & Pick<Printing, 'printingId' | 'oracleId'>,
       ): Printing => ({
@@ -1000,6 +1020,23 @@ describeDb('API-01 contract', () => {
         }),
         // A printing with no art at all — the 501-card case.
         printing({ printingId: counter!.defaultPrinting!, oracleId: COUNTER, priceUsd: 1 }),
+        // Two physical faces, both resolved. What a flip control flips.
+        printing({
+          printingId: dfc!.defaultPrinting!,
+          oracleId: DFC,
+          imageUris: { artCrop: DFC_FRONT_ART, normal: DFC_FRONT_NORMAL },
+          backImageUris: { artCrop: DFC_BACK_ART, normal: DFC_BACK_NORMAL },
+          priceUsd: 2,
+        }),
+        // Two physical faces, back art unresolved. The row still has to say
+        // there IS a second side — otherwise it is Sol Ring.
+        printing({
+          printingId: blind!.defaultPrinting!,
+          oracleId: DFC_BLIND,
+          imageUris: { artCrop: DFC_FRONT_ART, normal: DFC_FRONT_NORMAL },
+          backImageUris: { artCrop: '', normal: '' },
+          priceUsd: 3,
+        }),
       ])
 
       // The facts map is cached per snapshot and these rows did not exist when
@@ -1094,6 +1131,117 @@ describeDb('API-01 contract', () => {
       const body = (await app.inject({ method: 'GET', url: '/api/v1/cards/search?q=sol' })).json()
 
       expect(body.images[SOL]).toEqual({ artCrop: DEFAULT_ART, normal: DEFAULT_NORMAL })
+    })
+
+    /*
+     * The BACK face on the wire (ADR-0027).
+     *
+     * A new OPTIONAL member of each `ImageMap` entry, and optional in the load-
+     * bearing sense: `back` is absent for a single-faced card rather than null,
+     * because "no second side" and "second side, no picture" are different
+     * answers and a flip control has to draw a different thing for each.
+     */
+    describe('the back face', () => {
+      const batch = async (id: OracleId): Promise<Record<string, unknown>> =>
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/v1/cards/batch',
+            payload: { oracleIds: [id] },
+          })
+        ).json()
+
+      it('sends the back beside the front for a two-faced card', async () => {
+        const body = await batch(DFC)
+
+        expect(body['images']).toEqual({
+          [DFC]: {
+            artCrop: DFC_FRONT_ART,
+            normal: DFC_FRONT_NORMAL,
+            back: { artCrop: DFC_BACK_ART, normal: DFC_BACK_NORMAL },
+          },
+        })
+      })
+
+      it('leaves the front exactly where it was — it is still the card', async () => {
+        // The one regression that would matter more than the feature: a tile,
+        // the detail panel and the deck-web crop all read the top-level pair,
+        // and drawing the back there shows a card nobody searched for.
+        const body = await batch(DFC)
+        const images = body['images'] as Record<string, { normal: string; back: unknown }>
+
+        expect(images[DFC]?.normal).toBe(DFC_FRONT_NORMAL)
+        expect(images[DFC]?.normal).not.toBe(DFC_BACK_NORMAL)
+      })
+
+      it('sends NO back key at all for a single-faced card', async () => {
+        // Not `back: null`. Nine cards in ten are this, and a null would make
+        // every one of them claim a second side with no picture — as well as
+        // paying two extra members per card on the route the client calls at
+        // least twice per user action.
+        const body = await batch(SOL)
+        const images = body['images'] as Record<string, object>
+
+        expect(images[SOL]).toEqual({ artCrop: DEFAULT_ART, normal: DEFAULT_NORMAL })
+        expect(Object.keys(images[SOL] ?? {})).not.toContain('back')
+      })
+
+      it('still says a two-faced card HAS a back when its art did not resolve', async () => {
+        /*
+         * The distinction the whole change exists for, asserted at the seam a
+         * client actually reads. `back` is PRESENT with nulls inside: there is
+         * a second side and we have no picture of it, which draws a flip button
+         * over the fallback panel rather than no button at all.
+         *
+         * Collapse this to an absent key and it becomes indistinguishable from
+         * Sol Ring above — and the test above would still pass.
+         */
+        const body = await batch(DFC_BLIND)
+        const images = body['images'] as Record<string, object>
+
+        expect(images[DFC_BLIND]).toEqual({
+          artCrop: DFC_FRONT_ART,
+          normal: DFC_FRONT_NORMAL,
+          back: { artCrop: null, normal: null },
+        })
+      })
+
+      it('sends no back for an id the corpus does not know', async () => {
+        // An unknown id has not told us how many faces it has, so claiming it
+        // has one back with no art would be inventing an answer.
+        const unknown = randomUUID()
+        const body = await batch(oracleId(unknown))
+        const images = body['images'] as Record<string, object>
+
+        expect(images[unknown]).toEqual({ artCrop: null, normal: null })
+      })
+
+      it('carries the back on card detail, on the printing it belongs to', async () => {
+        // Card detail sends whole `Printing` rows rather than the images map,
+        // so it is a second seam and needs its own assertion — the preview
+        // panel is where a flip control is most likely to live.
+        const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${DFC}` })).json() as {
+          printings: { imageUris: object; backImageUris?: object }[]
+        }
+
+        expect(body.printings[0]?.imageUris).toEqual({
+          artCrop: DFC_FRONT_ART,
+          normal: DFC_FRONT_NORMAL,
+        })
+        expect(body.printings[0]?.backImageUris).toEqual({
+          artCrop: DFC_BACK_ART,
+          normal: DFC_BACK_NORMAL,
+        })
+      })
+
+      it('omits backImageUris on card detail for a single-faced printing', async () => {
+        const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${SOL}` })).json() as {
+          printings: object[]
+        }
+
+        expect(body.printings.length).toBeGreaterThan(0)
+        for (const p of body.printings) expect(Object.keys(p)).not.toContain('backImageUris')
+      })
     })
   })
 })

@@ -590,23 +590,79 @@ export const isUniversesBeyondCard = (tally: ProvenanceTally | undefined): boole
  * means when a caller asks "which card is this" — so it is what a tile, a
  * detail panel and a deck-web art crop must draw.
  *
- * The BACK face's art is deliberately NOT carried. `Card.oracleTextFaces` is
- * the precedent for per-face data, but it earned its place: `OracleText` draws
- * both faces' rules, so there is a reader. Nothing reads a back image —
- * `imageFor(card, level)` picks one asset from a single `{artCrop, normal}`
- * pair and there is no flip affordance anywhere in the UI. Adding it would cost
- * two `Printing` fields, two columns and a migration, a wire-contract change on
- * `/cards/batch`, and would feed nobody. It belongs with the flip control, not
- * before it.
+ * The BACK face's art IS carried now — see `backFaceImages` below. It used to be
+ * deliberately left out, on the argument that `Card.oracleTextFaces` earned its
+ * place because `OracleText` draws both faces' rules whereas nothing read a back
+ * image: `imageFor(card, level)` picks one asset from a single
+ * `{artCrop, normal}` pair, there was no flip affordance in the UI, and the two
+ * `Printing` fields, two columns, migration and `/cards/batch` contract change
+ * would have fed nobody. That condition was "it belongs with the flip control,
+ * not before it", and the flip control is being built, so the cost is now paid.
+ * The front is untouched by that: everything above still holds, and every
+ * existing reader still gets the front face and only the front face.
  */
 const faceImages = (raw: ScryfallCard): Record<string, string> | undefined =>
   raw.image_uris ?? raw.card_faces?.[0]?.image_uris
+
+/**
+ * Layouts printed on TWO PHYSICAL FACES — the cards that have a back at all.
+ *
+ * The list, not `card_faces.length === 2`, is what decides. `Fire // Ice`,
+ * `Bonecrusher Giant // Stomp` and every flip card also have two entries in
+ * `card_faces`, and they are two HALVES of one piece of cardboard: there is
+ * nothing to turn over, and offering to flip one would be offering to show its
+ * own right-hand side.
+ *
+ * Nor is it `card_faces[1].image_uris !== undefined`, which was the tempting
+ * one-liner. It would be right about every card in the corpus today and would
+ * still be the wrong rule, because it collapses the two states this whole change
+ * exists to keep apart: a card with no second side, and a card with a second
+ * side whose art did not resolve. Both would read as "no back image". The layout
+ * is the structural fact and the URLs only fill it in, so a transform whose face
+ * images are missing still says it has a back.
+ *
+ * `reversible_card` is included on the evidence already recorded above: checked
+ * across every layout with faces on 2026-08-31, it puts images only on its
+ * faces, exactly as `transform` and `modal_dfc` do. `double_faced_token` is NOT
+ * here — it is in `NON_PLAYABLE_LAYOUTS`, so `toPrinting` has already returned
+ * null before this is consulted, and listing it would be a branch no data can
+ * reach.
+ *
+ * `meld` is deliberately absent. A meld piece and the meld result are three
+ * SEPARATE Scryfall records, each with one physical face and its own top-level
+ * `image_uris` — `Brisela, Voice of Nightmares` has no `card_faces` at all. Meld
+ * backs were false positives in the commander-eligibility bug, so this was
+ * checked against the fixture rather than assumed: they are not a back face,
+ * they are a different card, and a flip control must not offer to flip to one.
+ *
+ * If Wizards invents a fourth two-faced layout, a card of it reads as
+ * single-faced here until this set is updated — no art, no flip button, nothing
+ * broken. That is the safe direction to fail in.
+ */
+const TWO_FACED_LAYOUTS: ReadonlySet<string> = new Set([
+  'transform',
+  'modal_dfc',
+  'reversible_card',
+])
+
+/**
+ * The back face's art, or undefined when the card has no back face.
+ *
+ * Undefined and `{artCrop: '', normal: ''}` are different answers on purpose;
+ * see `Printing.backImageUris` for what each one means to a reader.
+ */
+const backFaceImages = (raw: ScryfallCard): { artCrop: string; normal: string } | undefined => {
+  if (!TWO_FACED_LAYOUTS.has(raw.layout ?? '')) return undefined
+  const back = raw.card_faces?.[1]?.image_uris
+  return { artCrop: back?.['art_crop'] ?? '', normal: back?.['normal'] ?? '' }
+}
 
 /** The printing carried alongside an oracle record. Prices are estimates only. */
 export const toPrinting = (raw: ScryfallCard): Printing | null => {
   if (raw.oracle_id === undefined || skipReason(raw) !== null) return null
   const usd = raw.prices?.['usd']
   const images = faceImages(raw)
+  const back = backFaceImages(raw)
   return {
     printingId: printingId(raw.id),
     oracleId: oracleId(raw.oracle_id),
@@ -618,6 +674,10 @@ export const toPrinting = (raw: ScryfallCard): Printing | null => {
       artCrop: images?.['art_crop'] ?? '',
       normal: images?.['normal'] ?? '',
     },
+    // Spread, not `backImageUris: back`: under `exactOptionalPropertyTypes` an
+    // absent key and an explicit `undefined` are different types, and "this card
+    // has one face" is absence.
+    ...(back === undefined ? {} : { backImageUris: back }),
     // "Dangerously stale after 24 hours … consume at your own risk" (ADR-0009
     // Q7). Estimates only; never presented as a purchase price.
     priceUsd: usd === undefined || usd === null ? null : Number(usd),

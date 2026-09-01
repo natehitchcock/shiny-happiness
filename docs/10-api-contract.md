@@ -41,9 +41,40 @@ so each is its own map keyed by oracle id:
 
 ```
 PriceMap = Record<OracleId, number | null>          cheapest printing, an estimate (ADR-0009 Q7)
-ImageMap = Record<OracleId, { artCrop: string | null; normal: string | null }>
-                                                    default printing (ADR-0021)
+ImageMap = Record<OracleId, { artCrop: string | null; normal: string | null
+                              back?: { artCrop: string | null
+                                       normal: string | null } }>
+                                                    default printing (ADR-0021, ADR-0027)
 ```
+
+`artCrop` and `normal` are the **front** face, which is the card: the side that
+enters the battlefield, the side Scryfall names and sorts by, and the side a
+tile, the detail panel and the deck-web crop draw. That has not changed and does
+not change.
+
+`back` is the other physical face, added by
+[ADR-0027](adr/0027-the-back-face-rides-beside-the-front.md) so a flip control
+has something to show. It is **optional, and its absence is information**:
+
+| `back` | Meaning |
+| --- | --- |
+| absent | The card has one physical face. Most cards. Draw no flip affordance. |
+| present, URLs set | Two faces, art resolved. Draw the affordance and the picture. |
+| present, both null | Two faces, art unresolved. Draw the affordance over the no-art panel. |
+
+The last two rows are why this is optional rather than always-present-and-
+nullable: "no second side" and "second side, no picture" are different answers,
+and collapsing them leaves a client unable to decide whether to offer the flip.
+It is also what keeps the payload flat for the 98.5% of cards with nothing to
+say, on a route the client calls at least twice per user action.
+
+Card detail carries the same fact one level down, as an optional
+`backImageUris` on each `Printing` it already sends, on the same terms — absent
+for a single-faced printing, `''` inside a present pair for unresolved art
+(printings spell absent art `''`, the maps spell it `null`).
+
+Both are new **optional** fields: a client built before them ignores them, and a
+server built before them sends nothing where they would be.
 
 Both maps carry an entry for **every id the caller asked about**, including ids
 the corpus does not know and cards whose default printing has no art URL. A

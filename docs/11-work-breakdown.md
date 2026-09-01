@@ -45,6 +45,28 @@ thumbnail per row triples the scroll length to answer a question nobody asks of
 them. The reasoning is in the ADR, and `apps/web/src/art.test.tsx` pins both
 halves so the absences read as decisions rather than omissions.
 
+**The back face of a double-faced card is now carried, and NOT yet drawn.**
+Ingest, schema (migration 0016), the repositories and both card routes carry it
+end to end — [ADR-0027](adr/0027-the-back-face-rides-beside-the-front.md) — as a
+new optional field, so the front is untouched and nothing existing changed
+shape. The flip control that reads it is separate work and does not exist yet;
+`apps/web/src/api.ts` declares `ImageUris.back` and `printings[].backImageUris`
+so it has something typed to read.
+
+**It is empty until a card ingest runs.** The URLs come off
+`card_faces[1].image_uris` in the Scryfall bulk export and cannot be backfilled
+from anything already in the database, so every row written before 0016
+correctly reports "one physical face" for every card.
+`pnpm --filter @roundtable/ingest back-face-art` is a read-only check that says
+which of those two states a database is in, and fails rather than passing
+quietly on empty columns.
+
+The distinction that shape exists to keep: **absent means one physical face**,
+present-with-empty means there IS a second side whose art did not resolve. A
+flip control draws no button for the first and a button over the fallback panel
+for the second, so collapsing them would make a `transform` card with a missing
+image indistinguishable from Sol Ring.
+
 **The client stops re-downloading cards it already has.** The workspace used to
 replace its whole card map on every recompute, so every accept, reject, filter
 change and auto-query tick re-hydrated the entire page — names, type lines,

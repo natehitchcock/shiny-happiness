@@ -342,6 +342,117 @@ describe('toPrinting', () => {
       expect(toPrinting(bare)?.imageUris).toEqual({ artCrop: '', normal: '' })
     })
   })
+
+  /*
+   * The BACK face's art, which exists so a flip control has something to show.
+   *
+   * The whole difficulty is that "has two halves" and "has two physical faces"
+   * are different facts and Scryfall spells both `card_faces`. `Fire // Ice`
+   * and `Bonecrusher Giant // Stomp` have two faces in the data and one face in
+   * the hand; a `transform` has two of each. Only the second kind has a back to
+   * flip to, and a mapper that read `card_faces[1]` blindly would hand a split
+   * card a "back" that is really its right-hand half.
+   *
+   * The fixture is again the argument: it holds a transform, an MDFC, two
+   * splits, an adventure, two melds and twenty-odd ordinary cards, and they
+   * disagree in exactly the way that matters.
+   */
+  describe('back-face art, and the difference between two halves and two faces', () => {
+    const transform = cards.find((c) => c.layout === 'transform')!
+    const mdfc = cards.find((c) => c.layout === 'modal_dfc')!
+
+    it('carries a transforming card’s back face', () => {
+      const back = transform.card_faces?.[1]?.image_uris
+      expect(back?.['normal']).toBeDefined()
+
+      const printing = toPrinting(transform)
+      expect(printing?.backImageUris?.normal).toBe(back?.['normal'])
+      expect(printing?.backImageUris?.artCrop).toBe(back?.['art_crop'])
+    })
+
+    it('carries a modal double-faced card’s back face the same way', () => {
+      const back = mdfc.card_faces?.[1]?.image_uris
+      expect(back?.['normal']).toBeDefined()
+
+      expect(toPrinting(mdfc)?.backImageUris?.normal).toBe(back?.['normal'])
+    })
+
+    it('keeps the front and the back apart', () => {
+      // The one mistake that would make a flip control useless: showing the
+      // same picture twice. The front must stay the front (nothing about this
+      // change may move it) and the back must be a different URL.
+      const printing = toPrinting(transform)
+
+      expect(printing?.imageUris.normal).toBe(transform.card_faces?.[0]?.image_uris?.['normal'])
+      expect(printing?.backImageUris?.normal).not.toBe(printing?.imageUris.normal)
+    })
+
+    it('gives a split card NO back face — its two halves are one face', () => {
+      // `Fire // Ice` is the counter-example that fixes the shape. It has
+      // `card_faces[1]`, so a blanket read would invent a back for it; it has
+      // no image there, so the invented back would also be blank.
+      const fire = byName('Fire // Ice')
+      expect(fire.card_faces?.[1]).toBeDefined()
+
+      expect(toPrinting(fire)?.backImageUris).toBeUndefined()
+    })
+
+    it('gives an adventure NO back face, for the same reason', () => {
+      const bonecrusher = byName('Bonecrusher Giant // Stomp')
+      expect(bonecrusher.card_faces?.[1]).toBeDefined()
+
+      expect(toPrinting(bonecrusher)?.backImageUris).toBeUndefined()
+    })
+
+    it('gives a meld card NO back face — its other half is a different card', () => {
+      /*
+       * Meld backs were false positives in the commander-eligibility bug, so
+       * they are checked here deliberately rather than assumed.
+       *
+       * They are not a false positive here, and the reason is structural: a
+       * meld piece and the meld result are three SEPARATE Scryfall records,
+       * each with one physical face and its own top-level `image_uris`. There
+       * is no `card_faces` to misread. `Brisela` is the back of nothing — it is
+       * its own card — so a flip control must not offer to flip to it.
+       */
+      const brisela = byName('Brisela, Voice of Nightmares')
+      expect(brisela.layout).toBe('meld')
+      expect(brisela.card_faces).toBeUndefined()
+      expect(brisela.image_uris).toBeDefined()
+
+      expect(toPrinting(brisela)?.backImageUris).toBeUndefined()
+      expect(toPrinting(byName('Hanweir, the Writhing Township'))?.backImageUris).toBeUndefined()
+    })
+
+    it('gives an ordinary card NO back face', () => {
+      // The overwhelming majority. Absent, not `{artCrop: '', normal: ''}` —
+      // Sol Ring does not have a back whose picture is missing.
+      expect(toPrinting(byName('Sol Ring'))?.backImageUris).toBeUndefined()
+    })
+
+    it('still says a transform card HAS a back when its art is missing', () => {
+      /*
+       * The distinction the column exists to keep. A `transform` whose face
+       * images did not resolve is not a single-faced card: it still flips, we
+       * just have nothing to draw on the other side.
+       *
+       * This is why the layout decides and the URLs only fill in. Inferring
+       * "has a back" from `card_faces[1].image_uris` being present would make
+       * these two states the same, and a flip control reading that could never
+       * tell "no second side" from "second side, no picture".
+       */
+      const blind = {
+        ...transform,
+        card_faces: (transform.card_faces ?? []).map((f) => {
+          const copy = { ...f }
+          delete (copy as { image_uris?: unknown }).image_uris
+          return copy
+        }),
+      }
+
+      expect(toPrinting(blind)?.backImageUris).toEqual({ artCrop: '', normal: '' })
+    })
+  })
 })
 
 describe('rate limits (ADR-0009 Q1)', () => {

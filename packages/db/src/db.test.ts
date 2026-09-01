@@ -667,6 +667,177 @@ describeDb('packages/db against real PostgreSQL', () => {
       expect(facts.get(c.oracleId)?.imageUris).toEqual({ artCrop: ART, normal: NORMAL })
     })
 
+    /*
+     * The BACK face's art (0016, ADR-0027).
+     *
+     * Two nullable columns holding three states, which is the whole difficulty:
+     * both NULL is "one physical face", both set is "there is a back", and `''`
+     * inside a set pair is "there is a back and its art did not resolve". A
+     * flip control draws a button for the last two and none for the first, so
+     * the round trip has to keep them apart in both directions.
+     */
+    describe('the back face, which most cards do not have', () => {
+      const BACK_ART = 'https://cards.scryfall.io/art_crop/back/1/1/fable.jpg?1'
+      const BACK_NORMAL = 'https://cards.scryfall.io/normal/back/1/1/fable.jpg?1'
+
+      it('round-trips a two-faced printing’s back art', async () => {
+        const id = await owner('Delver of Secrets // Insectile Aberration')
+        await upsertPrintings(db.pool, [
+          printing(id, {
+            imageUris: { artCrop: ART, normal: NORMAL },
+            backImageUris: { artCrop: BACK_ART, normal: BACK_NORMAL },
+          }),
+        ])
+
+        const [row] = await printingsFor(db.pool, id)
+        expect(row?.backImageUris).toEqual({ artCrop: BACK_ART, normal: BACK_NORMAL })
+        // The front must not have moved. It is the card.
+        expect(row?.imageUris).toEqual({ artCrop: ART, normal: NORMAL })
+      })
+
+      it('leaves a single-faced printing with NULL columns and no back at all', async () => {
+        // Absent, not an empty pair. Sol Ring does not have a back whose
+        // picture is missing, and NULL is what lets a query ask how many cards
+        // have a second side.
+        const id = await owner('Sol Ring, Which Has One Side')
+        await upsertPrintings(db.pool, [
+          printing(id, { imageUris: { artCrop: ART, normal: NORMAL } }),
+        ])
+
+        const [row] = await printingsFor(db.pool, id)
+        expect(row?.backImageUris).toBeUndefined()
+
+        const { rows } = await db.pool.query<{
+          image_back_art_crop: string | null
+          image_back_normal: string | null
+        }>('SELECT image_back_art_crop, image_back_normal FROM printings WHERE oracle_id = $1', [
+          id,
+        ])
+        expect(rows[0]?.image_back_art_crop).toBeNull()
+        expect(rows[0]?.image_back_normal).toBeNull()
+      })
+
+      it('keeps a two-faced printing whose back art is missing DISTINCT from a single-faced one', async () => {
+        /*
+         * The state the two columns exist to express, and the one an obvious
+         * implementation loses.
+         *
+         * `''` is stored rather than collapsed to NULL — deliberately unlike
+         * the front columns, where `upsertPrintings` writes NULL for `''`. Here
+         * NULL is already taken: it means "no second side". Collapsing would
+         * make a transform card with an unresolved image read as Sol Ring.
+         */
+        const id = await owner('A Transform Card Whose Back Art Failed')
+        await upsertPrintings(db.pool, [
+          printing(id, { backImageUris: { artCrop: '', normal: '' } }),
+        ])
+
+        const [row] = await printingsFor(db.pool, id)
+        expect(row?.backImageUris).toEqual({ artCrop: '', normal: '' })
+
+        const { rows } = await db.pool.query<{ image_back_normal: string | null }>(
+          'SELECT image_back_normal FROM printings WHERE oracle_id = $1',
+          [id],
+        )
+        expect(rows[0]?.image_back_normal).toBe('')
+      })
+
+      it('replaces back art on re-ingest', async () => {
+        // The path every one of the 501 rows takes: they exist with NULL back
+        // columns, and the URL the fixed mapper reads has to survive ON
+        // CONFLICT DO UPDATE. Drop either column from that clause and this is
+        // the only test that notices — the insert above stays green.
+        const id = await owner('Treasure Map // Treasure Cove, Reingested')
+        const before = printing(id)
+        await upsertPrintings(db.pool, [before])
+        expect((await printingsFor(db.pool, id))[0]?.backImageUris).toBeUndefined()
+
+        await upsertPrintings(db.pool, [
+          { ...before, backImageUris: { artCrop: BACK_ART, normal: BACK_NORMAL } },
+        ])
+
+        const [after] = await printingsFor(db.pool, id)
+        expect(after?.printingId).toBe(before.printingId)
+        expect(after?.backImageUris).toEqual({ artCrop: BACK_ART, normal: BACK_NORMAL })
+      })
+
+      it('refuses a half-written pair, so the three states stay three', async () => {
+        // The constraint is what makes "both NULL means one face" a fact rather
+        // than a convention. One column set and the other NULL is a row that
+        // answers neither question.
+        const id = await owner('A Card With Half A Back')
+        await expect(
+          db.pool.query(
+            `INSERT INTO printings (printing_id, oracle_id, set_code, set_name,
+                                    collector_number, rarity, image_back_art_crop,
+                                    image_back_normal, price_usd, reserved)
+             VALUES ($1, $2, 'tst', 'Test Set', '1', 'common', $3, NULL, NULL, false)`,
+            [randomUUID(), id, BACK_ART],
+          ),
+        ).rejects.toThrow(/printings_back_face_pair/)
+      })
+
+      it('serves the default printing’s back art to the candidate pool', async () => {
+        // `printingFactsForAll` is what `/cards/batch` reads, and it joins art
+        // through `cards.default_printing`. A back face that stops at the
+        // repository never reaches a flip control.
+        const c = card('Tergrid, God of Fright // Tergrid’s Lantern')
+        const id = printingId(randomUUID())
+        await upsertCards(db.pool, [{ ...c, defaultPrinting: id }])
+        await upsertPrintings(db.pool, [
+          {
+            ...printing(c.oracleId),
+            printingId: id,
+            imageUris: { artCrop: ART, normal: NORMAL },
+            backImageUris: { artCrop: BACK_ART, normal: BACK_NORMAL },
+          },
+        ])
+
+        const facts = await printingFactsForAll(db.pool)
+        expect(facts.get(c.oracleId)?.backImageUris).toEqual({
+          artCrop: BACK_ART,
+          normal: BACK_NORMAL,
+        })
+      })
+
+      it('gives the candidate pool no back for a single-faced card', async () => {
+        const c = card('Black Lotus, Which Has One Side')
+        const id = printingId(randomUUID())
+        await upsertCards(db.pool, [{ ...c, defaultPrinting: id }])
+        await upsertPrintings(db.pool, [
+          {
+            ...printing(c.oracleId),
+            printingId: id,
+            imageUris: { artCrop: ART, normal: NORMAL },
+          },
+        ])
+
+        const facts = await printingFactsForAll(db.pool)
+        expect(facts.get(c.oracleId)?.backImageUris).toBeUndefined()
+        // …while still serving the front, which is the part that must not move.
+        expect(facts.get(c.oracleId)?.imageUris).toEqual({ artCrop: ART, normal: NORMAL })
+      })
+
+      it('reports a stored empty back as null on the way out, never as “”', async () => {
+        // The same trap `imageUrl` exists for on the front: `''` reaching an
+        // `<img src>` resolves against the page URL and draws a broken image.
+        // The PRESENCE of the object survives; the empty string does not.
+        const c = card('A Default Printing Whose Back Art Failed')
+        const id = printingId(randomUUID())
+        await upsertCards(db.pool, [{ ...c, defaultPrinting: id }])
+        await upsertPrintings(db.pool, [
+          {
+            ...printing(c.oracleId),
+            printingId: id,
+            backImageUris: { artCrop: '', normal: '' },
+          },
+        ])
+
+        const facts = await printingFactsForAll(db.pool)
+        expect(facts.get(c.oracleId)?.backImageUris).toEqual({ artCrop: null, normal: null })
+      })
+    })
+
     it('handles an empty batch without a query', async () => {
       expect(await upsertPrintings(db.pool, [])).toBe(0)
     })
