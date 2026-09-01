@@ -33,7 +33,7 @@ import { cardImpact } from './impact.js'
 import { matchesQuery, type AnnotatedCandidate } from './query/evaluate.js'
 import type { QueryNode } from './query/ast.js'
 import type { CandidateGroupKey, Reason, Recommendation } from './recommendation.js'
-import type { Role } from './role.js'
+import { primaryRole, type Role } from './role.js'
 import { DEFAULT_EMPHASIS_WEIGHT, type ScoringWeights } from './scoring.js'
 
 /**
@@ -223,6 +223,33 @@ const dimensionLabel = (dimension: CompositionDimension): string =>
   dimension.kind === 'role' ? dimension.role : dimension.type
 
 /**
+ * The role this card will be COUNTED under, which is the only role a
+ * `fills-<role>` group or a `fills-deficit` reason may name (ADR-0031).
+ *
+ * `countComposition` counts a card under `primaryRole(roles)` — the
+ * precedence-ordered choice — because composition totals need exactly one role
+ * per card or they double-count. Grouping used `roles[0]` instead, which is raw
+ * database array order and carries no meaning at all. Two different functions
+ * of the same data, disagreeing on 8.4% of a real pool, which put 20.4% of the
+ * rows under a "Fills gap · X" heading on cards that count as something else:
+ * "Fills gap · draw −9" offered Shorikai, Genesis Engine, Ominous Seas and Bone
+ * Miser, all of which count as `token-maker`. Accepting one moved a meter the
+ * heading had not named, and P4 says a reason has to be true.
+ *
+ * Stated once, here, rather than at the two call sites that need it — the whole
+ * defect was two places computing "this card's role" differently, so a second
+ * copy is the thing to avoid.
+ *
+ * NOT the same question the `role:` QUERY filter answers. That matches the
+ * whole role set (`roles.some(...)`), and should: a card that is both removal
+ * and a token maker genuinely does match `role:token-maker`, and a filter that
+ * missed it would be wrong. Filtering asks "is this card one of these?";
+ * counting asks "which single bucket does this card occupy?". Only the second
+ * has to agree with the meters.
+ */
+const countedRole = (pooled: PoolCard): Role => primaryRole(pooled.roles)
+
+/**
  * The deck's target curve, from its archetype (ADR-0011).
  *
  * Replaces a flat 25%-per-bucket comparison that could only ever reward, never
@@ -305,7 +332,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
   for (const pooled of input.pool) {
     if (!isEligible(pooled, input, identity)) continue
     const annotation = annotateCombos(input.comboIndex, input.accepted, pooled.card.oracleId)
-    const primary = pooled.roles[0] ?? pooled.card.primaryRole
+    const primary = countedRole(pooled)
     const profile = {
       produces: pooled.card.synergyProduces,
       wants: pooled.card.synergyWants,
@@ -370,7 +397,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
 
   for (const s of scratch) {
     const id = s.pooled.card.oracleId
-    const primary = s.pooled.roles[0] ?? s.pooled.card.primaryRole
+    const primary = countedRole(s.pooled)
     if (s.degree >= 3) s.group = 'combo-3plus'
     else if (s.degree === 2) s.group = 'combo-2'
     else if (s.degree === 1) s.group = 'combo-1'

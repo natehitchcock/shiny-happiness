@@ -8,7 +8,7 @@ import type { Deck } from './deck.js'
 import { comboId, deckId, oracleId, printingId } from './ids.js'
 import { parseQuery } from './query/parse.js'
 import { recommend, type CardStats, type PoolCard, type RecommendInput } from './recommend.js'
-import type { Role } from './role.js'
+import { primaryRole, type Role } from './role.js'
 import { DEFAULT_WEIGHTS, weightsFor } from './scoring.js'
 import { parseSemanticEmphasis } from './semantic-emphasis.js'
 import { COMMANDER_WEIGHT, type DeckSynergy } from './synergy.js'
@@ -252,6 +252,84 @@ describe('deficit groups', () => {
     const rec = result.groups.flatMap((g) => g.items)[0]!
     expect(rec.reasons).toContainEqual(
       expect.objectContaining({ kind: 'fills-deficit', source: 'custom' }),
+    )
+  })
+
+  /*
+   * The group a card is offered under is the dimension it will be COUNTED
+   * under (ADR-0031, pillar P4).
+   *
+   * Grouping used `roles[0]` — raw database array order — while
+   * `countComposition` counts by `primaryRole(roles)`, which is precedence
+   * order. They are different functions of the same data and they disagreed on
+   * 8.4% of a real candidate pool, which put 20.4% of the rows under a "Fills
+   * gap · X" heading on cards that do not count toward X at all. Accepting one
+   * moved a different meter than the heading named.
+   *
+   * `spot-removal` outranks `draw` in `ROLE_PRECEDENCE`, so this card is
+   * counted as removal however its role array happens to be ordered. Written
+   * with `draw` FIRST in the array on purpose: that is the ordering the old
+   * code read, so a regression here shows up as `fills-draw` rather than as a
+   * passing test.
+   */
+  it('offers a card under the role it will be counted as, not its first role', () => {
+    const versatile = card('versatile', {
+      roles: ['draw', 'spot-removal'],
+      primaryRole: 'spot-removal',
+    })
+    const result = recommend(
+      baseInput({
+        pool: [pooled('versatile', { roles: ['draw', 'spot-removal'], card: versatile })],
+      }),
+    )
+    expect(groupKeys(result)).toContain('fills-spot-removal')
+    expect(groupKeys(result)).not.toContain('fills-draw')
+  })
+
+  /*
+   * The same rule, stated against the COUNTER rather than against a literal.
+   *
+   * The test above pins one card; this one pins the agreement itself, so a
+   * change to `ROLE_PRECEDENCE` cannot quietly make the two drift apart again
+   * while both tests still read as though they check something.
+   */
+  it('names, in its reason, the dimension the deck counter will move', () => {
+    const versatile = card('versatile', {
+      roles: ['draw', 'spot-removal'],
+      primaryRole: 'spot-removal',
+    })
+    const result = recommend(
+      baseInput({
+        pool: [pooled('versatile', { roles: ['draw', 'spot-removal'], card: versatile })],
+      }),
+    )
+    const rec = result.groups.flatMap((g) => g.items)[0]!
+    const counted = countComposition(
+      {
+        ...emptyDeck,
+        entries: [
+          {
+            oracleId: versatile.oracleId,
+            zone: 'accepted',
+            origin: 'manual',
+            locked: false,
+            roleOverride: null,
+            tags: [],
+            addedAt: '',
+          },
+        ],
+      },
+      new Map([[versatile.oracleId, versatile]]),
+      (c) => primaryRole(c.roles),
+    )
+    const moved = [...counted.byRole.entries()].filter(([, n]) => n > 0).map(([role]) => role)
+    expect(moved).toEqual(['spot-removal'])
+    expect(rec.fillsRoleDeficit).toBe('spot-removal')
+    expect(rec.reasons).toContainEqual(
+      expect.objectContaining({
+        kind: 'fills-deficit',
+        dimension: { kind: 'role', role: 'spot-removal' },
+      }),
     )
   })
 })
