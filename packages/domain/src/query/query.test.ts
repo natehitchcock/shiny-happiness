@@ -495,4 +495,42 @@ describe('filtering by synergy tag', () => {
     expect(formatQuery(ast('causes:artifact-etb'))).toBe('produces:artifact-etb')
     expect(formatQuery(ast('tag:artifact-etb'))).toBe('tag:artifact-etb')
   })
+
+  describe('burn, the word a player types for a tag that is not called that (ADR-0029)', () => {
+    // The model and the search box answer to different vocabularies on purpose.
+    // Every internal tag names an EVENT so `readable()` can slot it after
+    // "causes"; `burn` is an archetype and fails that sentence. So it lives here
+    // instead, as a value alias beside the field aliases `causes` and `benefits`.
+    const burner = candidate({
+      card: card({ name: 'Flame Slash', synergyProduces: ['damage'] }),
+    })
+    const payoff = candidate({
+      card: card({ name: 'Ripjaw Raptor', synergyWants: ['damage'] }),
+    })
+
+    it('resolves on every field that takes a tag', () => {
+      // The negative assertions carry this test: an unknown value is dropped
+      // from the AST and an empty AST matches everything, so only the card that
+      // must NOT match can tell a working alias from a discarded term.
+      expect(errorsOf('produces:burn')).toEqual([])
+      expect(matchesQuery(ast('produces:burn'), burner)).toBe(true)
+      expect(matchesQuery(ast('produces:burn'), payoff)).toBe(false)
+      expect(matchesQuery(ast('produces:burn'), neither)).toBe(false)
+
+      expect(matchesQuery(ast('wants:burn'), payoff)).toBe(true)
+      expect(matchesQuery(ast('wants:burn'), burner)).toBe(false)
+
+      expect(matchesQuery(ast('tag:burn'), burner)).toBe(true)
+      expect(matchesQuery(ast('tag:burn'), payoff)).toBe(true)
+      expect(matchesQuery(ast('tag:burn'), neither)).toBe(false)
+    })
+
+    it('is one alias and not a synonym table', () => {
+      // An alias is warranted where the natural word is an archetype and the tag
+      // has to be an event. Nothing else has earned one, and a near-miss must
+      // still be an error rather than a silent match-everything.
+      expect(errorsOf('tag:aristocrats')[0]?.message).toContain('unknown synergy tag')
+      expect(errorsOf('tag:burnn')[0]?.message).toContain('unknown synergy tag')
+    })
+  })
 })

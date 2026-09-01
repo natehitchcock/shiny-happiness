@@ -199,6 +199,22 @@ export const IS_PREDICATES: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * Spellings of a tag that are not the tag (ADR-0029).
+ *
+ * `FIELD_ALIASES` above lets a user type `causes:` for `produces:`; this is the
+ * same mechanism one level down, on the VALUE. It exists because the model and
+ * the search box answer to different vocabularies on purpose: every internal tag
+ * names an event, so that `readable()` can slot it after "causes" or "benefits
+ * from" — "causes dealing damage" works and "causes burn" does not — while
+ * `burn` is the word a player actually types.
+ *
+ * Deliberately not a synonym table for the other nineteen. An alias is warranted
+ * where the natural word for a thing is an ARCHETYPE and the tag has to be an
+ * event; that is one tag today, and each future one should have to argue.
+ */
+const TAG_ALIASES: ReadonlyMap<string, string> = new Map([['burn', 'damage']])
+
+/**
  * A tag as the user is likely to type it.
  *
  * The tags are kebab-case internally (`artifact-etb`) but the UI renders them
@@ -206,11 +222,13 @@ export const IS_PREDICATES: ReadonlySet<string> = new Set([
  * chip they just read. Both are accepted, and so is `tag:"artifact etb"` with
  * the quotes the space would otherwise need.
  */
-export const normaliseTag = (value: string): string =>
-  value
+export const normaliseTag = (value: string): string => {
+  const kebab = value
     .trim()
     .toLowerCase()
     .replace(/[\s_]+/g, '-')
+  return TAG_ALIASES.get(kebab) ?? kebab
+}
 
 export const SYNERGY_TAG_VALUES: ReadonlySet<string> = new Set(SYNERGY_TAGS)
 
