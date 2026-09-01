@@ -239,8 +239,17 @@ button {
 }
 
 /*
- * WHAT THE ROW GIVES UP FIRST, and the order is: efficiency, impact, price,
- * mana cost. The name and the two decision buttons never go.
+ * WHAT THE ROW GIVES UP FIRST, and the order is: efficiency, impact — and then
+ * it stops giving things up. The name and the two decision buttons never go.
+ *
+ * ONE BEHAVIOUR, TWO MECHANISMS, and this is the seam. Every threshold in this
+ * section answers the same question — at what width can the row no longer hold
+ * a floored name beside what it carries? — and each one gives the cheapest
+ * answer still available. While that answer is "drop a number the page prints
+ * somewhere else", it is a `display: none`. When the only numbers left are ones
+ * the row exists to show, the answer becomes "take a second line", and the
+ * shedding order resumes on it. See the stacking block below, which derives the
+ * readable width the whole seam turns on.
  *
  * These sit AFTER the rules they override on purpose. A `@container` block adds
  * nothing to specificity, so `@container … { .card-row .mana { display: none } }`
@@ -258,8 +267,11 @@ button {
  * floor with no metric cells on it at all, so dropping the price alone frees
  * nowhere near the ~100px two more numbers need. The metrics have to go at that
  * width whatever else does, and taking the price as well would be shedding more
- * than the row asks for. So the price keeps its place, and with it the promise
- * `styles.test.ts` pins: opening a card must not reformat the rows behind it.
+ * than the row asks for. So the price keeps its place — and it keeps it all the
+ * way down now, because the row stacks at the width the price used to leave at
+ * and the price rides onto the second line. The promise `styles.test.ts` pins is
+ * the same assertion against the same pixel and now covers more: opening a card
+ * must not reformat the rows behind it, and the row's SHAPE is what it protects.
  *
  * Efficiency before impact. Impact is the primary of the pair — it is the first
  * default column, it is the one with a stated ceiling to read a bare number
@@ -291,8 +303,13 @@ button {
  *
  *   491.02  badge + mana + both metrics + price + Add + Reject  → hide at 491
  *   433.43  the same without efficiency                          → hide at 433
- *   375.84  the same without either metric                       → hide at 375
- *   313.45  the same without the price                           → hide at 313
+ *   375.84  the same without either metric                       → STACK at 375
+ *   342.92  mana + price + lock + remove (a deck row)            → STACK at 342
+ *
+ * The third and fourth are the same arithmetic as the first two and a different
+ * remedy — see the stacking block below for why the chain ends there. 313 and
+ * 280 used to sit under them, hiding each shape's mana cost; those two numbers
+ * are gone, because a stacked row has room for it.
  *
  * The first two were 489 and 431 and are two pixels wider now. The two pixels
  * are the border: at a 490px container with efficiency still shown, the name
@@ -311,10 +328,12 @@ button {
  * Rejected: one shared pair at the suggestion row's numbers, which would also
  * have fixed the rail's spill. The deck rail is one 1fr track of
  * `minmax(230px, 1fr) minmax(0, 2.4fr) minmax(230px, 1fr)`, which puts its
- * container at 286px on an ordinary 1400px laptop — above the deck row's own
- * mana threshold and below the suggestion row's. A shared number would take the
- * mana cost off every deck row on that screen to solve a problem the deck rail
- * does not have.
+ * container at 286px on an ordinary 1400px laptop — a width at which the two
+ * shapes want different things, every time. That 286px is also the width the
+ * user was looking at when they reported this: measured there, a deck row had
+ * shed its price and still gave the name 85.5px, with the mana cost, the lock
+ * and the Remove button all present. "The add/remove buttons and mv etc… cause
+ * the name to clip beyond what is readable."
  *
  * Rejected: a marker class on each row, or on the region. `:has(.name-cell)` is
  * the difference itself rather than a label for it, so a new row shape gets the
@@ -324,11 +343,12 @@ button {
  *
  * WHAT THIS COSTS, stated because it is the visible consequence: at the 1320px
  * viewport where the detail pane takes a column of its own, the feed's query
- * container is 394px, so opening a card hides BOTH metric cells. It cannot be
+ * container is 389px, so opening a card hides BOTH metric cells. It cannot be
  * avoided by narrowing them — the widest value this can hold is 41px, and even
- * at that size the pair needs 474px against the 394 available. The pane that
+ * at that size the pair needs 469px against the 389 available. The pane that
  * caused the squeeze is drawing both numbers in full, with their tiers and their
- * working, for the card being decided. The price survives it, which is the
+ * working, for the card being decided. The price survives it, and so does the
+ * row's shape: 389 is above the 375 at which it would stack, which is the
  * promise `styles.test.ts` pins.
  */
 @container (max-width: 491px) {
@@ -343,25 +363,161 @@ button {
   }
 }
 
+/*
+ * AND THEN IT STOPS SHEDDING AND TAKES A SECOND LINE (ADR-0032).
+ *
+ * The user: "when the screen becomes so narrow that the right and left items
+ * collide, stack them instead … otherwise, the add/remove buttons and mv etc…
+ * cause the name to clip beyond what is readable."
+ *
+ * WHAT READABLE IS, IN PIXELS. Every distinct card name in the corpus — 34,442
+ * of them — measured with `measureText` in this element's own resolved font
+ * (Karla 400 15px), and the width at which the WHOLE name fits taken as a
+ * distribution: p50 116.4, p75 138.6, p90 164.2, p95 182.5. **165px** is the
+ * ninetieth percentile and is what this file means by readable.
+ *
+ * That is NOT the 5rem above, and the two numbers do different jobs. 80px is
+ * where a name stops distinguishing one card from another: measured the same
+ * way, the shortest prefix that is unique in the corpus plus its ellipsis is
+ * under 80px for 70% of cards. 80px is an honest floor against overflow. It is
+ * not a readable width — a whole name fits in it for 10.7% of the corpus, and
+ * "Nicol Bolas, the Ravager" in 80px is a stub, not a name.
+ *
+ * THE CHAIN NEVER REACHES 165, AND THAT IS WHY THIS EXISTS. Measured on the
+ * running app, at the best pixel of each shed — the moment the cell disappears
+ * and the name springs back — the name is 137.6px (efficiency), 137.2 (impact),
+ * 141.6 (price) and 161.1 (mana). Every one of them is short, and by the next
+ * threshold the name is back at 80. Its mean across the chain's whole band,
+ * 232px to 576px of container, is about 113px, at which 45% of names read
+ * whole. Shedding cannot deliver a readable name at any width. It can only
+ * postpone overflow.
+ *
+ * SO THE CHAIN TERMINATES RATHER THAN CONTINUING. The rule it follows does not
+ * change — at each threshold the row can no longer hold a floored name beside
+ * what it carries — and only the remedy changes, at the step where the cheap
+ * cells have run out. Past the price there is nothing left on either shape but
+ * the name, the cost you pay every game, and the two decision buttons; a shed
+ * that spends one of those to arrive 23px short of legible has spent it for
+ * nothing. The second line buys 324px in one step, and the price comes with it.
+ *
+ * THE THRESHOLDS ARE THE PRICE'S OLD ONES, UNMOVED. 375 and 342 are still
+ * `ceil(what the one-line row needs) - 1`, derived exactly as the two above it:
+ *
+ *   375.84  badge + mana + price + Add + Reject, beside a floored name  → 375
+ *   342.92  mana + price + lock + remove, beside a floored name         → 342
+ *
+ * WHY 375 AND NOT HIGHER, which is the one number here with a hard ceiling over
+ * it. At the 1320px viewport where the detail pane takes a column of its own,
+ * the feed's query container is 389px — measured, with the four-column grid
+ * forced so it could be reproduced at a fixed viewport, at a 1303px layout
+ * viewport (1320 less a 17px classic scrollbar). A stacking threshold at or
+ * above 389 would RESTACK every row the moment a card is clicked, which is the
+ * reformat `styles.test.ts` forbids and a far more violent one than dropping a
+ * price cell. 375 leaves 14px, and it would take a 31px scrollbar to close it.
+ *
+ * The cost of that ceiling, stated: between 376 and 491 of container the row is
+ * still on one line and its name is between 80 and 142px. On this machine that
+ * band is only entered with the detail pane open between a 1320px and a 1454px
+ * viewport, and the pane is drawing the name it is squeezing, in full.
+ *
+ * REJECTED: raising the 5rem floor to the readable 165 and letting the chain
+ * shed harder. It works, and it is worse — measured, a feed row would drop
+ * efficiency at 576, impact at 518, the price at 460 and the mana cost at 398,
+ * so at the very widths stacking keeps everything the row would be a name and
+ * two buttons. Stacking buys the same name width by spending 22px of height
+ * instead of four columns of information.
+ *
+ * REJECTED: stacking one step later, where the mana cost would otherwise go
+ * (313 and 280). It is the tidier story — stack rather than lose the one number
+ * that is not repeated anywhere else on the page — and it does not fire where
+ * the user is looking. The deck rail's container on an ordinary 1400px laptop
+ * is 286px: above 280, so the row would stay on one line, with its mana cost,
+ * its lock, its Remove and 85.5px of name. That is the report, verbatim.
+ */
 @container (max-width: 375px) {
+  /*
+   * Line one is the name. Line two is everything that comments on it, in the
+   * same order and against the same right edge, so the number columns still
+   * read straight down the list. A stacked row is this row with the name lifted
+   * out of it.
+   *
+   * `justify-content` only ever acts on line two: line one's basis below adds
+   * up to exactly 100%, so there is no free space on it to distribute.
+   */
+  .card-row:has(.name-cell) {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  /*
+   * The combo badge stays with the name, and the basis is the badge's own
+   * `min-width` plus the row's own `gap` rather than the 32.8px they come to —
+   * so it follows them if either moves.
+   *
+   * Rejected: `flex-basis: 100%`, which drops the badge to line two. It is the
+   * row's left-edge signature, the only brass on the page, and under the
+   * controls it reads as a property of them rather than of the card.
+   */
+  .card-row:has(.name-cell) > .name-cell {
+    flex-basis: calc(100% - 1.55rem - var(--step));
+  }
+}
+
+@container (max-width: 342px) {
+  .card-row:not(:has(.name-cell)) {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  /* A deck row has no badge, so its name takes the whole line. */
+  .card-row:not(:has(.name-cell)) > .name {
+    flex-basis: 100%;
+  }
+}
+
+/*
+ * AND THE ORDER RESUMES ON THE SECOND LINE, unchanged: the price, then the mana
+ * cost. Same rule, same reasons, one line down.
+ *
+ * These are `fills` rather than `needs` — there is no name on this line, so
+ * nothing here is being kept at its expense. A row showing n cells on line two
+ * has n - 1 gaps between them, plus the row's padding and border:
+ *
+ *   287.84  badge + mana + price + Add + Reject   → hide the price at 287
+ *   254.92  mana + price + lock + remove          → hide the price at 254
+ *   225.45  badge + mana + Add + Reject           → hide the mana cost at 225
+ *   192.53  mana + lock + remove                  → hide the mana cost at 192
+ *
+ * These do fire. The narrowest container this layout can produce is the side
+ * rails' 198px, at a 901px viewport — one pixel above the `max-width: 900px`
+ * single-column breakpoint, where `minmax(230px, 1fr)` pins both rails at their
+ * floor. A stacked deck row at 198 needs 254.92 for all four of its cells and
+ * has 180, so without these the second line would spill exactly as the first
+ * one used to.
+ *
+ * Rejected: bringing a shed metric cell BACK onto the second line, which at a
+ * 375px container has room for exactly one. A column that reappears as the
+ * window narrows cannot be read as a shedding order at all.
+ */
+@container (max-width: 287px) {
   .card-row:has(.name-cell) .cash {
     display: none;
   }
 }
 
-@container (max-width: 342px) {
+@container (max-width: 254px) {
   .card-row:not(:has(.name-cell)) .cash {
     display: none;
   }
 }
 
-@container (max-width: 313px) {
+@container (max-width: 225px) {
   .card-row:has(.name-cell) .mana {
     display: none;
   }
 }
 
-@container (max-width: 280px) {
+@container (max-width: 192px) {
   .card-row:not(:has(.name-cell)) .mana {
     display: none;
   }
@@ -1364,6 +1520,118 @@ select {
   top: 0;
   z-index: 10;
   background: var(--ink);
+}
+
+/*
+ * THE OTHER SURFACE WHERE THE LEFT AND THE RIGHT COLLIDE, and it needs the same
+ * answer the row got: stop competing for one line, take two (ADR-0032).
+ *
+ * It already wrapped. `flex-wrap: wrap` has been on this rule since it was
+ * written, and wrapping was never the problem — WHERE it wrapped was. Measured
+ * on the running app with doc 20 §20.4's control set: at a 1300px masthead it
+ * broke between Quickbuild and Help; at 500px it left the overflow trigger alone
+ * on a line of its own; at 320px it produced six lines and 274px of sticky
+ * height, on a screen with 568px of it to spend. A toolbar cut in half is
+ * exactly the collision being reported, and a `flex-wrap` with nothing telling
+ * it where to break cannot avoid it.
+ *
+ * TWO GROUPS, and the split is the user's own: identity and state on the first
+ * line, tools on the second. `.wordmark`, the deck menu, the progress bar, the
+ * card count and the bracket chip say WHICH deck and HOW IT IS DOING; Graph,
+ * Quickbuild, Help and the overflow trigger are what you reach for. The tools
+ * are the half that must stay together and land somewhere predictable, so they
+ * are the half that gets a line.
+ *
+ * A `@media` query, not a `@container` one, and the asymmetry with the rows is
+ * deliberate: the masthead spans the layout viewport by construction. Nothing
+ * can drag it narrower, so unlike a rail, the viewport does know its width.
+ *
+ * WHY 1175px. The masthead is one line while all of this fits, measured on the
+ * running app — the three buttons that do not exist yet were measured by
+ * relabelling the three that do:
+ *
+ *   padding             48    calc(var(--step) * 3), both sides
+ *   wordmark         135.1
+ *   deck name           80    its floor, below
+ *   progress           180    its own min-width
+ *   card count       103.2
+ *   bracket chip       298    its widest state, per its own comment
+ *   Graph             47.6
+ *   Quickbuild        73.6
+ *   Help              39.6
+ *   overflow ⋯        25.9
+ *   eight gaps         128    nine children, 16px apart
+ *   -----------------------
+ *                   1159.0
+ *
+ * so it breaks at 1158 of masthead, and a media query sees `innerWidth` where
+ * the masthead gets `clientWidth` — 17px of Windows classic scrollbar between
+ * them, the same allowance the four-column threshold makes. 1158 + 17 = 1175.
+ *
+ * THE CHIP AT ITS WIDEST, AND WHAT THAT COSTS. A deck whose chip is narrower
+ * fits on one line a little below 1175 and now takes two: measured, this deck's
+ * chip is 231.8px and it held one line down to 1092, so between 1093 and 1175 it
+ * spends 39px of sticky height it did not have to. That is the mild direction
+ * and it is chosen. Being wrong the other way — deriving against a chip some
+ * decks exceed — means the split toolbar this whole block exists to remove.
+ *
+ * The control set is doc 20 §20.4's and not the five this started against.
+ * Import and Export moved behind the overflow trigger (A1), so the row grows by
+ * one button rather than three; derived against five, this would have broken
+ * 87px of viewport earlier than it needs to.
+ *
+ * WHAT HAPPENS AT SEVEN. The tool line holds four controls down to a 283px
+ * masthead and each further one costs about 66px, so five reach 349 and seven
+ * reach 481 — at which the tools wrap on every phone and the two-line promise
+ * is gone. That is what A1 is for: the row's growth is bounded by the menu, not
+ * by this stylesheet.
+ *
+ * Line one can still wrap below 908px of masthead, where its own parts stop
+ * fitting, and that is accepted rather than fixed. Everything on it is a label
+ * or opens a panel; none of it is in the build loop, so a label finding a second
+ * line costs nothing that a split toolbar costs.
+ *
+ * Rejected: a `<div>` around the buttons in `App.tsx`, which is the obvious way
+ * to group them. Rejected on ownership rather than mechanism — that file is
+ * being edited by the Quickbuild work at this exact spot, and a wrapper is a
+ * merge conflict where a pseudo-element is not.
+ */
+@media (max-width: 1175px) {
+  /*
+   * The break costs TWO row gaps, so the row gap is halved while it is here.
+   *
+   * `gap` applies on both axes, and a zero-height line between two lines is
+   * still a line with a gap on each side of it — measured, 32px between the
+   * wordmark's baseline box and the tools where the reader should see one gap's
+   * worth. Halving `row-gap` puts the two groups back at one full gap apart and
+   * leaves 8px between lines WITHIN a group, on the narrow screens where line
+   * one wraps on its own. That reads as a hierarchy rather than as an accident:
+   * tighter inside a group than between them.
+   *
+   * Rejected: `margin-block: calc(var(--step) * -1)` on the break to cancel one
+   * gap. It is the obvious trick and it does nothing — Chrome clamps a flex
+   * line's cross size at zero, so the height was 120.7px with the negative
+   * margin and 120.7px without it. Measured before it was believed.
+   */
+  .masthead {
+    row-gap: var(--step);
+  }
+
+  .masthead::after {
+    /*
+     * A zero-height flex item, full width, ordered between the two groups: the
+     * break happens in one place instead of wherever the last item ran out of
+     * room.
+     */
+    content: '';
+    order: 1;
+    flex-basis: 100%;
+    height: 0;
+  }
+
+  .masthead > .act {
+    order: 2;
+  }
 }
 
 .deck-count {
@@ -2482,8 +2750,39 @@ select {
    looking like text until you hover it — a button up here would compete with
    Import and Export for the same attention, and this is not that kind of
    action. */
+/*
+ * THE DECK NAME GETS THE SAME FLOOR A CARD NAME GETS, and for the same reason.
+ *
+ * Without it the masthead's 1175px threshold is not a threshold: a deck's name
+ * is user text of unbounded length, and while it can push the line over on its
+ * own the row wraps at a width no arithmetic can name. Measured — this deck's
+ * line is 374.6px and wrapped the masthead at 1330, 155px above where the fixed
+ * furniture says it should.
+ *
+ * So it yields the way a card name yields: shrink to 5rem, then ellipsise. One
+ * number across both surfaces, which is why 5rem is written here rather than a
+ * width chosen for this line. The name is repeated in the menu this handle
+ * opens, and it is the thing the reader just chose.
+ *
+ * THE FLOOR HAS TO BE THE BASIS, and `min-width` alone is not enough — this was
+ * measured wrong once and then measured right. A flex container decides where to
+ * WRAP using each item's hypothetical main size, which is its basis clamped by
+ * min and max, and only then flexes the line it has packed. With `flex-basis:
+ * auto` this item's hypothetical size is the deck name's full natural width, so
+ * a long name still pushed the tools onto a second line before anything shrank:
+ * measured, the masthead broke at 1200px with the progress bar still 63px above
+ * its own minimum. The floor as a BASIS makes the name contribute 80px to that
+ * decision and take more only out of the space that is left.
+ *
+ * `max-width: max-content` is what stops it growing past its own text. Without
+ * it the item would share the leftover with the progress bar and hold a strip of
+ * empty space beside a short deck name.
+ */
 .deck-menu {
   position: relative;
+  flex: 1 1 5rem;
+  min-width: 5rem;
+  max-width: max-content;
 }
 
 .deck-handle {
@@ -2496,6 +2795,20 @@ select {
   padding: 2px 6px;
   cursor: pointer;
   color: inherit;
+  /* The handle is the flex item that has to give, so it must be allowed to be
+     narrower than the line it holds. */
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* The floor alone would only make it overflow; this is what makes it clip. The
+   caret beside it is `flex: 0 0 auto` by being an inline-flex sibling with
+   nothing to shrink, so the label is the only thing that gives. */
+.deck-handle > .meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .deck-handle:hover {
   border-color: var(--rule);
