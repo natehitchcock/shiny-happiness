@@ -448,6 +448,10 @@ cannot be removed is a worse version of the problem §18.7 exists to fix. Making
 them ordinary columns costs one discriminated union and buys removal, ordering,
 sorting and persistence for free, all of which already exist.
 
+**Sorting turned out not to be free — see §18.10 item 7.** The other four are. A
+metric column draws its number, is removed from the legend, keeps its place in
+the list and is saved with the deck; what it does not do is order the rows.
+
 The second consequence settled it. Defaults that are ordinary columns can be
 changed later — a third metric, a different default pair — without touching
 anything but a constant. A privileged pair would have been a second rendering
@@ -464,7 +468,7 @@ the compromise is visible rather than hidden, is the honest version.
 
 ## 18.10 Where the build diverged from this design
 
-Six places. Each is a change to this document made in the same commit as the
+Seven places. Each is a change to this document made in the same commit as the
 code, per AGENTS.md §10.
 
 1. **The efficiency formula measures surpluses, not absolutes.** Scoped as
@@ -508,6 +512,28 @@ code, per AGENTS.md §10.
    `each` off a parenthetical on hundreds of cards and calls them mass effects.
    Self-references (`this creature`, and the card's own name) are normalised at
    the same time, which is what makes fragility detectable at all.
+
+7. **A metric column draws a number and does not sort by it.** §18.9 Q2 counted
+   sorting among the things ordinary columns buy for free. It is the one that
+   had to be given back, and the reason is the DEFAULTS rather than the metrics.
+   A query column is a question the builder just asked, and promoting a filter to
+   a column means "keep every suggestion and bring the ones I asked about to the
+   top" — the button says exactly that. There is no question inside a number, so
+   ordering by one means the app supplying the question; and because both metrics
+   are present by default it would supply it to every deck that has never touched
+   its columns. Two consequences, either one disqualifying: every feed silently
+   re-ranked by a card-intrinsic figure over the top of the deck-relative score
+   that is the product, and every query the builder actually typed sorting BELOW
+   two columns they never chose. `ordersRows` in `apps/web/src/App.tsx` is that
+   line, and the legend numbers only the chips on the sorting side of it.
+
+   The way to sort by impact is the one §18.7 already draws: type `impact>=6` and
+   promote THAT. It is a question, it has a threshold, it ticks and it sorts.
+   "Which of these clear my bar" is the sortable half of the pair; "how do these
+   compare" is the half you read. Rejected: keeping the rank and inserting new
+   columns at the FRONT of the list so a fresh query still won — it rescues the
+   promote button by breaking the documented composition rule instead, and still
+   leaves a deck with no query columns ordered by impact rather than by score.
 
 ## 18.11 What this does NOT include
 

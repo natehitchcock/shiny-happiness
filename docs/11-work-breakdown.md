@@ -257,9 +257,55 @@ columns come back has not cleared anything. No ADR: every contract change is a
 new optional field. The recommendations request is unchanged — a metric column
 needs no server evaluation, since its number is already on the row.
 
-**The COLUMN half is not built.** Nothing renders a metric column or persists
-the column list to the deck yet; the storage, the metrics, the endpoints and the
-`queryColumns` seam are.
+**The COLUMN half is built now.** Each suggestion row draws impact and
+efficiency **between its mana cost and its price**, which is where the user asked
+for them, and the column list is saved to the deck on every add and every remove.
+
+- **One list, two places to draw it.** `columns` in `App.tsx` is still the only
+  copy — what the legend removes from, what the sort reads, what is PATCHed. All
+  that is split is WHERE a column lands, and the split is a function of its
+  `kind`: a tick beside the name, a number beside the other numbers. A tick is
+  scanned down the list; a number is compared with the mana value and the price
+  on its own row, which is what "per mana" and "$4.10" are for.
+- **The two metrics are the deck's `DEFAULT_COLUMNS`**, read through the domain's
+  `columnsFor`, so `null` means the defaults and `[]` means the builder cleared
+  them and gets none back. Removing one PATCHes optimistically and rolls back
+  with a notice if the write fails. A **restore button** appears beside
+  "+ column" for each metric that is absent — `+ column` only makes query
+  columns, so without it removing Impact would be a one-way door.
+- **A metric column does not SORT.** Doc 18 §18.10 item 7 has the argument and
+  the rejected alternative. Short version: there is no question inside a number,
+  both metrics are on by default, and ranking by them would re-order every feed
+  by a card-intrinsic figure and push a query the builder just promoted below two
+  columns they never chose. The legend numbers only the chips that do sort, so
+  "+ column" still means what its tooltip says.
+- **Nothing rounds.** The cell prints `metricValue` — the same unrounded
+  formatter `CardMetrics` uses on the pane — so `impact>=6.13` can never drop a
+  row whose own cell says 6.13 (ADR-0025 §2). The cell is sized for `13.464`
+  rather than truncated; an ellipsis in a number is a wrong number.
+- **Shedding order, derived and measured:** efficiency, then impact, then price,
+  then mana cost. The name and the two buttons never go. The metrics go before
+  the price although the price is the more disposable figure, because the
+  arithmetic says so: at the width the detail pane leaves the feed (426px column,
+  394px container) the row is already at the name's 5rem floor with no metric
+  cells on it, so the metrics have to go whatever else does and taking the price
+  as well would shed more than the row asks for. The two thresholds — 489px and
+  431px — are each one pixel below the width at which the name would be pushed
+  under its floor to keep that cell. **Consequence, stated:** at the 1320px
+  viewport where the detail pane takes a column, opening a card hides both metric
+  cells; the pane that caused the squeeze is drawing both numbers in full.
+- The `@container` rules moved BELOW the base rules they override. `@container`
+  adds nothing to specificity, so `.card-row .mana { display: none }` above
+  `.card-row .mana { display: flex }` lost the tie and the mana column never
+  dropped at all — the dead rule the four-column comment recorded as belonging
+  to whoever owned the row.
+
+**Still open on the row:** `.name-cell` in the suggestion feed has no `min-width`
+floor. `.card-row .name` has one, but the feed's flexible child is the CELL, so
+below a 374px container the name shrinks to 32px while the price and the buttons
+keep their width — the failure the deck rail's floor was added to stop, still
+live in the feed. Out of this task's scope and unchanged by it: the metric
+thresholds are set so that no metric cell is ever kept at the name's expense.
 
 **The DETAIL half is.** Both metrics are drawn on the card detail pane — in the
 workspace preview panel and in the L3 `Detail` primitive, through one shared

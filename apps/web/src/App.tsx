@@ -17,6 +17,15 @@ import {
   interactsWith,
   MANA_LETTERS,
   rebaseCommands,
+  // The three-state read of `Deck.columns` — null is "never set, draw the
+  // defaults" and `[]` is "the builder removed them all" (doc 18 §18.7). One
+  // function, in the package that also owns the parse and the storage, so the
+  // client cannot answer it differently from the server.
+  columnsFor,
+  // The metrics a column may draw, from the package that owns the closed set.
+  // A hand-written `['impact', 'efficiency']` here is the list that fails to
+  // grow on the day a third metric is added.
+  COLUMN_METRICS,
 } from '@roundtable/domain'
 // Aliased: `oracleId` is a parameter name a dozen times in this file, and a
 // brander shadowed by a local of the same name reads as a bug even when it is
@@ -25,16 +34,24 @@ import { oracleId as asOracleId } from '@roundtable/domain'
 // `IDENTITY_COLORS` rather than a hex in this file: Magic's five colours are
 // data the design system owns, and a second copy here is how the pie and the
 // mana symbols come to disagree about what blue is.
+// `metricValue` and `IMPACT_MAX` come from the package that draws the same two
+// numbers on the detail pane. That is the whole point of importing them: the
+// cell and the pane must print one card's impact identically, and a second
+// formatter here — even `String(n)` written out — is the drift this guards.
+// `metricValue` also rounds NOWHERE, which ADR-0025 §2 requires of any renderer
+// that is not prepared to move its rounding into `impact.ts`.
 import {
   CardFace,
   CardMetrics,
   IDENTITY_COLORS,
+  IMPACT_MAX,
   ManaCost,
   OracleText,
   levelSpec,
+  metricValue,
 } from '@roundtable/ui'
 import type { CardView, Color } from '@roundtable/ui'
-import type { DeckCommand, SynergyTag } from '@roundtable/domain'
+import type { ColumnMetric, DeckColumn, DeckCommand, SynergyTag } from '@roundtable/domain'
 import { DeckMenu } from './DeckMenu'
 import { Boundary } from './Boundary'
 import { Hint } from './Hint'
@@ -684,19 +701,84 @@ const Degree = ({
 const Costs = ({
   manaCost,
   price,
+  between,
 }: {
   manaCost: string | null | undefined
   price: number | null | undefined
+  /**
+   * What goes BETWEEN the two costs — the metric cells, and nothing else today.
+   *
+   * A slot rather than a second copy of this component for the feed. The user's
+   * words were "between price and mv", so the position is a fact about this row
+   * and belongs beside the two cells it is between; a feed that reproduced
+   * `.mana` and `.cash` itself in order to slip something in the middle would
+   * be two rows to keep in step for the sake of one gap.
+   *
+   * The deck rail passes nothing and is unchanged.
+   */
+  between?: React.ReactNode
 }): React.JSX.Element => (
   <>
     <span className="mana">
       <ManaCost cost={manaCost} />
     </span>
+    {between}
     <span className="cash" title="Cheapest printing — an estimate">
       {usd(price)}
     </span>
   </>
 )
+
+/**
+ * One metric's number, in the row.
+ *
+ * UNROUNDED, and that is a requirement rather than a default. ADR-0025 §2 binds
+ * the filter to the raw score, so `impact>=6.13` must never drop a row whose
+ * own cell says `6.13`; a renderer that wants to round has to move the rounding
+ * into `impact.ts` where the predicate reads it too. Nothing has, so this
+ * prints what `metricValue` prints on the detail pane — ragged decimal counts
+ * (`6.12` beside `13.464`) and all. The rejected alternative was `toFixed(2)`,
+ * which is tidier in a narrow column and would make the column disagree with
+ * the filter that is sitting directly above it.
+ *
+ * The cell is therefore sized for the longest value the scales can produce
+ * rather than truncated to fit — see `.metric-cell` in `styles.css`. An
+ * ellipsis in a number is not a shorter number, it is a wrong one.
+ *
+ * `title` AND `aria-label`, because `6.12` in a column with no header says
+ * nothing: both carry the metric's name and its scale, in the words the pane
+ * uses for the same figure.
+ */
+const MetricCell = ({
+  metric,
+  item,
+}: {
+  metric: ColumnMetric
+  item: MetricRow
+}): React.JSX.Element => {
+  const score = metricScore(item, metric)
+  const label = METRIC_LABELS[metric]
+  const read =
+    score === undefined
+      ? `${label}: not measured for this card`
+      : `${label} ${metricValue(score)} ${metricScale(metric)}`
+  return (
+    <span
+      className="metric-cell"
+      // Read by the container queries that decide which number the row gives up
+      // first when it runs out of width, and by the legend, which measures the
+      // cell it has to align a chip to.
+      data-metric={metric}
+      data-column-key={`metric:${metric}`}
+      title={read}
+      aria-label={read}
+    >
+      {/* The same middle dot the query columns use for "no". A blank cell would
+          be indistinguishable from a column that failed to render. */}
+      {score === undefined ? '·' : metricValue(score)}
+    </span>
+  )
+}
 
 const CardRow = ({
   card,
@@ -3524,10 +3606,16 @@ const ImportDialog = ({
  * special tier, no exemption — so the difference has to live in the value and
  * not in a second code path beside it.
  *
- * `metric` is a seam and nothing more. Nothing in this build creates one, and
- * the numbers behind it are being computed in `packages/domain`; what is here
- * is the shape that stops the sort, the legend and the request from each
- * assuming a column is a string.
+ * `metric` is no longer a seam: the two metrics arrive on every recommendation
+ * item, they are `DEFAULT_COLUMNS`, they draw their number in the row and they
+ * rank in the sort chain.
+ *
+ * THE DOMAIN'S TYPE, not a local copy of it. This used to be its own union with
+ * a `label` on the metric arm, which was a second declaration of the shape that
+ * `packages/db` stores and `packages/domain` parses — free to drift the day a
+ * third metric is added, and free to hold a `metric: string` the store cannot
+ * keep. The label is derived from the metric instead (`METRIC_LABELS`), because
+ * a label is how this app words a thing and has no business on the wire.
  *
  * THE UNION SURVIVES `impact` AND `efficiency` BECOMING QUERY FIELDS, and the
  * reason is that they answer different questions about the same number:
@@ -3546,9 +3634,54 @@ const ImportDialog = ({
  * builder can legitimately hold both `impact>=6` and the impact metric column
  * at once, and the two must key apart.
  */
-export type Column =
-  | { readonly kind: 'query'; readonly query: string }
-  | { readonly kind: 'metric'; readonly metric: string; readonly label: string }
+export type Column = DeckColumn
+
+/**
+ * What each metric is called on screen.
+ *
+ * Here and not on the column, so the persisted shape carries a metric NAME and
+ * nothing this app happens to call it today. A label stored with the deck would
+ * be a copy of this table inside every deck row, frozen at whatever the wording
+ * was on the day the column was added — so renaming "Efficiency" would rename
+ * it for new decks only.
+ *
+ * `Record<ColumnMetric, …>` rather than a lookup with a fallback: adding a
+ * third metric to the domain must be a compile error here, not a column headed
+ * with a raw enum name.
+ */
+const METRIC_LABELS: Readonly<Record<ColumnMetric, string>> = {
+  impact: 'Impact',
+  efficiency: 'Efficiency',
+}
+
+/**
+ * The words each metric's value is read WITH — the same ones the detail pane
+ * prints beside the same number.
+ *
+ * `6.12` on its own is unreadable, and a cell has no room for the meter and the
+ * working that `CardMetrics` draws. What it does have room for is the accessible
+ * name, so the scale rides there: "Impact 6.12 of 18.48", "Efficiency 0.549 per
+ * mana". Taken from `IMPACT_MAX` in `@roundtable/ui` rather than written out,
+ * for the reason that constant exists — a range typed twice is a range that
+ * disagrees with itself the day the model moves a rung.
+ */
+const metricScale = (metric: ColumnMetric): string =>
+  metric === 'impact' ? `of ${metricValue(IMPACT_MAX)}` : 'per mana'
+
+/**
+ * One row's value for one metric, or `undefined` when the row has none.
+ *
+ * READ OFF THE ROW, never recomputed from the card. Doc 18 §18.8 puts both
+ * numbers on every recommendation item precisely so that the cell, the filter
+ * and the detail pane are three readings of ONE number; computing it here from
+ * `cards.get(id)` would be a fourth implementation, and the first one free to
+ * disagree with `impact>=6`.
+ *
+ * `undefined` for a server from before the metrics shipped, and for the deck
+ * rail's rows, which are not recommendations at all.
+ */
+const metricScore = (item: MetricRow, metric: ColumnMetric): number | undefined =>
+  metric === 'impact' ? item.impact?.score : item.efficiency?.score
 
 /**
  * The identity of a column, for React keys and for `columnMatches`.
@@ -3561,7 +3694,8 @@ export const columnKey = (c: Column): string =>
   c.kind === 'query' ? c.query : `metric:${c.metric}`
 
 /** What the legend chip says. */
-export const columnLabel = (c: Column): string => (c.kind === 'query' ? c.query : c.label)
+export const columnLabel = (c: Column): string =>
+  c.kind === 'query' ? c.query : METRIC_LABELS[c.metric]
 
 /**
  * The subset the RECOMMENDATIONS REQUEST can carry.
@@ -3603,15 +3737,57 @@ export const columnRank = (
   if (column.kind === 'query') {
     return matches.get(column.query)?.has(oracleId) === true ? 0 : 1
   }
-  /*
-   * A metric column has no ranking in this build.
-   *
-   * Deliberately 0 for every card rather than a guess: a metric whose values
-   * have not arrived must contribute NOTHING to the order, so the columns after
-   * it decide. Inventing an order from data we do not have would be worse than
-   * a column that does not sort yet — it would look like it worked.
-   */
+  // Never reached — `ordersRows` keeps metric columns out of the chain, and the
+  // argument for that is written there. Zero, not a guess, so that a caller
+  // that did ask would get "no opinion" rather than an invented order.
   return 0
+}
+
+/**
+ * Whether a column has an opinion about the ORDER of the rows, as opposed to
+ * something to say about each one.
+ *
+ * A QUERY DOES; A METRIC DOES NOT. This is the one place the two kinds are not
+ * equal citizens, and it is worth the asymmetry:
+ *
+ *   A query column is a question the builder just asked, and promoting a filter
+ *   to a column means "keep every suggestion, and bring the ones I asked about
+ *   to the top". The button that does it says exactly that. Sorting is the
+ *   whole of what it buys over a tick.
+ *
+ *   A metric column is a number, and there is no question inside a number. To
+ *   order by it, the app would have to supply the question — and because both
+ *   metrics are present BY DEFAULT (`DEFAULT_COLUMNS`), it would supply it to
+ *   every deck that has never touched its columns. Two consequences, either
+ *   one of them disqualifying. Every feed would be silently re-ranked by a
+ *   card-intrinsic figure over the top of the deck-relative score that is the
+ *   product; and every query the builder actually typed would sort BELOW two
+ *   columns they never chose, so "+ column" would stop bringing matches to the
+ *   top and its own tooltip would become false.
+ *
+ * The way to sort by impact is the way doc 18 §18.7 already draws the line:
+ * type `impact>=6` and promote THAT. It is a question, it has a threshold, it
+ * ticks, and it sorts. "Which of these clear my bar" is the sortable half of
+ * the pair; "how do these compare" is the half you read.
+ *
+ * Rejected: ranking metrics and inserting new columns at the FRONT of the list
+ * so a fresh query still won. It rescues the promote button and breaks the
+ * documented composition rule instead — the first column added stops being the
+ * primary sort — and it still leaves a deck with no query columns ordered by
+ * impact rather than by score.
+ */
+export const ordersRows = (c: Column): boolean => c.kind === 'query'
+
+/**
+ * A row that may carry the two card-intrinsic metrics.
+ *
+ * Both optional: the deck rail's rows are cards rather than recommendations and
+ * have neither, and a server from before the metrics shipped sends neither.
+ */
+export interface MetricRow {
+  readonly oracleId: string
+  readonly impact?: { readonly score: number } | undefined
+  readonly efficiency?: { readonly score: number } | undefined
 }
 
 /**
@@ -3642,11 +3818,18 @@ export const sortByColumns = <T extends { readonly oracleId: string }>(
   columns: readonly Column[],
   matches: ReadonlyMap<string, ReadonlySet<string>>,
 ): readonly T[] => {
-  if (columns.length === 0) return items
+  /*
+   * Narrowed to the columns that actually order rows before anything is
+   * allocated. With `DEFAULT_COLUMNS` in force, "columns present, none of them
+   * sorting" is now the ORDINARY case rather than an edge, so the early-out has
+   * to cover it or every group is copied and sorted to arrive back at itself.
+   */
+  const ranking = columns.filter(ordersRows)
+  if (ranking.length === 0) return items
   return items
     .map((item, at) => ({ item, at }))
     .sort((a, b) => {
-      for (const column of columns) {
+      for (const column of ranking) {
         const delta =
           columnRank(column, a.item.oracleId, matches) -
           columnRank(column, b.item.oracleId, matches)
@@ -3751,11 +3934,25 @@ const ColumnLegend = ({
   columns,
   onRemove,
   measureRoot,
+  rows,
 }: {
   columns: readonly Column[]
   /** By `columnKey`, so a metric and a query of the same text cannot collide. */
   onRemove: (key: string) => void
   measureRoot: React.RefObject<HTMLElement | null>
+  /**
+   * How many rows the feed is currently drawing. A trigger, not a value: the
+   * effect below has to re-measure when the cells it aligns to appear.
+   *
+   * It used to be enough to re-run on `columns`, because the legend did not
+   * exist until somebody promoted a query — by which time the rows had long
+   * since arrived. With the two metrics present by default the legend now
+   * mounts WITH the workspace, before the first recommendation lands, so the
+   * one measurement it took found nothing and the chips never aligned again.
+   * The `ResizeObserver` does not cover it either: the region is a scroller of
+   * fixed height, so filling it with rows changes no box it watches.
+   */
+  rows: number
 }): React.JSX.Element | null => {
   const barRef = useRef<HTMLDivElement>(null)
   /** Distance from the bar's right edge to each column's centre, in px. */
@@ -3770,20 +3967,59 @@ const ColumnLegend = ({
       const bar = barRef.current
       const root = measureRoot.current
       if (bar === null || root === null) return
-      const cells = [...root.querySelectorAll('.card-row .col-cell')].slice(0, columns.length)
-      // Before the first result lands there is nothing to align to. Falling
-      // back to the plain row is better than pinning chips to a guess.
-      if (cells.length !== columns.length) {
-        setInsets(null)
-        return
+      /*
+       * Found BY KEY, not by position.
+       *
+       * This used to take the first `columns.length` cells in document order
+       * and pair them off with the list. That held only while every column
+       * drew one cell in one place; the metric columns draw theirs between the
+       * mana cost and the price, so the nth cell in the row stopped being the
+       * nth column and every chip would have pointed at the wrong one.
+       *
+       * First occurrence per key, because every row on the page carries the
+       * same set and the chips only need one row to measure against.
+       */
+      const first = new Map<string, Element>()
+      for (const cell of root.querySelectorAll('.card-row [data-column-key]')) {
+        const key = cell.getAttribute('data-column-key')
+        if (key !== null && !first.has(key)) first.set(key, cell)
+      }
+      /*
+       * Before the first result lands there is nothing to align to, and a cell
+       * a container query has hidden measures 0 px wide — which is the same
+       * situation, not a position. Falling back to the plain row is better than
+       * pinning chips to a guess, and better than stacking every chip over the
+       * one column that survived the squeeze.
+       */
+      const boxes: DOMRect[] = []
+      for (const c of columns) {
+        const cell = first.get(columnKey(c))
+        /*
+         * `getComputedStyle` and not only the measured width.
+         *
+         * A `ResizeObserver` callback is delivered inside the layout that
+         * triggered it, and the container queries that hide a cell can resolve
+         * in a later pass of that same layout — so `getBoundingClientRect`
+         * here can still report the width the cell had before it was hidden,
+         * and the chips stay pinned to columns that are no longer on screen.
+         * Observed doing exactly that when the detail pane opened and took the
+         * feed below the metric columns' threshold. Reading the computed style
+         * flushes it and answers the question actually being asked, which is
+         * "is this column drawn", not "how wide was it a moment ago".
+         */
+        if (cell === undefined || window.getComputedStyle(cell).display === 'none') {
+          setInsets(null)
+          return
+        }
+        const box = cell.getBoundingClientRect()
+        if (box.width === 0) {
+          setInsets(null)
+          return
+        }
+        boxes.push(box)
       }
       const barRight = bar.getBoundingClientRect().right
-      setInsets(
-        cells.map((cell) => {
-          const box = cell.getBoundingClientRect()
-          return barRight - (box.left + box.width / 2)
-        }),
-      )
+      setInsets(boxes.map((box) => barRight - (box.left + box.width / 2)))
     }
     measure()
 
@@ -3793,7 +4029,7 @@ const ColumnLegend = ({
     if (barRef.current !== null) observer.observe(barRef.current)
     if (measureRoot.current !== null) observer.observe(measureRoot.current)
     return () => observer.disconnect()
-  }, [columns, measureRoot])
+  }, [columns, measureRoot, rows])
 
   if (columns.length === 0) return null
   const aligned = insets !== null
@@ -3808,11 +4044,20 @@ const ColumnLegend = ({
     >
       {columns.map((c, i) => {
         const label = columnLabel(c)
-        // The chips are already in priority order, but "the order they happen
-        // to be in" is not something a reader can be expected to infer from a
-        // stack of chips — and it now decides what the list is sorted by. So
-        // the position is stated.
-        const rank = i === 0 ? 'sorts first' : `then by this${i > 1 ? ` (${String(i + 1)})` : ''}`
+        /*
+         * The number is the SORT POSITION, so only the columns that sort get
+         * one — see `ordersRows`. Counted over the ranking columns rather than
+         * over the whole list, or promoting the first query to a column would
+         * label it "3" and tell the builder two columns they never chose
+         * outrank the question they just asked. They do not.
+         */
+        const at = columns.filter(ordersRows).indexOf(c)
+        const rank =
+          at < 0
+            ? null
+            : at === 0
+              ? 'sorts first'
+              : `then by this${at > 1 ? ` (${String(at + 1)})` : ''}`
         return (
           <span
             className="column-chip"
@@ -3823,15 +4068,31 @@ const ColumnLegend = ({
                 : undefined
             }
           >
-            <span className="column-rank" aria-hidden="true">
-              {i + 1}
-            </span>
+            {rank === null ? null : (
+              <span className="column-rank" aria-hidden="true">
+                {at + 1}
+              </span>
+            )}
             <code>{label}</code>
             <button
               className="act"
               onClick={() => onRemove(columnKey(c))}
-              aria-label={`Remove the ${label} column — ${rank}`}
-              title={`Matches sort to the top; ${rank}. Remove this column.`}
+              /*
+               * Two sentences, because a metric chip and a query chip are two
+               * different objects. A query says where it sits in the sort; a
+               * metric says what its number is, which is the only thing a
+               * reader needs of it and the only claim it can honestly make.
+               */
+              aria-label={
+                rank === null
+                  ? `Remove the ${label} column — a number on every row`
+                  : `Remove the ${label} column — ${rank}`
+              }
+              title={
+                rank === null
+                  ? `Shows each card's ${label.toLowerCase()} beside its cost. Remove this column.`
+                  : `Matches sort to the top; ${rank}. Remove this column.`
+              }
             >
               ×
             </button>
@@ -4081,11 +4342,35 @@ export const Workspace = ({
    * never crosses a group boundary.
    *
    * Every add and every remove goes through `addColumn` / `removeColumn` rather
-   * than calling the setter in place. That is not tidiness: this list is about
-   * to become a persisted field on the deck, and the two functions are where
-   * the PATCH will go. Scattered setters would be four places to remember.
+   * than calling the setter in place, and that is where the PATCH lives —
+   * "any added or removed column should be saved along with the deck".
+   *
+   * SEEDED FROM THE DECK, through the domain's `columnsFor`, which is the one
+   * reader of the three states `Deck.columns` can be in. `useState` with an
+   * initialiser and no syncing effect is right because the workspace is keyed
+   * on `deck.id` and remounts when the deck changes; an effect would also fight
+   * the optimistic write below every time the PATCH's own response landed.
    */
-  const [columns, setColumns] = useState<readonly Column[]>([])
+  const [columns, setColumns] = useState<readonly Column[]>(() => columnsFor(deck.columns))
+  /*
+   * The one list, split by WHERE each kind is drawn — not into two lists.
+   *
+   * Both halves come off `columns` on every render, so there is no second piece
+   * of state to keep in step and no way for a column to exist in one place and
+   * not the other. `queryColumnsOf` already exists to stop the request and the
+   * renderer answering "which of these does the server evaluate" differently;
+   * this is the same discipline for "where does it land on the row".
+   */
+  const queryColumns = useMemo(() => columns.filter((c) => c.kind === 'query'), [columns])
+  const metricColumns = useMemo(() => columns.filter((c) => c.kind === 'metric'), [columns])
+  /**
+   * The query columns as one string, so an effect can depend on their VALUE.
+   *
+   * `JSON.stringify` and not `join`: one column of `mv<=3 t:land` and two
+   * columns of `mv<=3` and `t:land` join to the same string, and they are not
+   * the same request.
+   */
+  const queryColumnSignature = useMemo(() => JSON.stringify(queryColumnsOf(columns)), [columns])
   const [columnMatches, setColumnMatches] = useState<Map<string, Set<string>>>(new Map())
   const [draftQuery, setDraftQuery] = useState('')
   /**
@@ -4483,32 +4768,100 @@ export const Workspace = ({
     expandedRef.current = new Set()
     setExtraItems(new Map())
     refresh()
-    // `columns` belongs here for the same reason `query` does: adding one
-    // changes what the server must compute. Without it a new column showed no
-    // ticks until something else happened to trigger a recompute.
-  }, [query, columns, refresh])
+    /*
+     * The QUERY columns belong here for the same reason `query` does: adding
+     * one changes what the server must compute, and without it a new column
+     * showed no ticks until something else happened to trigger a recompute.
+     *
+     * The whole `columns` array does NOT, and the difference arrived with the
+     * metric columns. A metric needs no server evaluation — its number is
+     * already on the row (doc 10) — so `queryColumnsOf` is unchanged when one
+     * is added or removed, and depending on the array would spend a full
+     * recompute, several seconds of it, to come back with the list already on
+     * screen. Compared as a joined string because a fresh array of the same
+     * queries is a new identity every render.
+     */
+  }, [query, queryColumnSignature, refresh])
+
+  /**
+   * Write the column list to the deck — "the filters are basically part of the deck".
+   *
+   * OPTIMISTIC, unlike `saveEmphasis` below, and the difference is what the
+   * screen can show without the server. A focus changes the SUGGESTION ORDER
+   * and carries a `supporting` count only the server can compute, so painting
+   * it early would show half a claim. A column is drawn entirely from data the
+   * client already holds — a tick from `columnMatches`, a number from the row —
+   * so the round trip has nothing to add to it and waiting would put a spinner
+   * on a click that has already finished.
+   *
+   * The price of optimism is a rollback, and it is taken rather than skipped:
+   * a failed PATCH puts the previous list back and says so. A column that is on
+   * screen and not on the deck is the one outcome that has to be impossible,
+   * because it comes back missing after a reload with nothing to explain it.
+   *
+   * `[]` is SENT AS `[]`, never as null. They are different decks (migration
+   * 0015): null means "never set, draw the defaults", so sending null for a
+   * builder who has just removed their last column would hand both metrics
+   * straight back on the next load — the customisation that undoes itself.
+   */
+  const saveColumns = useCallback(
+    (next: readonly Column[], previous: readonly Column[]): void => {
+      void api
+        .patchDeck(deck.id, { columns: next })
+        .then((d) => {
+          // The same reason `setDeckOption` does this: a refresh reads
+          // `serverDeckRef` for the deck it applies, and a stale ref would
+          // write the pre-PATCH version straight back over this one.
+          serverDeckRef.current = d
+          setDeck(withPendingLocks(d))
+        })
+        .catch((e: unknown) => {
+          setColumns(previous)
+          setNotice(
+            `Could not save your columns — ${e instanceof Error ? e.message : 'the server did not answer'}. Put back the ones you had.`,
+          )
+        })
+    },
+    [deck.id, withPendingLocks],
+  )
 
   /*
    * The two ways the column list changes, and the only two.
    *
-   * Everything that adds or removes a column goes through these. They do
-   * nothing today that an inline `setColumns` would not — the point is that the
-   * list is becoming a persisted deck field, and when it does, the PATCH goes
-   * here rather than in each of the call sites that would otherwise exist.
+   * Everything that adds or removes a column goes through these, which is why
+   * there is exactly one place the PATCH had to be added.
    */
-  const addColumn = useCallback((column: Column): void => {
-    setColumns((current) =>
+  /*
+   * Read from `columnsRef` rather than from a `setColumns` updater. An updater
+   * has to be pure — React runs it twice under StrictMode — and firing the
+   * PATCH from inside one would send the same write twice. The ref is assigned
+   * on every render beside `deckRef` and `queryRef`, so it is the current list.
+   */
+  const addColumn = useCallback(
+    (column: Column): void => {
+      const current = columnsRef.current
       // Adding a column that is already there would give it two positions in
       // the sort chain, which is two different answers to "what sorts first".
-      current.some((c) => columnKey(c) === columnKey(column)) ? current : [...current, column],
-    )
-  }, [])
+      if (current.some((c) => columnKey(c) === columnKey(column))) return
+      const next = [...current, column]
+      setColumns(next)
+      saveColumns(next, current)
+    },
+    [saveColumns],
+  )
 
-  const removeColumn = useCallback((key: string): void => {
-    // The survivors keep their relative order, so removing the primary sort
-    // promotes the second rather than reshuffling the rest.
-    setColumns((current) => current.filter((c) => columnKey(c) !== key))
-  }, [])
+  const removeColumn = useCallback(
+    (key: string): void => {
+      const current = columnsRef.current
+      // The survivors keep their relative order, so removing the primary sort
+      // promotes the second rather than reshuffling the rest.
+      const next = current.filter((c) => columnKey(c) !== key)
+      if (next.length === current.length) return
+      setColumns(next)
+      saveColumns(next, current)
+    },
+    [saveColumns],
+  )
 
   // Basics never change for a deck — its colour identity is fixed by its
   // commanders — so this is fetched once rather than with every recompute.
@@ -5135,13 +5488,17 @@ export const Workspace = ({
    */
   const sortedGroups = useMemo(
     () =>
-      columns.length === 0
+      // The QUERY columns decide whether there is any sorting to do at all —
+      // the metric pair is present by default and orders nothing (`ordersRows`),
+      // so testing the whole list would rebuild every group on every render to
+      // arrive back at the order the server sent.
+      queryColumns.length === 0
         ? visibleGroups
         : visibleGroups.map((g) => ({
             ...g,
             items: [...sortByColumns(g.items, columns, columnMatches)],
           })),
-    [visibleGroups, columns, columnMatches],
+    [visibleGroups, columns, queryColumns, columnMatches],
   )
 
   /** Whether anything is left to show under a heading, filters applied. */
@@ -5944,17 +6301,57 @@ export const Workspace = ({
                 }}
                 aria-label="Show this query as a column, and sort by it, instead of filtering by it"
                 title={
-                  columns.length === 0
+                  // The QUERY columns, not every column: the metric pair does
+                  // not sort (see `ordersRows`), so with only those on screen
+                  // this query really would be the primary sort and telling the
+                  // builder it queues behind them would be false.
+                  queryColumns.length === 0
                     ? 'Add as a column: keeps every suggestion, ticks the ones that match, and sorts them to the top of their group'
                     : 'Add as a column: sorts within each group after the columns already here'
                 }
               >
                 + column
               </button>
+              {/*
+               * The way back for a metric column, and the reason it has to
+               * exist: `+ column` only makes QUERY columns, so without this
+               * removing Impact would be a one-way door. Doc 16 §16.5's rule
+               * about a customisation needing a way out applies in the other
+               * direction here — "present by default until you remove them" is
+               * only true of a column you can also put back.
+               *
+               * Shown ONLY while the metric is absent, so the bar carries at
+               * most two extra buttons and none at all in the ordinary case.
+               * An ordinary `<button>` beside the one above, so the tap target,
+               * the focus ring and the keyboard path are the ones this bar
+               * already has (AGENTS.md R4).
+               *
+               * Rejected: a menu of every available column. Two metrics do not
+               * need a menu, and a menu would have to be built again the day a
+               * third arrives anyway — at which point it is worth building.
+               */}
+              {COLUMN_METRICS.filter(
+                (m) => !columns.some((c) => c.kind === 'metric' && c.metric === m),
+              ).map((m) => (
+                <button
+                  key={m}
+                  className="act"
+                  onClick={() => addColumn({ kind: 'metric', metric: m })}
+                  aria-label={`Show ${METRIC_LABELS[m].toLowerCase()} as a column again`}
+                  title={`Put the ${METRIC_LABELS[m]} column back, beside each card's cost.`}
+                >
+                  + {METRIC_LABELS[m].toLowerCase()}
+                </button>
+              ))}
               <FilterHelp />
             </div>
 
-            <ColumnLegend columns={columns} onRemove={removeColumn} measureRoot={suggestionsRef} />
+            <ColumnLegend
+              columns={columns}
+              onRemove={removeColumn}
+              measureRoot={suggestionsRef}
+              rows={sortedGroups.reduce((n, g) => n + g.items.length, 0)}
+            />
 
             {queryError !== null ? <p className="problem">{queryError}</p> : null}
           </div>
@@ -6229,14 +6626,17 @@ export const Workspace = ({
                             )}
                           </span>
                         </span>
-                        {columns.map((c) => {
-                          const matched =
-                            c.kind === 'query' &&
-                            columnMatches.get(c.query)?.has(item.oracleId) === true
+                        {queryColumns.map((c) => {
+                          const matched = columnMatches.get(c.query)?.has(item.oracleId) === true
                           return (
                             <span
                               className="col-cell"
                               key={columnKey(c)}
+                              // The legend aligns its chips by finding the cell
+                              // for each column; index into a flat list of cells
+                              // stopped working the moment the two kinds sat in
+                              // two different places on the row.
+                              data-column-key={columnKey(c)}
                               data-match={matched}
                               title={`${columnLabel(c)}: ${matched ? 'yes' : 'no'}`}
                               aria-label={`${columnLabel(c)}: ${matched ? 'yes' : 'no'}`}
@@ -6248,6 +6648,30 @@ export const Workspace = ({
                         <Costs
                           manaCost={cards.get(item.oracleId)?.manaCost}
                           price={prices.get(item.oracleId)}
+                          /*
+                           * The metric columns, between the mana cost and the
+                           * price, where the user asked for them.
+                           *
+                           * ONE LIST, TWO PLACES TO DRAW IT \u2014 not two lists.
+                           * `columns` is still the only copy: it is what the
+                           * legend removes from, what the sort reads, and what
+                           * is saved with the deck. All that is split here is
+                           * WHERE a column lands, and the split is a function of
+                           * its `kind`.
+                           *
+                           * Why the metrics do not simply follow the query
+                           * columns after the name: a tick and a number are
+                           * different reading tasks. A tick is scanned down the
+                           * list; a number is compared with the other numbers on
+                           * its own row \u2014 its mana value and its price \u2014 which
+                           * is what "per mana" and "$4.10" are for. Query
+                           * columns also come and go with each question asked,
+                           * so a numeric block that stayed put is what lets the
+                           * figures read straight down the column.
+                           */
+                          between={metricColumns.map((c) => (
+                            <MetricCell key={columnKey(c)} metric={c.metric} item={item} />
+                          ))}
                         />
                         {inFlight.has(item.oracleId) ? (
                           // Already in the deck as far as the user is concerned; the

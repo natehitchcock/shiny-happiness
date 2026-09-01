@@ -163,6 +163,17 @@ beforeEach(() => {
     images: new Map(),
   } satisfies api.Hydrated)
   mocked.basicLands.mockResolvedValue({ items: [] })
+  /*
+   * `patchDeck` returns a PROMISE, and a bare `vi.fn()` returns undefined.
+   *
+   * It never mattered while nothing in these tests patched the deck. It does
+   * now: adding or removing a column saves the list to the deck (doc 18 §18.7),
+   * so every promote-to-column click goes through here, and a mock that answers
+   * with the wrong SHAPE throws inside the component rather than failing an
+   * assertion — which is an uncaught exception attributed to whichever test
+   * happened to be running.
+   */
+  mocked.patchDeck.mockResolvedValue({ ...deck, version: deck.version + 1 })
 })
 
 afterEach(cleanup)
@@ -247,8 +258,18 @@ describe('the column legend', () => {
     await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
     await addColumn('mv<=3')
 
-    await waitFor(() => expect(container.querySelector('.columns code')).not.toBeNull())
-    expect(container.querySelector('.columns code')?.textContent).toBe('mv<=3')
+    /*
+     * ONCE, which is what this test is named for — not "first". The legend also
+     * carries the two metric columns every deck starts with (doc 18 §18.7), so
+     * reading the first chip would now be reading `Impact`.
+     */
+    await waitFor(() =>
+      expect([...container.querySelectorAll('.columns code')].map((c) => c.textContent)).toContain(
+        'mv<=3',
+      ),
+    )
+    const labels = [...container.querySelectorAll('.columns code')].map((c) => c.textContent)
+    expect(labels.filter((l) => l === 'mv<=3')).toHaveLength(1)
   })
 
   it('puts no column marker in the group header', async () => {
@@ -294,7 +315,13 @@ describe('the column legend', () => {
       // can change without breaking the thing under test, which is removal.
       screen.getByLabelText(/^Remove the mv<=3 column/).click()
     })
-    expect(container.querySelector('.column-chip')).toBeNull()
+    // Its chip is gone. The deck's default metric columns are not — removing
+    // one column may never take another with it.
+    expect(screen.queryByLabelText(/^Remove the mv<=3 column/)).toBeNull()
+    expect([...container.querySelectorAll('.columns code')].map((c) => c.textContent)).toEqual([
+      'Impact',
+      'Efficiency',
+    ])
   })
 })
 

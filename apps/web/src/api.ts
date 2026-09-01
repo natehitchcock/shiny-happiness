@@ -4,7 +4,13 @@
  * Relative paths throughout: Vite proxies `/api` in development and the API is
  * same-origin in production, so no base URL is ever configured in the client.
  */
-import type { CardEfficiency, CardImpact, DeckCommand, DeckCommandBatch } from '@roundtable/domain'
+import type {
+  CardEfficiency,
+  CardImpact,
+  DeckColumn,
+  DeckCommand,
+  DeckCommandBatch,
+} from '@roundtable/domain'
 
 export interface Card {
   oracleId: string
@@ -149,6 +155,31 @@ export interface Recommendation {
    */
   combos: { id: string; pieces: string[]; produces: string[] }[]
   reasons: Reason[]
+  /**
+   * The two card-intrinsic metrics, on every row (doc 10, doc 18 §18.8).
+   *
+   * WHOLE OBJECTS, for the same reason `CardDetail` carries whole objects: the
+   * detail pane reads the tiers behind the number, and a row that carried only
+   * `.score` would make the pane fetch a second copy of a figure the feed
+   * already holds — which is how two surfaces start disagreeing about one card.
+   *
+   * BESIDE `reasons`, never inside it. A `Reason` answers "why was this
+   * suggested to me"; impact is true of the card in every deck that has ever
+   * existed, so as a reason it would satisfy the non-empty-tuple type while
+   * hollowing out the P4 guarantee behind it (doc 10, doc 18 §18.8).
+   *
+   * This declaration lagged the route exactly as `CardDetail`'s did: both have
+   * been sent on every item since the metrics shipped and were simply never
+   * declared here, so the client could not see them. The domain types
+   * themselves rather than a restatement — `apps/web` and `apps/api` run the
+   * same code (doc 09 §9.4), so a renamed field is a compile error here instead
+   * of a cell that silently draws nothing.
+   *
+   * Optional because a server from before the metrics shipped answers without
+   * them, and a metric cell draws its "no value" dot rather than `NaN`.
+   */
+  impact?: CardImpact
+  efficiency?: CardEfficiency
 }
 
 export interface Group {
@@ -181,6 +212,26 @@ export interface Deck {
    * putting its own tag in this array. In canonical order, not click order.
    */
   semanticEmphasis?: string[]
+  /**
+   * The columns this deck is judged in (doc 18 §18.7, migration 0015).
+   *
+   * THREE STATES, and the third is the point:
+   *
+   *   `undefined`  a server from before migration 0015. Same reading as null.
+   *   `null`       never set. Draw `DEFAULT_COLUMNS` — impact and efficiency.
+   *   `[]`         the builder removed every column. Draw none.
+   *
+   * Every reader goes through the domain's `columnsFor`, never `length === 0`,
+   * or a builder who cleared their columns gets them handed back on the next
+   * page load — a customisation that undoes itself.
+   *
+   * The domain type rather than a restatement, unlike `TargetOverrides` above.
+   * The two differ because a `DeckColumn` is a discriminated union whose
+   * `metric` arm is a CLOSED set: restating it here would let this file and
+   * `packages/domain` disagree about which metrics exist, and the parse that
+   * drops an unknown one lives in the domain.
+   */
+  columns?: readonly DeckColumn[] | null
   entries: { oracleId: string; zone: 'accepted' | 'excluded'; locked: boolean }[]
 }
 
@@ -407,6 +458,17 @@ export const patchDeck = (
      * end up with an emphasis that cannot be taken off.
      */
     semanticEmphasis?: readonly string[] | null
+    /**
+     * Replaced wholesale, like the two above — removing a column is sending the
+     * list one shorter.
+     *
+     * `null` means "back to the defaults", which is what null already means for
+     * `targetOverrides` (back to the archetype) and `semanticEmphasis` (back to
+     * no focus). `[]` is different here and only here: it means "I removed them
+     * all", and the server stores it. Sending `[]` where `null` was meant would
+     * take a deck's columns away permanently.
+     */
+    columns?: readonly DeckColumn[] | null
   },
 ): Promise<Deck> => request(`/decks/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 

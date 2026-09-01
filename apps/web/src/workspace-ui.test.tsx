@@ -121,6 +121,17 @@ beforeEach(() => {
     images: new Map(),
   } satisfies api.Hydrated)
   mocked.basicLands.mockResolvedValue({ items: [] })
+  /*
+   * `patchDeck` returns a PROMISE, and a bare `vi.fn()` returns undefined.
+   *
+   * It never mattered while nothing in these tests patched the deck. It does
+   * now: adding or removing a column saves the list to the deck (doc 18 §18.7),
+   * so every promote-to-column click goes through here, and a mock that answers
+   * with the wrong SHAPE throws inside the component rather than failing an
+   * assertion — which is an uncaught exception attributed to whichever test
+   * happened to be running.
+   */
+  mocked.patchDeck.mockResolvedValue({ ...deck, version: deck.version + 1 })
   mocked.searchCards.mockResolvedValue({ items: [] })
 })
 
@@ -493,16 +504,47 @@ describe('sortByColumns', () => {
     expect(first).toEqual(['c', 'a', 'd', 'b', 'e'])
   })
 
-  it('gives a metric column no opinion until its values exist', () => {
-    // A seam, not a feature: `impact` and `efficiency` are being computed in
-    // packages/domain. A column with no values must contribute NOTHING to the
-    // order rather than inventing one, so the query column beside it decides.
+  it('gives a metric column no opinion about the order, values or not', () => {
+    /*
+     * `ordersRows`, in one case. A metric column DRAWS a number and does not
+     * rank by it, so the query column beside it decides — even though this
+     * metric's values are right here on the rows and would have ordered them
+     * b, a, c if it had been allowed an opinion.
+     *
+     * Not a seam any more: the values arrive on every recommendation item. The
+     * reason is that both metrics are present by DEFAULT, so ranking by them
+     * would re-order every feed by a card-intrinsic figure nobody asked about
+     * and would push a query the builder just promoted below two columns they
+     * never chose.
+     */
+    const withImpact = [
+      { oracleId: 'a', impact: { score: 2 } },
+      { oracleId: 'b', impact: { score: 9 } },
+      { oracleId: 'c', impact: { score: 5 } },
+    ]
     const out = sortByColumns(
-      rows('a', 'b', 'c'),
-      [{ kind: 'metric', metric: 'impact', label: 'Impact' }, query('x')],
+      withImpact,
+      [{ kind: 'metric', metric: 'impact' }, query('x')],
       matches({ x: ['c'] }),
     )
     expect(out.map((r) => r.oracleId)).toEqual(['c', 'a', 'b'])
+  })
+
+  it('leaves the score order alone when every column is a metric', () => {
+    // The ordinary case now, not an edge: a deck on `DEFAULT_COLUMNS` has two
+    // columns and no sorting to do, and must get back the array it passed in
+    // rather than a re-sorted copy of it.
+    const items = rows('a', 'b', 'c')
+    expect(
+      sortByColumns(
+        items,
+        [
+          { kind: 'metric', metric: 'impact' },
+          { kind: 'metric', metric: 'efficiency' },
+        ],
+        new Map(),
+      ),
+    ).toBe(items)
   })
 })
 
@@ -593,7 +635,14 @@ describe('a column sorts the suggestion feed', () => {
       })
     }
 
-    await waitFor(() => expect(container.querySelectorAll('.column-chip')).toHaveLength(2))
+    /*
+     * Four chips — the two metric columns every deck starts with, plus these
+     * two — and TWO rank badges. Only the columns that sort are numbered
+     * (`ordersRows`), so `x` is still "sorts first" with the metrics on screen
+     * beside it. Numbering all four would tell the builder that two columns
+     * they never chose outrank the question they just asked.
+     */
+    await waitFor(() => expect(container.querySelectorAll('.column-chip')).toHaveLength(4))
     expect([...container.querySelectorAll('.column-rank')].map((r) => r.textContent)).toEqual([
       '1',
       '2',
@@ -601,6 +650,8 @@ describe('a column sorts the suggestion feed', () => {
     // In words as well, because a lone digit read aloud is not information.
     expect(screen.getByLabelText(/^Remove the x column . sorts first/)).toBeDefined()
     expect(screen.getByLabelText(/^Remove the y column . then by this/)).toBeDefined()
+    // And a metric chip makes no claim about the order at all.
+    expect(screen.getByLabelText(/^Remove the Impact column . a number on every row/)).toBeDefined()
   })
 
   it('refuses the same query twice — that would be two answers to "what sorts first"', async () => {
@@ -614,7 +665,8 @@ describe('a column sorts the suggestion feed', () => {
     await act(async () => {
       screen.getByLabelText(/Show this query as a column/).click()
     })
-    await waitFor(() => expect(container.querySelectorAll('.column-chip')).toHaveLength(1))
+    // Three: the two default metric columns, and the `x` just promoted.
+    await waitFor(() => expect(container.querySelectorAll('.column-chip')).toHaveLength(3))
 
     await typeFilter('x')
     expect(

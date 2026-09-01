@@ -241,6 +241,100 @@ describe('a deck row never loses the card name', () => {
   })
 })
 
+/**
+ * What a suggestion row gives up first, once it carries two more numbers.
+ *
+ * Order, top to bottom: efficiency, impact, price, mana cost. The name and the
+ * two decision buttons never go. Each of the four is a `display: none` under a
+ * `@container` query, so the whole order is readable as four thresholds and
+ * that is what these assert — the alternative, rendering the row at ten widths
+ * in jsdom, measures nothing, because jsdom reports every box as 0×0.
+ */
+describe('a suggestion row sheds its numbers in a stated order', () => {
+  const threshold = (selector: RegExp): number => {
+    const found = new RegExp(
+      `@container \\(max-width:\\s*(\\d+)px\\)\\s*\\{\\s*${selector.source}`,
+    ).exec(css)
+    expect(found).not.toBeNull()
+    return Number(found?.[1])
+  }
+
+  const efficiency = (): number => threshold(/\.card-row \.metric-cell\[data-metric='efficiency'\]/)
+  const impact = (): number => threshold(/\.card-row \.metric-cell\[data-metric='impact'\]/)
+  const price = (): number => threshold(/\.card-row \.cash/)
+
+  it('drops efficiency first, then impact', () => {
+    // The derived rate goes before the quantity it is derived from: impact is
+    // the pair's primary — first default column, stated ceiling, the example
+    // the filter help gives — and efficiency travels with a caveat a cell has
+    // no room for.
+    expect(efficiency()).toBeGreaterThan(impact())
+  })
+
+  it('keeps the price after both metrics have gone', () => {
+    /*
+     * This reverses the row's old order, and the reason is arithmetic rather
+     * than taste. At the width the detail pane leaves the feed, the row is
+     * already at the name's floor with no metric cells on it, so dropping the
+     * price frees nowhere near what two more numbers need — the metrics have
+     * to go at that width whatever else does, and taking the price as well
+     * would shed more than the row asks for.
+     */
+    expect(impact()).toBeGreaterThan(price())
+  })
+
+  it('never keeps a number at the cost of the card’s name', () => {
+    /*
+     * Both thresholds are DERIVED, and this is the derivation. Measured in a
+     * browser on a real deck: 25px combo badge, 74 mana, 50 per metric cell,
+     * 54 price, 36 Add, 49 Reject, 8px gaps and 16px of row padding. Each
+     * threshold is one pixel below the width at which the name would be pushed
+     * under its 5rem floor to keep that cell.
+     */
+    const fixed = 25 + 74 + 54 + 36 + 49
+    const nameFloor = 80
+    const rowPadding = 16
+    const gap = 8
+    const cell = 50
+    const withBoth = fixed + 2 * cell + 7 * gap + rowPadding + nameFloor
+    const withImpact = fixed + cell + 6 * gap + rowPadding + nameFloor
+    expect(efficiency()).toBe(withBoth - 1)
+    expect(impact()).toBe(withImpact - 1)
+  })
+
+  it('puts the shedding rules after the rules they override', () => {
+    /*
+     * A `@container` block adds NOTHING to specificity, so a `display: none`
+     * inside one loses the tie to a later `display: flex` at equal specificity
+     * and does nothing at all. The mana rule sat above its own base rule and
+     * was dead the whole time — the four-column comment in this sheet recorded
+     * it as a defect belonging to whoever owned the row.
+     *
+     * `.cash` never had the problem: its base rule declares no `display`.
+     */
+    const base = css.search(/\.card-row \.mana \{[^}]*display:\s*flex/)
+    const shed = css.search(/@container \(max-width:\s*\d+px\)\s*\{\s*\.card-row \.mana/)
+    expect(base).toBeGreaterThan(-1)
+    expect(shed).toBeGreaterThan(base)
+  })
+
+  it('sizes the metric cell for its widest value rather than truncating it', () => {
+    /*
+     * ADR-0025 §2 keeps the number unrounded, so the cell has to fit `13.464`
+     * — measured at 41px in this font, inside a 3.1rem floor. An ellipsis in a
+     * number is not a shorter number, it is a wrong one, so there must be no
+     * `text-overflow` on this cell.
+     */
+    const rule = /\.card-row \.metric-cell \{([^}]*)\}/.exec(css)
+    expect(rule).not.toBeNull()
+    const body = rule?.[1] ?? ''
+    expect(body).toMatch(/min-width:\s*3\.1rem/)
+    expect(body).not.toMatch(/text-overflow/)
+    // Ragged decimal counts are exactly what proportional digits ruin.
+    expect(body).toMatch(/font-variant-numeric:\s*tabular-nums/)
+  })
+})
+
 describe('the stylesheet parses', () => {
   /*
    * A merge dropped one `}` from `.bracket-source a` and `pnpm build` failed
