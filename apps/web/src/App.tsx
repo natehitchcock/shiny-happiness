@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
 import { cardDetail, hydrateCards } from './cardcache'
 import { usePipeline, type Phase } from './pipeline'
@@ -3615,34 +3615,218 @@ export const columnRank = (
 }
 
 /**
- * Sort one group's rows by the columns, in the order they were added.
+ * What the suggestions can be ordered BY, on the user's say-so (ADR-0028).
  *
- * Three rules, and the first outranks the other two:
+ * `default` is not a key and deliberately has no comparison behind it: it is
+ * the absence of a user ordering, which leaves the columns and the server's
+ * score in charge exactly as before. Modelled as a member of the union rather
+ * than `SortKey | null` so the `<select>` has something to be, and so every
+ * `switch` over the union has to answer for it.
+ *
+ * `efficiency` is the case this was asked for. `impact` is its sibling and
+ * comes from the same place on the row. The other four are here because they
+ * are the numbers already ON the row — a builder comparing two suggestions is
+ * reading the cost and the price off the same line — and adding them was four
+ * lines in `sortValue` rather than a second control.
+ *
+ * NOT here: anything the client would have to compute a new opinion to answer,
+ * such as "synergy" or "how good is this". The server already published its
+ * opinion as `score`, and a second one drawn from the same data by a different
+ * method would be two rankings disagreeing in public.
+ */
+export type SortKey = 'default' | 'efficiency' | 'impact' | 'score' | 'manaValue' | 'price' | 'name'
+
+export interface Sort {
+  readonly key: SortKey
+  readonly direction: 'asc' | 'desc'
+}
+
+/** No user ordering: the columns and the server's score decide, as they always did. */
+export const DEFAULT_SORT: Sort = { key: 'default', direction: 'desc' }
+
+/**
+ * How each key is named, and what its two directions are CALLED.
+ *
+ * The direction words are per key because "descending" is not a thing a reader
+ * checks a list against. Highest/lowest for a number and A–Z/Z–A for a name are
+ * what the list actually looks like, and R4 asks for the state in words rather
+ * than in the direction an arrow points.
+ */
+export const SORT_KEYS: readonly {
+  readonly key: SortKey
+  readonly label: string
+  readonly asc: string
+  readonly desc: string
+}[] = [
+  { key: 'default', label: 'Recommended', asc: 'Recommended', desc: 'Recommended' },
+  { key: 'efficiency', label: 'Efficiency', asc: 'Lowest first', desc: 'Highest first' },
+  { key: 'impact', label: 'Impact', asc: 'Lowest first', desc: 'Highest first' },
+  { key: 'score', label: 'Recommendation score', asc: 'Lowest first', desc: 'Highest first' },
+  { key: 'manaValue', label: 'Mana value', asc: 'Cheapest first', desc: 'Costliest first' },
+  { key: 'price', label: 'Price', asc: 'Cheapest first', desc: 'Costliest first' },
+  { key: 'name', label: 'Name', asc: 'A–Z', desc: 'Z–A' },
+]
+
+/**
+ * Which way round a key starts when it is chosen.
+ *
+ * Descending for every number, because "sort by efficiency" asked as a question
+ * means "which of these is the most efficient" far more often than the reverse
+ * — and the reverse is one click away. Ascending for a name, because Z–A is
+ * nobody's idea of alphabetical.
+ */
+export const initialDirectionFor = (key: SortKey): Sort['direction'] =>
+  key === 'name' ? 'asc' : 'desc'
+
+/** The row fields a sort can read. Structural, so a test fixture need not be an `api.Recommendation`. */
+export interface SortableRow {
+  readonly oracleId: string
+  readonly score?: number
+  readonly impact?: { readonly score: number }
+  readonly efficiency?: { readonly score: number }
+}
+
+/** The two hydrated maps the card-shaped keys read. Nothing else is fetched to sort. */
+export interface SortFacts {
+  readonly cards: ReadonlyMap<string, { readonly name: string; readonly manaValue: number }>
+  readonly prices: ReadonlyMap<string, number | null>
+}
+
+const NO_FACTS: SortFacts = { cards: new Map(), prices: new Map() }
+
+/**
+ * What one row is worth on one key. `null` means WE DO NOT KNOW.
+ *
+ * The distinction between "no value" and "zero" is the whole of this function
+ * and it is not pedantry. A land really does have an efficiency of 0 — the
+ * metric is total, a noncreature with no rules text scores `0 / (mv + 1)` — and
+ * it belongs at the bottom of "highest first" because that is what it measured.
+ * A row whose metrics this build did not send, or whose card has not hydrated
+ * yet, measured NOTHING, and answering 0 for it would put an unknown card in
+ * the same place as a Mountain and claim we had checked.
+ *
+ * This is the same argument `columnRank` makes for a metric column that has no
+ * values: a sort key with nothing behind it must contribute nothing, because
+ * inventing an order from data we do not have looks exactly like it worked.
+ */
+export const sortValue = (
+  key: SortKey,
+  row: SortableRow,
+  facts: SortFacts = NO_FACTS,
+): number | string | null => {
+  switch (key) {
+    case 'default':
+      return null
+    case 'efficiency':
+      return row.efficiency?.score ?? null
+    case 'impact':
+      return row.impact?.score ?? null
+    case 'score':
+      return row.score ?? null
+    case 'manaValue':
+      return facts.cards.get(row.oracleId)?.manaValue ?? null
+    case 'price':
+      // `Map<string, number | null>`: an entry present and null is an UNPRICED
+      // card, which is as unknown as a card with no entry at all. `??` collapses
+      // both to null on purpose.
+      return facts.prices.get(row.oracleId) ?? null
+    case 'name':
+      return facts.cards.get(row.oracleId)?.name ?? null
+    default: {
+      const never: never = key
+      return never
+    }
+  }
+}
+
+/**
+ * Order two rows on the chosen key. 0 for "this key has no opinion".
+ *
+ * UNKNOWNS SINK IN BOTH DIRECTIONS, and the rejected alternative is the one
+ * that falls out of a naive implementation: let the unknowns be a −Infinity and
+ * simply reverse with everything else. That produces a "least efficient first"
+ * list whose first rows are the cards whose efficiency nobody knows, which is
+ * the strongest possible claim made from the weakest possible evidence. Sinking
+ * them both ways means the top of the list is always the rows that actually
+ * answered the question, whichever end of the scale is being asked about.
+ *
+ * The cost of that choice, stated because it is real: the sort is not an
+ * involution. Ascending is not the reverse of descending — the unknown tail
+ * stays put, and so does the order of rows that tie. Both are deliberate.
+ */
+export const compareBySort = (
+  a: SortableRow,
+  b: SortableRow,
+  sort: Sort,
+  facts: SortFacts = NO_FACTS,
+): number => {
+  if (sort.key === 'default') return 0
+  const left = sortValue(sort.key, a, facts)
+  const right = sortValue(sort.key, b, facts)
+  if (left === null && right === null) return 0
+  if (left === null) return 1
+  if (right === null) return -1
+  const delta =
+    typeof left === 'string' && typeof right === 'string'
+      ? // `localeCompare`, not `<`: "Æther Vial" sorts before "Ajani" only under
+        // a collator, and Magic prints accents.
+        left.localeCompare(right)
+      : Number(left) - Number(right)
+  return sort.direction === 'asc' ? delta : -delta
+}
+
+/**
+ * Sort one group's rows by the columns, then by the key the user picked.
+ *
+ * Four rules, and the first outranks the other three:
  *
  *   GROUP ORDER IS UNTOUCHED (doc 05 §5.3, pillar P5). The groups are the app's
  *   argument about what this deck needs, in the order it wants to make it, and
  *   a sort that could move a row from "completes a combo" into "fills ramp"
  *   would be re-deciding that argument on the strength of a text query. So this
- *   sorts WITHIN a group and is never applied across them.
+ *   sorts WITHIN a group and is never applied across them. A global "most
+ *   efficient card anywhere" list is a different product and is not this.
  *
  *   COLUMNS COMPOSE. The first column added is the primary sort, the second
  *   breaks its ties, and so on — which is the only reading of "as a secondary
  *   sort, maintaining the ordering of previous sorts" that survives a third
  *   column being added.
  *
- *   SCORE IS THE LAST WORD. Two rows that every column agrees about keep the
- *   order the server sent them in, which is descending score. Carried as an
- *   explicit index rather than leaning on `Array.prototype.sort` being stable:
- *   the guarantee holds in every engine this ships to, but a deterministic
- *   order is the thing being promised and it should be visible in the code
- *   that promises it.
+ *   THE CHOSEN KEY BREAKS WHAT THE COLUMNS TIE, and does not outrank them
+ *   (ADR-0028). The rejected alternative was to put the key first, on the
+ *   reading that "sort by efficiency" means the most efficient row must be at
+ *   the top no matter what. It loses to the same rule that ordered the columns
+ *   among themselves: each sorting instruction the user adds breaks the ties of
+ *   the ones already there. A column says "bring the ones I asked about to the
+ *   top" — demoting it the moment a key is picked would silently cancel an
+ *   instruction the user gave and left on screen. With no columns, which is the
+ *   ordinary case, the key IS the primary sort and the distinction never
+ *   arises; a column's ranks are binary, so the key still fully orders each of
+ *   the two blocks it makes.
+ *
+ *   SCORE IS THE LAST WORD. Two rows that every column and the key agree about
+ *   keep the order the server sent them in, which is descending score. Carried
+ *   as an explicit index rather than leaning on `Array.prototype.sort` being
+ *   stable: the guarantee holds in every engine this ships to, but a
+ *   deterministic order is the thing being promised and it should be visible in
+ *   the code that promises it.
+ *
+ * REORDERS, NEVER SELECTS. Every input row comes out exactly once — there is no
+ * filter here and there must never be one. The list this receives has already
+ * been cut to `limitPerGroup` by the server and halved for the merged combo
+ * heading by `shownGroups`, INCLUDING the focus guarantee's rescue of the rows
+ * that halving would have dropped (ADR-0026). All of that happens upstream, so
+ * a user's sort cannot undo it — and "ascending by efficiency" honestly means
+ * the least efficient of the suggestions ON SCREEN, not of the pool.
  */
-export const sortByColumns = <T extends { readonly oracleId: string }>(
+export const sortByColumns = <T extends SortableRow>(
   items: readonly T[],
   columns: readonly Column[],
   matches: ReadonlyMap<string, ReadonlySet<string>>,
+  sort: Sort = DEFAULT_SORT,
+  facts: SortFacts = NO_FACTS,
 ): readonly T[] => {
-  if (columns.length === 0) return items
+  if (columns.length === 0 && sort.key === 'default') return items
   return items
     .map((item, at) => ({ item, at }))
     .sort((a, b) => {
@@ -3652,6 +3836,8 @@ export const sortByColumns = <T extends { readonly oracleId: string }>(
           columnRank(column, b.item.oracleId, matches)
         if (delta !== 0) return delta
       }
+      const chosen = compareBySort(a.item, b.item, sort, facts)
+      if (chosen !== 0) return chosen
       return a.at - b.at
     })
     .map((x) => x.item)
@@ -3838,6 +4024,117 @@ const ColumnLegend = ({
           </span>
         )
       })}
+    </div>
+  )
+}
+
+/**
+ * The ordering control: a key, a direction, and the way back (ADR-0028).
+ *
+ * A SORT AND NOT A FILTER, which is what was asked for and is the one property
+ * the whole thing has to keep: every suggestion that was under a heading is
+ * still under it afterwards, in a different order. Nothing here can remove a
+ * row, because nothing here touches the list — `sortByColumns` reorders and the
+ * groups themselves are never merged, split or resequenced (pillar P5).
+ *
+ * THE DEFAULT IS A REAL OPTION, first in the list and named `Recommended`, so
+ * getting back to it is the same gesture as leaving it. There is also an
+ * explicit button, because "set the select back to the value it started at"
+ * asks the reader to remember a value, and the state line beside it is where a
+ * reader looks when they want out.
+ *
+ * A `<select>` rather than a row of sortable column headers. The rows here are
+ * not a table — they are a name, a stack of reasons, some costs and two buttons
+ * — so there are no headers to click, and inventing some to hang a sort off
+ * would be a bigger change to the feed than the sort is. A select is also
+ * keyboard-operable and announces its own value for free (R4).
+ *
+ * The direction is a BUTTON LABELLED WITH ITS STATE IN WORDS — "Highest first",
+ * "A–Z" — not an arrow. R4: an arrow glyph is not a state a screen reader can
+ * read, and ▲/▼ is genuinely ambiguous even to a sighted reader about whether
+ * it shows the current order or the one a click would produce. The accessible
+ * name says both halves so there is nothing left to infer.
+ */
+const SortControl = ({
+  sort,
+  onChange,
+}: {
+  sort: Sort
+  onChange: (next: Sort) => void
+}): React.JSX.Element => {
+  const current = SORT_KEYS.find((k) => k.key === sort.key) ?? SORT_KEYS[0]!
+  const chosen = sort.key !== 'default'
+  const now = sort.direction === 'asc' ? current.asc : current.desc
+  const other = sort.direction === 'asc' ? current.desc : current.asc
+  // A `for`/`id` pair rather than wrapping the select in its label: a wrapping
+  // label's accessible name is computed from its whole subtree, which here is
+  // the word "Sort" followed by every option in the list.
+  const id = useId()
+
+  return (
+    <div className="sort-bar">
+      <div className="sort-field">
+        <label htmlFor={id}>Sort</label>
+        <select
+          id={id}
+          value={sort.key}
+          onChange={(e) => {
+            const key = e.target.value as SortKey
+            // A fresh direction per key, not the one left over from the last:
+            // "Z–A" is a strange thing to land on when you have just asked for
+            // names, and `initialDirectionFor` says why.
+            onChange({ key, direction: initialDirectionFor(key) })
+          }}
+        >
+          {SORT_KEYS.map((k) => (
+            <option key={k.key} value={k.key}>
+              {k.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {chosen ? (
+        <>
+          <button
+            type="button"
+            className="act sort-direction"
+            onClick={() =>
+              onChange({ ...sort, direction: sort.direction === 'asc' ? 'desc' : 'asc' })
+            }
+            aria-label={`${current.label}: ${now.toLowerCase()}. Activate to sort ${other.toLowerCase()} instead.`}
+            title={`Sort ${other.toLowerCase()} instead`}
+          >
+            {now}
+          </button>
+          <button
+            type="button"
+            className="act sort-reset"
+            onClick={() => onChange(DEFAULT_SORT)}
+            title="Put the suggestions back in the order this deck was advised to consider them"
+          >
+            Recommended order
+          </button>
+        </>
+      ) : null}
+      {/*
+        Whose ordering this is, said out loud.
+
+        A live region and not a `title`: the reader who most needs to know that
+        the top row stopped being a recommendation is the one who cannot see the
+        list rearrange. Present in both states rather than mounted on demand —
+        an `aria-live` node inserted at the same moment its text appears is not
+        reliably announced.
+
+        The second sentence is the honest scope. The server cut each group to
+        `limitPerGroup` before any of this ran, so "lowest efficiency" means the
+        lowest of what is on screen. A control that read as though it searched
+        the corpus would be promising something it cannot do.
+      */}
+      <p className="note sort-state" role="status">
+        {chosen
+          ? `Your order: ${current.label.toLowerCase()}, ${now.toLowerCase()}. Same suggestions in every group, reordered — these are the ones already on screen, not the whole card pool.`
+          : 'Recommended order — the top of each group is what this deck is being advised to add.'}
+      </p>
     </div>
   )
 }
@@ -4087,6 +4384,20 @@ export const Workspace = ({
    */
   const [columns, setColumns] = useState<readonly Column[]>([])
   const [columnMatches, setColumnMatches] = useState<Map<string, Set<string>>>(new Map())
+  /**
+   * The ordering the USER asked for, if any (ADR-0028).
+   *
+   * Not persisted anywhere, and not sent to the server. It changes nothing
+   * about what is recommended or which group anything is in — it reorders rows
+   * already on the page — so there is nothing here for the deck record or for a
+   * request to carry, and a round trip would make a reorder feel like a query.
+   *
+   * `DEFAULT_SORT` is the resting state and the interface always offers a way
+   * back to it: while it holds, the top of each group is the app's
+   * recommendation, and the moment it does not, the bar under the filter says
+   * whose ordering is on screen.
+   */
+  const [sort, setSort] = useState<Sort>(DEFAULT_SORT)
   const [draftQuery, setDraftQuery] = useState('')
   /**
    * Run the filter on its own if the box sits untouched.
@@ -5123,25 +5434,35 @@ export const Workspace = ({
   )
 
   /**
-   * The same groups, with each one's rows put in column order.
+   * The same groups, with each one's rows put in column order and then in the
+   * order the user asked for.
    *
    * The groups themselves are NOT reordered and no row moves between them
    * (doc 05 §5.3, pillar P5) — the sort happens inside each heading, because
-   * the headings are the app's argument about what this deck needs and a text
-   * query does not get to re-decide that.
+   * the headings are the app's argument about what this deck needs and neither
+   * a text query nor a sort key gets to re-decide that.
    *
    * Rows an expand fetched are folded in above, so they sort with everything
-   * else rather than sitting in a block at the end.
+   * else rather than sitting in a block at the end. So do the rows the focus
+   * guarantee rescued (ADR-0026): they are in `g.items` by the time this runs,
+   * and under a chosen key they take the place their own number earns. The
+   * guarantee is about being ON the page, not about being at a particular end
+   * of it — see ADR-0028.
+   *
+   * `cards` and `prices` are dependencies because two of the keys read them.
+   * That is also why the list re-sorts as hydration lands: a row sorting by a
+   * name it does not have yet is one we say nothing about (`null`), and it
+   * takes its place the moment the name arrives.
    */
   const sortedGroups = useMemo(
     () =>
-      columns.length === 0
+      columns.length === 0 && sort.key === 'default'
         ? visibleGroups
         : visibleGroups.map((g) => ({
             ...g,
-            items: [...sortByColumns(g.items, columns, columnMatches)],
+            items: [...sortByColumns(g.items, columns, columnMatches, sort, { cards, prices })],
           })),
-    [visibleGroups, columns, columnMatches],
+    [visibleGroups, columns, columnMatches, sort, cards, prices],
   )
 
   /** Whether anything is left to show under a heading, filters applied. */
@@ -5955,6 +6276,18 @@ export const Workspace = ({
             </div>
 
             <ColumnLegend columns={columns} onRemove={removeColumn} measureRoot={suggestionsRef} />
+
+            {/*
+              Under the columns, not inside the filter bar.
+
+              The bar is already an input, a search button, "+ column" and a
+              help button, and at 360 px a fifth control in it wraps into a
+              second row anyway. Below the legend it sits directly above the
+              first heading, which is where the reader is looking when the
+              question "why is this card first" occurs to them — and it reads in
+              the order the sort actually applies: columns, then key.
+            */}
+            <SortControl sort={sort} onChange={setSort} />
 
             {queryError !== null ? <p className="problem">{queryError}</p> : null}
           </div>
