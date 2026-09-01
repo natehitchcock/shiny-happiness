@@ -133,33 +133,16 @@ button {
 }
 
 /*
- * A narrow rail drops the price, then the mana cost.
- *
  * A CONTAINER query, not a media query: the rail's width is set by the
  * workspace grid and by wherever the user has dragged the divider, so the
  * viewport does not know it. A `@media` rule here would hide the price on a
  * wide screen with a dragged-narrow rail and show it on a phone.
  *
- * The price goes first because it is the most disposable thing on the row: it
- * is an estimate that goes stale within a day (ADR-0009 Q7) and it is repeated
- * in the deck total above. The mana cost follows, because at that width the
- * choice is between a cost and a name, and a row that cannot say which card it
- * is has stopped being a row.
+ * The rules themselves are at the END of this section rather than here, and
+ * that is not tidiness — see the block above them.
  */
 .region {
   container-type: inline-size;
-}
-
-@container (max-width: 320px) {
-  .card-row .cash {
-    display: none;
-  }
-}
-
-@container (max-width: 250px) {
-  .card-row .mana {
-    display: none;
-  }
 }
 
 .card-row .cost {
@@ -199,6 +182,116 @@ button {
   text-align: right;
   min-width: 3.4rem;
   flex: 0 0 auto;
+}
+
+/*
+ * Impact and efficiency, between the mana cost and the price.
+ *
+ * A third fixed column of the same family as the two costs, and drawn like
+ * them: monospace, right-aligned, fixed minimum, so the figures read straight
+ * down the list instead of jittering with each card's name.
+ *
+ * `min-width` and NO `text-overflow`. The value is printed unrounded, because
+ * ADR-0025 §2 binds the filter to the raw score — `impact>=6.13` must not drop
+ * a row whose own cell says `6.13` — so the widest thing this can hold is
+ * something like `13.464`, and 3.1rem is that string in this font with a
+ * character to spare. A cell that ellipsised a number would not be showing a
+ * shorter number, it would be showing a wrong one.
+ *
+ * `tabular-nums` because the whole value of a column of numbers is that the
+ * decimal points line up, and the ragged decimal counts the no-rounding rule
+ * produces are exactly the case proportional digits ruin.
+ */
+.card-row .metric-cell {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--parchment-dim);
+  text-align: right;
+  min-width: 3.1rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/*
+ * WHAT THE ROW GIVES UP FIRST, and the order is: efficiency, impact, price,
+ * mana cost. The name and the two decision buttons never go.
+ *
+ * These sit AFTER the rules they override on purpose. A `@container` block adds
+ * nothing to specificity, so `@container … { .card-row .mana { display: none } }`
+ * declared before `.card-row .mana { display: flex }` loses the tie to it and
+ * does nothing at all. That is not hypothetical: the mana rule sat above its
+ * base rule and was dead the whole time — a shedding order with a rule in it
+ * that never fires is not an order, so it is fixed here rather than left as a
+ * comment about a defect.
+ *
+ * WHY THE METRICS GO BEFORE THE PRICE, which reverses what this block used to
+ * say. The price used to be first because it is the most disposable thing on
+ * the row — an estimate that goes stale within a day (ADR-0009 Q7), repeated in
+ * the deck total. It still is. What changed is the arithmetic: measured, a feed
+ * row at the width the detail pane leaves it is already at the name's 5rem
+ * floor with no metric cells on it at all, so dropping the price alone frees
+ * nowhere near the ~100px two more numbers need. The metrics have to go at that
+ * width whatever else does, and taking the price as well would be shedding more
+ * than the row asks for. So the price keeps its place, and with it the promise
+ * `styles.test.ts` pins: opening a card must not reformat the rows behind it.
+ *
+ * Efficiency before impact. Impact is the primary of the pair — it is the first
+ * default column, it is the one with a stated ceiling to read a bare number
+ * against, and it is the example the filter help gives. Efficiency is a derived
+ * rate that travels with a caveat the pane has room for and a cell does not ("a
+ * small cheap card can out-rate a bomb"), so it is the worse of the two to be
+ * left alone with.
+ *
+ * Rejected: shedding by list position, last-added first. It reads well until
+ * the metrics sit at a fixed position and a builder's third query column,
+ * added a moment ago, is the thing they are watching.
+ *
+ * Nothing here hides a metric cell from the DECK rail, because the rail's rows
+ * have none — they are cards, not recommendations.
+ *
+ * THE TWO NUMBERS ARE DERIVED, not chosen. Measured in a browser on a real
+ * deck, a feed row holds: 25px of combo badge, 74 of mana, 50 per metric cell,
+ * 54 of price, 36 of Add, 49 of Reject, seven 8px gaps and 16px of its own
+ * padding. Each threshold is the width one below the point at which the name
+ * would have to give way for the cell to stay:
+ *
+ *   490px  everything fits, name exactly at its 5rem floor  → hide below, 489
+ *   432px  the same without efficiency, name back at 5rem   → hide below, 431
+ *
+ * So neither metric is ever kept at the price of the name, which is the one
+ * thing on a row that says which card the buttons act on.
+ *
+ * WHAT THIS COSTS, stated because it is the visible consequence: at the 1320px
+ * viewport where the detail pane takes a column of its own, the feed is 426px
+ * wide and its query container 394, so opening a card hides BOTH metric cells.
+ * It cannot be avoided by narrowing them — the widest value this can hold is
+ * 41px, and even at that size the pair needs 474px against the 394 available.
+ * The pane that caused the squeeze is drawing both numbers in full, with their
+ * tiers and their working, for the card being decided.
+ */
+@container (max-width: 489px) {
+  .card-row .metric-cell[data-metric='efficiency'] {
+    display: none;
+  }
+}
+
+@container (max-width: 431px) {
+  .card-row .metric-cell[data-metric='impact'] {
+    display: none;
+  }
+}
+
+@container (max-width: 320px) {
+  .card-row .cash {
+    display: none;
+  }
+}
+
+@container (max-width: 250px) {
+  .card-row .mana {
+    display: none;
+  }
 }
 
 /*
