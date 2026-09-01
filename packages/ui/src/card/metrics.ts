@@ -34,6 +34,35 @@ export interface ImpactView {
   readonly fragile: boolean
 }
 
+/**
+ * Where this card's role sits, as a view model. Same rule as `ImpactView`.
+ *
+ * `RoleImpactBand` + `impactRolePlacement` + `roleImpactIsMostlyUnreadable`
+ * from `@roundtable/domain`, flattened. The two derived fields arrive already
+ * decided rather than being recomputed here, and that is deliberate: a
+ * placement computed in the renderer could disagree with the one the domain
+ * would give, and the whole point of the line is that its cutoffs are the
+ * corpus's rather than the interface's. This file formats; it does no
+ * arithmetic on corpus data.
+ *
+ * The structural match is checked, not promised —
+ * `apps/web/src/metrics-contract.test.ts` imports both and fails if the domain
+ * types stop assigning to these.
+ */
+export interface ImpactRoleView {
+  /** The role name, exactly as `RoleDot` prints it on the badge above. */
+  readonly role: string
+  /** Commander-legal cards holding this role. */
+  readonly n: number
+  readonly q1: number
+  readonly q3: number
+  readonly placement: 'bottom-quarter' | 'middle-half' | 'top-quarter'
+  /** More than half the role names nothing the model can count. */
+  readonly mostlyUnreadable: boolean
+  /** How many of the `n` name nothing the model can count. */
+  readonly noCountableEffect: number
+}
+
 /** `CardEfficiency` from `@roundtable/domain`, as a view model. Same rule. */
 export interface EfficiencyView {
   readonly score: number
@@ -173,6 +202,74 @@ export const impactRows = (impact: ImpactView): readonly MetricRow[] => {
 }
 
 /**
+ * A card count, with the thousands grouped.
+ *
+ * `11820` sitting in a sentence beside `6.12` and `18.48` reads as another
+ * score. `11,820` cannot be mistaken for one. Grouped by hand rather than
+ * through `Intl.NumberFormat`, which formats to the RUNTIME's locale — the same
+ * sentence would come back with a full stop in it on a de-DE browser, and this
+ * copy is English either way.
+ */
+const count = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+
+/**
+ * WHERE THIS CARD SITS AMONG THE CARDS THAT SHARE ITS JOB (doc 18 §18.12).
+ *
+ * THE PROBLEM. Impact is a property of the card and is NOT comparable across
+ * roles. Sol Ring scores 0.68 against a ceiling of 18.48, and a reader handed
+ * that with no comparison concludes the app rates one of the format's defining
+ * cards as near-worthless. It is the median ramp card. Wrath of God's 6.12
+ * looks enormous next to it and is the BOTTOM of the middle half of board
+ * wipes. One bar for all eighteen roles would tell a builder their entire mana
+ * base was bad, which is the specific harm this line exists to prevent.
+ *
+ * DESCRIPTIVE, NOT PRESCRIPTIVE, and the distinction is the reason this is
+ * allowed to exist at all. doc 18 §18.9 declined to give the model bands and
+ * `impactRows` above rejected letter grades because "every cutoff would be the
+ * renderer's opinion". Neither is being overturned. Nothing here says what a
+ * card SHOULD score; it names the quartile the card lands in and PRINTS THE
+ * TWO QUARTILES IT USED, so the cutoff is a corpus measurement a reader can
+ * check and disagree with rather than a bar the interface invented.
+ *
+ * ONE ROLE — the card's `primaryRole`, the one the badge above already shows.
+ * Rejected: a line per role for the 4,891 cards that hold more than one.
+ * Measured, 1,251 of those have roles that DISAGREE about the placement
+ * (Pathway Arrows is typical spot removal and top-quarter equipment), so the
+ * multi-role version hands the reader two verdicts and no way to choose. The
+ * pane names one role; the comparison names the same one.
+ *
+ * Rejected: the whole eighteen-row table, behind a `Hint` or otherwise. The
+ * pane is 21rem and a bottom sheet on a phone, and it does not need the table —
+ * it is showing ONE card, so it needs one row of it. That is also why this is
+ * plain text with no control: the reader whose Sol Ring reads 0.68 must not
+ * have to suspect they need help before the help appears.
+ */
+export const impactRoleLine = (
+  impact: ImpactView,
+  role: ImpactRoleView | undefined,
+): string | null => {
+  if (role === undefined) return null
+  // The same rule `impactRows` follows. The pane already tells a textless card
+  // there is nothing here to measure, and ranking it against its peers directly
+  // underneath would contradict the sentence above it.
+  if (impact.score === 0) return null
+  return `${PLACEMENT[role.placement]} of the ${count(role.n)} ${role.role} cards in the corpus; half of them score ${metricValue(role.q1)} to ${metricValue(role.q3)}.`
+}
+
+/**
+ * Named for the quartile, not graded.
+ *
+ * "Bottom quarter" is a description of where the card fell, checkable against
+ * the two numbers in the same sentence. "D-" is a verdict, and a verdict is
+ * what §18.9 and `impactRows` both refused.
+ */
+const PLACEMENT: Readonly<Record<ImpactRoleView['placement'], string>> = {
+  'bottom-quarter': 'Bottom quarter',
+  'middle-half': 'Middle half',
+  'top-quarter': 'Top quarter',
+}
+
+/**
  * What the tiers alone would leave a reader to guess wrong.
  *
  * The blindness note is unconditional and deliberate. `impact.ts`'s own
@@ -186,7 +283,10 @@ export const impactRows = (impact: ImpactView): readonly MetricRow[] => {
  * goes stale the first time a regex moves, with nothing to catch it — a UI
  * string is not covered by the model's tests.
  */
-export const impactNotes = (impact: ImpactView): readonly string[] => {
+export const impactNotes = (
+  impact: ImpactView,
+  role?: ImpactRoleView | undefined,
+): readonly string[] => {
   const notes: string[] = []
   if (impact.score === 0) {
     // Exactly 0, and only 0, for a card with no rules text at all — see the
@@ -202,6 +302,31 @@ export const impactNotes = (impact: ImpactView): readonly string[] => {
   if (impact.fragile) {
     // Otherwise "Repeats: once" on a permanent looks like a misclassification.
     notes.push('It sacrifices itself, so it counts as one-shot whatever its type line says.')
+  }
+  /*
+   * The blind spot, QUANTIFIED where the role makes it the headline rather than
+   * a caveat.
+   *
+   * "Effects only" is true of every card in the format, which is exactly what
+   * makes it easy to skim past — and for a land or a ramp rock it is not a
+   * footnote, it is the whole explanation of the number. The model finds
+   * nothing to count on 896 of 1,194 lands and 961 of 1,401 ramp cards, so the
+   * range on the line above is largely a measurement of its own blindness, and
+   * a reader cannot tell that from the range.
+   *
+   * REPLACES the generic sentence rather than stacking on it: they are the same
+   * claim and the sourced one is strictly better. Two caveats saying one thing
+   * in a 21rem column is how a pane teaches people to stop reading it.
+   *
+   * Only when the model reads fewer than half the role. Spot removal is 0 of
+   * 3,273 and a "blind spot" line there would be a false statement wearing the
+   * costume of sourcing.
+   */
+  if (role !== undefined && role.mostlyUnreadable) {
+    notes.push(
+      `Effects only — and on ${count(role.noCountableEffect)} of those ${count(role.n)} it finds nothing to count at all, so that range is largely its blind spot.`,
+    )
+    return notes
   }
   notes.push('Effects only: a card whose job is mana or a tax reads low here.')
   return notes

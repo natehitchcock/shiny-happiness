@@ -431,6 +431,28 @@
   margin: 0;
   color: var(--parchment);
 }
+/*
+ * Where this card sits among the cards that share its role (doc 18 §18.12).
+ *
+ * Full `--parchment`, not the dim of a note, and a step larger: this is the
+ * sentence that makes the figure above it mean anything — "0.68" is a verdict
+ * on Sol Ring until this line says it is the median ramp card — so it must not
+ * read as a footnote to the number it rescues.
+ *
+ * One colour for the whole sentence rather than brass on the leading
+ * "Middle half". The placement is only true BECAUSE of the quartiles in the
+ * second clause, and highlighting the verdict away from its evidence is how a
+ * descriptive line starts being read as a grade — which §18.9 refused.
+ *
+ * No `text-wrap: balance`. At 21rem this is three lines and balancing would
+ * leave a short orphan under a full-width line for no gain; the bottom sheet is
+ * narrower still.
+ */
+.rt-metric-role {
+  margin: 2px 0 0;
+  font: 400 12px/1.45 var(--ui);
+  color: var(--parchment);
+}
 .rt-metric-note {
   margin: 0;
   font: 400 11px/1.45 var(--ui);

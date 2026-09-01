@@ -15,6 +15,19 @@
  * in favour of simply printing them: a metric a reader has never seen has to
  * explain itself on first sight, and an explanation behind a button is an
  * explanation for people who already suspect they need it.
+ *
+ * `impactRole` was held to the same rule, and it is the case that tested it.
+ * The app has a `Hint` popover now — top-layer, unclipped, keyboard and
+ * touch-equivalent — and the obvious move was to hang the role figures off it.
+ * Rejected twice over. The pane is 21rem and a bottom sheet on a phone, but it
+ * is showing ONE card, so it never needed the eighteen-row table that width
+ * would have forced behind a disclosure; one row fits in two lines of prose.
+ * And the reader who most needs this line is the one looking at Sol Ring's 0.68
+ * and quietly concluding the app rates it badly — they have no reason to press
+ * anything, because they do not yet know they have been misled. Help that only
+ * opens on request cannot reach them. (`Hint` also lives in `apps/web`, and
+ * `@roundtable/ui` does not import from an app — but that is a consequence of
+ * the layering, not the reason.)
  */
 
 import type { JSX } from 'react'
@@ -24,9 +37,11 @@ import {
   efficiencyWorking,
   impactFraction,
   impactNotes,
+  impactRoleLine,
   impactRows,
   metricValue,
   type EfficiencyView,
+  type ImpactRoleView,
   type ImpactView,
 } from './metrics.js'
 
@@ -34,12 +49,26 @@ export interface CardMetricsProps {
   /** Absent while detail is still in flight, and for any surface that has none. */
   readonly impact?: ImpactView | undefined
   readonly efficiency?: EfficiencyView | undefined
+  /**
+   * Where the card's own role sits, so `6.12` and `0.68` can be read correctly
+   * (doc 18 §18.12).
+   *
+   * Optional, and absent wherever the card's role is: a search result, an
+   * unresolved import. The pane then reads exactly as it did before.
+   */
+  readonly impactRole?: ImpactRoleView | undefined
 }
 
-export const CardMetrics = ({ impact, efficiency }: CardMetricsProps): JSX.Element | null => {
+export const CardMetrics = ({
+  impact,
+  efficiency,
+  impactRole,
+}: CardMetricsProps): JSX.Element | null => {
   // Nothing at all rather than a heading over two blanks. Detail arrives after
   // the card does, and a section that flashes empty reads as a broken panel.
   if (impact === undefined && efficiency === undefined) return null
+
+  const roleLine = impact === undefined ? null : impactRoleLine(impact, impactRole)
 
   return (
     <section className="rt-metrics" aria-label="Impact and efficiency">
@@ -88,7 +117,23 @@ export const CardMetrics = ({ impact, efficiency }: CardMetricsProps): JSX.Eleme
               ))}
             </dl>
           )}
-          {impactNotes(impact).map((note) => (
+          {/*
+           * WHERE THE NUMBER BECOMES READABLE (doc 18 §18.12).
+           *
+           * Directly under the tier rows, because it is the answer to the
+           * question those rows raise but cannot settle — "everything at once,
+           * once, on an opponent's side" tells a reader what the card does and
+           * still leaves 6.12 floating against a ceiling of 18.48. This is the
+           * sentence that says whether 6.12 is a lot. It sits above the notes
+           * because the notes qualify it.
+           *
+           * Its own paragraph rather than a fourth `dl` row: Reach, Repeats and
+           * Falls on are three facts about THIS card's text, and a corpus
+           * comparison is a different kind of statement that should not be
+           * dressed as a fourth tier.
+           */}
+          {roleLine === null ? null : <p className="rt-metric-role">{roleLine}</p>}
+          {impactNotes(impact, impactRole).map((note) => (
             <p className="rt-metric-note" key={note}>
               {note}
             </p>

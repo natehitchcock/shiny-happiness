@@ -24,7 +24,7 @@
  * already means.
  */
 
-import type { EfficiencyView, ImpactView } from './metrics.js'
+import type { EfficiencyView, ImpactRoleView, ImpactView } from './metrics.js'
 
 export type Color = 'W' | 'U' | 'B' | 'R' | 'G'
 
@@ -86,4 +86,15 @@ export interface CardView {
    */
   readonly impact?: ImpactView | undefined
   readonly efficiency?: EfficiencyView | undefined
+  /**
+   * What impact looks like for the cards that share this one's `primaryRole`
+   * (doc 18 §18.12), so `0.68` reads as "the median ramp card" rather than as
+   * "a twenty-seventh of the best card in Magic".
+   *
+   * Separate from `impact` although it is drawn beside it: `impact` is on the
+   * wire from the server and `impactRole` is a lookup the client does against a
+   * table baked into `@roundtable/domain`. Folding it into `ImpactView` would
+   * make a field the API never sends look as though it did.
+   */
+  readonly impactRole?: ImpactRoleView | undefined
 }

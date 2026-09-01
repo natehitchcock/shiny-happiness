@@ -1,9 +1,27 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { IMPACT_MAX as DOMAIN_MAX, cardEfficiency, cardImpact } from '@roundtable/domain'
-import type { CardEfficiency, CardImpact, EfficiencyInput } from '@roundtable/domain'
-import { IMPACT_MAX as UI_MAX, type EfficiencyView, type ImpactView } from '@roundtable/ui'
+import {
+  IMPACT_MAX as DOMAIN_MAX,
+  cardEfficiency,
+  cardImpact,
+  impactRolePlacement,
+  roleImpactBand,
+  roleImpactIsMostlyUnreadable,
+} from '@roundtable/domain'
+import type {
+  CardEfficiency,
+  CardImpact,
+  EfficiencyInput,
+  RoleImpactBand,
+  RoleImpactPlacement,
+} from '@roundtable/domain'
+import {
+  IMPACT_MAX as UI_MAX,
+  type EfficiencyView,
+  type ImpactRoleView,
+  type ImpactView,
+} from '@roundtable/ui'
 import * as api from './api'
 import { Workspace } from './App'
 
@@ -210,6 +228,72 @@ describe('the preview panel draws both metrics', () => {
     expect(shown.getByText(/A rate, not a ranking/)).toBeDefined()
   })
 
+  it('places the score against the card’s own role, not against the ceiling', async () => {
+    // 6.12 of 18.48 reads as "a third of the best card in Magic" until the pane
+    // says a board wipe's middle half starts at 6.12. `primaryRole` comes off
+    // the detail response and the band off the baked table; nothing here is
+    // typed by hand.
+    const card = wrath({ primaryRole: 'board-wipe' })
+    const panel = await openPreview(card, { impact: impactOf(), efficiency: efficiencyOf() })
+    const shown = within(
+      await within(panel).findByRole('region', { name: 'Impact and efficiency' }),
+    )
+    expect(shown.getByText(/Middle half of the .* board-wipe cards in the corpus/)).toBeDefined()
+    // And the caveat stays generic. 70 of 502 board wipes name nothing this
+    // model can count, which is a minority, so a "blind spot" sentence here
+    // would be a false statement wearing the costume of sourcing.
+    expect(shown.getByText(/a card whose job is mana or a tax reads low here/)).toBeDefined()
+    expect(shown.queryByText(/blind spot/)).toBeNull()
+  })
+
+  it('tells a ramp rock its low score is the median for its role', async () => {
+    // THE FAILURE THIS FEATURE EXISTS FOR. Sol Ring is 0.68 of 18.48 and
+    // format-defining, and a builder shown only that number concludes the app
+    // rates their whole mana base badly.
+    const solRing = wrath({
+      oracleId: 'o1',
+      name: 'Sol Ring',
+      manaCost: '{1}',
+      manaValue: 1,
+      typeLine: 'Artifact',
+      types: ['artifact'],
+      oracleText: '{T}: Add {C}{C}.',
+      primaryRole: 'ramp',
+    })
+    mocked.hydrate.mockResolvedValue({
+      cards: new Map([['o1', solRing]]),
+      prices: new Map([['o1', 1.25]]),
+      images: new Map(),
+    })
+    const impact = cardImpact({
+      name: 'Sol Ring',
+      manaCost: '{1}',
+      oracleText: '{T}: Add {C}{C}.',
+      typeLine: 'Artifact',
+    })
+    const panel = await openPreview(solRing, { impact })
+    const shown = within(
+      await within(panel).findByRole('region', { name: 'Impact and efficiency' }),
+    )
+    expect(impact.score).toBeLessThan(1)
+    expect(shown.getByText(/Middle half of the .* ramp cards in the corpus/)).toBeDefined()
+    // And the caveat is quantified rather than generic, because for ramp the
+    // blind spot IS the explanation of the number.
+    expect(shown.getByText(/it finds nothing to count at all/)).toBeDefined()
+  })
+
+  it('says nothing about a role the shipped bands never measured', async () => {
+    // A role a newer server invented, or one this build has never heard of. The
+    // pane loses a sentence rather than gaining `undefined of undefined`.
+    const card = wrath({ primaryRole: 'removal' })
+    const panel = await openPreview(card, { impact: impactOf(), efficiency: efficiencyOf() })
+    const shown = within(
+      await within(panel).findByRole('region', { name: 'Impact and efficiency' }),
+    )
+    expect(shown.queryByText(/in the corpus; half of them score/)).toBeNull()
+    expect(shown.getByText(/Effects only/)).toBeDefined()
+  })
+
   it('draws nothing when the server answers without the fields', async () => {
     // A server from before doc 18 shipped. The panel must lose a section, not
     // gain a `NaN of 18.48`.
@@ -241,5 +325,27 @@ describe('the view model and the domain model agree', () => {
     const view: EfficiencyView = efficiencyOf()
     expect(view.cost).toBe(5)
     expect(view.statSurplus).toBe(0)
+  })
+
+  it('accepts a real `RoleImpactBand` as the numbers half of an `ImpactRoleView`', () => {
+    // Same seam as the two above, for doc 18 §18.12's baked table. A field
+    // renamed in `impact-roles.ts` would stop compiling here rather than
+    // silently drawing a sentence with `undefined` in it.
+    const band = roleImpactBand('board-wipe') as RoleImpactBand
+    const placement: RoleImpactPlacement = impactRolePlacement(cardImpact(WRATH_INPUT).score, band)
+    const view: ImpactRoleView = {
+      role: 'board-wipe',
+      n: band.n,
+      q1: band.q1,
+      q3: band.q3,
+      placement,
+      mostlyUnreadable: roleImpactIsMostlyUnreadable(band),
+      noCountableEffect: band.noCountableEffect,
+    }
+    expect(view.n).toBeGreaterThan(0)
+    // Wrath of God is an ordinary wrath, not an outlier — it is the low end of
+    // the middle half. That reading is the entire point of the feature and it
+    // is asserted against the SHIPPED band, not a fixture.
+    expect(view.placement).toBe('middle-half')
   })
 })

@@ -57,6 +57,21 @@ export const ROLE_PRECEDENCE: readonly Role[] = [
 ]
 
 /**
+ * Is this string one of the eighteen roles?
+ *
+ * For the client boundary. `api.Card.primaryRole` is a bare `string` on the
+ * wire — it has to be, since a server one version ahead may send a role this
+ * build has never heard of — and code that wants to look a role up in a table
+ * would otherwise cast. A cast says "trust me"; this asks.
+ *
+ * Reads `ROLE_PRECEDENCE`, which is exhaustive over `Role` because `primaryRole`
+ * below already depends on it being so: a role missing from that list can never
+ * be chosen as a primary.
+ */
+const ROLE_NAMES: ReadonlySet<string> = new Set<string>(ROLE_PRECEDENCE)
+export const isRole = (value: string): value is Role => ROLE_NAMES.has(value)
+
+/**
  * The single role a card is counted under. Falls back to `synergy` — the
  * catch-all — rather than throwing, because role derivation is heuristic and an
  * unclassifiable card is a data-quality problem, not a crash.
