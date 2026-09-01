@@ -149,6 +149,27 @@ export interface Recommendation {
    */
   combos: { id: string; pieces: string[]; produces: string[] }[]
   reasons: Reason[]
+  /**
+   * The two card-intrinsic metrics, per suggestion (doc 18 §18.8).
+   *
+   * ALREADY ON THE WIRE and simply never declared, exactly as they were on
+   * `CardDetail` until recently: `recommend` sets both on every item and the
+   * route spreads the item whole, and the same route reads `item.impact.score`
+   * back to decide what an `impact>=6` column ticks. Declaring them is what
+   * lets the client sort by the same numbers the server filtered on, rather
+   * than a second reading of the card computed here.
+   *
+   * The domain types, not a restatement, for the reason `CardDetail` gives: a
+   * field the server renames becomes a compile error here instead of a silent
+   * `undefined`.
+   *
+   * Optional because a server from before the metrics shipped answers without
+   * them. Absent means "this build did not compute them", never "this card
+   * scores zero" — which is why `sortValue` returns `null` for an absent one
+   * and sinks the row, instead of sorting it as a 0 it never claimed.
+   */
+  impact?: CardImpact
+  efficiency?: CardEfficiency
 }
 
 export interface Group {

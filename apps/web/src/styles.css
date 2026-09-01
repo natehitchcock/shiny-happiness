@@ -1808,6 +1808,59 @@ select {
   padding-right: 4px;
 }
 
+/* ---------------------------------------------------------------- sort */
+
+/*
+ * The ordering control, under the legend and above the first heading.
+ *
+ * Wraps rather than scrolls: at 360 px the key, the direction and the way back
+ * do not fit on one line, and a control the reader has to scroll sideways to
+ * find the reset button in is a control with no way out.
+ */
+.sort-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--step);
+  margin-top: var(--step);
+}
+
+.sort-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--step);
+  font-size: 0.72rem;
+  color: var(--parchment-dim);
+}
+
+/*
+ * Auto, not the 100% every other select in this sheet takes.
+ *
+ * The form rule sizes a select to its field, which is right in Deck options
+ * where each one owns a row. Here it shares a line with two buttons, and a
+ * full-width select would push both onto a line of their own on every screen.
+ */
+.sort-field select {
+  width: auto;
+  padding: 2px var(--step);
+  font-size: 0.72rem;
+}
+
+/*
+ * The state line takes the whole width, always.
+ *
+ * `flex-basis: 100%` after a wrapping row puts it on its own line under the
+ * controls whatever they wrap to, so the sentence never gets squeezed into a
+ * column beside a button — it is the part that says whose ordering is on
+ * screen, and it is the part with the most words.
+ */
+.sort-state {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--parchment-dim);
+}
+
 /* A column is a fact about a row, not a ranking, so it sits quietly beside the
    costs rather than competing with the reasons. */
 .col-cell {
