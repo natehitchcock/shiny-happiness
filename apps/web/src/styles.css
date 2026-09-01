@@ -3719,3 +3719,175 @@ select {
   color: var(--parchment-dim);
   font-size: 0.78rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Quickbuild (doc 19)
+
+   Over the SUGGESTION PANE, not the workspace: `position: absolute` inside the
+   suggestions region, so the deck rail and the composition rail stay visible
+   and readable. They are the scoreboard the panel is asking you to play
+   against, and covering them would hide the meters that justify every question
+   it asks (§19.1).
+
+   Colour comes from tokens only. Nothing here is conveyed by colour alone —
+   the focused option carries a left rule AND says "Option 2 of 3" in words, and
+   the failure and limit notes are sentences before they are anything else
+   (§19.5).
+   --------------------------------------------------------------------------- */
+/* The containing block for the panel, so `inset: 0` means "this pane" and not
+   "the whole window". Set only while Quickbuild is open. */
+.region-overlaid {
+  position: relative;
+}
+
+.quickbuild {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  overflow-y: auto;
+  background: var(--ink-2);
+  border: 1px solid var(--brass-dim);
+  border-radius: var(--radius);
+  padding: calc(var(--step) * 2);
+}
+
+.quickbuild:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: -2px;
+}
+
+.quickbuild-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--step);
+  margin-bottom: var(--step);
+}
+
+.quickbuild-head h2 {
+  flex: 1;
+  margin: 0;
+  font-family: var(--display);
+  font-size: 1.05rem;
+}
+
+/* Present from the first render and empty, so a screen reader is already
+   watching the node when it first has something to say. Visually hidden, never
+   `display: none` — a hidden region is not announced at all. */
+.quickbuild-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.quickbuild-gap {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--step);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: var(--step);
+  margin-bottom: var(--step);
+}
+
+.quickbuild-gap h3 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 1rem;
+  color: var(--brass);
+}
+
+.quickbuild-why,
+.quickbuild-filter,
+.quickbuild-state,
+.quickbuild-limit,
+.quickbuild-of,
+.quickbuild-group,
+.quickbuild-done {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--parchment-dim);
+}
+
+.quickbuild-why {
+  flex: 1;
+}
+
+.quickbuild-filter,
+.quickbuild-limit {
+  border-left: 2px solid var(--steel);
+  padding: calc(var(--step) / 2) var(--step);
+  margin: var(--step) 0;
+}
+
+.quickbuild-limit {
+  border-left-color: var(--brass-dim);
+}
+
+.quickbuild-filter code {
+  font-family: var(--mono);
+  color: var(--parchment);
+}
+
+.quickbuild-failed {
+  border-left: 2px solid var(--rust);
+  padding: calc(var(--step) / 2) var(--step);
+}
+
+.quickbuild-of {
+  margin: var(--step) 0;
+}
+
+/* Three across where there is room, and the stylesheet is the only thing that
+   decides how many are drawn. `auto-fit` with a floor means the panel degrades
+   to two and then to one by itself as the pane narrows (Q4) — and because the
+   count is never hidden from the markup, the other options stay in the DOM,
+   focusable and reachable by Tab at every width. The panel never becomes "yes
+   or no to this one card"; it becomes a scrolling list of the same three. */
+.quickbuild-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--step);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.quickbuild-option {
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--step);
+  background: var(--ink);
+}
+
+/* The focused option is marked by a RULE as well as a colour, and the panel
+   also says "Option 2 of 3" in words above the list. Three signals, none of
+   them colour alone. */
+.quickbuild-option.is-focused {
+  border-left-color: var(--brass);
+  background: var(--ink-3);
+}
+
+.quickbuild-option:focus-within {
+  border-left-color: var(--brass);
+}
+
+.quickbuild-group {
+  margin-top: calc(var(--step) / 2);
+  font-style: italic;
+}
+
+.quickbuild-actions {
+  display: flex;
+  gap: var(--step);
+  margin-top: calc(var(--step) * 1.5);
+}
+
+.quickbuild-done {
+  padding: calc(var(--step) * 2) 0;
+}

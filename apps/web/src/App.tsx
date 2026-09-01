@@ -34,6 +34,10 @@ import {
   // A hand-written `['impact', 'efficiency']` here is the list that fails to
   // grow on the day a third metric is added.
   COLUMN_METRICS,
+  // Quickbuild's gap model (doc 19). The ordering rule, the archetype build
+  // order and the handover threshold all live in the domain; this file only
+  // hands it the numbers the composition meters are already drawing from.
+  quickbuildPlan,
 } from '@roundtable/domain'
 // Aliased: `oracleId` is a parameter name a dozen times in this file, and a
 // brander shadowed by a local of the same name reads as a bug even when it is
@@ -70,6 +74,7 @@ import type {
 import { DeckMenu } from './DeckMenu'
 import { Boundary } from './Boundary'
 import { Hint } from './Hint'
+import { Quickbuild, type QuickbuildCandidate } from './Quickbuild'
 import { DeckWeb } from './deckweb/DeckWeb'
 import { enterDeckWeb, leaveDeckWeb, useDeckWebMode } from './deckweb/route'
 import { readable } from './tags'
@@ -4648,6 +4653,8 @@ export const Workspace = ({
   const [emphasisSaving, setEmphasisSaving] = useState(false)
   /** Whether the "add a focus" list is open — the way back into the prompt. */
   const [addingFocus, setAddingFocus] = useState(false)
+  /** Whether the Quickbuild panel is over the suggestion pane (doc 19 §19.1). */
+  const [quickbuilding, setQuickbuilding] = useState(false)
   const [analysis, setAnalysis] = useState<api.Analysis | null>(null)
   const [cards, setCards] = useState<Map<string, api.Card>>(new Map())
   const [prices, setPrices] = useState<Map<string, number | null>>(new Map())
@@ -5850,6 +5857,93 @@ export const Workspace = ({
   const basicIds = useMemo(() => new Set(basics.map((b) => b.oracleId)), [basics])
 
   /**
+   * The deck's gaps, from the numbers the composition meters are already
+   * drawing (doc 19).
+   *
+   * Built from `analysis` rather than recomputed, and that is the point:
+   * `Analysis.targets` carries `ideal`, `min` and `actual` per dimension and
+   * `analysis.curve.deltas` carries the distance to each bucket's band, because
+   * those are exactly what the two rails render. A second computation here
+   * could disagree with the meter drawn six inches away, and the panel's whole
+   * claim is that it is working the gaps those rails describe.
+   *
+   * `null` while the analysis is loading, which is also why the masthead button
+   * is disabled until then.
+   */
+  const quickbuild = useMemo(() => {
+    if (analysis === null) return null
+    return quickbuildPlan({
+      total: analysis.counts.total,
+      targets: analysis.targets.map((t) => ({
+        dimension:
+          t.dimension.role === undefined
+            ? ({ kind: 'type', type: (t.dimension.type ?? '') as never } as const)
+            : ({ kind: 'role', role: t.dimension.role as never } as const),
+        ideal: t.ideal,
+        min: t.min,
+        actual: t.actual,
+      })),
+      curveDeltas: analysis.curve.deltas.map((d) => ({ bucket: d.bucket, delta: d.delta })),
+      bracket: (deck.targetBracket ?? 3) as never,
+    })
+  }, [analysis, deck.targetBracket])
+
+  /**
+   * Ask the ordinary recommendations endpoint the gap's narrower question.
+   *
+   * `limitPerGroup: 8`, NOT 3, and this is the ADR-0026 lesson applied one
+   * layer up. Asking for three would make the server's focus guarantee append
+   * three more to a list of three, and taking the first three from that would
+   * throw away exactly the rows the guarantee promised — the same defect
+   * ADR-0026 exists to fix, reintroduced by the caller. Eight is what the feed
+   * asks for, and the panel takes three from the front.
+   *
+   * Candidates are taken in the order the server EMITTED THE GROUPS, never by
+   * comparing scores across a group boundary. Scores order cards within a group
+   * and nowhere else (P5); a global ranking is precisely what this product does
+   * not have, and Quickbuild is a view over the ranking that exists rather than
+   * a new one.
+   */
+  const fetchQuickbuildCandidates = useCallback(
+    async (
+      gapQueryText: string,
+      groups: readonly string[] | null,
+    ): Promise<readonly QuickbuildCandidate[]> => {
+      const recs = await api.getRecommendations(deck.id, {
+        limitPerGroup: 8,
+        query: gapQueryText,
+        ...(groups === null ? {} : { groups }),
+      })
+      const items = recs.groups.flatMap((g) =>
+        g.items.map((item) => ({ item, groupLabel: g.label })),
+      )
+      const hydrated = await hydrateCards(
+        items.map((i) => i.item.oracleId),
+        recs.datasetSnapshotId,
+      )
+      return items.flatMap(({ item, groupLabel }) => {
+        const card = hydrated.cards.get(item.oracleId) ?? cards.get(item.oracleId)
+        if (card === undefined) return []
+        const price = hydrated.prices.get(item.oracleId) ?? prices.get(item.oracleId)
+        const image = hydrated.images.get(item.oracleId) ?? images.get(item.oracleId)
+        return [
+          {
+            oracleId: item.oracleId,
+            // Reasons phrased by the workspace's own `reasonText`, so a card
+            // says the same sentence here as it does in the feed (P4).
+            view: {
+              ...cardView(card, price, image),
+              reasons: item.reasons.map((r) => reasonText(r, item)),
+            },
+            groupLabel,
+          },
+        ]
+      })
+    },
+    [deck.id, cards, prices, images],
+  )
+
+  /**
    * The three "Completes N combos" groups, shown as one.
    *
    * The split was a ranking device that leaked into the layout: three headers,
@@ -6385,6 +6479,25 @@ export const Workspace = ({
         >
           Graph
         </button>
+        {/* Doc 19 §19.1: beside Import, Export and Graph. `aria-pressed`, like
+            Graph, because it is one panel being opened and closed rather than
+            two states with two controls. Disabled until the analysis has
+            landed: the gaps ARE the analysis, so a panel opened without it
+            could only say "loading", and a button that opens an empty panel
+            teaches people not to press it. */}
+        <button
+          className="act"
+          aria-pressed={quickbuilding}
+          disabled={analysis === null}
+          title={
+            analysis === null
+              ? 'Quickbuild opens once the deck analysis has loaded'
+              : 'Fill your composition and curve gaps, three cards at a time'
+          }
+          onClick={() => setQuickbuilding((open) => !open)}
+        >
+          Quickbuild
+        </button>
       </header>
 
       {tuningTargets && analysis !== null ? (
@@ -6664,7 +6777,46 @@ export const Workspace = ({
           ) : null}
         </section>
 
-        <section className="region" aria-label="Suggestions" ref={suggestionsRef}>
+        {/* `region-overlaid` only while Quickbuild is open, and only to make
+            this section the containing block for it. Without a positioned
+            ancestor the panel's `inset: 0` resolves against the viewport and it
+            covers the deck rail and the composition rail — which is exactly
+            what §19.1 says it must not do. Added as a modifier rather than
+            putting `position: relative` on `.region`, because `.region` is
+            shared with the deck and analysis columns and this is not their
+            concern. */}
+        <section
+          className={quickbuilding ? 'region region-overlaid' : 'region'}
+          aria-label="Suggestions"
+          ref={suggestionsRef}
+        >
+          {/*
+           * Quickbuild, over the SUGGESTION PANE only (doc 19 §19.1).
+           *
+           * Inside this section rather than over the workspace, so the deck rail
+           * on the left and the composition rail on the right stay visible.
+           * They are the scoreboard the panel is asking you to play against —
+           * covering them would hide the meters that justify every question it
+           * asks.
+           *
+           * Isolated behind a boundary for the reason the bracket chip is: this
+           * panel reads `analysis` fields a server may not send, and an
+           * unguarded read in a child should not be able to take the whole
+           * workspace down with it.
+           */}
+          {quickbuilding && quickbuild !== null ? (
+            <Boundary name="Quickbuild">
+              <Quickbuild
+                plan={quickbuild}
+                filter={query}
+                fetchCandidates={fetchQuickbuildCandidates}
+                onAdd={(oracleId) => decide(oracleId, 'accept')}
+                onReject={(oracleId) => decide(oracleId, 'exclude')}
+                onClose={() => setQuickbuilding(false)}
+                cutCount={cutBy.size}
+              />
+            </Boundary>
+          ) : null}
           <h2>Deck options</h2>
           <div className="options" aria-label="Deck options">
             <label className="check">
