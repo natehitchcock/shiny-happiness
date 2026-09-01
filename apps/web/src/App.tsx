@@ -15,8 +15,16 @@ import {
   // added — which is exactly how `C` came to be missing from the first pie.
   IDENTITY_BUCKETS,
   interactsWith,
+  // The measured per-role impact bands (doc 18 §18.12). Baked into the domain
+  // package and looked up here rather than fetched: they are a corpus
+  // measurement, not deck state, and asking the server for a constant per card
+  // click would be a round trip to learn something this build already knows.
+  impactRolePlacement,
+  isRole,
   MANA_LETTERS,
   rebaseCommands,
+  roleImpactBand,
+  roleImpactIsMostlyUnreadable,
 } from '@roundtable/domain'
 // Aliased: `oracleId` is a parameter name a dozen times in this file, and a
 // brander shadowed by a local of the same name reads as a bug even when it is
@@ -33,8 +41,8 @@ import {
   OracleText,
   levelSpec,
 } from '@roundtable/ui'
-import type { CardView, Color } from '@roundtable/ui'
-import type { DeckCommand, SynergyTag } from '@roundtable/domain'
+import type { CardView, Color, ImpactRoleView } from '@roundtable/ui'
+import type { CardImpact, DeckCommand, SynergyTag } from '@roundtable/domain'
 import { DeckMenu } from './DeckMenu'
 import { Boundary } from './Boundary'
 import { Hint } from './Hint'
@@ -129,6 +137,50 @@ const cardView = (
   priceUsd: price,
   imageUris: viewImageUris(images),
 })
+
+/**
+ * Where this card's impact sits among the cards that share its role (doc 18 §18.12).
+ *
+ * WHY THE PANE NEEDS THIS AT ALL. `impact` is a property of the card and is not
+ * comparable across roles. Measured on the corpus: Sol Ring 0.68, Command Tower
+ * 0.68, Wrath of God 6.12, Craterhoof Behemoth 6.0, all against a ceiling of
+ * 18.48. A builder reading "0.68 of 18.48" with nothing to compare it to
+ * concludes the app rates Sol Ring near-worthless — and, worse, that their whole
+ * mana base is bad. It is the MEDIAN ramp card, and only its role can say so.
+ *
+ * `primaryRole`, not every role the card holds, and that is a real choice.
+ * 4,891 commander-legal cards hold more than one role and 1,251 of those have
+ * roles that DISAGREE about the placement, so a line per role hands the reader
+ * two verdicts and no way to pick. `primaryRole` is the app's own answer to
+ * exactly that question, it is the one the panel's role badge already prints,
+ * and `primaryRole(roles)` is always a member of `roles` — so the card is always
+ * inside the population it is being placed against.
+ *
+ * `undefined` for a role the shipped bands never measured, including one a newer
+ * server sends that this build has never heard of. The pane then reads exactly
+ * as it did before this existed.
+ */
+const impactRoleView = (
+  primaryRole: string | undefined,
+  impact: CardImpact | undefined,
+): ImpactRoleView | undefined => {
+  if (primaryRole === undefined || impact === undefined || !isRole(primaryRole)) return undefined
+  const band = roleImpactBand(primaryRole)
+  if (band === null) return undefined
+  return {
+    role: primaryRole,
+    n: band.n,
+    q1: band.q1,
+    q3: band.q3,
+    // Decided in the domain, not here. A placement computed in the renderer
+    // could disagree with `impact>=6`'s idea of the same card, and the whole
+    // claim of the line is that its cutoffs are the corpus's rather than the
+    // interface's.
+    placement: impactRolePlacement(impact.score, band),
+    mostlyUnreadable: roleImpactIsMostlyUnreadable(band),
+    noCountableEffect: band.noCountableEffect,
+  }
+}
 
 /**
  * The cheapest price across a card's printings.
@@ -2014,7 +2066,11 @@ const Preview = ({
        * second renderer of card detail, and two implementations of one number
        * is how two surfaces start disagreeing about it.
        */}
-      <CardMetrics impact={detail?.impact} efficiency={detail?.efficiency} />
+      <CardMetrics
+        impact={detail?.impact}
+        efficiency={detail?.efficiency}
+        impactRole={impactRoleView(detail?.primaryRole, detail?.impact)}
+      />
       <p className="note">
         {/* ADR-0009 Q7: a price is an estimate and the interface has to say so.
             The number moves to the card's badge row when there is a card face

@@ -1,0 +1,158 @@
+{
+  "$comment": [
+    "GENERATED. Do not edit by hand — run `pnpm --filter @roundtable/ingest impact-roles`",
+    "against a corpus database and commit what it writes (doc 18 §18.12).",
+    "",
+    "What impact looks like for each role, so a card can be placed against the",
+    "cards that share its job rather than against the whole format. Impact is",
+    "NOT comparable across roles: Sol Ring scores 0.68 and Wrath of God 6.12,",
+    "and a single bar for all eighteen roles would tell a builder their entire",
+    "mana base was bad.",
+    "",
+    "DESCRIPTIVE, NOT PRESCRIPTIVE. These are quartiles of the corpus, not",
+    "targets. doc 18 §18.9 declined to give the model bands and that still",
+    "holds — nothing here says what a card SHOULD score. q1 and q3 are printed",
+    "in the interface beside any verdict drawn from them, so the cutoff is the",
+    "corpus's own and a reader can disagree with it on sight.",
+    "",
+    "A card counts toward EVERY role it holds, not only its primaryRole:",
+    "`primaryRole` exists to stop composition counting double-counting a card,",
+    "and grouping by it leaves `graveyard-hate` with no cards at all.",
+    "",
+    "`noCountableEffect` is how many of them the model reads as naming nothing",
+    "to affect (`breadth: none`) — the blindness doc 18 §18.2 accepts rather",
+    "than patches, measured per role so the interface can state it."
+  ],
+  "generatedAt": "2026-08-31",
+  "corpus": {
+    "commanderLegal": 31782
+  },
+  "roles": {
+    "anthem": {
+      "n": 553,
+      "q1": 6,
+      "median": 6,
+      "q3": 11.4,
+      "noCountableEffect": 0
+    },
+    "aura": {
+      "n": 1235,
+      "q1": 0.425,
+      "median": 0.68,
+      "q3": 0.935,
+      "noCountableEffect": 1019
+    },
+    "board-wipe": {
+      "n": 502,
+      "q1": 6.12,
+      "median": 7.2,
+      "q3": 8.4,
+      "noCountableEffect": 70
+    },
+    "draw": {
+      "n": 3738,
+      "q1": 0.68,
+      "median": 0.95,
+      "q3": 2.24,
+      "noCountableEffect": 2026
+    },
+    "equipment": {
+      "n": 619,
+      "q1": 0.425,
+      "median": 0.808,
+      "q3": 1.2,
+      "noCountableEffect": 422
+    },
+    "evasion": {
+      "n": 7335,
+      "q1": 0.425,
+      "median": 0.808,
+      "q3": 2.06,
+      "noCountableEffect": 4270
+    },
+    "graveyard-hate": {
+      "n": 100,
+      "q1": 1.36,
+      "median": 1.4,
+      "q3": 7.155,
+      "noCountableEffect": 0
+    },
+    "land": {
+      "n": 1194,
+      "q1": 0.68,
+      "median": 0.68,
+      "q3": 0.99,
+      "noCountableEffect": 896
+    },
+    "protection": {
+      "n": 1205,
+      "q1": 0.425,
+      "median": 0.95,
+      "q3": 2.64,
+      "noCountableEffect": 606
+    },
+    "ramp": {
+      "n": 1401,
+      "q1": 0.68,
+      "median": 0.68,
+      "q3": 1.4,
+      "noCountableEffect": 961
+    },
+    "recursion": {
+      "n": 939,
+      "q1": 0.85,
+      "median": 1.2,
+      "q3": 2.28,
+      "noCountableEffect": 256
+    },
+    "sac-outlet": {
+      "n": 294,
+      "q1": 0.68,
+      "median": 0.808,
+      "q3": 2.24,
+      "noCountableEffect": 158
+    },
+    "spot-removal": {
+      "n": 3273,
+      "q1": 1.2,
+      "median": 1.2,
+      "q3": 1.92,
+      "noCountableEffect": 0
+    },
+    "stax": {
+      "n": 93,
+      "q1": 0.425,
+      "median": 0.7,
+      "q3": 1.92,
+      "noCountableEffect": 52
+    },
+    "synergy": {
+      "n": 11820,
+      "q1": 0.5,
+      "median": 1.2,
+      "q3": 2.28,
+      "noCountableEffect": 5564
+    },
+    "token-maker": {
+      "n": 2799,
+      "q1": 0.5,
+      "median": 0.935,
+      "q3": 2.28,
+      "noCountableEffect": 1648
+    },
+    "tutor": {
+      "n": 224,
+      "q1": 0.425,
+      "median": 0.5,
+      "q3": 0.95,
+      "noCountableEffect": 169
+    },
+    "wincon": {
+      "n": 116,
+      "q1": 0.7,
+      "median": 0.935,
+      "q3": 1.454,
+      "noCountableEffect": 82
+    }
+  }
+}

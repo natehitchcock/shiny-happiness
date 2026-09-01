@@ -523,3 +523,189 @@ code, per AGENTS.md §10.
   already stores (`oracle_text`, `type_line`, `mana_cost`, `power`, `toughness`).
   Nothing new is derived at ingest, no card column is added, and the existing
   corpus answers both questions today.
+
+---
+
+## 18.12 Impact per role — measured, so the number can be read
+
+**Status: built.** §18.9 declined to give the model bands. This does not
+overturn that; it answers a different question, and the difference is the whole
+design.
+
+### The failure this fixes
+
+The card detail pane draws `0.68 of 18.48` under a meter, with three tier rows
+and the standing "effects only" caveat. For Sol Ring that is a true, complete,
+and thoroughly misleading screen. A builder who reads it concludes the app rates
+one of the format's defining cards at a twenty-seventh of the scale — and, worse,
+that every rock and every land in their deck is the same kind of bad.
+
+The number is right. What is missing is *compared to what*. Measured on the
+corpus (31,782 commander-legal cards, 2026-08-31):
+
+| card | impact | role | what the role says |
+| --- | ---: | --- | --- |
+| Sol Ring | 0.68 | `ramp` | the **median** ramp card |
+| Arcane Signet | 0.68 | `ramp` | the median ramp card |
+| Command Tower | 0.68 | `land` | the median land |
+| Forest | 0.425 | `land` | bottom quarter of lands |
+| Cultivate | 0.425 | `ramp` | bottom quarter of ramp |
+| Swords to Plowshares | 1.2 | `spot-removal` | the median removal spell |
+| Wrath of God | 6.12 | `board-wipe` | the **bottom of the middle half** |
+| Craterhoof Behemoth | 6.0 | `evasion` | top quarter |
+| Cyclonic Rift | 7.2 | `synergy` | top quarter |
+
+Wrath of God and Craterhoof are the pair that make the point. Both are around 6,
+both are enormous cards, and one of them is an *ordinary* member of its role
+while the other is exceptional in its. A single bar — "aim for 6+" — would have
+called Wrath elite, Craterhoof elite, and the entire mana base worthless.
+
+### The measured bands
+
+Every commander-legal card, scored by `cardImpact`, grouped by role. Quartiles
+are the ordinary interpolating "type 7" definition, the one R, NumPy and every
+spreadsheet's `PERCENTILE` mean.
+
+| role | n | q1 | median | q3 | no countable effect |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `anthem` | 553 | 6.0 | 6.0 | 11.4 | 0 |
+| `aura` | 1,235 | 0.425 | 0.68 | 0.935 | 1,019 |
+| `board-wipe` | 502 | 6.12 | 7.2 | 8.4 | 70 |
+| `draw` | 3,738 | 0.68 | 0.95 | 2.24 | 2,026 |
+| `equipment` | 619 | 0.425 | 0.808 | 1.2 | 422 |
+| `evasion` | 7,335 | 0.425 | 0.808 | 2.06 | 4,270 |
+| `graveyard-hate` | 100 | 1.36 | 1.4 | 7.155 | 0 |
+| `land` | 1,194 | 0.68 | 0.68 | 0.99 | 896 |
+| `protection` | 1,205 | 0.425 | 0.95 | 2.64 | 606 |
+| `ramp` | 1,401 | 0.68 | 0.68 | 1.4 | 961 |
+| `recursion` | 939 | 0.85 | 1.2 | 2.28 | 256 |
+| `sac-outlet` | 294 | 0.68 | 0.808 | 2.24 | 158 |
+| `spot-removal` | 3,273 | 1.2 | 1.2 | 1.92 | 0 |
+| `stax` | 93 | 0.425 | 0.7 | 1.92 | 52 |
+| `synergy` | 11,820 | 0.5 | 1.2 | 2.28 | 5,564 |
+| `token-maker` | 2,799 | 0.5 | 0.935 | 2.28 | 1,648 |
+| `tutor` | 224 | 0.425 | 0.5 | 0.95 | 169 |
+| `wincon` | 116 | 0.7 | 0.935 | 1.454 | 82 |
+
+The whole corpus, for comparison: q1 0.68, median 0.95, q3 2.24.
+
+**A board wipe's worst quartile is above a ramp card's best.** `board-wipe`'s q1
+is 6.12 and `ramp`'s q3 is 1.4 — the two roles do not overlap at all in the
+middle. That gap is the reason a single cross-role band would have been a lie
+rather than an approximation.
+
+### DESCRIPTIVE, not prescriptive — and why that is not a dodge
+
+§18.9 refused to give the model bands, and `metrics.ts` refused letter grades
+because "every cutoff would be the renderer's opinion". Both still hold. What
+ships says what cards in a role **do** score, never what a card **should** score,
+and it prints the two quartiles beside any placement drawn from them:
+
+> Middle half of the 502 board-wipe cards in the corpus; half of them score 6.12
+> to 8.4.
+
+The only cutoffs in that sentence are the corpus's own quartiles and both are on
+the screen, so a reader who disagrees is disagreeing with a measurement rather
+than with a taste. A prescriptive form — "you want at least 6 here" — was
+considered and rejected outright: it would need a target the corpus cannot
+supply, it would be the interface's opinion in exactly the way §18.9 forbids,
+and there is no deck-independent answer to it anyway. Deck-relative "you need
+more of this" is what role deficits already are (§18.2), and that is where it
+belongs.
+
+The placement is named for the quartile — *bottom quarter*, *middle half*, *top
+quarter* — rather than graded. The boundaries belong to the band they bound:
+`score < q1` and `score > q3` are both strict, because the model produces a few
+dozen distinct values rather than a continuum and quartiles land exactly on real
+cards constantly. Wrath of God **is** the board-wipe q1; calling the format's
+archetypal wrath "bottom quarter" by a hair would be the interface losing an
+argument it started.
+
+### Where the model cannot see the role at all
+
+`land` is the case the design brief flagged, and it is real but not in the shape
+a guess would give. The band is 0.68 to 0.99 — not near-zero, but 0.31 wide on an
+18.48 scale, which is a range that tells a reader nothing.
+
+Publishing a "degenerate" flag off a band-width threshold was rejected: any
+width cutoff would be invented here, which is the thing this whole section is
+avoiding. What ships instead is a **direct measurement of the blindness §18.2
+accepts** — how many cards in the role the classifier reads as `breadth: 'none'`,
+naming nothing it can affect. 896 of 1,194 lands. 961 of 1,401 ramp cards. **0 of
+3,273 spot-removal spells.**
+
+Where that is more than half the role — "most cards in this role", a plain-
+language majority rather than a tuned number — the pane's standing caveat is
+replaced by the sourced one:
+
+> Effects only — and on 961 of those 1,401 it finds nothing to count at all, so
+> that range is largely its blind spot.
+
+It **replaces** rather than stacks: the generic "a card whose job is mana or a
+tax reads low here" is the same claim unquantified, and two caveats saying one
+thing in a 21rem column is how a pane teaches people to stop reading it.
+
+Note that this fires for `ramp` as well as `land`, which is correct and is the
+better half of the feature: the band still says Sol Ring is the median ramp card,
+*and* the note says why every ramp card is down there.
+
+### One role per card, and which one
+
+4,891 commander-legal cards hold more than one role. **1,251 of those have roles
+that disagree about the placement** — Pathway Arrows is middle-half spot removal
+and top-quarter equipment; Pure Reflection is bottom-quarter board-wipe and
+middle-half token-maker. Showing every role would hand the reader two verdicts
+and no way to arbitrate, which is worse than one.
+
+So the pane shows **`primaryRole`** — the role its own badge already prints three
+lines above, so the two cannot disagree — and that pairing is sound because
+`primaryRole(roles)` always returns a member of `roles`: the card being placed is
+always one of the `n` it is placed against.
+
+**The bands themselves are grouped by membership, not by primary role.** A card
+counts toward every role it holds. Two reasons, the second fatal to the
+alternative: "what does a board wipe score" is a question about board wipes, and
+a card that wipes the board is one whether or not a higher-precedence role wins
+its badge; and grouping by `primaryRole` leaves `graveyard-hate` with **zero**
+cards, because all 100 of them hold a role that outranks it.
+
+### Baked, not live, and how to regenerate it
+
+`packages/domain/src/impact/by-role.data.json`, generated by
+`pnpm --filter @roundtable/ingest impact-roles` — the arrangement
+`efficiency/baseline.data.json` already establishes (§18.6), for the same reason.
+The generator is read-only against the corpus, runs no ingest, queries no third
+party (ADR-0008), and imports `cardImpact` rather than reimplementing it.
+
+Live was rejected on three grounds and the first is decisive: `packages/domain`
+is pure (AGENTS.md R1) and cannot have a database. Beyond that, the client has no
+corpus at all, and asking the server to re-derive quartiles over 31,782 cards per
+card click would buy a cache to invalidate in exchange for a number that changes
+only when the corpus does. The file carries `generatedAt` and the corpus size so
+a reader can check it rather than trust it.
+
+### Where it lives, and why it is not behind the `Hint`
+
+Inline in `CardMetrics`, under the tier rows and above the notes. Plain text, no
+control.
+
+The pane is 21rem wide and a bottom sheet on a phone, which does rule out
+eighteen rows of table — but it never needed them. It is showing **one card**, so
+it needs **one row**, and one row is two lines of prose. The `Hint` popover would
+have fitted the table and was still rejected: the reader who most needs this line
+is the one looking at Sol Ring's 0.68 and quietly concluding the app is wrong,
+and they have no reason to press anything, because they do not yet know they have
+been misled. Help that only opens on request cannot reach them. That is the same
+argument `CardMetrics` used to reject a "what is this?" disclosure over the tier
+rows, applied to the case that tested it.
+
+Staying non-interactive also keeps AGENTS.md R4 vacuous here rather than adding a
+trigger, a focus ring and a tap target to a read-only figure.
+
+### No contract change
+
+New optional fields and new exports only, which is the line AGENTS.md R2 draws:
+`CardMetricsProps.impactRole`, `CardView.impactRole`, and
+`roleImpactBand` / `impactRolePlacement` / `roleImpactIsMostlyUnreadable` /
+`isRole` in `@roundtable/domain`. Nothing on the wire changed — the client looks
+the band up locally from `primaryRole`, which card detail has always sent.

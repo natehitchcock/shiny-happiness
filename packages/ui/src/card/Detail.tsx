@@ -138,7 +138,11 @@ export const Detail = ({
          * argument before knowing what the card does is reading the verdict
          * before the evidence.
          */}
-        <CardMetrics impact={card.impact} efficiency={card.efficiency} />
+        <CardMetrics
+          impact={card.impact}
+          efficiency={card.efficiency}
+          impactRole={card.impactRole}
+        />
 
         <h3 className="rt-detail-h">Why this is here</h3>
         {reasons.length === 0 ? (

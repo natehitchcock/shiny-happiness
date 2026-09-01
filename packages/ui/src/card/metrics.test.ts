@@ -5,9 +5,11 @@ import {
   efficiencyWorking,
   impactFraction,
   impactNotes,
+  impactRoleLine,
   impactRows,
   metricValue,
   type EfficiencyView,
+  type ImpactRoleView,
   type ImpactView,
 } from './metrics.js'
 
@@ -88,6 +90,58 @@ const CRATERHOOF: ImpactView = {
   fragile: false,
 }
 
+/**
+ * The role bands, copied verbatim from `packages/domain/src/impact/by-role.data.json`.
+ *
+ * REAL MEASUREMENTS, and deliberately four different shapes. A fixture set in
+ * which every role had the same band could not tell "placed against its own
+ * role" from "placed against a constant" — which is the only thing this copy
+ * claims — and every assertion below would pass on a renderer that ignored the
+ * role entirely.
+ *
+ *   board-wipe   the model reads almost all of them; the band sits high
+ *   ramp         the model is blind to two thirds; the band sits at the floor
+ *   land         blind to three quarters; the band is 0.31 wide on an 18.48 scale
+ *   spot-removal blind to NONE of them, the control that keeps the blindness
+ *                copy from being unconditional by accident
+ */
+const BOARD_WIPE: ImpactRoleView = {
+  role: 'board-wipe',
+  n: 502,
+  q1: 6.12,
+  q3: 8.4,
+  placement: 'middle-half',
+  mostlyUnreadable: false,
+  noCountableEffect: 70,
+}
+const RAMP: ImpactRoleView = {
+  role: 'ramp',
+  n: 1401,
+  q1: 0.68,
+  q3: 1.4,
+  placement: 'middle-half',
+  mostlyUnreadable: true,
+  noCountableEffect: 961,
+}
+const LAND: ImpactRoleView = {
+  role: 'land',
+  n: 1194,
+  q1: 0.68,
+  q3: 0.99,
+  placement: 'bottom-quarter',
+  mostlyUnreadable: true,
+  noCountableEffect: 896,
+}
+const SPOT_REMOVAL: ImpactRoleView = {
+  role: 'spot-removal',
+  n: 3273,
+  q1: 1.2,
+  q3: 1.92,
+  placement: 'middle-half',
+  mostlyUnreadable: false,
+  noCountableEffect: 0,
+}
+
 describe('metricValue', () => {
   it('draws the stored number and rounds nothing', () => {
     // ADR-0025 §2: the filter compares the raw score, so a renderer that rounds
@@ -154,6 +208,55 @@ describe('impactRows', () => {
   })
 })
 
+describe('impactRoleLine', () => {
+  /**
+   * THE REGRESSION THIS WHOLE FEATURE IS. Sol Ring scores 0.68 of 18.48; a
+   * reader with no comparison concludes the app rates it near-worthless. It is
+   * the MEDIAN ramp card, and saying so is the entire fix.
+   */
+  it('reads one score as ordinary in one role and exceptional in another', () => {
+    const solRing = impactRoleLine({ ...WRATH, score: 0.68 }, RAMP)
+    const craterhoof = impactRoleLine(CRATERHOOF, { ...RAMP, placement: 'top-quarter' })
+    expect(solRing).toContain('Middle half')
+    expect(craterhoof).toContain('Top quarter')
+    expect(solRing).not.toBe(craterhoof)
+  })
+
+  it('prints the corpus quartiles beside the verdict, so the cutoff is visible', () => {
+    // doc 18 §18.9 declined to give the model bands and `impactRows` rejected
+    // letter grades because "every cutoff would be the renderer's opinion".
+    // These cutoffs are the corpus's own and they are on the screen — a reader
+    // can disagree with the placement by reading the two numbers it used.
+    expect(impactRoleLine(WRATH, BOARD_WIPE)).toBe(
+      'Middle half of the 502 board-wipe cards in the corpus; half of them score 6.12 to 8.4.',
+    )
+  })
+
+  it('groups the thousands, because 11820 in a sentence reads as a score', () => {
+    expect(impactRoleLine(WRATH, LAND)).toContain('the 1,194 land cards')
+  })
+
+  it('names the role with the same word the pane already prints on its badge', () => {
+    // `RoleDot` draws the raw role name two lines above this. A prettified
+    // synonym here would leave a reader wondering whether "removal" and
+    // "spot-removal" are the same thing the app is talking about.
+    expect(impactRoleLine(WRATH, SPOT_REMOVAL)).toContain('spot-removal cards')
+  })
+
+  it('says nothing at all when the card has no rules text', () => {
+    // Same rule `impactRows` follows. The pane already says there is nothing
+    // here to measure, and ranking a card the model has declared unreadable
+    // against its peers would contradict the line above it.
+    expect(impactRoleLine(VANILLA, LAND)).toBeNull()
+  })
+
+  it('says nothing at all when the role is unknown', () => {
+    // A card whose role never reached the pane, or a role the corpus measured
+    // no cards for. Silence, not a band of zeroes.
+    expect(impactRoleLine(WRATH, undefined)).toBeNull()
+  })
+})
+
 describe('impactNotes', () => {
   it('always names the blind spot, because a low score otherwise reads as a verdict', () => {
     // `impact.ts`: Sol Ring scores 0.68 and that was accepted, not patched. A
@@ -164,6 +267,36 @@ describe('impactNotes', () => {
         'Effects only: a card whose job is mana or a tax reads low here.',
       )
     }
+  })
+
+  it('quantifies the blind spot for a role the model mostly cannot read', () => {
+    // "Effects only" is true of every card and is therefore easy to skim past.
+    // For a land it is not a caveat, it is the headline: three quarters of them
+    // name nothing this model can count, so the band above is largely a
+    // measurement of its own blind spot.
+    const note = impactNotes(WRATH, LAND).join(' ')
+    expect(note).toContain('896 of those 1,194')
+    expect(note).toContain('blind spot')
+    // REPLACES the generic caveat rather than stacking a second one on it —
+    // they are the same claim, and the quantified one is strictly better.
+    expect(note).not.toContain('a card whose job is mana or a tax reads low here')
+  })
+
+  it('leaves the generic caveat alone for a role the model reads well', () => {
+    // The control. Spot removal has 0 of 3,273 unreadable, and a "blind spot"
+    // sentence there would be a false statement dressed up as sourcing.
+    for (const role of [BOARD_WIPE, SPOT_REMOVAL]) {
+      const note = impactNotes(WRATH, role).join(' ')
+      expect(note).toContain('Effects only: a card whose job is mana or a tax reads low here.')
+      expect(note).not.toContain('blind spot')
+    }
+  })
+
+  it('quantifies the blind spot for ramp, which is where a low score misleads most', () => {
+    // Not just lands. 961 of 1,401 ramp cards have nothing this model can
+    // count, which is exactly why Sol Ring reads low, and the pane says so with
+    // the number rather than leaving the reader to guess.
+    expect(impactNotes(WRATH, RAMP).join(' ')).toContain('961 of those 1,401')
   })
 
   it('marks a scaling card, and only a scaling card', () => {
