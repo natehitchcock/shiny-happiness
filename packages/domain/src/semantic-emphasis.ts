@@ -1,5 +1,6 @@
 import {
   COMMANDER_WEIGHT,
+  interactsWith,
   SYNERGY_TAGS,
   type SynergyMatch,
   type SynergyProfile,
@@ -176,4 +177,104 @@ export const emphasisScore = (matches: readonly SynergyMatch[]): number => {
   if (matches.length === 0) return 0
   const total = matches.reduce((sum, m) => sum + m.weight, 0)
   return total / (total + COMMANDER_WEIGHT)
+}
+
+/**
+ * What to offer next, once a focus has been chosen.
+ *
+ * "After one is selected, it should add any semantics that benefits from that
+ * focus or causes that focus, and allow you to add more from those, until you
+ * are satisfied." The chain is not built here — it falls out of calling this
+ * again with the longer emphasis, which is the whole reason it takes the SET
+ * rather than the tag just clicked.
+ *
+ * "RELATED", NOT "CAUSES" AND "BENEFITS FROM", and the difference is the one
+ * thing a caller must not paper over. The user's sentence names two directions,
+ * and this model has two different relations that could answer it:
+ *
+ *   - Same tag, opposite direction. A card that PRODUCES `sacrifice-fodder` and
+ *     a card that WANTS it. That one is genuinely directional, it needs no
+ *     table, and the card preview already renders it as "Causes" / "Benefits
+ *     from" over `produces` and `wants`.
+ *   - Cross-tag, via `INTERACTION_PAIRS`, which is what this reads. That table
+ *     is unordered BY CONSTRUCTION and each row was admitted only because it
+ *     "reads true in both directions, which is the bar this table sets" — the
+ *     one-way relations (`player-damage` → `lifeloss`) were deliberately
+ *     REFUSED entry and carried on the payoff side instead (ADR-0023).
+ *
+ * So the direction is not information this table lost; it is information it was
+ * built to exclude, and a row that survived the bar answers "both". A UI over
+ * this must therefore say "related", and the existing consumer already does —
+ * `TagChip` renders the same list as "Benefits, and benefits from: …". Saying
+ * "causes" over a symmetric list would also collide with the card preview,
+ * where those two words already mean the other relation.
+ *
+ * `excluding` is what the caller is already showing elsewhere, so a tag is
+ * never offered twice on one screen. Entries that are not tags are ignored
+ * rather than rejected: the caller's list is UI state, not a validated set.
+ *
+ * Canonical `SYNERGY_TAGS` order, for the reason `parseSemanticEmphasis` gives —
+ * the same focus must offer the same list every time. Ranking it by how much of
+ * the pool supports each tag is `bySupport`, deliberately separate, because that
+ * is a fact about one deck's colours and this is a fact about the model.
+ */
+export const relatedSemantics = (
+  emphasis: SemanticEmphasis,
+  excluding: Iterable<string> = [],
+): readonly SynergyTag[] => {
+  if (emphasis.length === 0) return []
+  const skip = new Set<string>([...emphasis, ...excluding])
+  const offered = new Set<SynergyTag>()
+  for (const tag of emphasis) {
+    for (const neighbour of interactsWith(tag)) {
+      if (!skip.has(neighbour)) offered.add(neighbour)
+    }
+  }
+  return SYNERGY_TAGS.filter((tag) => offered.has(tag))
+}
+
+/**
+ * Everything the caller is not already showing. The "show all semantics" escape
+ * hatch, and the only way to reach a tag no chosen focus is a neighbour of.
+ *
+ * The expansion cannot replace this, and measuring says so twice over. The
+ * interaction graph is ONE connected component of all 21 tags, so a walk can in
+ * principle reach anything — but the first offer is a median of 2 and a mean of
+ * 2.9 neighbours, and reaching `landfall` from `player-damage` takes five hops
+ * through tags the builder never wanted. Someone who knows they want landfall
+ * should not have to walk there, and someone who has emphasised nothing at all
+ * gets no expansion by definition.
+ */
+export const remainingSemantics = (excluding: Iterable<string>): readonly SynergyTag[] => {
+  const skip = new Set<string>(excluding)
+  return SYNERGY_TAGS.filter((tag) => !skip.has(tag))
+}
+
+/**
+ * Rank an offer by how much of the deck's candidate pool actually supports each
+ * tag (`RecommendResult.tagSupport`).
+ *
+ * A tag nothing in the deck's colours supports is still a legal focus — emphasis
+ * reorders and never filters, and the interface says so in words — but offering
+ * it FIRST would be recommending the one choice known to change nothing.
+ *
+ * NO COUNTS AT ALL means no reordering, not a reordering by zero. The commander
+ * prompt runs before any deck exists, so nothing has been counted there; sorting
+ * that list would present an order as a ranking and derive it from nothing.
+ *
+ * A tag MISSING from a map that has counts sorts last, behind a tag counted at
+ * zero. "Counted, and it was nothing" is a fact about the pool; "not counted
+ * yet" is the absence of one, and a list ordered by support cannot promote the
+ * tag it has no answer for. Ties break on canonical order, so equal support
+ * never reshuffles between renders (doc 05).
+ */
+export const bySupport = (
+  tags: readonly SynergyTag[],
+  supporting: ReadonlyMap<string, number> | undefined,
+): readonly SynergyTag[] => {
+  if (supporting === undefined || supporting.size === 0) return tags
+  const rank = (tag: SynergyTag): number => supporting.get(tag) ?? -1
+  return [...tags].sort(
+    (a, b) => rank(b) - rank(a) || (ORDER.get(a) ?? 0) - (ORDER.get(b) ?? 0),
+  )
 }

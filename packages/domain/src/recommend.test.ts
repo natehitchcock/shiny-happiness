@@ -11,7 +11,7 @@ import { recommend, type CardStats, type PoolCard, type RecommendInput } from '.
 import { primaryRole, type Role } from './role.js'
 import { DEFAULT_WEIGHTS, weightsFor } from './scoring.js'
 import { parseSemanticEmphasis } from './semantic-emphasis.js'
-import { COMMANDER_WEIGHT, type DeckSynergy } from './synergy.js'
+import { COMMANDER_WEIGHT, SYNERGY_TAGS, type DeckSynergy } from './synergy.js'
 
 const card = (name: string, over: Partial<Card> = {}): Card => ({
   oracleId: oracleId(name),
@@ -798,6 +798,86 @@ describe('semantic emphasis', () => {
 
   it('reports no emphasis when none is set', () => {
     expect(recommend(baseInput({ pool: [pooled('a')] })).emphasis).toEqual([])
+  })
+
+  /**
+   * `tagSupport` — the same count, for EVERY tag rather than the emphasised few.
+   *
+   * What it is for: the interface offers the semantics related to a chosen
+   * focus, and it has to put them in an order that means something. "How much
+   * of your colours supports this" is the only real signal available, and it is
+   * a fact about a tag nobody has emphasised yet — so `emphasis`, which is
+   * indexed by the emphasis, cannot carry it.
+   */
+  describe('tagSupport', () => {
+    const oneCard = (over: Partial<RecommendInput> = {}) =>
+      recommend(
+        baseInput({
+          pool: [
+            pooled('a', {
+              card: card('a', { synergyProduces: ['token'], synergyWants: ['landfall'] }),
+            }),
+          ],
+          ...over,
+        }),
+      )
+
+    it('counts every tag in the vocabulary, not only the emphasised ones', () => {
+      // The offer includes tags the deck does not emphasise — that is what an
+      // offer IS — so a report indexed by the emphasis would be blind to all of
+      // them and the ordering would fall back to the alphabet.
+      const support = oneCard().tagSupport
+      expect(support.map((e) => e.tag)).toEqual(SYNERGY_TAGS)
+    })
+
+    it('counts a candidate on both sides of the model', () => {
+      const support = new Map(oneCard().tagSupport.map((e) => [e.tag, e.supporting]))
+      expect(support.get('token')).toBe(1) // produced
+      expect(support.get('landfall')).toBe(1) // wanted
+    })
+
+    it('says zero for a tag nothing in the pool touches, rather than omitting it', () => {
+      // Omission and zero would be the same on the wire and are not the same
+      // claim. `bySupport` sinks a counted zero and sinks an uncounted tag even
+      // further, so the difference decides where the chip lands.
+      const support = new Map(oneCard().tagSupport.map((e) => [e.tag, e.supporting]))
+      expect(support.get('treasure')).toBe(0)
+    })
+
+    it('counts a card once for a tag it both produces and wants', () => {
+      const support = new Map(
+        oneCard({
+          pool: [
+            pooled('engine', {
+              card: card('engine', { synergyProduces: ['token'], synergyWants: ['token'] }),
+            }),
+          ],
+        }).tagSupport.map((e) => [e.tag, e.supporting]),
+      )
+      expect(support.get('token')).toBe(1)
+    })
+
+    it('does not depend on the emphasis, so the offer does not reshuffle as you pick', () => {
+      // The counts are taken over ELIGIBLE candidates and emphasis never
+      // filters, so they are the same numbers before and after a focus is
+      // added. The client holds them across a save on the strength of this.
+      expect(oneCard({ emphasis: ['token'] }).tagSupport).toEqual(oneCard().tagSupport)
+    })
+
+    it('counts before the query filter, like the emphasis report it generalises', () => {
+      // The claim is about the deck's colours and the corpus, not about
+      // whatever the search box currently holds.
+      expect(oneCard({ query: ast('t:enchantment') }).tagSupport).toEqual(oneCard().tagSupport)
+    })
+
+    it('agrees with the emphasis report wherever the two overlap', () => {
+      const result = oneCard({ emphasis: ['token', 'treasure'] })
+      const support = new Map(result.tagSupport.map((e) => [e.tag, e.supporting]))
+      for (const entry of result.emphasis) {
+        expect(support.get(entry.tag)).toBe(entry.supporting)
+      }
+      expect(result.emphasis).toHaveLength(2)
+    })
   })
 })
 

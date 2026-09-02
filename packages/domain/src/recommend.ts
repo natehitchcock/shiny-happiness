@@ -9,6 +9,7 @@ import { findDeficits, shortfalls } from './composition-analysis.js'
 import {
   synergyMatches,
   synergyScore,
+  SYNERGY_TAGS,
   type DeckSynergy,
   type SynergyMatch,
   type SynergyTag,
@@ -164,6 +165,31 @@ export interface RecommendResult {
   readonly emphasis: readonly {
     readonly tag: SynergyTag
     /** Eligible candidates that produce or want it. */
+    readonly supporting: number
+  }[]
+  /**
+   * The same count for EVERY tag, in `SYNERGY_TAGS` order — `emphasis` is this
+   * list narrowed to what the deck emphasises, and reordered to match it.
+   *
+   * `emphasis` answers "did my focus find anything". This answers the question
+   * the interface asks NEXT: having chosen a focus, which of the semantics
+   * related to it are worth offering first. That is a question about tags
+   * nobody has emphasised, so a report indexed by the emphasis is structurally
+   * unable to answer it, and without an answer the offer falls back to
+   * alphabetical — recommending, at the top, whichever tag happens to sort
+   * first, including one no card in the deck's colours can support.
+   *
+   * Every tag appears, including at zero. Omitting the zeroes would make
+   * "counted, and it was nothing" indistinguishable on the wire from "not
+   * counted", and `bySupport` ranks those two differently on purpose.
+   *
+   * Emphasis-independent by construction: the counts run over eligible
+   * candidates, and emphasis reorders without ever changing eligibility. The
+   * client relies on that to hold these across a focus save instead of
+   * blanking them, which is what stops the offer reshuffling under the cursor.
+   */
+  readonly tagSupport: readonly {
+    readonly tag: SynergyTag
     readonly supporting: number
   }[]
 }
@@ -721,7 +747,13 @@ export const recommend = (input: RecommendInput): RecommendResult => {
   // Counted over every eligible candidate, including ones the query filtered
   // out and ones that fell into no group: the claim is "your colours contain
   // nothing that does this", which the search box has no bearing on.
-  const supporting = new Map<SynergyTag, number>(emphasis.map((tag) => [tag, 0]))
+  //
+  // Seeded with EVERY tag rather than the emphasised ones, so the same pass
+  // answers both reports. It costs nothing — the loop already visits every tag
+  // on every candidate, and the only thing the narrower seed bought was a
+  // `supporting.get` that returned `undefined` for tags the map deliberately
+  // did not hold.
+  const supporting = new Map<SynergyTag, number>(SYNERGY_TAGS.map((tag) => [tag, 0]))
   for (const s of scratch) {
     for (const tag of new Set([...s.pooled.card.synergyProduces, ...s.pooled.card.synergyWants])) {
       const held = supporting.get(tag)
@@ -738,6 +770,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
     },
     // In `emphasis` order, which `parseSemanticEmphasis` already made canonical.
     emphasis: emphasis.map((tag) => ({ tag, supporting: supporting.get(tag) ?? 0 })),
+    tagSupport: SYNERGY_TAGS.map((tag) => ({ tag, supporting: supporting.get(tag) ?? 0 })),
   }
 }
 

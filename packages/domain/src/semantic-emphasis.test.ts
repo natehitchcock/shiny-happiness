@@ -1,19 +1,33 @@
 import { describe, expect, it } from 'vitest'
 import {
+  bySupport,
   EMPHASIS_FLOOR,
   emphasisMatches,
   emphasisScore,
   hasEmphasis,
   NO_EMPHASIS,
   parseSemanticEmphasis,
+  relatedSemantics,
+  remainingSemantics,
   type SemanticEmphasis,
 } from './semantic-emphasis.js'
-import { COMMANDER_WEIGHT, type SynergyMatch, type SynergyProfile } from './synergy.js'
+import {
+  COMMANDER_WEIGHT,
+  interactsWith,
+  SYNERGY_TAGS,
+  type SynergyMatch,
+  type SynergyProfile,
+  type SynergyTag,
+} from './synergy.js'
 
 const profile = (over: Partial<SynergyProfile> = {}): SynergyProfile => ({
   produces: over.produces ?? [],
   wants: over.wants ?? [],
 })
+
+/** Canonical order, so a test can state "in `SYNERGY_TAGS` order" as an assertion. */
+const byTagOrder = (a: SynergyTag, b: SynergyTag): number =>
+  SYNERGY_TAGS.indexOf(a) - SYNERGY_TAGS.indexOf(b)
 
 describe('parseSemanticEmphasis', () => {
   it('keeps the tags it knows', () => {
@@ -196,5 +210,125 @@ describe('emphasisScore', () => {
     const real = emphasisScore([{ tag: 'untap', direction: 'enables', weight: COMMANDER_WEIGHT }])
     expect(floored).toBeGreaterThan(0)
     expect(floored).toBeLessThan(real)
+  })
+})
+
+describe('relatedSemantics', () => {
+  it('offers nothing when nothing is emphasised — there is no focus to relate to', () => {
+    expect(relatedSemantics(NO_EMPHASIS)).toEqual([])
+  })
+
+  it('offers the neighbours of the one emphasised tag', () => {
+    // `interactsWith` owns which these are; this pins that the offer IS that
+    // list, not a re-derivation of it that could drift from the table.
+    expect(relatedSemantics(['treasure'])).toEqual([...interactsWith('treasure')].sort(byTagOrder))
+  })
+
+  it('never offers a tag that is already emphasised', () => {
+    // `token` and `sacrifice-fodder` are neighbours of each other, so emphasising
+    // both must not offer either back — a chip that toggled a focus already on
+    // is the "stuck on" failure wearing an offer's clothes.
+    const offered = relatedSemantics(['token', 'sacrifice-fodder'])
+    expect(offered).not.toContain('token')
+    expect(offered).not.toContain('sacrifice-fodder')
+  })
+
+  it('unions the neighbours of every emphasised tag', () => {
+    const both = relatedSemantics(['landfall', 'treasure'])
+    expect(both).toContain('untap') // landfall's
+    expect(both).toContain('artifact-etb') // treasure's
+  })
+
+  it('offers a tag once even when two emphasised tags both reach it', () => {
+    // `token` is a neighbour of both. A duplicate would render two toggles for
+    // one tag, and the second would disagree with the first the moment it moved.
+    const offered = relatedSemantics(['landfall', 'creature-etb'])
+    expect(offered.filter((t) => t === 'token')).toHaveLength(1)
+  })
+
+  it('drops anything the caller is already showing, so no tag appears twice', () => {
+    expect(relatedSemantics(['treasure'], ['artifact-etb'])).not.toContain('artifact-etb')
+    expect(relatedSemantics(['treasure'], ['artifact-etb'])).toContain('sacrifice-fodder')
+  })
+
+  it('ignores an exclusion that is not a tag at all, rather than throwing', () => {
+    expect(relatedSemantics(['treasure'], ['not-a-tag'])).toEqual(
+      [...interactsWith('treasure')].sort(byTagOrder),
+    )
+  })
+
+  it('is in canonical tag order, so the same focus offers the same list every time', () => {
+    const offered = relatedSemantics(['creature-death'])
+    expect([...offered].sort(byTagOrder)).toEqual(offered)
+  })
+})
+
+describe('remainingSemantics', () => {
+  it('is the whole vocabulary when nothing is on offer yet', () => {
+    expect(remainingSemantics([])).toEqual(SYNERGY_TAGS)
+  })
+
+  it('leaves out what is already on screen', () => {
+    const rest = remainingSemantics(['token', 'landfall'])
+    expect(rest).not.toContain('token')
+    expect(rest).not.toContain('landfall')
+    expect(rest).toHaveLength(SYNERGY_TAGS.length - 2)
+  })
+
+  it('is empty once every semantic is on offer — the button has nothing left to show', () => {
+    expect(remainingSemantics(SYNERGY_TAGS)).toEqual([])
+  })
+
+  it('is in canonical order', () => {
+    expect(remainingSemantics(['token'])).toEqual(SYNERGY_TAGS.filter((t) => t !== 'token'))
+  })
+})
+
+describe('bySupport', () => {
+  const support = (entries: Record<string, number>): ReadonlyMap<string, number> =>
+    new Map(Object.entries(entries))
+
+  it('puts the tag more of the pool supports first', () => {
+    expect(bySupport(['token', 'landfall'], support({ token: 2, landfall: 40 }))).toEqual([
+      'landfall',
+      'token',
+    ])
+  })
+
+  it('makes no claim at all without counts — the start screen has none yet', () => {
+    // Canonical order, unchanged. Sorting by a number nobody has computed would
+    // be an order presented as a ranking and derived from nothing.
+    expect(bySupport(['token', 'landfall'], undefined)).toEqual(['token', 'landfall'])
+  })
+
+  it('sinks a tag nothing in the deck’s colours supports, rather than hiding it', () => {
+    // Emphasis never filters, so a zero-support tag is still a legal, offered
+    // choice (`supportText` says so in words). It just must not LEAD.
+    const ordered = bySupport(['token', 'landfall', 'untap'], support({ token: 0, landfall: 5, untap: 9 }))
+    expect(ordered).toEqual(['untap', 'landfall', 'token'])
+  })
+
+  it('sorts a tag with no count of its own after one known to be zero', () => {
+    // "Counting…" is weaker than "counted, and it was nothing": one is a fact
+    // about the pool, the other is the absence of a fact, and a list ordered by
+    // how much supports a tag cannot promote the one it cannot answer for.
+    expect(bySupport(['token', 'landfall'], support({ landfall: 0 }))).toEqual([
+      'landfall',
+      'token',
+    ])
+  })
+
+  it('breaks a tie on canonical order, so equal support never reshuffles', () => {
+    expect(bySupport(['untap', 'token', 'landfall'], support({ token: 3, landfall: 3, untap: 3 }))).toEqual([
+      'token',
+      'landfall',
+      'untap',
+    ])
+  })
+
+  it('leaves the input alone', () => {
+    const input: SynergyTag[] = ['token', 'landfall']
+    bySupport(input, support({ landfall: 9 }))
+    expect(input).toEqual(['token', 'landfall'])
   })
 })
