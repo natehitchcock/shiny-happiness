@@ -2295,6 +2295,15 @@ const PartnerName = ({
   )
 }
 
+/**
+ * How many of one card's near-miss lines are drawn before the row summarises.
+ *
+ * A single card can sit one piece from a great many combos — the count is on
+ * the row either way, so the remainder is reported rather than dropped, which
+ * is the same rule the suggestion feed's withheld footer follows.
+ */
+const ONE_AWAY_LINES = 4
+
 const Works = ({
   detail,
   accepted,
@@ -2321,8 +2330,30 @@ const Works = ({
 
   // Combos this card completes with cards already accepted.
   const assembled: Partner[] = []
-  // Combos needing exactly one more card — the near miss worth showing.
-  const oneAway: { readonly needs: Partner; readonly with: readonly Partner[] }[] = []
+  /**
+   * Combos needing exactly one more card — the near miss worth showing —
+   * grouped by THE CARD THEY NEED.
+   *
+   * One row per card, not one per combo. Several combos routinely need the same
+   * single piece, and this list used to draw one row for each of them: four
+   * paragraphs, each reading "one card away, needs Emiel the Blessed", which is
+   * four answers to the one question the panel is being asked. It is also where
+   * the duplicate React keys came from — the row was keyed by the card it
+   * needed, which is exactly the value several rows shared, and React's own
+   * warning says such children "may be duplicated and/or omitted".
+   *
+   * Merging is the stronger claim as well as the shorter one. "This one card
+   * finishes three different lines you already hold" is a better argument for
+   * going and getting it than the same sentence written out three times, and
+   * the lines are still named individually so nothing is lost — the alternative
+   * of deduping down to one line per card would have thrown the argument away
+   * to fix the key.
+   */
+  const oneAway: {
+    readonly needs: Partner
+    readonly lines: { readonly comboId: string; readonly with: readonly Partner[] }[]
+  }[] = []
+  const oneAwayAt = new Map<string, number>()
 
   for (const combo of detail.combos) {
     const others = combo.pieces.filter((p) => p.oracleId !== self)
@@ -2330,15 +2361,25 @@ const Works = ({
     const missing = others.filter((p) => !accepted.has(p.oracleId))
     if (missing.length === 0) {
       for (const p of others) assembled.push(partner(p.oracleId, p.name))
-    } else if (missing.length === 1 && oneAway.length < 6) {
-      const need = missing[0]!
-      oneAway.push({
-        needs: partner(need.oracleId, need.name),
-        with: others
-          .filter((p) => p.oracleId !== need.oracleId)
-          .map((p) => partner(p.oracleId, p.name)),
-      })
+      continue
     }
+    if (missing.length !== 1) continue
+    const need = missing[0]!
+    const line = {
+      comboId: combo.id,
+      with: others.filter((p) => p.oracleId !== need.oracleId).map((p) => partner(p.oracleId, p.name)),
+    }
+    const at = oneAwayAt.get(need.oracleId)
+    if (at !== undefined) {
+      oneAway[at]!.lines.push(line)
+      continue
+    }
+    // The cap now counts CARDS rather than combos, which is what it was always
+    // meant to bound: six rows. Six combos could be one card six times, and the
+    // panel would then have named a single missing card and stopped.
+    if (oneAway.length >= 6) continue
+    oneAwayAt.set(need.oracleId, oneAway.length)
+    oneAway.push({ needs: partner(need.oracleId, need.name), lines: [line] })
   }
 
   // Deck cards whose synergy tags pair with this card's, strongest first.
@@ -2395,17 +2436,37 @@ const Works = ({
           <p className="partners-note">
             No combo assembled yet — these need one more card, shown in rust:
           </p>
-          {oneAway.map((line) => (
-            <p className="partners" key={line.needs.oracleId}>
-              <PartnerName p={line.needs} onOpen={onOpen} />
-              {line.with.length === 0 ? null : (
-                <>
-                  <span className="partners-label">with</span>
-                  {line.with.map((p) => (
-                    <PartnerName key={p.oracleId} p={p} onOpen={onOpen} />
-                  ))}
-                </>
-              )}
+          {oneAway.map((row) => (
+            /*
+             * Keyed by the needed card, which is now unique because the rows
+             * ARE one per needed card. Each line inside is keyed by its combo
+             * id — the identity the combo already has on the wire, and the one
+             * `Detail` has always used for the same list.
+             */
+            <p className="partners partners-one-away" key={row.needs.oracleId}>
+              <PartnerName p={row.needs} onOpen={onOpen} />
+              <span className="partners-label">
+                {row.lines.length === 1
+                  ? 'completes'
+                  : `completes ${String(row.lines.length)} combos`}
+              </span>
+              {row.lines.slice(0, ONE_AWAY_LINES).map((line) => (
+                <span className="partners-line" key={line.comboId}>
+                  {line.with.length === 0 ? (
+                    // A two-card combo: this card plus the missing one, and
+                    // there is no third piece to name. Saying nothing would
+                    // make the line look like a rendering failure.
+                    <span className="partners-alone">with this card alone</span>
+                  ) : (
+                    line.with.map((p) => <PartnerName key={p.oracleId} p={p} onOpen={onOpen} />)
+                  )}
+                </span>
+              ))}
+              {row.lines.length > ONE_AWAY_LINES ? (
+                <span className="partners-more">
+                  +{row.lines.length - ONE_AWAY_LINES} more
+                </span>
+              ) : null}
             </p>
           ))}
         </>
@@ -4102,6 +4163,19 @@ interface PendingCommand {
 }
 
 /**
+ * The three keys the server emits for combo candidates, in the order it emits
+ * them (doc 05 §5.3, and `recommend.ts`'s membership chain).
+ *
+ * Named once, here, because the client invents a fourth key — `combo` — for the
+ * heading it merges them into, and every place that has to undo the merge needs
+ * the same three names. They were previously written out as `combo-2`,
+ * `combo-3` and `combo-4`: `combo-3` and `combo-4` do not exist and matched
+ * nothing, and `combo-1` and `combo-3plus` were never asked for at all, so More
+ * on the merged heading could only ever return more two-combo cards.
+ */
+const COMBO_KEYS = ['combo-3plus', 'combo-2', 'combo-1'] as const
+
+/**
  * Fetch the extra rows for every group the user has expanded.
  *
  * One request for all of them, narrowed to those keys. `combo` is a client-side
@@ -4116,7 +4190,7 @@ const expansionsFor = async (
   columns: readonly string[] = [],
 ): Promise<ReadonlyMap<string, readonly api.Recommendation[]>> => {
   if (keys.size === 0) return new Map()
-  const wanted = [...keys].flatMap((k) => (k === 'combo' ? ['combo-2', 'combo-3', 'combo-4'] : [k]))
+  const wanted = [...keys].flatMap((k) => (k === 'combo' ? [...COMBO_KEYS] : [k]))
   const more = await api.getRecommendations(deckId, {
     limitPerGroup: 32,
     groups: wanted,
@@ -5465,6 +5539,20 @@ export const Workspace = ({
     new Map(),
   )
   const [expanding, setExpanding] = useState<string | null>(null)
+
+  /**
+   * Whether the merged combo heading is showing the rows its halving holds back.
+   *
+   * Local and sticky across recomputes, like `collapsed` and unlike
+   * `extraItems`: it records a preference about density — "show me all of
+   * these" — rather than a set of cards, so there is nothing in it to go stale
+   * when the deck changes. Resetting it on every recompute would close the list
+   * under a builder who had just opened it, once per accept.
+   *
+   * It needs no server round trip at all. These rows are already in hand; the
+   * halving is the only thing keeping them off the page.
+   */
+  const [comboRevealed, setComboRevealed] = useState(false)
 
   const [cutThreshold, setCutThreshold] = useState<number>(() => {
     const saved = Number(localStorage.getItem('lw.cutThreshold'))
@@ -7141,9 +7229,12 @@ export const Workspace = ({
    * "One card away" stays separate — it is a different claim, about a combo the
    * deck cannot make yet.
    */
-  const shownGroups = useMemo(() => {
+  const { shownGroups, comboWithheld } = useMemo((): {
+    shownGroups: readonly api.Group[]
+    comboWithheld: readonly api.Recommendation[]
+  } => {
     const combo = groups.filter((g) => g.key.startsWith('combo-'))
-    if (combo.length === 0) return groups
+    if (combo.length === 0) return { shownGroups: groups, comboWithheld: [] }
     /*
      * Half the rows the three groups would have shown between them.
      *
@@ -7167,20 +7258,55 @@ export const Workspace = ({
      * a density decision about a merged heading, not a licence to ignore it.
      */
     const kept = all.slice(0, half)
-    const rescued = all.slice(half).filter((i) => i.reasons.some((r) => r.guaranteed === true))
+    const past = all.slice(half)
+    const guaranteed = (i: api.Recommendation): boolean =>
+      i.reasons.some((r) => r.guaranteed === true)
+    const rescued = past.filter(guaranteed)
+    /*
+     * WHAT THE HALVING HELD BACK, kept rather than dropped.
+     *
+     * The halving stays — it is a real density decision and ADR-0026 §8 records
+     * it — but "halve" meant "discard", with the heading still printing the
+     * full count above the rows it had thrown away. Nothing on the page said a
+     * card had been withheld, and the merged key is one this client invented,
+     * so More could not reach them either: the rows were unreachable by any
+     * route. In a playtest the two cut at three cards were Mana Vault and Mox
+     * Opal, and Mana Vault finishes a two-card combo with a card already in the
+     * deck — the single most decision-relevant row in the feed, silently gone.
+     *
+     * doc 05 §5.3 already fixes the shape of the answer for the case where a
+     * query withholds a card ("+3 more complete 3+ combos but don't match your
+     * filter · show"), so this follows that convention rather than inventing a
+     * second one: the count is footed and the rows are one click away. They are
+     * already in hand, so the click costs no request.
+     *
+     * The rescued rows are NOT in here. They are on the page, so counting them
+     * as withheld would overstate the footer by exactly the number of promises
+     * the client kept.
+     */
+    const withheld = past.filter((i) => !guaranteed(i))
     const merged: api.Group = {
       ...combo[0]!,
       key: 'combo',
       label: 'Completes combos',
       total: combo.reduce((n, g) => n + g.total, 0),
       rationale: 'Adding one of these finishes a combo using only cards already in your deck.',
-      items: [...kept, ...rescued],
+      /*
+       * Revealed rows go back into `all` order rather than being appended, so a
+       * row takes the place its own degree and score earn. Appending them would
+       * put the weakest rows of the first half above the strongest of the
+       * second, which is the ordering the halving was supposed to preserve.
+       */
+      items: comboRevealed ? all : [...kept, ...rescued],
     }
     const rest = groups.filter((g) => !g.key.startsWith('combo-'))
     // Back where the strongest of the three sat, not appended to the end.
     const at = groups.findIndex((g) => g.key.startsWith('combo-'))
-    return [...rest.slice(0, at), merged, ...rest.slice(at)]
-  }, [groups])
+    return {
+      shownGroups: [...rest.slice(0, at), merged, ...rest.slice(at)],
+      comboWithheld: comboRevealed ? [] : withheld,
+    }
+  }, [groups, comboRevealed])
 
   /**
    * Every group, with any rows an expand fetched folded in.
@@ -7242,6 +7368,22 @@ export const Workspace = ({
           })),
     [visibleGroups, columns, queryColumns, columnMatches, sort, cards, prices],
   )
+
+  /**
+   * How many rows this heading is holding back — the number its footer offers.
+   *
+   * Only the merged combo heading withholds anything: the other groups draw
+   * every row the server sent them and reach for more through More. Decided
+   * cards are subtracted on the same terms `rowsIn` uses, so a card the builder
+   * rejected a second ago is not counted as one they are still missing (P6).
+   */
+  const withheldIn = (g: api.Group): number =>
+    g.key !== 'combo'
+      ? 0
+      : comboWithheld.filter((item) => {
+          const decided = optimistic.entries.find((e) => e.oracleId === item.oracleId)
+          return decided === undefined || decided.zone !== 'excluded'
+        }).length
 
   /** Whether anything is left to show under a heading, filters applied. */
   const rowsIn = (g: api.Group): number =>
@@ -8726,6 +8868,35 @@ export const Workspace = ({
                         )}
                       </div>
                     ))}
+              {/*
+               * The rows this heading is holding back, named rather than lost.
+               *
+               * doc 05 §5.3: a group that is not showing a card it holds
+               * footers the count and offers it. The convention was written for
+               * a query withholding a card; the merged combo heading withholds
+               * for density instead, and the reader's question is identical —
+               * "the heading says 131, I can see twelve, where are the rest" —
+               * so it gets the identical answer rather than a second one.
+               *
+               * The count is recomputed here rather than taken from
+               * `comboWithheld.length` so that a card the builder has just
+               * rejected is not offered back to them as something they are
+               * missing (P6). At zero the footer disappears entirely: an
+               * offer of nothing is noise.
+               */}
+              {isCollapsed(g) || g.key !== 'combo' || withheldIn(g) === 0 ? null : (
+                <p className="group-foot">
+                  <button
+                    type="button"
+                    className="as-link group-reveal"
+                    onClick={() => setComboRevealed(true)}
+                    aria-label={`Show the ${withheldIn(g)} more rows that complete combos`}
+                    title="These are already loaded — showing them costs no request."
+                  >
+                    +{withheldIn(g)} more complete combos · show
+                  </button>
+                </p>
+              )}
             </div>
           ))}
           {groups.length === 0 ? <p className="note">Working…</p> : null}

@@ -2554,6 +2554,29 @@ select {
   color: var(--parchment-dim);
   font-size: 0.68rem;
 }
+/*
+ * One near-miss line inside a row that names several.
+ *
+ * A row is now "this card, which finishes N combos", and each line is one of
+ * those N. They need a visible boundary or the partner names of two different
+ * combos read as one list of partners for one combo — which is a wrong claim,
+ * not just a cramped one. A leading separator rather than a trailing one, so
+ * the first line does not carry a dangling mark.
+ */
+.partners-line + .partners-line::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--parchment-dim);
+}
+.partners-line .partner + .partner::before {
+  content: ' + ';
+  color: var(--parchment-dim);
+}
+.partners-alone,
+.partners-more {
+  color: var(--parchment-dim);
+  font-size: 0.68rem;
+}
 
 /*
  * A combo piece as a control that opens it.
@@ -3320,6 +3343,20 @@ select {
 .group-more:disabled {
   opacity: 0.4;
   cursor: default;
+}
+/* The footer that accounts for rows a heading is holding back (doc 05 §5.3).
+   Indented to the rows rather than the heading, because it is the last line of
+   the list and not a second title for it. */
+.group-foot {
+  margin: 0.15rem 0 0.5rem;
+  padding-left: 0.35rem;
+  font-size: 0.7rem;
+}
+.group-reveal {
+  color: var(--parchment-dim);
+}
+.group-reveal:hover {
+  color: var(--brass);
 }
 /* ------------------------------------------------- archetype customiser */
 

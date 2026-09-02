@@ -79,6 +79,36 @@ describe('Detail — combos', () => {
     render(<Detail card={card()} combos={[]} />)
     expect(screen.getByText(/Not part of any combo/)).toBeDefined()
   })
+
+  /**
+   * Absent and empty are different claims, and this component used to make the
+   * same one for both.
+   *
+   * `combos={[]}` is a caller that looked and found nothing — a fact, and worth
+   * printing. No prop at all is a caller that never asked, and answering that
+   * with "Not part of any combo we know about" invents a negative result the
+   * component has no source for. Quickbuild rendered every card this way, so
+   * every card in the panel said "completes 1 combo" an inch above "Not part of
+   * any combo we know about".
+   *
+   * The contrast with `reasons` directly above is deliberate and is the reason
+   * this is not simply symmetry: P4 makes a missing `reasons` list a BUG, so
+   * saying so loudly is the right response to its absence. Nothing guarantees a
+   * caller supplies `combos`, so its absence is ignorance, not a defect, and
+   * the honest rendering of ignorance is silence.
+   */
+  it('says nothing at all when it was never given the combos', () => {
+    render(<Detail card={card()} />)
+    expect(screen.queryByText(/Not part of any combo/)).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Combos' })).toBeNull()
+  })
+
+  it('still lists them when it is given some', () => {
+    // The absent case must not be implemented by dropping the section whenever
+    // the list is short.
+    render(<Detail card={card()} combos={[combo()]} />)
+    expect(screen.getByRole('heading', { name: 'Combos' })).toBeDefined()
+  })
 })
 
 describe('Detail — decide without closing', () => {

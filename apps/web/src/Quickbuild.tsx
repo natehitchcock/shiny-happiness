@@ -247,13 +247,52 @@ export const combinedQuery = (filter: string, gap: QuickbuildGap): string => {
  * be a claim that the deck is five staples short of something, and there is no
  * such target anywhere in the product — the list is an opinion with an owner
  * (ADR-0044), not a band the deck is measured against.
+ *
+ * BECAUSE it is a claim about what is on offer, the number has to come from the
+ * offer. `gap.short` for a staples gap is the `staple` group's `total` from the
+ * last FEED recompute, while the cards underneath come from a separate, later
+ * request this panel makes for that same group and are then filtered again by
+ * the optimistic deck. Two definitions of "a staple you don't have", an inch
+ * apart, drifting the moment the builder adds anything: the playtest saw "5
+ * staple lands you don't have yet" over an empty panel after all five had been
+ * added.
+ *
+ * `offering` is this panel's own count — the list the body is drawing, with
+ * every accept and rejection already applied — and it wins whenever the panel
+ * has one. `gap.short` survives only until the first response lands, because
+ * until then the panel has nothing of its own to count and a heading is still
+ * needed.
+ *
+ * The other two kinds are NOT switched over. A composition or curve gap's
+ * `short` is a measured deficit against a target — "3 more at mana value 2" is
+ * a fact about the deck, not about this trio — so counting the offer there
+ * would replace a true number with a different true number answering a
+ * different question.
  */
-const gapHeading = (gap: QuickbuildGap): string =>
-  gap.kind === 'staples'
-    ? `${gap.short} ${gap.label} you don’t have yet`
-    : gap.kind === 'curve'
-      ? `${gap.short} more at ${gap.label}`
-      : `${gap.short} more ${gap.label}`
+const gapHeading = (gap: QuickbuildGap, offering: number | null): string => {
+  if (gap.kind === 'curve') return `${gap.short} more at ${gap.label}`
+  if (gap.kind !== 'staples') return `${gap.short} more ${gap.label}`
+  const left = offering ?? gap.short
+  /*
+   * At zero the heading stops counting.
+   *
+   * "0 staple lands you don't have yet" is technically true and reads as a
+   * puzzle, and it would also be the one heading that could be wrong: zero
+   * because the builder took them all and zero because the server never had
+   * any are different facts, and the sentence under the heading is what tells
+   * them apart. So the heading says the neutral thing that holds either way
+   * and leaves the explanation to the line that has it.
+   */
+  if (left === 0) return `No ${gap.label} left to offer`
+  /*
+   * The count now walks down to one on the way out, so the singular is reached
+   * every time rather than occasionally. The two labels the domain emits here
+   * are `staples` and `staple lands` — both regular plurals — so trimming the
+   * final `s` is exact for both, and is deliberately not a general pluraliser,
+   * which is not this file's to own. Pinned in `quickbuild.test.tsx`.
+   */
+  return `${left} ${left === 1 ? gap.label.replace(/s$/, '') : gap.label} you don’t have yet`
+}
 
 /**
  * What the panel says when it runs out of gaps — the report's second half.
@@ -584,6 +623,18 @@ export const Quickbuild = ({
 
   const showing = useMemo(() => live.slice(passed, passed + OPTIONS), [live, passed])
 
+  /**
+   * How many candidates this panel is holding for this gap — the number the
+   * staples heading counts, so the heading and the body are two readings of one
+   * list rather than of two responses.
+   *
+   * `null` until a response for THIS gap and THIS filter has landed. The
+   * heading still has to say something before then, and `live` is `[]` while
+   * the queue is stale, which is not a count of anything — rendering it as one
+   * would flash "0 staples you don't have yet" over every gap change.
+   */
+  const offering = stale || queue === null ? null : live.length
+
   /*
    * "Option 3 of 2" is not a sentence. `focused` is a cursor over a list that
    * shortens under it — a card retiring from the queue is enough — so it is
@@ -661,7 +712,7 @@ export const Quickbuild = ({
         ? 'Could not load candidates for this gap.'
         : showing.length === 0
           ? `No candidates for ${gap.label}.`
-          : `${gapHeading(gap)}. ${showing.length} option${showing.length === 1 ? '' : 's'}: ${showing
+          : `${gapHeading(gap, offering)}. ${showing.length} option${showing.length === 1 ? '' : 's'}: ${showing
               .map((c) => c.view.name)
               .join(', ')}.`,
     )
@@ -697,7 +748,22 @@ export const Quickbuild = ({
     setFocused(0)
   }
 
-  const exhausted = !fetching && !failed && showing.length === 0 && passed > 0
+  /*
+   * The gap had candidates and has none left.
+   *
+   * `passed > 0` alone made this mean "the builder skipped past the end", so a
+   * builder who only ever pressed Add walked the list to zero and was then told
+   * "Nothing in your colours fills this gap" — blaming their colour identity
+   * for a list they had emptied themselves. Adding and rejecting retire cards
+   * through `retiredIds` rather than through `passed`, so neither of them ever
+   * moved this flag.
+   *
+   * The distinction it exists to draw survives: a gap the server had no answer
+   * for at all still has `queue.candidates` empty, and still gets the sentence
+   * about colours or about the filter.
+   */
+  const spent = !stale && queue !== null && queue.candidates.length > 0 && live.length === 0
+  const exhausted = !fetching && !failed && showing.length === 0 && (passed > 0 || spent)
 
   return (
     <div
@@ -768,7 +834,7 @@ export const Quickbuild = ({
       ) : (
         <>
           <div className="quickbuild-gap">
-            <h3>{gapHeading(gap)}</h3>
+            <h3>{gapHeading(gap, offering)}</h3>
             <p className="quickbuild-why">
               {/*
                * The staples phase says whose opinion it is, because it is one
@@ -909,6 +975,23 @@ export const Quickbuild = ({
                     aria-label={`Option ${at + 1} of ${showing.length}: ${candidate.view.name}`}
                     onFocus={() => setFocused(at)}
                   >
+                    {/*
+                     * NO `combos` PROP, deliberately, and it must stay that way.
+                     *
+                     * The panel does not know this card's combos. A
+                     * `Recommendation` carries only the COMPLETED ones — every
+                     * piece already in the deck — so an empty list from that
+                     * source says nothing about the near misses, which is
+                     * exactly the claim most of these cards are here on. Handing
+                     * `Detail` `[]` made it print "Not part of any combo we know
+                     * about" an inch under "completes 1 combo", on cards where
+                     * the denial was flatly false (Vandalblast among them).
+                     *
+                     * `Detail` now distinguishes absent from empty and says
+                     * nothing when it was never told, and the card's combo
+                     * standing is still on screen: `reasons` states it in words
+                     * and `ComboBadge` in a number.
+                     */}
                     <Detail
                       card={candidate.view}
                       actions={

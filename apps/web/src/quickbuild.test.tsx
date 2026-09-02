@@ -1255,8 +1255,123 @@ describe('the staples phase opens the loop', () => {
   it('says what is on offer rather than what the deck is short of', async () => {
     // There is no target behind this number. "11 more staples" would assert the
     // deck is eleven staples short of something the product never measured.
-    setup({ plan: staplesPlan() })
+    //
+    // Eleven candidates, matching the gap's `short`, so this reads the PHRASING
+    // and not the arithmetic — which the tests below own.
+    setup(
+      { plan: staplesPlan() },
+      ['Ai', 'Bo', 'Cy', 'Di', 'Ed', 'Fi', 'Gu', 'Ha', 'Iv', 'Jo', 'Ky'].map((n) =>
+        candidate(n, 'Staples'),
+      ),
+    )
     await screen.findByRole('heading', { name: /11 staples you don’t have yet/i })
+  })
+
+  /**
+   * The heading and the body have to be two readings of ONE list.
+   *
+   * `gap.short` is the `staple` group's `total` from the last FEED recompute
+   * (App.tsx's `quickbuild` memo). The trio underneath comes from a separate,
+   * later request the panel makes for the same group, and is then filtered
+   * again by the optimistic deck. Two definitions of "a staple you don't have",
+   * one in the heading and one an inch below it, and they drift the moment the
+   * builder adds anything.
+   *
+   * The panel's own list is the authoritative one: it is what is actually on
+   * offer HERE, it already has every accept and rejection applied, and it is
+   * the list the body draws. `short` is kept only until the first response
+   * lands, because before that the panel has nothing of its own to count.
+   */
+  it('counts the staples it is actually offering, not the feed’s stale total', async () => {
+    setup({ plan: staplesPlan() }, [
+      candidate('Ai', 'Staples'),
+      candidate('Bo', 'Staples'),
+      candidate('Cy', 'Staples'),
+    ])
+    // `short` says 11; the group came back with three.
+    await screen.findByRole('heading', { name: /3 staples you don’t have yet/i })
+  })
+
+  it('falls to zero as the builder takes them, rather than standing at 11', async () => {
+    const retired = new Set<string>()
+    const { rerender } = setup({ plan: staplesPlan() }, [
+      candidate('Ai', 'Staples'),
+      candidate('Bo', 'Staples'),
+      candidate('Cy', 'Staples'),
+    ])
+    await screen.findByRole('heading', { name: /3 staples you don’t have yet/i })
+
+    retired.add('Ai')
+    await act(async () => {
+      rerender(
+        <Quickbuild
+          plan={staplesPlan()}
+          filter=""
+          fetchCandidates={vi
+            .fn()
+            .mockResolvedValue([
+              candidate('Ai', 'Staples'),
+              candidate('Bo', 'Staples'),
+              candidate('Cy', 'Staples'),
+            ])}
+          onAdd={vi.fn()}
+          onReject={vi.fn()}
+          onClose={vi.fn()}
+          onReach={vi.fn()}
+          cutCount={0}
+          retiredIds={retired}
+        />,
+      )
+    })
+    await screen.findByRole('heading', { name: /2 staples you don’t have yet/i })
+  })
+
+  it('drops the plural on the last one, which the count now reaches every time', async () => {
+    // Reached on the way out of every staples phase, not occasionally: the
+    // heading counts down as the builder adds.
+    setup({ plan: staplesPlan() }, [candidate('Ai', 'Staples')])
+    await screen.findByRole('heading', { name: /^1 staple you don’t have yet$/i })
+  })
+
+  it('does the same for the lands label', async () => {
+    setup({ plan: staplesPlan({ gaps: [stapleLandGap, rampGap] }) }, [candidate('Ai', 'Staples')])
+    await screen.findByRole('heading', { name: /^1 staple land you don’t have yet$/i })
+  })
+
+  it('stops counting at zero rather than posing a riddle', async () => {
+    /*
+     * "0 staple lands you don't have yet" is true and unreadable, and it is
+     * also the one count that could mislead: zero because the builder took them
+     * all and zero because the server never had any are different facts, and
+     * the line UNDER the heading is what distinguishes them.
+     */
+    setup({ plan: staplesPlan({ gaps: [stapleLandGap, rampGap] }) }, [])
+    await screen.findByRole('heading', { name: /No staple lands left to offer/i })
+    expect(screen.queryByRole('heading', { name: /0 staple lands/i })).toBeNull()
+  })
+
+  it('does not blame the colours for a list the builder emptied themselves', async () => {
+    /*
+     * The playtest's exact line: "5 staple lands you don't have yet" over
+     * "Nothing in your colours fills this gap" — after all five had been added.
+     * The colours had nothing to do with it. `exhausted` required the builder
+     * to have SKIPPED, so a builder who only ever pressed Add fell through to
+     * the sentence about their colour identity.
+     */
+    setup({ plan: staplesPlan(), retiredIds: new Set(['Ai', 'Bo', 'Cy']) }, [
+      candidate('Ai', 'Staples'),
+      candidate('Bo', 'Staples'),
+      candidate('Cy', 'Staples'),
+    ])
+    await screen.findByText(/No more candidates for this gap/i)
+    expect(screen.queryByText(/Nothing in your colours fills this gap/i)).toBeNull()
+  })
+
+  it('still blames the colours when the group came back empty in the first place', async () => {
+    // The distinction has to survive: a gap the server has no answer for is a
+    // different fact from a gap the builder has worked through.
+    setup({ plan: staplesPlan() }, [])
+    await screen.findByText(/Nothing in your colours fills this gap/i)
   })
 
   it('names the curated list as an opinion, and drops the build-order sentence', async () => {
@@ -1272,5 +1387,28 @@ describe('the staples phase opens the loop', () => {
     setup({ plan: plan({ gaps: [rampGap], ordering: 'build-order' }) })
     await screen.findByText(/Working your archetype’s build order/i)
     expect(screen.queryByText(/Our opinion, not a statistic/i)).toBeNull()
+  })
+})
+
+/**
+ * Defect 2 — the card panel contradicting itself one inch apart.
+ *
+ * Every card in the panel said "completes 1 combo" under WHY THIS IS HERE and
+ * "Not part of any combo we know about" under COMBOS, because `Detail` was
+ * rendered with no `combos` prop and defaulted it to `[]`. Seen on true
+ * near-combo cards — Vandalblast among them — where the denial was flatly
+ * wrong rather than merely unsupported.
+ */
+describe('the card panel does not deny what its own reasons claim', () => {
+  const comboReason = (name: string): QuickbuildCandidate => ({
+    oracleId: name,
+    view: { ...view(name), reasons: ['one card from 1 combo'] },
+    groupLabel: 'Staples',
+  })
+
+  it('never asserts a card is in no combo when it was never asked', async () => {
+    setup({}, [comboReason('Vandalblast')])
+    await screen.findByText('one card from 1 combo')
+    expect(screen.queryByText(/Not part of any combo we know about/i)).toBeNull()
   })
 })

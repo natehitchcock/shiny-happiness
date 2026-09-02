@@ -33,6 +33,19 @@ export interface ComboLine {
 export interface DetailProps {
   readonly card: CardView
   readonly width?: number
+  /**
+   * The combos this card is in, as far as the CALLER knows.
+   *
+   * Three states, not two, and the third is the one that was being lost. `[]`
+   * is a caller that looked and found none — printed, because it is a finding.
+   * Absent is a caller that never asked, and there is NO DEFAULT that can be
+   * substituted for it: `[]` would put a negative claim on screen that nothing
+   * on this component's inputs supports.
+   *
+   * That was not hypothetical. Quickbuild rendered every card with no `combos`
+   * prop, so every card in the panel read "completes 1 combo" under WHY THIS IS
+   * HERE and "Not part of any combo we know about" an inch below it.
+   */
   readonly combos?: readonly ComboLine[]
   readonly actions?: JSX.Element
   readonly onCorrectRole?: (oracleId: string) => void
@@ -41,7 +54,7 @@ export interface DetailProps {
 export const Detail = ({
   card,
   width,
-  combos = [],
+  combos,
   actions,
   onCorrectRole,
 }: DetailProps): JSX.Element => {
@@ -192,23 +205,38 @@ export const Detail = ({
           </ul>
         )}
 
-        <h3 className="rt-detail-h">Combos</h3>
-        {combos.length === 0 ? (
-          <p className="rt-detail-nocombos">Not part of any combo we know about.</p>
-        ) : (
-          <ul className="rt-detail-combos">
-            {combos.map((combo) => (
-              <li key={combo.comboId} data-assembled={combo.missing.length === 0}>
-                <span className="rt-combo-pieces">{combo.pieces.join(' + ')}</span>
-                <span className="rt-combo-result">{combo.result}</span>
-                {combo.missing.length === 0 ? (
-                  <span className="rt-combo-state">assembled</span>
-                ) : (
-                  <span className="rt-combo-state">needs {combo.missing.join(', ')}</span>
-                )}
-              </li>
-            ))}
-          </ul>
+        {/*
+         * Silence when nothing was passed, and only then.
+         *
+         * The asymmetry with `reasons` immediately above is the point rather
+         * than an oversight. P4 makes an absent `reasons` list a BUG, so the
+         * absence is stated loudly — hiding it would hide the defect the pillar
+         * exists to catch. Nothing guarantees a caller knows this card's
+         * combos, so an absent `combos` is ignorance and not a defect, and the
+         * honest rendering of ignorance is to say nothing. An empty list is
+         * still a claim someone made and is still printed.
+         */}
+        {combos === undefined ? null : (
+          <>
+            <h3 className="rt-detail-h">Combos</h3>
+            {combos.length === 0 ? (
+              <p className="rt-detail-nocombos">Not part of any combo we know about.</p>
+            ) : (
+              <ul className="rt-detail-combos">
+                {combos.map((combo) => (
+                  <li key={combo.comboId} data-assembled={combo.missing.length === 0}>
+                    <span className="rt-combo-pieces">{combo.pieces.join(' + ')}</span>
+                    <span className="rt-combo-result">{combo.result}</span>
+                    {combo.missing.length === 0 ? (
+                      <span className="rt-combo-state">assembled</span>
+                    ) : (
+                      <span className="rt-combo-state">needs {combo.missing.join(', ')}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         )}
       </div>
     </section>
