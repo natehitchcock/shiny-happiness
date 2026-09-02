@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import { Detail, type CardView } from '@roundtable/ui'
-import { gapQuery, type QuickbuildGap, type QuickbuildPlan } from '@roundtable/domain'
+import {
+  DECK_SIZE,
+  gapQuery,
+  type QuickbuildGap,
+  type QuickbuildPlan,
+  type QuickbuildReach,
+} from '@roundtable/domain'
 
 /**
  * Quickbuild — one gap, three cards, one decision (doc 19).
@@ -57,6 +63,15 @@ export interface QuickbuildProps {
   readonly onAdd: (oracleId: string) => void
   readonly onReject: (oracleId: string) => void
   readonly onClose: () => void
+  /**
+   * Reach past the band, when the builder asks for it (ADR-0040).
+   *
+   * The plan is computed by the workspace, so the choice offered at the end of
+   * the loop has to be handed back up rather than kept here. It is a callback
+   * and not a piece of local state for the same reason `plan` is a prop: two
+   * copies of "which number are we working to" is two numbers to disagree.
+   */
+  readonly onReach: (reach: QuickbuildReach) => void
   /** How many cards the cut indicator currently names, for the Q5 message. */
   readonly cutCount: number
   /**
@@ -177,6 +192,36 @@ const gapHeading = (gap: QuickbuildGap): string =>
     ? `${gap.short} more at ${gap.label}`
     : `${gap.short} more ${gap.label}${gap.short === 1 ? '' : ''}`
 
+/**
+ * What the panel says when it runs out of gaps — the report's second half.
+ *
+ * "Quickbuild ended while I was below curve on ramp and spot removal, and also
+ * only at 58 of 100 cards." Both halves of that were true at once, and the
+ * panel said neither. The band's floor sits three cards under the ideal, so a
+ * dimension can be inside its band and visibly under its meter at the same
+ * time; and the role minima sum to 56 for a midrange deck at bracket 3, so a
+ * deck reaches every band at 56 cards with 44 still to find.
+ *
+ * So the ending states the arithmetic instead of asserting completion, and
+ * NEVER closes by itself. The sentence is assembled from the plan's own numbers
+ * — nothing here computes a target.
+ */
+const endingText = (plan: QuickbuildPlan): string => {
+  const met =
+    plan.reach === 'band'
+      ? 'Every composition and curve allotment is inside its band.'
+      : 'Every composition and curve target is at its ideal.'
+  const holds = `The deck holds ${plan.held} of ${DECK_SIZE}`
+  // `held` rather than `DECK_SIZE - unallocated`, which floors at zero and
+  // would tell a deck of 110 that it holds all 100.
+  if (plan.unallocated === 0) return `${met} ${holds}.`
+  return (
+    `${met} ${holds}, so there are ${plan.unallocated} more cards to pick. Your archetype ` +
+    `leaves ${plan.unroled} slots with no target at all — the threats and win conditions — ` +
+    `and Quickbuild has no opinion about those.`
+  )
+}
+
 export const Quickbuild = ({
   plan,
   filter,
@@ -184,12 +229,37 @@ export const Quickbuild = ({
   onAdd,
   onReject,
   onClose,
+  onReach,
   cutCount,
   retiredIds,
 }: QuickbuildProps): JSX.Element => {
-  const [gapAt, setGapAt] = useState(0)
-  /** How many candidates have been passed over for this gap. D5: a PASS. */
-  const [passed, setPassed] = useState(0)
+  /**
+   * The gap "Different gap" moved to, by KEY. `null` means the leading one.
+   *
+   * It used to be an index into `plan.gaps`, advanced with a modulo against the
+   * length AT THE TIME OF THE CLICK. The plan is recomputed on every accept and
+   * gaps close as the deck fills, so the list it indexed got shorter underneath
+   * it — and `plan.gaps[3]` on a three-gap plan is `undefined`, which the panel
+   * rendered as "Every composition and curve goal is inside its band. Nothing
+   * to fill." It announced it was finished while the deck was still short of
+   * ramp and spot removal, which is exactly what the report describes.
+   */
+  const [chosenKey, setChosenKey] = useState<string | null>(null)
+  /**
+   * How many candidates have been passed over, and FOR WHICH GAP. D5: a PASS.
+   *
+   * The gap key rides with the count because the two must never be applied to
+   * each other's list. This was a bare number, so a builder who skipped twice
+   * on the land gap and then had that gap close under them kept a cursor of six
+   * into the next gap's fresh page of eight — the panel sliced past almost all
+   * of it and, when the new page was shorter, reported "No more candidates for
+   * this gap" about a gap it had not shown a single card for. The second half
+   * of the same report: ramp and spot removal never being offered.
+   */
+  const [cursor, setCursor] = useState<{ readonly gapKey: string; readonly passed: number }>({
+    gapKey: '',
+    passed: 0,
+  })
   /**
    * The candidates held for one gap, and which gap they answer.
    *
@@ -202,8 +272,19 @@ export const Quickbuild = ({
     readonly gapKey: string
     readonly filter: string
     readonly candidates: readonly QuickbuildCandidate[]
-    /** The deep page has landed; there is nothing further to top up. */
+    /** The deep page has landed; there is nothing deeper to ask for. */
     readonly deep: boolean
+    /**
+     * How many cards the deck had decided on when this queue was fetched.
+     *
+     * It is what makes a REFILL distinguishable from a pointless repeat.
+     * `recommend` never offers a card the deck already holds, so its answer for
+     * one gap changes exactly when the deck does — and `retiredIds` growing is
+     * this panel's own record of that. Asking again with the same deck would
+     * return the same list; asking again after eight picks returns eight cards
+     * the builder has not seen.
+     */
+    readonly retiredAt: number
   } | null>(null)
   const [fetching, setFetching] = useState(true)
   const [failed, setFailed] = useState(false)
@@ -216,7 +297,24 @@ export const Quickbuild = ({
   const panelRef = useRef<HTMLDivElement>(null)
   const openerRef = useRef<Element | null>(null)
 
-  const gap = plan.gaps[gapAt]
+  /*
+   * The gap on screen: the one the builder chose while it is still open, and
+   * the leading one otherwise.
+   *
+   * Looked up BY KEY rather than by index. An index into `plan.gaps` cannot
+   * survive the plan being recomputed on every accept: `plan.gaps[3]` on a
+   * three-gap plan is `undefined`, which rendered as "Nothing to fill" and is
+   * the false ending in the report. A wrapping index cannot go out of range but
+   * still points somewhere arbitrary — measured in the browser, "Different gap"
+   * onto tutor and then two gaps closing left the panel on a gap the builder
+   * had not asked for, which is exactly the reshuffling D3 says must not
+   * happen. A key is stable under both.
+   *
+   * Falling back to `gaps[0]` when the chosen gap is gone is the honest answer:
+   * the gap they were working has closed, so the most pressing one leads again.
+   */
+  const gap = plan.gaps.find((g) => g.key === chosenKey) ?? plan.gaps[0]
+  const passed = gap !== undefined && cursor.gapKey === gap.key ? cursor.passed : 0
 
   /*
    * Focus moves in on open and RETURNS to whatever opened the panel on close
@@ -278,6 +376,15 @@ export const Quickbuild = ({
    */
   const generation = useRef(0)
 
+  /*
+   * `retiredIds.size` as of this render, readable from inside `load` without
+   * making every fetch depend on it. `load` must not be rebuilt each time a
+   * card is accepted — the effects below key off its identity, and a new
+   * `load` on every pick would re-run them and refetch what is already in hand.
+   */
+  const retiredSize = useRef(retiredIds.size)
+  retiredSize.current = retiredIds.size
+
   const load = useCallback(
     async (
       forGap: QuickbuildGap,
@@ -304,6 +411,7 @@ export const Quickbuild = ({
           filter: forFilter,
           candidates: found,
           deep: limit >= DEEP_PAGE,
+          retiredAt: retiredSize.current,
         })
         setFetching(false)
       } catch {
@@ -352,17 +460,43 @@ export const Quickbuild = ({
   const showing = useMemo(() => live.slice(passed, passed + OPTIONS), [live, passed])
 
   /*
-   * THE PREFETCH. Deepen the queue while the builder is reading, so the next
-   * trio is already in hand whichever of the four things they do with this one.
+   * "Option 3 of 2" is not a sentence. `focused` is a cursor over a list that
+   * shortens under it — a card retiring from the queue is enough — so it is
+   * clamped on read for the same reason `gapAt` is.
+   */
+  const focus = showing.length === 0 ? 0 : Math.min(focused, showing.length - 1)
+
+  /*
+   * THE PREFETCH, and the REFILL.
    *
-   * `background: true` — no waiting state, no announcement, no bar. If it never
-   * lands, the panel is exactly as good as it was before this existed.
+   * Deepening is the original job: fetch the deep page while the builder is
+   * reading the first trio, so the next one is already in hand whichever of the
+   * four things they do with this one.
+   *
+   * Refilling is the job it was missing, and the omission was visible in the
+   * running app. `deep` was treated as "there is nothing further to top up",
+   * which is true of the SERVER'S ANSWER and false of the deck: a builder
+   * working one large gap consumes all twenty-four and the queue empties, and
+   * the panel then said "Nothing in your colours fills this gap" about a gap
+   * with thousands of candidates left. Observed at 96 of 100 cards on an eight
+   * card land gap, with the server returning eight more on the same query.
+   *
+   * A refill is safe from looping because it is conditioned on the DECK having
+   * changed since the fetch, not on the queue being empty: `recommend` never
+   * offers a card the deck already holds, so a repeat with an unchanged deck
+   * would return the identical list and is not made. See `retiredAt`.
    */
   useEffect(() => {
-    if (gap === undefined || stale || queue === null || queue.deep || fetching) return
-    if (live.length - passed > TOPUP_BELOW_TRIOS * OPTIONS) return
-    void load(gap, filter, DEEP_PAGE, { background: true })
-  }, [gap, stale, queue, fetching, live.length, passed, filter, load])
+    if (gap === undefined || stale || queue === null || fetching) return
+    const remaining = live.length - passed
+    const wantsDepth = !queue.deep && remaining <= TOPUP_BELOW_TRIOS * OPTIONS
+    const wantsRefill = remaining < OPTIONS && retiredIds.size > queue.retiredAt
+    if (!wantsDepth && !wantsRefill) return
+    // Silent while there is still something on screen, and honest about the
+    // wait when the queue has run out entirely — at that point there is
+    // genuinely nothing to look at and a silent pause reads as a dead panel.
+    void load(gap, filter, DEEP_PAGE, { background: remaining > 0 })
+  }, [gap, stale, queue, fetching, live.length, passed, filter, load, retiredIds])
 
   /*
    * The bar waits `BAR_AFTER_MS` before admitting to a wait, and only when
@@ -384,7 +518,14 @@ export const Quickbuild = ({
    * user presses Add and has no way to learn what replaced it.
    */
   useEffect(() => {
-    if (gap === undefined) return
+    if (gap === undefined) {
+      // The ending is announced too. It is the one moment the panel stops
+      // asking questions, and a screen-reader user who hears nothing at that
+      // point has no way to learn the loop is over or that there is a choice
+      // waiting on it.
+      setAnnouncement(endingText(plan))
+      return
+    }
     // Silence while a first fetch is still running: `pipeline.ts`'s `describe`
     // learned this the hard way — a live region that narrates work rather than
     // results announces "Preparing…" over and over and is worse than none. The
@@ -399,11 +540,18 @@ export const Quickbuild = ({
               .map((c) => c.view.name)
               .join(', ')}.`,
     )
-  }, [failed, fetching, showing, gap])
+  }, [failed, fetching, showing, gap, plan])
 
+  /*
+   * Step to the next gap in the plan, wrapping at the end.
+   *
+   * Resolved against the CURRENT list every time rather than carried as a
+   * counter, so cycling always lands on a gap that exists right now.
+   */
   const nextGap = (): void => {
-    setGapAt((at) => (at + 1) % Math.max(1, plan.gaps.length))
-    setPassed(0)
+    if (plan.gaps.length === 0) return
+    const at = plan.gaps.findIndex((g) => g.key === gap?.key)
+    setChosenKey(plan.gaps[(at + 1) % plan.gaps.length]?.key ?? null)
     setFocused(0)
   }
 
@@ -419,7 +567,8 @@ export const Quickbuild = ({
    * button that says what it does.
    */
   const skip = (): void => {
-    setPassed((n) => n + OPTIONS)
+    if (gap === undefined) return
+    setCursor({ gapKey: gap.key, passed: passed + OPTIONS })
     setFocused(0)
   }
 
@@ -452,9 +601,45 @@ export const Quickbuild = ({
       </p>
 
       {gap === undefined ? (
-        <p className="quickbuild-done">
-          Every composition and curve goal is inside its band. Nothing to fill.
-        </p>
+        /*
+         * THE ENDING IS A QUESTION, NOT A FULL STOP (ADR-0040).
+         *
+         * It used to be one sentence — "Nothing to fill." — with no action on
+         * it, which read as "you are done" to a builder who was 42 cards short
+         * of a legal deck. Both offers are here, always: keep going, or go back
+         * to the list. Neither happens on its own, and the panel never closes
+         * itself.
+         */
+        <div
+          className="quickbuild-done"
+          /*
+           * A named GROUP, not a bare div: it holds a sentence and the two
+           * controls that answer it, and a screen-reader user arriving at
+           * "Keep quickbuilding to the ideals" out of context has no way to
+           * know what it would continue. The name is what ties the buttons to
+           * the paragraph above them.
+           */
+          role="group"
+          aria-label="Quickbuild has no gaps left"
+        >
+          <p className="quickbuild-done-text">{endingText(plan)}</p>
+          <div className="quickbuild-actions">
+            {plan.beyond.length === 0 ? null : (
+              /*
+               * Offered only when there is something past the band to work.
+               * `beyond` is the plan's own answer to "would continuing find
+               * anything", so the button cannot appear over an empty loop —
+               * the failure this whole change is about, one layer along.
+               */
+              <button className="act primary" onClick={() => onReach('ideal')}>
+                Keep quickbuilding to the ideals
+              </button>
+            )}
+            <button className="act" onClick={onClose}>
+              Back to the suggestion list
+            </button>
+          </div>
+        </div>
       ) : (
         <>
           <div className="quickbuild-gap">
@@ -518,15 +703,13 @@ export const Quickbuild = ({
                * of these three".
                */}
               <p className="quickbuild-of">
-                Option {focused + 1} of {showing.length}
+                Option {focus + 1} of {showing.length}
               </p>
               <ul className="quickbuild-options" aria-label="Three candidates for this gap">
                 {showing.map((candidate, at) => (
                   <li
                     key={candidate.oracleId}
-                    className={
-                      at === focused ? 'quickbuild-option is-focused' : 'quickbuild-option'
-                    }
+                    className={at === focus ? 'quickbuild-option is-focused' : 'quickbuild-option'}
                     /*
                      * Named, because `Detail` renders its own list of reasons
                      * inside this one. Without a label the three options are

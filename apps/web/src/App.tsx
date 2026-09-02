@@ -38,6 +38,7 @@ import {
   // order and the handover threshold all live in the domain; this file only
   // hands it the numbers the composition meters are already drawing from.
   quickbuildPlan,
+  type QuickbuildReach,
 } from '@roundtable/domain'
 // Aliased: `oracleId` is a parameter name a dozen times in this file, and a
 // brander shadowed by a local of the same name reads as a bug even when it is
@@ -4855,6 +4856,17 @@ export const Workspace = ({
   const [addingFocus, setAddingFocus] = useState(false)
   /** Whether the Quickbuild panel is over the suggestion pane (doc 19 §19.1). */
   const [quickbuilding, setQuickbuilding] = useState(false)
+  /**
+   * Which number Quickbuild is working to — the band, or the ideal (ADR-0040).
+   *
+   * Held here rather than in the panel because the PLAN is computed here, and
+   * the reach is an input to it. It starts at `band` every time the panel
+   * opens: reaching for the ideals is something the builder asked for once,
+   * about the deck as it stood, and a wizard that silently remembered a
+   * stricter setting from an hour ago would be answering a question nobody
+   * asked twice.
+   */
+  const [quickbuildReach, setQuickbuildReach] = useState<QuickbuildReach>('band')
   /** Whether the quick tutorial is running over the workspace (doc 20). */
   const [touring, setTouring] = useState(false)
   /** The Help button, so dismissing the tour can hand focus back to it. */
@@ -6350,10 +6362,19 @@ export const Workspace = ({
         min: t.min,
         actual: t.actual,
       })),
-      curveDeltas: analysis.curve.deltas.map((d) => ({ bucket: d.bucket, delta: d.delta })),
+      // `actual` and `ideal` ride along so a gap can be measured to the ideal
+      // as well as to the band. `delta` alone cannot answer that — it is a
+      // distance to the nearest EDGE and reads zero anywhere inside the band.
+      curveDeltas: analysis.curve.deltas.map((d) => ({
+        bucket: d.bucket,
+        delta: d.delta,
+        actual: d.actual,
+        ideal: d.ideal,
+      })),
       bracket: (deck.targetBracket ?? 3) as never,
+      reach: quickbuildReach,
     })
-  }, [analysis, deck.targetBracket])
+  }, [analysis, deck.targetBracket, quickbuildReach])
 
   /**
    * Ask the ordinary recommendations endpoint the gap's narrower question.
@@ -7353,7 +7374,12 @@ export const Workspace = ({
                 fetchCandidates={fetchQuickbuildCandidates}
                 onAdd={(oracleId) => decide(oracleId, 'accept')}
                 onReject={(oracleId) => decide(oracleId, 'exclude')}
-                onClose={() => setQuickbuilding(false)}
+                onClose={() => {
+                  setQuickbuilding(false)
+                  // Back to the band next time it opens — see the state above.
+                  setQuickbuildReach('band')
+                }}
+                onReach={setQuickbuildReach}
                 cutCount={cutBy.size}
                 /*
                  * From the OPTIMISTIC deck, so a card joins it on the click
