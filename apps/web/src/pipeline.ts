@@ -89,11 +89,39 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
   const [phase, setPhase] = useState<Phase>('idle')
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * What the user has done since the view last moved — the tally the bar counts.
+   *
+   * NOT the send buffer. Reported: *"I clicked add card when the loading bar was
+   * at the middle, and the count of cards to add reset back to 1 (it was 2
+   * before I clicked add)."* The count was read straight off `items`, which the
+   * tick empties the instant a batch goes on the wire, so the third click
+   * rebuilt it from nothing and the first two vanished from the tally while
+   * still being invisible everywhere else on the page.
+   *
+   * The user's own statement of the rule: *"When the bar resets, it should
+   * continue to count changes since the last time it refreshed the view. This
+   * includes removals and adds."* So the two lists are separated: `items` is
+   * "not sent yet" and is emptied by the send, this is "not applied yet" and is
+   * emptied by the apply.
+   */
   const [queued, setQueued] = useState<readonly T[]>([])
 
   // Refs, not state: the animation frame reads these every tick and must see
   // the current values without re-subscribing.
+  /** The next batch to send. Emptied by the send, NOT by the apply. */
   const items = useRef<T[]>([])
+  /**
+   * The mirror of `queued` the event handler can read synchronously.
+   *
+   * `schedule` has to append to a list that already contains everything queued
+   * this cycle, and state is a render behind when two clicks land in the same
+   * tick. Rejected alternative: a `setQueued` updater — the label is derived
+   * from the array's identity and an updater cannot also hand `items` back to
+   * `launch`, so the two lists would have drifted for exactly the reason this
+   * bug existed in the first place.
+   */
+  const unapplied = useRef<T[]>([])
   const phaseRef = useRef<Phase>('idle')
   const startedAt = useRef(0)
   const settleFrom = useRef(0)
@@ -178,6 +206,9 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
     stop()
     setPhaseBoth('idle')
     setProgress(0)
+    // The one place the tally is allowed to reset: the view is about to move,
+    // so "changes since the last time it refreshed the view" starts again here.
+    unapplied.current = []
     setQueued([])
     const held = result.current
     result.current = null
@@ -249,7 +280,24 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
 
       if (skipBuffer) {
         setPhaseBoth('querying')
-        launch.current([])
+        /*
+         * Whatever is still in the buffer goes WITH the new question.
+         *
+         * This used to send `[]` while `refresh` threw `items.current` away, so
+         * a card clicked in the 600 ms before a filter committed was never sent
+         * at all — and the overlay showed it landing until the refresh's own
+         * answer quietly swept it off. The second report is explicit that the
+         * only acceptable drop is a lost connection, and this was not one.
+         *
+         * Sending them is right rather than merely safe: a command is the
+         * user's intent and does not expire because the question changed. The
+         * rejected alternative was to hold them back for the NEXT buffer, which
+         * leaves an accept sitting unsent for as long as the user does nothing
+         * else — indefinitely, if they walk away.
+         */
+        const batch = items.current
+        items.current = []
+        launch.current(batch)
       } else {
         setPhaseBoth('buffering')
       }
@@ -263,7 +311,8 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
   const schedule = useCallback(
     (item: T): void => {
       items.current = [...items.current, item]
-      setQueued(items.current)
+      unapplied.current = [...unapplied.current, item]
+      setQueued(unapplied.current)
       setError(null)
 
       // Inside the buffer this just joins the batch and the bar keeps running.
@@ -293,8 +342,9 @@ export const usePipeline = <T>(options: PipelineOptions<T>): Pipeline<T> => {
    * from when the answer lands, never from when the request left.
    */
   const refresh = useCallback((): void => {
-    setQueued([])
-    items.current = []
+    // Neither list is cleared here any more. `start` sends the buffer with the
+    // new question instead of dropping it, and the tally belongs to the user's
+    // clicks, which a filter change has not applied — `finish` still ends it.
     start(false, true)
   }, [start])
 
