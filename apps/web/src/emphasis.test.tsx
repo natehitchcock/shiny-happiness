@@ -484,7 +484,8 @@ describe('a semantic in the card preview', () => {
     await mount()
     await openPreview()
 
-    const chip = screen.getByText('opponent discard')
+    // `readable()` since ADR-0046, not the hyphen-stripped wire spelling.
+    const chip = screen.getByText('opponents discarding')
     await act(async () => (chip.closest('button') as HTMLButtonElement).click())
     // The hint still opens, and no PATCH was sent by opening it.
     expect(screen.getByRole('tooltip').textContent).toContain('wants:opponent-discard')

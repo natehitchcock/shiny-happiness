@@ -221,11 +221,19 @@ const evaluateTerm = (
       return candidate.card.synergyProduces.some((t) => t === normaliseTag(value))
     case 'wants':
       return candidate.card.synergyWants.some((t) => t === normaliseTag(value))
+    // What the card IS or HAS (ADR-0048), which is the direction almost every
+    // subtype and keyword tag lives in. Absent on a card read before migration
+    // 0017, and absent means "not derived yet" rather than "nothing" — so the
+    // predicate answers false, the same answer it gives for a card that
+    // genuinely has none, and the re-ingest is what fixes it.
+    case 'has':
+      return (candidate.card.synergyHas ?? []).some((t) => t === normaliseTag(value))
     case 'tag': {
       const tag = normaliseTag(value)
       return (
         candidate.card.synergyProduces.some((t) => t === tag) ||
-        candidate.card.synergyWants.some((t) => t === tag)
+        candidate.card.synergyWants.some((t) => t === tag) ||
+        (candidate.card.synergyHas ?? []).some((t) => t === tag)
       )
     }
     case 'is':

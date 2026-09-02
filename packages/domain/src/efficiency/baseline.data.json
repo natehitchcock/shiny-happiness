@@ -64,10 +64,7 @@
     "slope": 1.6993,
     "intercept": 0.5414,
     "n": 319,
-    "overManaValues": [
-      1,
-      6
-    ]
+    "overManaValues": [1, 6]
   },
   "statPointsPerImpactPoint": 0.4919,
   "exchangeRateByManaValue": [

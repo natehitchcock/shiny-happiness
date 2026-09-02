@@ -46,7 +46,10 @@ describe.skipIf(!available)('oracle-refs over the whole card table', () => {
       : (row.oracle_text ?? '')
   const withText = rows.filter((row) => textOf(row).trim() !== '')
 
-  const all = withText.map((row) => ({ row, refs: resolveOracleReferences(textOf(row), known, row.name) }))
+  const all = withText.map((row) => ({
+    row,
+    refs: resolveOracleReferences(textOf(row), known, row.name),
+  }))
   const linked = all.filter((entry) => entry.refs.length > 0)
   const total = all.reduce((sum, entry) => sum + entry.refs.length, 0)
 
@@ -90,7 +93,17 @@ describe.skipIf(!available)('oracle-refs over the whole card table', () => {
    * appears thousands of times in text that is not referring to the card.
    */
   it('never links the ordinary words that are also card names', () => {
-    const traps = new Set(['When', 'X', 'Sacrifice', 'Exile', 'Return', 'Flash', 'Vigilance', 'Regenerate', 'Fear'])
+    const traps = new Set([
+      'When',
+      'X',
+      'Sacrifice',
+      'Exile',
+      'Return',
+      'Flash',
+      'Vigilance',
+      'Regenerate',
+      'Fear',
+    ])
     for (const { refs } of linked) for (const ref of refs) expect(traps.has(ref.name)).toBe(false)
   })
 
@@ -107,7 +120,10 @@ describe.skipIf(!available)('oracle-refs over the whole card table', () => {
       all.find((entry) => entry.row.name === name)?.refs.map((r) => r.name) ?? []
     expect(find('Ral’s Dispersal').length + find("Ral's Dispersal").length).toBeGreaterThan(0)
     expect(find('Helm of Kaldra')).toEqual(['Sword of Kaldra', 'Shield of Kaldra'])
-    expect(find('Urza, Lord Protector')).toEqual(['The Mightstone and Weakstone', 'Urza, Planeswalker'])
+    expect(find('Urza, Lord Protector')).toEqual([
+      'The Mightstone and Weakstone',
+      'Urza, Planeswalker',
+    ])
     expect(find('Kher Keep')).toEqual(['Kobolds of Kher Keep'])
   })
 })

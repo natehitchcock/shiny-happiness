@@ -5,6 +5,7 @@ import {
   emphasisMatches,
   emphasisScore,
   hasEmphasis,
+  MAX_EMPHASIS,
   NO_EMPHASIS,
   parseSemanticEmphasis,
   relatedSemantics,
@@ -28,6 +29,37 @@ const profile = (over: Partial<SynergyProfile> = {}): SynergyProfile => ({
 /** Canonical order, so a test can state "in `SYNERGY_TAGS` order" as an assertion. */
 const byTagOrder = (a: SynergyTag, b: SynergyTag): number =>
   SYNERGY_TAGS.indexOf(a) - SYNERGY_TAGS.indexOf(b)
+
+describe('parseSemanticEmphasis — the cap (ADR-0046)', () => {
+  it('truncates a stored value over the cap instead of rejecting it', () => {
+    // The argument for having no cap was that deduplication bounded the value at
+    // `SYNERGY_TAGS.length`, which was 19 when it was written and is 608 now. A
+    // 608-element emphasis means 608 `{tag, supporting}` objects on every
+    // recompute and 608 rows with Remove buttons.
+    //
+    // TRUNCATED here and REJECTED at the API, and the split is the point: an
+    // emphasis a user cannot open is the trap this feature must not set, so a
+    // row written by an older build has to stay readable.
+    const tooMany = SYNERGY_TAGS.slice(0, MAX_EMPHASIS + 8)
+    const parsed = parseSemanticEmphasis([...tooMany])
+
+    expect(tooMany.length).toBeGreaterThan(MAX_EMPHASIS)
+    expect(parsed).toHaveLength(MAX_EMPHASIS)
+  })
+
+  it('caps AFTER sorting, so which twelve survive is a property of the value', () => {
+    // Not of the order it happened to be written in. Two clients that saved the
+    // same set in different orders must read back the same twelve.
+    const forwards = parseSemanticEmphasis([...SYNERGY_TAGS.slice(0, MAX_EMPHASIS + 5)])
+    const backwards = parseSemanticEmphasis([...SYNERGY_TAGS.slice(0, MAX_EMPHASIS + 5)].reverse())
+
+    expect(forwards).toEqual(backwards)
+  })
+
+  it('leaves a value under the cap exactly as it was', () => {
+    expect(parseSemanticEmphasis(['untap', 'opponent-discard'])).toHaveLength(2)
+  })
+})
 
 describe('parseSemanticEmphasis', () => {
   it('keeps the tags it knows', () => {

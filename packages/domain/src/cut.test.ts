@@ -74,7 +74,7 @@ const inputFor = (d: Deck, cards: Card[], extra: Partial<CutInput> = {}): CutInp
     targets: [{ dimension: { kind: 'role', role: 'ramp' }, min: 0, ideal: 1, max: 1 }],
     curveTarget: curveTarget('midrange'),
     comboIndex: buildComboIndex([]),
-    deckSynergy: { produces: new Map(), wants: new Map() },
+    deckSynergy: { produces: new Map(), wants: new Map(), has: new Map() },
     ...extra,
   }
 }

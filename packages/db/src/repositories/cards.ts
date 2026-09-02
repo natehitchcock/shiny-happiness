@@ -1,3 +1,4 @@
+import { semanticMembership } from '@roundtable/domain'
 import type { Card, Color, OracleId, PrintingId, Role } from '@roundtable/domain'
 import type { Pool } from 'pg'
 
@@ -71,6 +72,28 @@ const toCard = (row: CardRow): Card => ({
   universesBeyond: row.universes_beyond,
   synergyProduces: row.synergy_produces as Card['synergyProduces'],
   synergyWants: row.synergy_wants as Card['synergyWants'],
+  /*
+   * DERIVED here rather than stored (ADR-0048), and this line is the whole of
+   * the decision.
+   *
+   * `synergyProduces` and `synergyWants` above are read from columns because
+   * computing them means running the rule tables over `oracle_text` — the
+   * column a trimmed read most wants to drop. `synergyHas` is two set
+   * intersections over `type_line` and `keywords`, both of which are already in
+   * this row, so a column would ship 1.98 MiB of a pure function of 1.43 MiB
+   * already on the wire. Measured at 13.0 ms for the whole 31,782-card eligible
+   * pool, which is 0.4 microseconds here.
+   *
+   * It also removes a state rather than adding one: there is no "written before
+   * the migration" window, no re-ingest before tribal matching works, and
+   * regenerating `semantic-vocabulary.data.json` takes effect on deploy instead
+   * of after 34k rows are rewritten.
+   *
+   * THE COUPLING: `type_line` and `keywords` are now load-bearing for every
+   * read that expects a card to know its own tribe. `findEligibleCards` names
+   * its columns, and a test in `db.test.ts` fails if either leaves that list.
+   */
+  synergyHas: semanticMembership({ typeLine: row.type_line, keywords: row.keywords }),
   gameChanger: row.game_changer,
 })
 
@@ -196,6 +219,52 @@ export const getCards = async (pool: Pool, ids: readonly OracleId[]): Promise<Ca
 }
 
 /**
+ * Every column this read actually needs, named rather than `*`.
+ *
+ * ADR-0017 made this argument about combos and took that read from 71.9 MB to
+ * 0.5 MB. This is the same argument about the read `corpus-cache.ts` flags as
+ * the untrimmed one — 12.1 MB for a five-colour deck, and unlike the combo read
+ * it does not scope, because the eligible pool for a five-colour commander IS
+ * the corpus.
+ *
+ * Three columns are left out, and the list is short on purpose — it is only
+ * what could be dropped WITHOUT lying:
+ *
+ *   power_num, toughness_num   not in `CardRow` and not mapped by `toCard`.
+ *                              Fetched on every one of 31,782 rows and thrown
+ *                              away unread since migration 0006.
+ *   oracle_text_faces          absent already MEANS "single-faced, or ingested
+ *                              before the column existed" (see `card.ts`), so
+ *                              leaving it out says something true. Nothing on
+ *                              this path reads it: the faces exist for ingest-
+ *                              time derivation and for the card-detail route,
+ *                              which is a different query.
+ *
+ * TWO OF THESE COLUMNS ARE LOAD-BEARING IN A WAY A READER WOULD NOT GUESS.
+ * `type_line` and `keywords` are not only mapped onto the card — `toCard`
+ * derives `synergyHas` from them (ADR-0048), so dropping either from this list
+ * would silently empty every card's tribe and evasion tags and break tribal
+ * matching with no error anywhere. `db.test.ts` fails if either leaves, because
+ * a derivation whose inputs can be trimmed away by someone doing exactly what
+ * this comment recommends is a landmine rather than a saving.
+ *
+ * `default_printing` is the next 0.485 MiB and is NOT dropped here, because
+ * `toCard` maps it to `PrintingId | null` and a trimmed row would arrive as
+ * `null` — indistinguishable from "ING-04 has not resolved imagery yet". That
+ * is precisely the failure ADR-0017 warns about, and taking it needs
+ * `findEligibleCards` to return a type narrower than `Card` rather than a
+ * `Card` with a hole in it. Left, measured, and said out loud.
+ *
+ * Measured on the live corpus over the 31,782 eligible rows, all on
+ * `pg_column_size` so the two halves are comparable: the ADR-0046 tag columns
+ * ADD 1.247 MiB and this trim gives back 0.396 MiB.
+ */
+const ELIGIBLE_COLUMNS = `oracle_id, name, mana_cost, mana_value, color_identity, colors,
+       produced_mana, type_line, types, oracle_text, power, toughness, loyalty,
+       keywords, legality_commander, can_be_commander, edhrec_rank, default_printing,
+       roles, primary_role, universes_beyond, synergy_produces, synergy_wants, game_changer`
+
+/**
  * The eligible candidate pool for a deck's colours (doc 05 §5.2).
  *
  * Colour identity and legality are filtered in SQL rather than in the
@@ -213,7 +282,7 @@ export const findEligibleCards = async (
   } = {},
 ): Promise<Card[]> => {
   const { rows } = await pool.query<CardRow>(
-    `SELECT * FROM cards
+    `SELECT ${ELIGIBLE_COLUMNS} FROM cards
       WHERE legality_commander = 'legal'
         AND color_identity <@ $1::char(1)[]
         AND ($2::boolean = false OR type_line NOT ILIKE '%basic%land%')

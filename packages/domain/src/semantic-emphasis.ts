@@ -73,14 +73,27 @@ const ORDER = new Map(SYNERGY_TAGS.map((tag, index) => [tag, index]))
  * tie. Click order carries no meaning here anyway — emphasis is a set, and the
  * first tag clicked is not weighted above the second.
  *
- * No length cap. Deduplication already bounds the value at `SYNERGY_TAGS.length`
- * (19 today), so an arbitrary "at most five" would only be a rule to explain.
- * Emphasising every tag is degenerate rather than dangerous: it adds the same
- * constant to every card that has any tag at all and changes almost nothing,
- * which is the honest outcome of saying everything matters.
+ * There IS a length cap now, and the argument that there should not be has
+ * expired. It read:
  *
- * Pure and total: every input returns a `SemanticEmphasis`, possibly empty.
+ *   > No length cap. Deduplication already bounds the value at
+ *   > `SYNERGY_TAGS.length` (19 today) … Emphasising every tag is degenerate
+ *   > rather than dangerous.
+ *
+ * ADR-0046 took `SYNERGY_TAGS.length` to 608. A deck could store a 608-element
+ * `jsonb` array, the recommendations response would carry 608 `{tag,
+ * supporting}` objects on every recompute, and the focus panel would render 608
+ * rows each with its own Remove button. That is dangerous rather than
+ * degenerate, and the bound the old argument leaned on is gone.
+ *
+ * READING is lenient and WRITING is strict, which is the split that matters. A
+ * stored value over the cap is truncated here rather than rejected, because an
+ * emphasis a user cannot open is exactly the trap the paragraph above refuses —
+ * and the API rejects an oversized value at the boundary with a message, so the
+ * only way to reach this branch is a row written by an older build.
  */
+export const MAX_EMPHASIS = 12
+
 export const parseSemanticEmphasis = (value: unknown): SemanticEmphasis => {
   if (!Array.isArray(value)) return NO_EMPHASIS
   const kept = new Set<SynergyTag>()
@@ -90,7 +103,9 @@ export const parseSemanticEmphasis = (value: unknown): SemanticEmphasis => {
     kept.add(entry as SynergyTag)
   }
   if (kept.size === 0) return NO_EMPHASIS
-  return [...kept].sort((a, b) => (ORDER.get(a) ?? 0) - (ORDER.get(b) ?? 0))
+  // Sorted BEFORE the cap, so which twelve survive is a property of the value
+  // rather than of the order it happened to be written in.
+  return [...kept].sort((a, b) => (ORDER.get(a) ?? 0) - (ORDER.get(b) ?? 0)).slice(0, MAX_EMPHASIS)
 }
 
 /**

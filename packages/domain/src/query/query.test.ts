@@ -6,6 +6,7 @@ import type { QueryNode } from './ast.js'
 import { describeQuery, formatQuery, toChips } from './format.js'
 import { matchesQuery, type AnnotatedCandidate } from './evaluate.js'
 import { parseQuery, parseQueryStrict } from './parse.js'
+import { SYNERGY_TAG_VALUES } from './ast.js'
 
 const ast = (input: string): QueryNode | null => {
   const parsed = parseQuery(input)
@@ -484,13 +485,32 @@ describe('filtering by synergy tag', () => {
     expect(matchesQuery(ast('-tag:artifact-etb'), neither)).toBe(true)
   })
 
-  it('rejects a tag that does not exist, and lists the ones that do', () => {
+  it('rejects a tag that does not exist, and suggests the near misses', () => {
     const errors = errorsOf('tag:artifcat-etb')
     expect(errors).toHaveLength(1)
     expect(errors[0]?.message).toContain('unknown synergy tag')
     expect(errors[0]?.suggestion).toContain('artifact-etb')
   })
 
+  it('does not put the whole vocabulary in the error message (ADR-0046)', () => {
+    // It used to, on the stated ground that "the list is short and closed …
+    // showing all seventeen". The vocabulary is 608 tags now, and 608 of them
+    // joined with commas is a several-kilobyte string rendered under a search
+    // box. `is:` already truncates this way one branch up.
+    const suggestion = errorsOf('tag:artifcat-etb')[0]?.suggestion ?? ''
+
+    expect(suggestion.split(', ')).not.toHaveLength(SYNERGY_TAG_VALUES.size)
+    expect(suggestion.length).toBeLessThan(200)
+  })
+
+  it('still says something useful when nothing is close', () => {
+    // A value that shares no prefix with any tag falls back to naming a few, so
+    // the message is never just "unknown".
+    const suggestion = errorsOf('tag:zzzzzzzz')[0]?.suggestion ?? ''
+
+    expect(suggestion).toContain('known:')
+    expect(suggestion.length).toBeLessThan(200)
+  })
   it('round-trips through the formatter', () => {
     expect(formatQuery(ast('causes:artifact-etb'))).toBe('produces:artifact-etb')
     expect(formatQuery(ast('tag:artifact-etb'))).toBe('tag:artifact-etb')
@@ -532,5 +552,61 @@ describe('filtering by synergy tag', () => {
       expect(errorsOf('tag:aristocrats')[0]?.message).toContain('unknown synergy tag')
       expect(errorsOf('tag:burnn')[0]?.message).toContain('unknown synergy tag')
     })
+  })
+})
+
+describe('has: — the third direction (ADR-0048)', () => {
+  const elf = candidate({
+    card: card({
+      typeLine: 'Creature — Elf Druid',
+      synergyHas: ['subtype:elf', 'ability:flying'],
+    }),
+  })
+  const lord = candidate({
+    card: card({ typeLine: 'Creature — Elf', synergyWants: ['subtype:elf'] }),
+  })
+
+  it('matches what the card IS or HAS', () => {
+    expect(matchesQuery(ast('has:subtype:elf'), elf)).toBe(true)
+    expect(matchesQuery(ast('has:ability:flying'), elf)).toBe(true)
+  })
+
+  it('does not match a card that merely WANTS the tag', () => {
+    // The distinction the direction exists for: an Elf lord is not an Elf.
+    expect(matchesQuery(ast('has:subtype:elf'), lord)).toBe(false)
+    expect(matchesQuery(ast('wants:subtype:elf'), lord)).toBe(true)
+  })
+
+  it('takes a namespaced value without quoting, because the field splits on the FIRST colon', () => {
+    // `produces:subtype:elf` has two colons and parses correctly: the tokenizer
+    // takes the earliest operator, so the value keeps its own.
+    expect(errorsOf('has:subtype:elf')).toEqual([])
+    expect(formatQuery(ast('has:subtype:elf'))).toBe('has:subtype:elf')
+  })
+
+  it('is read by tag:, which asks about all three directions', () => {
+    expect(matchesQuery(ast('tag:subtype:elf'), elf)).toBe(true)
+    expect(matchesQuery(ast('tag:subtype:elf'), lord)).toBe(true)
+  })
+
+  it('answers false rather than throwing for a card with no membership at all', () => {
+    // A `Card` built without the field — a hand-made one, or a caller with no
+    // vocabulary. Absent is not `[]`, but the predicate must still be total.
+    const bare = candidate({ card: card({ typeLine: 'Artifact' }) })
+
+    expect(matchesQuery(ast('has:subtype:elf'), bare)).toBe(false)
+  })
+
+  it('accepts `mill` as the word a player types', () => {
+    // Aliased to `opponent-mill`, which carries the subject the way
+    // `opponent-discard` does. Same mechanism as `burn` → `damage`.
+    expect(errorsOf('tag:mill')).toEqual([])
+    expect(formatQuery(ast('produces:mill'))).toBe('produces:mill')
+    expect(
+      matchesQuery(
+        ast('produces:mill'),
+        candidate({ card: card({ synergyProduces: ['opponent-mill'] }) }),
+      ),
+    ).toBe(true)
   })
 })

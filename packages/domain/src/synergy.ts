@@ -1,5 +1,7 @@
+import { TAKES_EXTRA_TURN } from './bracket-barometers.js'
 import type { Card } from './card.js'
 import type { OracleId } from './ids.js'
+import { SEMANTIC_TAGS, deriveSemanticTokens, type SemanticTag } from './semantic-tokens.js'
 
 /**
  * Mechanical synergy (ADR-0011).
@@ -39,7 +41,18 @@ import type { OracleId } from './ids.js'
  * override table is a first-class, growing artifact.
  */
 
-export type SynergyTag =
+/**
+ * The curated events. Twenty-one, hand-written, each with an ADR behind it.
+ *
+ * `SynergyTag` is wider than this: ADR-0046 adds the two OPEN vocabularies —
+ * subtypes and keywords — which cannot be hand-curated because the game keeps
+ * printing new ones. They live in `semantic-tokens.ts` and are generated from
+ * the corpus. Everything in THIS file is about the closed list: the regex
+ * tables below and `INTERACTION_PAIRS` are all event-only, and the pairs table
+ * stays small precisely because the new families need no pairs at all — their
+ * relation is same-tag-opposite-direction, which the model already has.
+ */
+export type EventTag =
   | 'creature-death'
   | 'token'
   | 'lifegain'
@@ -62,8 +75,12 @@ export type SynergyTag =
   | 'player-damage'
   | 'damage'
   | 'land-creature'
+  | 'opponent-mill'
+  | 'extra-turns'
 
-export const SYNERGY_TAGS: readonly SynergyTag[] = [
+export type SynergyTag = EventTag | SemanticTag
+
+export const EVENT_TAGS: readonly EventTag[] = [
   'creature-death',
   'token',
   'lifegain',
@@ -86,7 +103,20 @@ export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'player-damage',
   'damage',
   'land-creature',
+  'opponent-mill',
+  'extra-turns',
 ]
+
+/**
+ * Every tag, curated and derived.
+ *
+ * APPEND-ONLY, and that is a persisted contract rather than a style note:
+ * `semantic-emphasis.ts` sorts a deck's stored emphasis into this array's ORDER
+ * and migration 0014 documents the guarantee, so inserting a tag in the middle
+ * silently reorders scoring ties for decks that already exist. The events come
+ * first and keep their existing indices; the generated families are appended.
+ */
+export const SYNERGY_TAGS: readonly SynergyTag[] = [...EVENT_TAGS, ...SEMANTIC_TAGS]
 
 /**
  * Which events feed which other events.
@@ -301,10 +331,61 @@ const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
   ['land-creature', 'landfall'],
   ['land-creature', 'attack-trigger'],
   ['land-creature', 'plus1-counter'],
+
+  /*
+   * Milling an OPPONENT (ADR-0048), and the one pair the evidence supports.
+   *
+   * `opponent-mill` ↔ `opponent-discard` because the cards say both in one
+   * breath, which is the bar ADR-0022 set for exactly this shape: Lo and Li,
+   * Royal Advisors reads "whenever an opponent DISCARDS a card OR MILLS one or
+   * more cards", and a deck built to strip an opponent's hand is the deck built
+   * to strip their library.
+   *
+   * `opponent-mill` ↔ `graveyard-creature` is REFUSED, and refusing it is the
+   * whole reason this tag is not just "mill". ADR-0016 ruled that an opponent's
+   * graveyard is not the resource, ADR-0022 kept that ruling, and pairing them
+   * would offer a self-mill reanimator deck a Glimpse the Unthinkable on the
+   * grounds that both put cards in a graveyard. Different graveyard.
+   *
+   * `opponent-mill` ↔ `card-draw` was considered on the strength of the
+   * deck-out kill — an empty library is a loss on the next draw — and refused:
+   * the card that mills is not the card that makes them draw, and every deck
+   * draws on its own turn anyway, so the pair would be true of the format
+   * rather than of a deck.
+   */
+  ['opponent-mill', 'opponent-discard'],
+
+  /*
+   * An extra turn (ADR-0048), and one pair.
+   *
+   * `extra-turns` ↔ `attack-trigger` because `attack-trigger`'s own producer
+   * rule is already "additional combat phase", and an extra turn is that claim
+   * writ larger — the same untap, the same attack, plus everything else. It
+   * reads true in both directions, which is the bar this table sets: a deck
+   * full of attack triggers wants more turns, and a deck taking extra turns
+   * wants something to do with them.
+   *
+   * SAY IT PLAINLY: this tag CANNOT SCORE today. Measured over the corpus, 53
+   * cards take an extra turn and NOTHING pays one off — the payoff templates
+   * that looked promising all matched the Force cycle's "if it's not your
+   * turn", which is about instant-speed interaction and not about extra turns
+   * at all. `synergyMatches` needs a `wants` on the other side, and there is
+   * none, so `extra-turns` is vocabulary and a label rather than a score. That
+   * is the same standing the derived keyword families have (ADR-0046) and it is
+   * stated here rather than left for someone to discover — a pair in this table
+   * does not make a tag score, because `interactsWith` feeds the card panel and
+   * not the matcher.
+   */
+  ['extra-turns', 'attack-trigger'],
 ]
 
+// Over the EVENTS only. The table above is event-only by construction, and the
+// derived families need no entry in it: their relation is same-tag-opposite-
+// direction, which the model already has. `interactsWith` answers `[]` for them
+// through its own `?? []`, which is the same "gap, not a claim" the docblock
+// below already describes.
 const INTERACTIONS = ((): ReadonlyMap<SynergyTag, readonly SynergyTag[]> => {
-  const map = new Map<SynergyTag, SynergyTag[]>(SYNERGY_TAGS.map((t) => [t, []]))
+  const map = new Map<SynergyTag, SynergyTag[]>(EVENT_TAGS.map((t) => [t, []]))
   for (const [a, b] of INTERACTION_PAIRS) {
     map.get(a)?.push(b)
     map.get(b)?.push(a)
@@ -515,6 +596,27 @@ const PRODUCES: readonly Rule[] = [
   { tag: 'damage', test: /\bdamage divided\b/i },
 
   { tag: 'token', test: /\bcreate(s)? .{0,40}\btoken/i },
+  /*
+   * The doublers, which never say "create" in the active voice (ADR-0048, found
+   * by the commander sweep).
+   *
+   * Doubling Season, Anointed Procession, Primal Vigor, Parallel Lives, Mondrak,
+   * Adrix and Nev, Chatterfang and Divine Visitation all read "if one or more
+   * tokens WOULD BE CREATED under your control…". They are the most-played token
+   * cards in the format and the rule above could reach none of them: it wants
+   * "create" followed by "token" within forty characters, and a replacement
+   * effect puts the verb after its object and in the passive.
+   *
+   * 15 cards that were carrying no token tag. PRODUCES rather than WANTS,
+   * because a doubler makes tokens — it makes them out of other tokens, which is
+   * still making them, and treating it as a payoff would invert the direction on
+   * the single most-played enchantment in the archetype.
+   *
+   * `sacrifice-fodder` is deliberately NOT added alongside, unlike the rule
+   * above: a doubler doubles whatever the deck already makes, and the card that
+   * makes the creature tokens is the one that should claim the bodies.
+   */
+  { tag: 'token', test: /\btokens? would be created\b|\bwould create one or more tokens\b/i },
   { tag: 'sacrifice-fodder', test: /\bcreate(s)? .{0,40}\bcreature token/i },
 
   { tag: 'treasure', test: /\bTreasure token/i },
@@ -671,6 +773,56 @@ const PRODUCES: readonly Rule[] = [
   },
   { tag: 'graveyard-creature', test: /\bdies\b.{0,60}\bgraveyard\b/i },
 
+  /*
+   * The other side of the same verb (ADR-0048), and an OVERRIDE of a standing
+   * decision rather than a gap being filled.
+   *
+   * ADR-0029 §6 refused a mill tag, and its reasoning is still on disk and is
+   * still worth reading: nothing paid it off, and a tag with no payoff is inert
+   * by construction. The user has overruled that, and what changed is worth
+   * writing down rather than quietly contradicting:
+   *
+   *   1. THE SCOPE IS NARROWER THAN THE TAG THAT WAS REFUSED. Self-mill was
+   *      never the gap — the `graveyard-creature` rule directly above already
+   *      reads "you mill", "mill N cards" and "surveil N", and has since
+   *      ADR-0016. What no rule could see is milling an OPPONENT, which
+   *      ADR-0016 and ADR-0022 both ruled is a different resource. 244
+   *      commander-legal cards, and the tag is named for the subject for
+   *      exactly the reason `discard` and `opponent-discard` are.
+   *   2. THE PAYOFF CLASS IS NOT EMPTY, though it is small. Re-measured: Glowing
+   *      One, Infesting Radroach, Zellix and Lo and Li trigger on a player
+   *      milling; Spoils of War, Spoils of Evil, Jailbreak and Dawnbreak
+   *      Reclaimer count or take from an opponent's graveyard. Roughly ten
+   *      cards, which is thin and is more than the zero ADR-0029 measured for
+   *      the tag it refused.
+   *
+   * Same subject test as `opponent-discard` and `opponent-sacrifice`: the
+   * third-person inflected verb, never the bare imperative addressed to you.
+   * "Each player mills" deliberately matches this AND `graveyard-creature`,
+   * because a symmetric mill genuinely does both — the ruling ADR-0022 made
+   * about "each player discards".
+   */
+  {
+    tag: 'opponent-mill',
+    test: /\b(each|target|that|each other|any number of target) (player|opponent)s? (?:each )?mills?\b|\b(players|opponents) each mills?\b|\bdefending player mills\b/i,
+  },
+
+  /*
+   * An extra turn (ADR-0048).
+   *
+   * The regex is IMPORTED from `bracket-barometers.ts` rather than written
+   * again, and that is the whole point of this rule's existence being cheap:
+   * that file already answers "does this card give someone an extra turn" for
+   * the bracket check, already knows the three cards that DENY extra turns
+   * ("would BEGIN an extra turn" is the denial verb, "takes" is the grant), and
+   * already knows Emrakul does not say "after this one". A second regex here
+   * would be a second answer to one question, and the two would drift.
+   *
+   * 53 cards. Nothing pays it off — see the pair table above, where that is
+   * stated rather than implied.
+   */
+  { tag: 'extra-turns', test: TAKES_EXTRA_TURN },
+
   { tag: 'plus1-counter', test: /\bput(s)? .{0,30}\+1\/\+1 counter/i },
   /*
    * A permanent that arrives with counters on it is a +1/+1 deck's payload, and
@@ -705,9 +857,17 @@ const PRODUCES: readonly Rule[] = [
   // Ramp is what a landfall deck runs, and the old pattern wanted the word
   // "land" AFTER "put" — so every fetch ("search your library for a basic land
   // card, then put it onto the battlefield") read as nothing at all.
+  /*
+   * The determiner was a closed list of one (ADR-0048, found by the commander
+   * sweep). `an additional land` missed "you may play TWO additional lands on
+   * each of your turns" — which is Azusa, Lost but Seeking, a top-flight
+   * landfall commander that derived no landfall tag at all — and "you may play
+   * X additional lands this turn" (Nahiri's Lithoforming). Two cards, and one of
+   * them is the card the archetype is named after.
+   */
   {
     tag: 'landfall',
-    test: /\bplay an additional land\b|\bput(s)? .{0,30}land .{0,20}battlefield/i,
+    test: /\bplay (?:an|one|two|three|X|another|any number of) additional lands?\b|\bput(s)? .{0,30}land .{0,20}battlefield/i,
   },
   { tag: 'landfall', test: /\bland cards?\b[^.]{0,60}\bonto the battlefield\b/i },
   /*
@@ -1083,6 +1243,30 @@ const WANTS: readonly Rule[] = [
     test: /\bwhenever (an opponent|a player|another player)[^.,\n]{0,60}\bsacrifices\b/i,
   },
 
+  /*
+   * The payoffs for milling an opponent (ADR-0048), and the reason the tag is
+   * not the inert one ADR-0029 §6 refused.
+   *
+   * Two shapes, read one by one. The trigger — "whenever a player mills a
+   * nonland card" is Glowing One, Infesting Radroach, Zellix and Lo and Li —
+   * and the count, which is a card that reaches into an opponent's graveyard
+   * and is worth more the fuller it is: Spoils of War, Spoils of Evil,
+   * Jailbreak, Dawnbreak Reclaimer.
+   *
+   * The count rule names the opponent's graveyard explicitly rather than
+   * accepting any graveyard, because "for each card in YOUR graveyard" is a
+   * self-mill payoff and belongs to `graveyard-creature` — ADR-0016's ruling,
+   * which this tag exists beside rather than instead of.
+   */
+  {
+    tag: 'opponent-mill',
+    test: /\bwhenever (an opponent|a player|one or more (?:players|opponents))[^.,\n]{0,60}\bmills?\b/i,
+  },
+  {
+    tag: 'opponent-mill',
+    test: /\bcards? in (?:an|each|target|that) opponent's graveyard\b|\bfor each [a-z /]{0,30}card in target opponent's graveyard\b/i,
+  },
+
   { tag: 'graveyard-creature', test: /\breturn target creature card from your graveyard\b/i },
   { tag: 'graveyard-creature', test: /\bdelve\b|\bescape\b|\bthreshold\b|\bdelirium\b/i },
   // The graveyard as a resource — which is what `delve` and `threshold` above
@@ -1238,7 +1422,10 @@ const WANTS: readonly Rule[] = [
    * that rule reads and substitution eats the word. Cheaper to miss twelve
    * cards than to break thirty.
    */
-  { tag: 'creature-etb', test: /^[^\n]*\bCreature\b[\s\S]*\b[Ww]hen(?:ever)? [A-Z][^,.\n]{0,28} enters\b/ },
+  {
+    tag: 'creature-etb',
+    test: /^[^\n]*\bCreature\b[\s\S]*\b[Ww]hen(?:ever)? [A-Z][^,.\n]{0,28} enters\b/,
+  },
 
   {
     tag: 'spell-cast',
@@ -1289,9 +1476,23 @@ const WANTS: readonly Rule[] = [
 export interface SynergyProfile {
   readonly produces: readonly SynergyTag[]
   readonly wants: readonly SynergyTag[]
+  /**
+   * What the card IS or HAS, as opposed to what it causes (ADR-0048).
+   *
+   * A third direction, and the reason is that two verbs could not say what the
+   * derived families mean: a card does not *cause* flying, it *has* it, and
+   * Ambush Commander does not *produce* Elf, it *is* one. Membership crammed
+   * into `produces` made 298 of the 317 keyword tags look inert.
+   *
+   * Optional, with the same reading `oracleTextFaces` and `canBeCommander`
+   * already have in this codebase: absent means "derived before the column
+   * existed", not "this card has nothing". `[]` would be a claim; absence is a
+   * gap, and every such card gets its answer at the next re-ingest.
+   */
+  readonly has?: readonly SynergyTag[]
 }
 
-export const EMPTY_PROFILE: SynergyProfile = { produces: [], wants: [] }
+export const EMPTY_PROFILE: SynergyProfile = { produces: [], wants: [], has: [] }
 
 export type SynergyOverrides = ReadonlyMap<OracleId, SynergyProfile>
 
@@ -1347,7 +1548,8 @@ const apply = (rules: readonly Rule[], texts: readonly string[]): SynergyTag[] =
  * Splitting a string we were never handed would be a guess.
  */
 export const deriveSynergy = (
-  card: Pick<Card, 'oracleId' | 'oracleText' | 'typeLine'> & Partial<Pick<Card, 'oracleTextFaces'>>,
+  card: Pick<Card, 'oracleId' | 'name' | 'oracleText' | 'typeLine' | 'keywords'> &
+    Partial<Pick<Card, 'oracleTextFaces'>>,
   options: { readonly curated?: SynergyOverrides } = {},
 ): SynergyProfile => {
   const curated = (options.curated ?? CURATED_SYNERGY).get(card.oracleId)
@@ -1357,7 +1559,29 @@ export const deriveSynergy = (
   // whole text is the only answer available and is the right one for the first.
   const faces = card.oracleTextFaces ?? [card.oracleText]
   const texts = faces.map((face) => `${card.typeLine}\n${face}`)
-  return { produces: apply(PRODUCES, texts), wants: apply(WANTS, texts) }
+  /*
+   * The derived families (ADR-0046), unioned in rather than folded into the
+   * rule tables above.
+   *
+   * `name` and `keywords` are REQUIRED rather than optional, and the reason is
+   * that both silently weaken the answer when absent: without the name a card
+   * that spells itself out in its own text asks to be paired with its own
+   * tribe, and without keywords a flier produces nothing. An optional field
+   * that quietly changes what a card means is worse than a call site to update.
+   */
+  const semantic = deriveSemanticTokens(card)
+  return {
+    produces: [...apply(PRODUCES, texts), ...semantic.produces],
+    wants: [...apply(WANTS, texts), ...semantic.wants],
+    /*
+     * `has` is derived-only, and that is the boundary ADR-0048 draws rather
+     * than an omission. The curated twenty-two are EVENTS — a card causes a
+     * creature to die or pays off when one does — and there is no third thing
+     * to say about an event. Membership is a question you can only ask of what
+     * a card IS, which is exactly the two families in `semantic-tokens.ts`.
+     */
+    has: semantic.has,
+  }
 }
 
 /**
@@ -1371,6 +1595,8 @@ export interface DeckSynergy {
   /** Tag → weight. */
   readonly produces: ReadonlyMap<SynergyTag, number>
   readonly wants: ReadonlyMap<SynergyTag, number>
+  /** What the deck's cards ARE or HAVE (ADR-0048). Its tribe, and its evasion. */
+  readonly has: ReadonlyMap<SynergyTag, number>
 }
 
 export const COMMANDER_WEIGHT = 4
@@ -1382,13 +1608,14 @@ export const deckSynergy = (
 ): DeckSynergy => {
   const produces = new Map<SynergyTag, number>()
   const wants = new Map<SynergyTag, number>()
+  const has = new Map<SynergyTag, number>()
 
   const add = (
     into: Map<SynergyTag, number>,
-    tags: readonly SynergyTag[],
+    tags: readonly SynergyTag[] | undefined,
     weight: number,
   ): void => {
-    for (const tag of tags) into.set(tag, (into.get(tag) ?? 0) + weight)
+    for (const tag of tags ?? []) into.set(tag, (into.get(tag) ?? 0) + weight)
   }
 
   for (const id of commanders) {
@@ -1396,6 +1623,7 @@ export const deckSynergy = (
     if (profile === undefined) continue
     add(produces, profile.produces, COMMANDER_WEIGHT)
     add(wants, profile.wants, COMMANDER_WEIGHT)
+    add(has, profile.has, COMMANDER_WEIGHT)
   }
   for (const id of accepted) {
     if (commanders.includes(id)) continue
@@ -1403,9 +1631,10 @@ export const deckSynergy = (
     if (profile === undefined) continue
     add(produces, profile.produces, 1)
     add(wants, profile.wants, 1)
+    add(has, profile.has, 1)
   }
 
-  return { produces, wants }
+  return { produces, wants, has }
 }
 
 export interface SynergyMatch {
@@ -1460,12 +1689,37 @@ export const synergyMatches = (
 ): readonly SynergyMatch[] => {
   const matches: SynergyMatch[] = []
 
-  for (const tag of candidate.produces) {
+  /*
+   * Which directions pair (ADR-0048).
+   *
+   * `has` is a second way of SUPPLYING a tag, so it pairs with `wants` exactly
+   * as `produces` does and in both directions: a flier supplies what Favorable
+   * Winds wants, and Favorable Winds pays off a deck full of fliers.
+   *
+   * `has` ↔ `has` is NOT scored, for the same reason `produces` ↔ `produces` is
+   * not: two Elves are redundancy, not synergy. What makes a tribe a deck is
+   * the card that WANTS the tribe, and that card is already the other half of
+   * both pairings above. `has` ↔ `produces` is refused on the same ground — a
+   * card that is an Elf and a card that makes Elf tokens are two copies of the
+   * same effect.
+   *
+   * "Has can still imply certain benefits from and causes" was the ask, and the
+   * answer is that the implication is already carried, by the pairing being
+   * symmetric rather than by a rule. A flier gets credit in a deck with a flying
+   * payoff (`has` → `wants`) and the payoff gets credit in a deck of fliers
+   * (`wants` → `has`); there is nothing left for an implication to add. What it
+   * would add if written — a shared `has` counting as a theme — is the
+   * redundancy the paragraph above refuses. No second relation is hardcoded in
+   * the scorer, and if one is ever wanted it belongs in the rules that emit the
+   * tags, not here.
+   */
+  const supplied = new Set<SynergyTag>([...candidate.produces, ...(candidate.has ?? [])])
+  for (const tag of supplied) {
     const weight = deck.wants.get(tag) ?? 0
     if (weight > 0) matches.push({ tag, direction: 'enables', weight })
   }
   for (const tag of candidate.wants) {
-    const weight = deck.produces.get(tag) ?? 0
+    const weight = (deck.produces.get(tag) ?? 0) + (deck.has.get(tag) ?? 0)
     if (weight > 0) matches.push({ tag, direction: 'payoff', weight })
   }
 

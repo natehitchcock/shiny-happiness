@@ -13,13 +13,9 @@ const REMOVAL = dimensionKey(roleDimension('spot-removal'))
 const CREATURE = dimensionKey(typeDimension('creature'))
 
 /** Every role that answers an opponent's card. See ADR-0037. */
-const ANSWER_KEYS = [
-  'spot-removal',
-  'counterspell',
-  'graveyard-hate',
-  'bounce',
-  'board-wipe',
-].map((role) => dimensionKey(roleDimension(role as Role)))
+const ANSWER_KEYS = ['spot-removal', 'counterspell', 'graveyard-hate', 'bounce', 'board-wipe'].map(
+  (role) => dimensionKey(roleDimension(role as Role)),
+)
 
 const idealsOf = (archetype: ArchetypeKey, secondary: ArchetypeKey | null = null, bracket = 3) =>
   new Map(

@@ -51,6 +51,14 @@ export interface Card {
    */
   synergyProduces: string[]
   synergyWants: string[]
+  /**
+   * What the card IS or HAS (ADR-0048).
+   *
+   * Optional on the wire because it is optional on the card: a row written
+   * before migration 0017 has not been asked, and the API omits the field
+   * rather than sending `[]`, which would claim the card supplies nothing.
+   */
+  synergyHas?: string[]
 }
 
 export interface CardDetail extends Card {

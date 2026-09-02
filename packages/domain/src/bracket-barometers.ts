@@ -114,8 +114,14 @@ const BASIC_LAND_TYPE =
  * extra turn" (Time Warp); the optional word covers "take TWO extra turns"
  * (Time Stretch). "after this one" is deliberately NOT required: Emrakul, the
  * Promised End says only "After that turn, that player takes an extra turn".
+ *
+ * EXPORTED since ADR-0048, and exported rather than copied. `synergy.ts` needs
+ * the same question answered for the `extra-turns` tag, and a second regex
+ * would be a second answer: this one already knows about the three denial cards
+ * and about Emrakul's missing "after this one", and a fresh one would rediscover
+ * both the hard way. One rule, two readers, no way for them to disagree.
  */
-const TAKES_EXTRA_TURN = /\btakes? (?:[a-z]+ )?extra turns?\b/i
+export const TAKES_EXTRA_TURN = /\btakes? (?:[a-z]+ )?extra turns?\b/i
 
 export const grantsExtraTurn = (card: Card): boolean => TAKES_EXTRA_TURN.test(card.oracleText)
 

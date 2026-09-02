@@ -607,6 +607,7 @@ describe('semantic emphasis', () => {
       ['opponent-discard', COMMANDER_WEIGHT],
       ['untap', COMMANDER_WEIGHT],
     ]),
+    has: new Map(),
   }
 
   /** Two cards that are identical apart from which of Tergrid's tags they carry. */
@@ -1255,7 +1256,9 @@ describe('the staples phase honours the budget cap and the bracket', () => {
   })
 
   it('keeps it in when the deck has no budget, and when the price is under the cap', () => {
-    expect(idsIn(recommend(baseInput({ pool: [dear()] })), 'staple')).toEqual([oracleId('Sol Ring')])
+    expect(idsIn(recommend(baseInput({ pool: [dear()] })), 'staple')).toEqual([
+      oracleId('Sol Ring'),
+    ])
     expect(idsIn(recommend(baseInput({ pool: [dear()], maxBudgetUsd: 50 })), 'staple')).toEqual([
       oracleId('Sol Ring'),
     ])

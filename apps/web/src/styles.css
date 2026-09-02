@@ -2717,6 +2717,20 @@ select {
   color: var(--brass);
   border-color: var(--brass-dim);
 }
+/* What the card IS or HAS (ADR-0048): its tribe and its keywords, which is a
+   different claim from causing an event and from paying one off.
+
+   A DASHED border rather than a third colour, and that is the accessibility
+   answer rather than a decoration: the two directions above are already told
+   apart by their labelled rows, and adding a third hue would lean on colour for
+   a distinction a reader may not be able to see. A dash reads at any contrast
+   and in any palette, and it says the right thing — a membership tag is a
+   quieter claim than an engine. */
+.tag[data-direction='has'] {
+  color: var(--parchment-dim);
+  border-color: var(--rule);
+  border-style: dashed;
+}
 .tag-hint .hint-trigger {
   cursor: pointer;
 }

@@ -428,7 +428,11 @@ const focusGuaranteed = (members: readonly Scratch[], limit: number): readonly S
 export const recommend = (input: RecommendInput): RecommendResult => {
   const identity = new Set(input.colorIdentity)
   const curve = input.curveTarget ?? curveTarget('midrange')
-  const synergy: DeckSynergy = input.deckSynergy ?? { produces: new Map(), wants: new Map() }
+  const synergy: DeckSynergy = input.deckSynergy ?? {
+    produces: new Map(),
+    wants: new Map(),
+    has: new Map(),
+  }
   const emphasis = input.emphasis ?? NO_EMPHASIS
   const limit = input.limitPerGroup ?? 60
   const deficits = shortfalls(findDeficits(input.counts, input.targets))
@@ -446,6 +450,10 @@ export const recommend = (input: RecommendInput): RecommendResult => {
     const profile = {
       produces: pooled.card.synergyProduces,
       wants: pooled.card.synergyWants,
+      // Spread rather than `?? []`, because absent and empty are different
+      // claims here (ADR-0048): a card read before migration 0017 has not been
+      // asked, and `[]` would say it supplies nothing.
+      ...(pooled.card.synergyHas === undefined ? {} : { has: pooled.card.synergyHas }),
     }
     const matches = synergyMatches(profile, synergy)
     const s: Scratch = {
@@ -755,7 +763,11 @@ export const recommend = (input: RecommendInput): RecommendResult => {
   // did not hold.
   const supporting = new Map<SynergyTag, number>(SYNERGY_TAGS.map((tag) => [tag, 0]))
   for (const s of scratch) {
-    for (const tag of new Set([...s.pooled.card.synergyProduces, ...s.pooled.card.synergyWants])) {
+    for (const tag of new Set([
+      ...s.pooled.card.synergyProduces,
+      ...s.pooled.card.synergyWants,
+      ...(s.pooled.card.synergyHas ?? []),
+    ])) {
       const held = supporting.get(tag)
       if (held !== undefined) supporting.set(tag, held + 1)
     }

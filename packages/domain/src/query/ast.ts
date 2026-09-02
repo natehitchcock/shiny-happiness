@@ -40,6 +40,7 @@ export type QueryField =
    */
   | 'produces'
   | 'wants'
+  | 'has'
   | 'tag'
   /**
    * The two card-intrinsic metrics (doc 18), which the suggestion table already
@@ -122,6 +123,9 @@ export const FIELD_ALIASES: ReadonlyMap<string, QueryField> = new Map([
   ['causes', 'produces'],
   ['wants', 'wants'],
   ['benefits', 'wants'],
+  // The third direction (ADR-0048). `has` was free — `is` is taken by the
+  // predicate field and `kw`/`type` are the Scryfall-style card filters.
+  ['has', 'has'],
   ['tag', 'tag'],
   ['synergy', 'tag'],
   // Short spelling first, long spelling canonical — the shape `mv`/`cmc` and
@@ -155,6 +159,7 @@ export const CANONICAL_FIELD: Readonly<Record<QueryField, string>> = {
   group: 'group',
   produces: 'produces',
   wants: 'wants',
+  has: 'has',
   tag: 'tag',
   /*
    * The FULL word, not `imp`/`eff`. The abbreviated canonicals above are the
@@ -211,8 +216,18 @@ export const IS_PREDICATES: ReadonlySet<string> = new Set([
  * Deliberately not a synonym table for the other nineteen. An alias is warranted
  * where the natural word for a thing is an ARCHETYPE and the tag has to be an
  * event; that is one tag today, and each future one should have to argue.
+ *
+ * `mill` is the second, and it argues a different case (ADR-0048). The tag is
+ * `opponent-mill` because this file's own convention puts the subject in the
+ * name — `discard`/`opponent-discard`, `sacrifice-fodder`/`opponent-sacrifice`
+ * — and self-mill already has a tag in `graveyard-creature`, so a bare `mill`
+ * would name the half that is not there. But `mill` is the word a player types,
+ * and the request that created the tag used it. Alias, not rename.
  */
-const TAG_ALIASES: ReadonlyMap<string, string> = new Map([['burn', 'damage']])
+const TAG_ALIASES: ReadonlyMap<string, string> = new Map([
+  ['burn', 'damage'],
+  ['mill', 'opponent-mill'],
+])
 
 /**
  * A tag as the user is likely to type it.

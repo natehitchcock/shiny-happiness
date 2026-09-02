@@ -18,7 +18,8 @@
     "start": "node dist/main.js",
     "baseline": "node dist/efficiency-baseline.js",
     "impact-roles": "node dist/impact-by-role.js",
-    "back-face-art": "node dist/back-face-art-check.js"
+    "back-face-art": "node dist/back-face-art-check.js",
+    "semantic-vocabulary": "node dist/semantic-vocabulary.js"
   },
   "dependencies": {
     "@roundtable/clients": "workspace:*",

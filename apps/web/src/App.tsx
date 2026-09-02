@@ -1,4 +1,13 @@
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import * as api from './api'
 import { cardDetail, hydrateCards } from './cardcache'
 import { usePipeline, type Phase } from './pipeline'
@@ -76,7 +85,13 @@ import {
   levelSpec,
   metricValue,
 } from '@roundtable/ui'
-import type { CardView, Color, ImpactRoleView, MetricExplainer, OracleSegment } from '@roundtable/ui'
+import type {
+  CardView,
+  Color,
+  ImpactRoleView,
+  MetricExplainer,
+  OracleSegment,
+} from '@roundtable/ui'
 import type {
   CardImpact,
   ColumnMetric,
@@ -92,7 +107,7 @@ import { OverflowMenu } from './OverflowMenu'
 import { Tour, type TourExit } from './Tour'
 import { DeckWeb } from './deckweb/DeckWeb'
 import { enterDeckWeb, leaveDeckWeb, useDeckWebMode } from './deckweb/route'
-import { readable } from './tags'
+import { MEMBERSHIP_LABEL, membershipFrame, readable } from './tags'
 import type { Card } from './api'
 
 /** Human-readable label for a composition dimension. */
@@ -1894,7 +1909,7 @@ const TagChip = ({
   emphasisBusy = false,
 }: {
   tag: string
-  direction: 'produces' | 'wants'
+  direction: 'produces' | 'wants' | 'has'
   /** Whether the deck currently emphasises this tag. */
   emphasised?: boolean
   /**
@@ -1910,7 +1925,9 @@ const TagChip = ({
   emphasisBusy?: boolean
 }): React.JSX.Element => {
   const partners = interactsWith(tag as SynergyTag)
-  const opposite = direction === 'produces' ? 'wants' : 'produces'
+  // What the other half of the question is. `has` and `produces` are both ways
+  // of SUPPLYING a tag (ADR-0048), so both point at `wants`.
+  const opposite = direction === 'wants' ? 'produces' : 'wants'
   return (
     <span className="tag-chip" data-emphasised={emphasised === true}>
       <Hint
@@ -1919,9 +1936,11 @@ const TagChip = ({
           <>
             <strong>{readable(tag)}</strong>
             <span className="hint-line">
-              {direction === 'produces'
-                ? `This card causes it. It pairs with cards that benefit from ${readable(tag)}.`
-                : `This card benefits from ${readable(tag)}. It pairs with cards that cause it.`}
+              {direction === 'has'
+                ? `This card ${membershipFrame(tag) === 'is' ? 'is one' : 'has it'}. It pairs with cards that benefit from ${readable(tag)}.`
+                : direction === 'produces'
+                  ? `This card causes it. It pairs with cards that benefit from ${readable(tag)}.`
+                  : `This card benefits from ${readable(tag)}. It pairs with cards that cause it.`}
             </span>
             {partners.length === 0 ? null : (
               <span className="hint-line">
@@ -1956,8 +1975,11 @@ const TagChip = ({
           </>
         }
       >
+        {/* `readable`, not the wire spelling. ADR-0046 tags are namespaced —
+          `subtype:elf` — and the hyphen-stripper would print the namespace at
+          a reader. */}
         <span className="tag" data-direction={direction}>
-          {tag.replace(/-/g, ' ')}
+          {readable(tag)}
         </span>
       </Hint>
       {onToggleEmphasis === undefined ? null : (
@@ -1976,18 +1998,27 @@ const TagChip = ({
 const Semantics = ({
   produces,
   wants,
+  has = [],
   emphasis = [],
   onToggleEmphasis,
   emphasisBusy = false,
 }: {
   produces: readonly string[]
   wants: readonly string[]
+  /**
+   * What the card IS or HAS (ADR-0048).
+   *
+   * Absent means the card was read before migration 0017, which is not the same
+   * as having none — so it defaults to `[]` here and simply draws no row, the
+   * same way an empty `produces` does.
+   */
+  has?: readonly string[]
   /** The DECK's emphasis, not this card's — a chip is pressed iff the deck is about it. */
   emphasis?: readonly string[]
   onToggleEmphasis?: (tag: string) => void
   emphasisBusy?: boolean
 }): React.JSX.Element => {
-  const chip = (t: string, direction: 'produces' | 'wants'): React.JSX.Element => (
+  const chip = (t: string, direction: 'produces' | 'wants' | 'has'): React.JSX.Element => (
     <TagChip
       key={t}
       tag={t}
@@ -1997,7 +2028,16 @@ const Semantics = ({
       {...(onToggleEmphasis === undefined ? {} : { onToggleEmphasis })}
     />
   )
-  if (produces.length === 0 && wants.length === 0) {
+  /*
+   * One direction, two rows.
+   *
+   * "Is an Elf" and "has flying" are not the same sentence, and a single
+   * heading over both would have to pick one and be wrong about the other. The
+   * split is the tag's own prefix, so nothing is stored to support it.
+   */
+  const isRow = has.filter((t) => membershipFrame(t) === 'is')
+  const hasRow = has.filter((t) => membershipFrame(t) === 'has')
+  if (produces.length === 0 && wants.length === 0 && has.length === 0) {
     // Half the corpus derives no tags at all (ADR-0013). Saying so beats an
     // empty heading, which would read as "this card interacts with nothing".
     return (
@@ -2013,6 +2053,20 @@ const Semantics = ({
   return (
     <>
       <h4>Semantics</h4>
+      {/* Membership first, because it is what the card IS — the reader's own
+        first question about a card, and the row the other two are about. */}
+      {isRow.length > 0 ? (
+        <p className="tags">
+          <span className="tags-label">{MEMBERSHIP_LABEL.is}</span>
+          {isRow.map((t) => chip(t, 'has'))}
+        </p>
+      ) : null}
+      {hasRow.length > 0 ? (
+        <p className="tags">
+          <span className="tags-label">{MEMBERSHIP_LABEL.has}</span>
+          {hasRow.map((t) => chip(t, 'has'))}
+        </p>
+      ) : null}
       {produces.length > 0 ? (
         <p className="tags">
           <span className="tags-label">Causes</span>
@@ -2214,7 +2268,11 @@ const PartnerName = ({
   onOpen: (oracleId: string) => void
 }): React.JSX.Element => {
   const title =
-    p.missing === true ? `${p.name} is not in your deck yet` : p.locked ? `${p.name} — locked` : p.name
+    p.missing === true
+      ? `${p.name} is not in your deck yet`
+      : p.locked
+        ? `${p.name} — locked`
+        : p.name
   return (
     <button
       className="partner as-link"
@@ -2556,7 +2614,8 @@ const Preview = ({
   const splitNames = useMemo(() => {
     if (referenceIds.size === 0 || shown === null) return undefined
     const known = new Set(referenceIds.keys())
-    return (ability: string): readonly OracleSegment[] => splitOracleText(ability, known, shown.name)
+    return (ability: string): readonly OracleSegment[] =>
+      splitOracleText(ability, known, shown.name)
   }, [referenceIds, shown])
 
   /*
@@ -2865,6 +2924,7 @@ const Preview = ({
       <Semantics
         produces={shown.synergyProduces}
         wants={shown.synergyWants}
+        has={shown.synergyHas ?? []}
         emphasis={emphasis}
         onToggleEmphasis={onToggleEmphasis}
         emphasisBusy={emphasisBusy}
