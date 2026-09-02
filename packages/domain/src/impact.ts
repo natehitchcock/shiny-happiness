@@ -287,6 +287,34 @@ const MEASURED = new RegExp(
   'g',
 )
 
+/**
+ * A class of spells YOU CAST — serial, not simultaneous. Removed before breadth.
+ *
+ * `MASS_QUANTIFIED` lists `spell` among the nouns a mass quantifier may take,
+ * and for `counter all other spells` that is right: those spells are on the
+ * stack together, one effect touches all of them, and the reach is real. It is
+ * wrong for `each spell you cast`, where the spells arrive ONE AT A TIME across
+ * the whole game and no effect ever touches two of them.
+ *
+ * A serial class is the persistence axis, never the breadth axis — see
+ * `SPELL_GRANT`. This is the same removal `MEASURED` performs for a clause that
+ * counts rather than affects, for the same reason: the sentence mentions a
+ * group the effect does not reach all of.
+ *
+ * The cost of not having it, measured: Threefold Signal — "each spell you cast
+ * that's exactly three colors has replicate {3}" — took `unbounded` breadth,
+ * fell through the stakes ladder to `opposing` and scored 7.2, which is
+ * Cyclonic Rift's number, on a card that cannot touch an opponent at all.
+ * Goblin Anarchomancer, a two-mana 2/2 that makes your red and green spells
+ * cost {1} less, scored the same 7.2. Five commander-legal cards say this.
+ *
+ * IT REQUIRES `you cast`, and that bound is the whole safety of it. Damping
+ * Sphere's "each spell a player casts costs {1} more" and Trinisphere's "each
+ * spell that would cost less than three mana" really do apply to everybody and
+ * keep their unbounded reach.
+ */
+const SERIAL_SPELL_CLASS = /\b(?:all|each|every) (?:other )?spells? you(?:'ve| have)? cast\b/g
+
 const MASS_QUANTIFIED =
   /\b(all|each|every) (other |target )?(creature|permanent|player|opponent|land|artifact|enchantment|nonland|spell|card)/
 /**
@@ -377,6 +405,41 @@ const WHENEVER = /\bwhenever\b/
 const ACTIVATED = /(^|\n)[^\n:]{0,60}:\s/
 const SACRIFICE_SELF = /sacrifice ~/
 
+/**
+ * A STANDING modification to a class of your future spells — the Quandrix rule.
+ *
+ * The report: *"Quandrix the Proof gives spells cascade, shouldn't that mean
+ * that his reach is every spell cast? Or he repeats every spell cast?"* It is
+ * the second one, and the measurement that decided it is Teval, Arbiter of
+ * Virtue, which carries BOTH spellings — the static "Spells you cast have
+ * delve" and the triggered "Whenever you cast a spell, you lose life equal to
+ * its mana value". Teval already scored `none/triggered/self`, off the second
+ * clause alone. Breadth and stakes agreed between the two forms; PERSISTENCE
+ * was the only axis that differed, and only because the static spelling never
+ * says `whenever` so the ladder fell through to `one-shot`.
+ *
+ * The ordering that proved it broken: Yidris, Maelstrom Wielder grants cascade
+ * only after connecting in combat and only for that turn, and scored 0.808.
+ * Quandrix grants it unconditionally, forever, and scored 0.425 — the floor,
+ * the same number as a creature whose only text is a keyword. 251
+ * commander-legal permanents carry a grant of this shape.
+ *
+ * `triggered` and not `upkeep`, because there IS something to wait for: you
+ * must cast a spell. That also lands the static spelling on exactly the tier
+ * the triggered spelling already had, which is the point.
+ *
+ * THE `this turn` LOOKAHEAD IS LOAD-BEARING. 28 cards say "spells you cast this
+ * turn cost {1} less" — a one-turn effect hung off an attack trigger or a Saga
+ * chapter, not a standing modification. Without the exclusion a Saga chapter is
+ * priced as a permanent engine. The window is bounded and refuses `.`, `;` and
+ * `:` so it reads the qualifier on THIS spell class and cannot reach into the
+ * next sentence; every match longer than 45 characters was inspected and each
+ * is a genuine qualifier ("from your hand with mana value X or less",
+ * "that share a card type with the exiled card").
+ */
+const SPELL_GRANT =
+  /\bspells? you cast\b(?![^.;:\n]{0,60}?this turn)[^.;:\n]{0,60}?\b(?:have|has|gain|gains|cost|costs)\b/
+
 const TARGET_PLAYER = /target (player|opponent)/
 /**
  * The effect lands on somebody else's side.
@@ -400,40 +463,32 @@ const OPPOSING =
   /you don't control|an opponent controls|target (?:creature|permanent|artifact|enchantment|land|planeswalker|spell)s?\b(?![^.,;:\n]{0,24} you control)/
 const YOU_CONTROL = /you control/
 
+/** One ability line's complete reading. The four tiers travel together. */
+interface ClauseImpact {
+  readonly score: number
+  readonly breadth: BreadthTier
+  readonly persistence: PersistenceTier
+  readonly stakes: StakesTier
+  readonly symmetry: Symmetry
+}
+
 /**
- * How much this card does, from its text alone.
+ * Score ONE ability line as a complete tuple (ADR-0043).
  *
- * Pure and total: every card returns a `CardImpact`. Roughly 3 µs per card
- * (31,782 cards in ~90 ms), so callers may compute it per row rather than
- * caching — a cache keyed by oracle id would be a second thing to invalidate
- * when the corpus is re-ingested, for no measurable gain.
+ * `oneShot` carries the two facts that belong to the card rather than to any
+ * line: its type (an instant has already resolved, whatever its text promises)
+ * and its fragility (when the card sacrifices itself, every one of its lines
+ * stops, so the pin is genuinely card-wide and not a property of the clause
+ * that happens to spell the sacrifice).
  */
-export const cardImpact = (card: ImpactInput): CardImpact => {
-  if (card.oracleText.trim() === '') return NO_IMPACT
-
-  const text = normalise(card)
+const clauseImpact = (clause: string, oneShot: boolean): ClauseImpact => {
   /*
-   * A card whose text was ENTIRELY reminder text has no rules text either.
-   *
-   * The check above runs on the raw string, so a basic Forest — whose whole
-   * printed text is the parenthetical `({T}: Add {G}.)` — walked past it and
-   * took the `none` floor, 0.425. doc 18 §18.10 item 6 already established that
-   * reminder text is stripped before anything is matched; the emptiness test
-   * was simply asked before the strip rather than after. 22 commander-legal
-   * cards are affected: every basic, every original dual, Icehide Golem and
-   * Dryad Arbor. Both checks are kept because the first is the cheap one and
-   * covers the 339 genuinely textless creatures without normalising at all.
+   * The line with every COUNTING clause and every SERIAL spell class removed —
+   * what the effect touches, rather than every plural the sentence mentions.
+   * See `MEASURED` and `SERIAL_SPELL_CLASS`. Only the scope questions read
+   * this; persistence still reads the line as written.
    */
-  if (text.trim() === '') return NO_IMPACT
-
-  const types = card.typeLine.toLowerCase()
-  /*
-   * The text with every COUNTING clause removed — what the effect touches,
-   * rather than every plural the sentence mentions. See `MEASURED`. Only the
-   * scope questions read this; persistence, fragility and `scales` are facts
-   * about the whole card and still read the full text.
-   */
-  const effect = text.replace(MEASURED, ' ')
+  const effect = clause.replace(MEASURED, ' ').replace(SERIAL_SPELL_CLASS, ' ')
 
   const quantified = MASS_QUANTIFIED.test(effect)
   const plural = MASS_PLURAL.test(effect)
@@ -445,14 +500,6 @@ export const cardImpact = (card: ImpactInput): CardImpact => {
    * An anthem hits your board only, so it is `own` stakes rather than
    * `opposing`, and it is one-sided rather than symmetric even though it names
    * no opponent.
-   *
-   * IT NO LONGER REQUIRES THE PLURAL TO BE UNQUANTIFIED. That restriction is
-   * what sent Agatha's Soul Cauldron to an opponent: it says "creatures you
-   * control" three times and names an opponent nowhere, but one of those
-   * clauses carries `all`, so `quantified` was true, `yoursOnly` was false, and
-   * the `breadth === 'unbounded'` branch below claimed it before `you control`
-   * was ever consulted. 935 cards were reported as attacking a board they
-   * cannot touch.
    *
    * `unrestrictedMass` is what bounds it, and it has to: a wrath may mention
    * "you control" in a rider and still destroy everything, so an unrestricted
@@ -473,16 +520,14 @@ export const cardImpact = (card: ImpactInput): CardImpact => {
   else if (TARGET.test(effect) || ANY_TARGET.test(effect)) breadth = 'one'
   else breadth = 'none'
 
-  const scales = breadth === 'variable' || FOR_EACH.test(text) || COST_X.test(card.manaCost ?? '')
-
-  const fragile = SACRIFICE_SELF.test(text)
   let persistence: PersistenceTier
-  if (INSTANT_OR_SORCERY.test(types)) persistence = 'one-shot'
-  else if (UPKEEP.test(text)) persistence = 'upkeep'
-  else if (WHENEVER.test(text)) persistence = 'triggered'
-  else if (ACTIVATED.test(text)) persistence = 'activated'
+  if (oneShot) persistence = 'one-shot'
+  else if (UPKEEP.test(clause)) persistence = 'upkeep'
+  // A static grant to a class of your future spells is a repeat that never
+  // says `whenever`. See `SPELL_GRANT` — this is the Quandrix ruling.
+  else if (WHENEVER.test(clause) || SPELL_GRANT.test(clause)) persistence = 'triggered'
+  else if (ACTIVATED.test(clause)) persistence = 'activated'
   else persistence = 'one-shot'
-  if (fragile) persistence = 'one-shot'
 
   let stakes: StakesTier
   if (yoursOnly) stakes = 'own'
@@ -508,13 +553,91 @@ export const cardImpact = (card: ImpactInput): CardImpact => {
   // Rounded to three places so the value is stable across platforms and can be
   // compared for equality in a test. Float multiplication of four constants is
   // otherwise 7.199999999999999 on the wire.
+  return { score: Math.round(raw * 1000) / 1000, breadth, persistence, stakes, symmetry }
+}
+
+/**
+ * How much this card does, from its text alone.
+ *
+ * ONE CLAUSE WINS AND BRINGS ITS WHOLE TUPLE (ADR-0043). Every ability line is
+ * scored as a complete `breadth × persistence × stakes × symmetry`, and the
+ * card reports the highest-scoring line's tiers TOGETHER. Never the maximum of
+ * each axis taken independently — that is what let Diregraf Captain take
+ * `unbounded` off its anthem line and `player` off its drain line and report
+ * 15.96 for a three-mana lord, a combination corresponding to nothing the card
+ * does. It now reports 6.0, which is what every other lord scores.
+ *
+ * THE UNIT IS THE ABILITY LINE, and that is ADR-0038's reasoning reused rather
+ * than freshly invented: every pattern above is written `.` or `[^…\n]`, and
+ * JavaScript's `.` does not match a newline, so each rule is already confined to
+ * one line by construction. A line scored in isolation therefore gives exactly
+ * the answer it gave in card context. A sentence split could promise no such
+ * thing — Wrath of God's two sentences share a line, and "They can't be
+ * regenerated" alone is not a board wipe.
+ *
+ * Splitting happens AFTER `normalise`, so reminder text can never become a
+ * clause of its own and a card's self-reference is already `~` on every line.
+ *
+ * Pure and total: every card returns a `CardImpact`.
+ */
+export const cardImpact = (card: ImpactInput): CardImpact => {
+  if (card.oracleText.trim() === '') return NO_IMPACT
+
+  const text = normalise(card)
+  /*
+   * A card whose text was ENTIRELY reminder text has no rules text either.
+   *
+   * The check above runs on the raw string, so a basic Forest — whose whole
+   * printed text is the parenthetical `({T}: Add {G}.)` — walked past it and
+   * took the `none` floor, 0.425. doc 18 §18.10 item 6 already established that
+   * reminder text is stripped before anything is matched; the emptiness test
+   * was simply asked before the strip rather than after. 22 commander-legal
+   * cards are affected: every basic, every original dual, Icehide Golem and
+   * Dryad Arbor. Both checks are kept because the first is the cheap one and
+   * covers the 339 genuinely textless creatures without normalising at all.
+   */
+  if (text.trim() === '') return NO_IMPACT
+
+  const types = card.typeLine.toLowerCase()
+
+  /*
+   * Both card-level facts, and both genuinely card-level rather than clause-
+   * level. `fragile` because when the card sacrifices itself EVERY line stops,
+   * so pinning only the line that spells the sacrifice would price the rest of
+   * the card as an engine it no longer has — Viridian Zealot is a Naturalize
+   * with a body however you split it. `scales` because it is a marker on the
+   * whole reading, not a term in the product.
+   */
+  const fragile = SACRIFICE_SELF.test(text)
+  const oneShot = INSTANT_OR_SORCERY.test(types) || fragile
+
+  const clauses = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  if (clauses.length === 0) return NO_IMPACT
+
+  const scored = clauses.map((clause) => clauseImpact(clause, oneShot))
+
+  /*
+   * The winning clause, taken WHOLE.
+   *
+   * `reduce` rather than a sort so the FIRST clause wins a tie: on a card whose
+   * lines score equally the earlier one is the one a reader sees first, and a
+   * stable answer matters more than which of two identical numbers is picked.
+   */
+  const best = scored.reduce((a, b) => (b.score > a.score ? b : a))
+
   return {
-    score: Math.round(raw * 1000) / 1000,
-    breadth,
-    persistence,
-    stakes,
-    symmetry,
-    scales,
+    score: best.score,
+    breadth: best.breadth,
+    persistence: best.persistence,
+    stakes: best.stakes,
+    symmetry: best.symmetry,
+    scales:
+      scored.some((c) => c.breadth === 'variable') ||
+      FOR_EACH.test(text) ||
+      COST_X.test(card.manaCost ?? ''),
     fragile,
   }
 }

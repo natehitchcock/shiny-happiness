@@ -596,3 +596,324 @@ describe('IMPACT_MAX', () => {
     }
   })
 })
+
+/**
+ * One clause wins, and it brings its whole tuple with it (ADR-0043).
+ *
+ * The rule, from the product owner: *"when it comes to choosing one tier per
+ * card, choose all the tiers from the highest impact effect."* Score every
+ * ability line as a complete `breadth × persistence × stakes × symmetry`, then
+ * the card reports the winning line's tiers TOGETHER — never the maximum of
+ * each axis taken independently.
+ *
+ * The defect it removes was named and deferred by the previous audit. Diregraf
+ * Captain took `unbounded` off its anthem line and `player` off its drain line
+ * and reported the product, 15.96, for a three-mana lord — a combination
+ * corresponding to nothing the card does. No line of Diregraf Captain is a
+ * board-wide effect aimed at a player's life total.
+ *
+ * The unit is the ABILITY LINE, newline-separated, and that is ADR-0038's
+ * reasoning reused rather than a fresh invention: every pattern here is written
+ * `.` or `[^...\n]`, and JavaScript's `.` does not match a newline, so each rule
+ * is already confined to one line by construction. A line scored in isolation
+ * therefore gives exactly the answer it gave in card context. Splitting on
+ * sentences could promise no such thing — Wrath of God's two sentences share a
+ * line, and "They can't be regenerated" alone is not a board wipe.
+ *
+ * Splitting happens AFTER reminder text is stripped, so a parenthetical can
+ * never become a clause of its own.
+ */
+describe('the winning clause brings its whole tuple (ADR-0043)', () => {
+  const DIREGRAF_CAPTAIN = card({
+    name: 'Diregraf Captain',
+    manaCost: '{1}{U}{B}',
+    typeLine: 'Creature — Zombie Soldier',
+    oracleText:
+      'Deathtouch\nOther Zombie creatures you control get +1/+1.\nWhenever another Zombie you control dies, target opponent loses 1 life.',
+  })
+
+  it('reports the lord clause wholesale, not a tuple assembled from two clauses', () => {
+    const at = cardImpact(DIREGRAF_CAPTAIN)
+    expect(at.breadth).toBe('unbounded')
+    expect(at.stakes).toBe('own')
+    expect(at.persistence).toBe('one-shot')
+    expect(at.symmetry).toBe('one-sided')
+  })
+
+  it('prices the three-mana lord as a lord', () => {
+    // 6.0 is what every other anthem scores — Glorious Anthem and Knight
+    // Exemplar both sit there. 15.96 put it above Wrath of God.
+    expect(cardImpact(DIREGRAF_CAPTAIN).score).toBe(6.0)
+    expect(cardImpact(DIREGRAF_CAPTAIN).score).toBeLessThan(cardImpact(WRATH_OF_GOD).score)
+  })
+
+  it('never combines a breadth and a stakes that no single clause had', () => {
+    // The general property, stated so it cannot regress quietly: whatever tuple
+    // the card reports, some ONE line must produce it on its own.
+    const lines = [
+      'Other Zombie creatures you control get +1/+1.',
+      'Whenever another Zombie you control dies, target opponent loses 1 life.',
+      'Deathtouch',
+    ]
+    const at = cardImpact(DIREGRAF_CAPTAIN)
+    const alone = lines.map((l) =>
+      cardImpact(card({ name: 'Diregraf Captain', typeLine: 'Creature — Zombie Soldier', oracleText: l })),
+    )
+    expect(alone.some((a) => a.breadth === at.breadth && a.stakes === at.stakes && a.persistence === at.persistence)).toBe(
+      true,
+    )
+  })
+
+  it('leaves a single-line card exactly where it was', () => {
+    // Wrath of God is one line carrying two sentences. If the splitter ever
+    // cut on sentences instead, "They can't be regenerated." would score alone
+    // and the wipe would lose its board.
+    expect(cardImpact(WRATH_OF_GOD).score).toBe(6.12)
+    expect(cardImpact(WRATH_OF_GOD).breadth).toBe('unbounded')
+  })
+
+  it('holds the six regression anchors', () => {
+    // Quoted in doc 18 and in prior ADRs. None of them may move without a
+    // reason written down beside it, and none of them moved.
+    const swords = card({
+      name: 'Swords to Plowshares',
+      manaCost: '{W}',
+      typeLine: 'Instant',
+      oracleText: 'Exile target creature. Its controller gains life equal to its power.',
+    })
+    expect(cardImpact(WRATH_OF_GOD).score).toBe(6.12)
+    expect(cardImpact(CRATERHOOF).score).toBe(6.0)
+    expect(cardImpact(SOL_RING).score).toBe(0.68)
+    expect(cardImpact(FOREST).score).toBe(0)
+    expect(cardImpact(CYCLONIC_RIFT).score).toBe(7.2)
+    expect(cardImpact(swords).score).toBe(1.2)
+  })
+
+  it('keeps Cyclonic Rift on its overload line, which is a line of its own', () => {
+    // The two lines score 1.2 and 7.2. The overload keyword is the winner and
+    // it carries `unbounded`, so the card still reports the mass mode.
+    const at = cardImpact(CYCLONIC_RIFT)
+    expect(at.breadth).toBe('unbounded')
+    expect(at.stakes).toBe('opposing')
+  })
+
+  it('keeps fragility a fact about the card, not about one clause', () => {
+    // When the card sacrifices itself EVERY clause stops, so this one stays
+    // card-level and pins every line to one-shot. Viridian Zealot is a
+    // Naturalize with a body however you split it.
+    expect(cardImpact(VIRIDIAN_ZEALOT).fragile).toBe(true)
+    expect(cardImpact(VIRIDIAN_ZEALOT).persistence).toBe('one-shot')
+  })
+
+  it('does not move IMPACT_MAX — no tier VALUE changed, only which tier a clause lands in', () => {
+    expect(IMPACT_MAX).toBe(18.48)
+  })
+})
+
+/**
+ * A standing modification to a class of your FUTURE spells is repeat, not reach.
+ *
+ * The report was Quandrix, the Proof: *"gives spells cascade, shouldn't that
+ * mean that his reach is every spell cast? Or he repeats every spell cast?"* —
+ * and it is the second one.
+ *
+ * Breadth counts what one effect touches AT ONCE. A cascade grant touches one
+ * spell at a time; it is the same effect happening again on the next spell,
+ * which is the persistence axis by its own definition — "none of the cost
+ * recurs, conditional on an event" — and casting a spell is the event.
+ *
+ * The model already agreed and could not say so. Teval, Arbiter of Virtue
+ * carries BOTH phrasings — the static "Spells you cast have delve" and the
+ * triggered "Whenever you cast a spell, you lose life equal to its mana value" —
+ * and scored `none/triggered/self` off the second clause alone. Breadth and
+ * stakes already matched between the two forms. Persistence was the ONLY axis
+ * that differed, and it differed because the static spelling never says the
+ * word `whenever`, so the ladder fell through to `one-shot`.
+ *
+ * The ordering that proves it was broken: Yidris, Maelstrom Wielder grants
+ * cascade only after connecting in combat and only for that turn, and scored
+ * 0.808. Quandrix grants it unconditionally, every turn, for the rest of the
+ * game, and scored 0.425 — the model's absolute floor, the same number as a
+ * creature whose only text is a keyword. The strictly conditional card
+ * outranked the unconditional one and the whole difference was one word.
+ */
+describe('a static grant to a class of your future spells (the Quandrix report)', () => {
+  const QUANDRIX = card({
+    name: 'Quandrix, the Proof',
+    manaCost: '{4}{G}{U}',
+    typeLine: 'Legendary Creature — Elder Dragon',
+    oracleText:
+      'Flying, trample\nCascade (When you cast this spell, exile cards from the top of your library until you exile a nonland card that costs less. You may cast it without paying its mana cost. Put the exiled cards on the bottom in a random order.)\nInstant and sorcery spells you cast from your hand have cascade.',
+  })
+
+  const FLAMEKIN_HERALD = card({
+    name: 'Flamekin Herald',
+    manaCost: '{2}{R}',
+    typeLine: 'Creature — Elemental Shaman',
+    oracleText:
+      'Commander spells you cast have cascade. (Whenever you cast a commander, exile cards from the top of your library until you exile a nonland card with lesser mana value. You may cast it without paying its mana cost. Put the exiled cards on the bottom in a random order.)',
+  })
+
+  it('reads the grant as triggered though the card never says "whenever"', () => {
+    expect(cardImpact(QUANDRIX).persistence).toBe('triggered')
+  })
+
+  it('leaves breadth alone — one spell at a time is not every spell at once', () => {
+    // This is the ruling. Handing an open-ended SERIAL class `unbounded`
+    // breadth would put Flamekin Herald — a three-mana 1/1 whose grant reaches
+    // only commander spells — level with Craterhoof Behemoth at 6.0.
+    expect(cardImpact(QUANDRIX).breadth).toBe('none')
+    expect(cardImpact(FLAMEKIN_HERALD).breadth).toBe('none')
+    expect(cardImpact(FLAMEKIN_HERALD).score).toBeLessThan(cardImpact(CRATERHOOF).score)
+  })
+
+  it('is not fooled by the cascade REMINDER TEXT the grant carries', () => {
+    // Quandrix's own reminder says "When you cast this spell" and Flamekin
+    // Herald's says "Whenever you cast a commander". A classifier reading
+    // either would be right here for entirely the wrong reason and wrong on
+    // every card that carries a cascade reminder and grants nothing. The
+    // trample reminder that once made Colossal Dreadmaw a burn payoff is the
+    // same trap. A card whose only parenthetical is a trigger word must still
+    // come out one-shot.
+    const reminderOnly = card({
+      name: 'Reminder Only',
+      typeLine: 'Creature — Dinosaur',
+      oracleText:
+        'Cascade (When you cast this spell, exile cards from the top of your library until you exile a nonland card that costs less.)',
+    })
+    expect(cardImpact(reminderOnly).persistence).toBe('one-shot')
+    expect(cardImpact(reminderOnly).score).toBe(0.425)
+  })
+
+  it('no longer ranks the conditional one-turn grant above the permanent one', () => {
+    const yidris = card({
+      name: 'Yidris, Maelstrom Wielder',
+      manaCost: '{2}{B}{G}{U}{R}',
+      typeLine: 'Legendary Creature — Human Wizard',
+      oracleText:
+        'Trample\nWhenever Yidris deals combat damage to a player, as you cast spells from your hand this turn, they gain cascade.',
+    })
+    expect(cardImpact(QUANDRIX).score).toBeGreaterThanOrEqual(cardImpact(yidris).score)
+  })
+
+  it('covers cost reduction, the same clause with a different payload', () => {
+    // "Spells you cast cost {1} less" applies once per spell cast, on an event,
+    // with nothing recurring. Same shape as the cascade grant; no principled
+    // reason to separate them.
+    const jetMedallion = card({
+      name: 'Jet Medallion',
+      manaCost: '{2}',
+      typeLine: 'Artifact',
+      oracleText: 'Black spells you cast cost {1} less to cast.',
+    })
+    expect(cardImpact(jetMedallion).persistence).toBe('triggered')
+  })
+
+  it('does not promote a grant that lasts only one turn', () => {
+    // A STANDING modification is the shape. "Spells you cast this turn cost {1}
+    // less" is a one-turn effect hung off an attack or landfall trigger, and 28
+    // commander-legal cards say exactly that. Promoting them would price a Saga
+    // chapter as a permanent engine.
+    const oneTurn = card({
+      name: 'One Turn Only',
+      typeLine: 'Enchantment',
+      oracleText: 'Spells you cast this turn cost {1} less to cast.',
+    })
+    expect(cardImpact(oneTurn).persistence).toBe('one-shot')
+  })
+
+  it('leaves an instant or sorcery one-shot whatever it grants', () => {
+    const sorcery = card({
+      name: 'Sorcery Grant',
+      typeLine: 'Sorcery',
+      oracleText: 'Spells you cast cost {1} less to cast.',
+    })
+    expect(cardImpact(sorcery).persistence).toBe('one-shot')
+  })
+
+  it('does not let the grant outrank an upkeep clause on the same card', () => {
+    // The winning-clause rule still decides. An upkeep trigger scores above a
+    // spell grant, so it is the upkeep line's tuple that is reported.
+    const both = card({
+      name: 'Both',
+      typeLine: 'Enchantment',
+      oracleText:
+        'Spells you cast cost {1} less to cast.\nAt the beginning of your upkeep, each opponent loses 1 life.',
+    })
+    expect(cardImpact(both).persistence).toBe('upkeep')
+  })
+})
+
+/**
+ * A class of spells you cast is SERIAL, and a serial class is never board-wide.
+ *
+ * Found while hunting counter-examples for the ruling above, and it is the
+ * BREADTH reading of the same report — already implemented by accident, and
+ * already producing wrong numbers.
+ *
+ * `MASS_QUANTIFIED` lists `spell` among the nouns a mass quantifier may take.
+ * That is right for `counter all other spells`: those spells are on the stack
+ * together and one effect touches all of them at once. It is wrong for `each
+ * spell you cast`, where the spells arrive one at a time across the whole game
+ * and no effect ever touches two.
+ *
+ * The cost, measured: Threefold Signal — *"each spell you cast that's exactly
+ * three colors has replicate {3}"* — took `unbounded` breadth, fell through the
+ * stakes ladder to `opposing`, and scored 7.2. That is Cyclonic Rift's number,
+ * on a card that cannot touch an opponent at all. Goblin Anarchomancer, a
+ * two-mana 2/2 making your red and green spells cost {1} less, scored the same
+ * 7.2. This is the Colossal Dreadmaw shape: a false positive at the top of the
+ * scale, invisible until the whole corpus was diffed.
+ *
+ * Five commander-legal cards say `each/every/all spell(s) you cast`. The eleven
+ * genuine mass effects on the stack say no such thing and do not move.
+ */
+describe('a serial class of spells is measured on repeat, never on reach', () => {
+  const THREEFOLD_SIGNAL = card({
+    name: 'Threefold Signal',
+    manaCost: '{2}{U}',
+    typeLine: 'Artifact',
+    oracleText:
+      "When this artifact enters, scry 3.\nEach spell you cast that's exactly three colors has replicate {3}. (When you cast it, copy it for each time you paid its replicate cost.)",
+  })
+
+  const SWIFT_SILENCE = card({
+    name: 'Swift Silence',
+    manaCost: '{1}{W}{U}{U}',
+    typeLine: 'Instant',
+    oracleText: 'Counter all other spells. Draw a card for each spell countered this way.',
+  })
+
+  it('does not call a grant to your own spells a board-wide effect', () => {
+    expect(cardImpact(THREEFOLD_SIGNAL).breadth).not.toBe('unbounded')
+  })
+
+  it('does not report a grant to your own spells as reaching an opponent', () => {
+    // The stakes ladder sends anything `unbounded` to `opposing` by default, so
+    // the breadth error and the stakes error always arrive together.
+    expect(cardImpact(THREEFOLD_SIGNAL).stakes).not.toBe('opposing')
+  })
+
+  it('scores it far below Cyclonic Rift, which it used to equal exactly', () => {
+    expect(cardImpact(THREEFOLD_SIGNAL).score).toBeLessThan(cardImpact(CYCLONIC_RIFT).score / 2)
+  })
+
+  it('still calls "counter all other spells" board-wide — those share a stack', () => {
+    // The counter-example that bounds the fix, and it must not move.
+    expect(cardImpact(SWIFT_SILENCE).breadth).toBe('unbounded')
+    expect(cardImpact(SWIFT_SILENCE).score).toBe(7.2)
+  })
+
+  it('still calls a tax on every player board-wide', () => {
+    // Trinisphere says "each spell", not "each spell you cast", and it really
+    // does apply to everybody.
+    const trinisphere = card({
+      name: 'Trinisphere',
+      manaCost: '{3}',
+      typeLine: 'Artifact',
+      oracleText:
+        'As long as this artifact is untapped, each spell that would cost less than three mana to cast costs three mana to cast.',
+    })
+    expect(cardImpact(trinisphere).breadth).toBe('unbounded')
+  })
+})
