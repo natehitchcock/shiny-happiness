@@ -69,7 +69,7 @@
       6
     ]
   },
-  "statPointsPerImpactPoint": 0.4945,
+  "statPointsPerImpactPoint": 0.4919,
   "exchangeRateByManaValue": [
     {
       "manaValue": 1,
@@ -77,7 +77,7 @@
       "vanilla": 2.97,
       "all": 2.34,
       "gap": 0.62,
-      "meanImpact": 1.607
+      "meanImpact": 1.619
     },
     {
       "manaValue": 2,
@@ -85,7 +85,7 @@
       "vanilla": 4.04,
       "all": 3.4,
       "gap": 0.64,
-      "meanImpact": 1.957
+      "meanImpact": 1.967
     },
     {
       "manaValue": 3,
@@ -93,7 +93,7 @@
       "vanilla": 5.3,
       "all": 4.48,
       "gap": 0.82,
-      "meanImpact": 2.321
+      "meanImpact": 2.334
     },
     {
       "manaValue": 4,
@@ -101,7 +101,7 @@
       "vanilla": 6.78,
       "all": 5.81,
       "gap": 0.97,
-      "meanImpact": 2.502
+      "meanImpact": 2.515
     },
     {
       "manaValue": 5,
@@ -109,7 +109,7 @@
       "vanilla": 9.08,
       "all": 7.29,
       "gap": 1.79,
-      "meanImpact": 2.553
+      "meanImpact": 2.565
     },
     {
       "manaValue": 6,
@@ -117,7 +117,7 @@
       "vanilla": 11.8,
       "all": 9.05,
       "gap": 2.75,
-      "meanImpact": 2.604
+      "meanImpact": 2.611
     }
   ]
 }

@@ -68,7 +68,7 @@
       "q1": 0.68,
       "median": 0.935,
       "q3": 1.6,
-      "noCountableEffect": 2068
+      "noCountableEffect": 2067
     },
     "equipment": {
       "n": 619,
@@ -82,7 +82,7 @@
       "q1": 0.425,
       "median": 0.808,
       "q3": 1.92,
-      "noCountableEffect": 4341
+      "noCountableEffect": 4339
     },
     "graveyard-hate": {
       "n": 112,
@@ -116,7 +116,7 @@
       "n": 939,
       "q1": 0.85,
       "median": 1.2,
-      "q3": 2.24,
+      "q3": 2.28,
       "noCountableEffect": 260
     },
     "sac-outlet": {
@@ -131,7 +131,7 @@
       "q1": 1.2,
       "median": 1.2,
       "q3": 1.92,
-      "noCountableEffect": 1
+      "noCountableEffect": 0
     },
     "stax": {
       "n": 93,
@@ -143,9 +143,9 @@
     "synergy": {
       "n": 11629,
       "q1": 0.5,
-      "median": 1,
-      "q3": 1.92,
-      "noCountableEffect": 5644
+      "median": 1.1,
+      "q3": 2.2,
+      "noCountableEffect": 5642
     },
     "token-maker": {
       "n": 2799,
