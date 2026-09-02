@@ -75,6 +75,8 @@ import { DeckMenu } from './DeckMenu'
 import { Boundary } from './Boundary'
 import { Hint } from './Hint'
 import { Quickbuild, type QuickbuildCandidate } from './Quickbuild'
+import { OverflowMenu } from './OverflowMenu'
+import { Tour, type TourExit } from './Tour'
 import { DeckWeb } from './deckweb/DeckWeb'
 import { enterDeckWeb, leaveDeckWeb, useDeckWebMode } from './deckweb/route'
 import { readable } from './tags'
@@ -1030,6 +1032,24 @@ const ARCHETYPES = [
 const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JSX.Element => {
   const [term, setTerm] = useState('')
   /**
+   * The landing page's Help, and the tour it opens (doc 20 D5, §20.1).
+   *
+   * §20.1: "The landing page gets nothing but the Help button." There is no
+   * deck rail, feed or analysis rail here, so the tour cannot point at any of
+   * them — `Tour` finds none of its seven anchors and shows the how-to-start
+   * step instead, deferring the region steps until there is a workspace.
+   *
+   * IT DOES NOT SET `lw.tutorialSeen`, and that is a deliberate refinement of
+   * A4 rather than a hole in it. A4's rule is that opening the tour counts as
+   * seeing it; what the flag guards is the seven-step region tour, and the
+   * landing page cannot show a single step of that. Setting it here would let
+   * a reader who pressed Help before picking a commander lose the real tour
+   * without ever having been shown it — the precise failure A4 named Help as
+   * the mitigation for.
+   */
+  const [touring, setTouring] = useState(false)
+  const helpRef = useRef<HTMLButtonElement>(null)
+  /**
    * What was actually searched for, as opposed to what is typed.
    *
    * The two were the same thing when every keystroke fired a request. They are
@@ -1212,7 +1232,24 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
         <h1 className="wordmark">
           Lotus <span>Wizard</span>
         </h1>
+        <button
+          className="act"
+          data-tour="help"
+          ref={helpRef}
+          title="What this is, and how to start"
+          onClick={() => setTouring(true)}
+        >
+          Help
+        </button>
       </header>
+      {touring ? (
+        <Tour
+          onExit={() => {
+            setTouring(false)
+            if (helpRef.current !== null && helpRef.current.isConnected) helpRef.current.focus()
+          }}
+        />
+      ) : null}
       <div className="start">
         {/* h2, not h1: the wordmark above is the page's heading, exactly as it
             is in the workspace. Two h1s would be two answers to "what is this
@@ -4686,12 +4723,24 @@ export const Workspace = ({
   deck: initial,
   onSwitch,
   onNew,
+  freshlyCreated = false,
 }: {
   deck: api.Deck
   /** Open another deck on this device. */
   onSwitch?: (id: string) => void
   /** Back to the start screen to build a new one. */
   onNew?: () => void
+  /**
+   * This workspace was opened by choosing a commander just now, rather than
+   * restored from `roundtable.deck` on a reload.
+   *
+   * Doc 20 §20.1's whole point: "first time" cannot mean "on first load",
+   * because the landing page has no workspace to tour. It means the moment the
+   * workspace first exists AND is empty, which is exactly this transition — and
+   * it is not the same as "the flag is unset", which is also true for someone
+   * who has had a deck for a week when the flag is introduced.
+   */
+  freshlyCreated?: boolean
 }): React.JSX.Element => {
   const [deck, setDeck] = useState(initial)
   /** Doc 17 §17.1 — the deck web is a mode at `#web`, not a panel. */
@@ -4724,6 +4773,12 @@ export const Workspace = ({
   const [addingFocus, setAddingFocus] = useState(false)
   /** Whether the Quickbuild panel is over the suggestion pane (doc 19 §19.1). */
   const [quickbuilding, setQuickbuilding] = useState(false)
+  /** Whether the quick tutorial is running over the workspace (doc 20). */
+  const [touring, setTouring] = useState(false)
+  /** The Help button, so dismissing the tour can hand focus back to it. */
+  const helpRef = useRef<HTMLButtonElement>(null)
+  /** The workspace itself, where focus goes when the tour is FINISHED (§20.6). */
+  const workspaceRef = useRef<HTMLDivElement>(null)
   const [analysis, setAnalysis] = useState<api.Analysis | null>(null)
   const [cards, setCards] = useState<Map<string, api.Card>>(new Map())
   const [prices, setPrices] = useState<Map<string, number | null>>(new Map())
@@ -4794,6 +4849,79 @@ export const Workspace = ({
   useEffect(() => {
     localStorage.setItem('lw.cutThreshold', String(cutThreshold))
   }, [cutThreshold])
+
+  /**
+   * Start the tutorial, and count it as seen the moment it OPENS (doc 20 A4).
+   *
+   * Not when it completes. A4 was decided with its cost stated out loud: a
+   * stray refresh at step 1 silently costs a first-time user the entire tour.
+   * The alternative — resume-on-reload — was not chosen, so this must not
+   * quietly become that.
+   *
+   * `lw.tutorialSeen` in `localStorage`, per A5 and D4: the same convention as
+   * `lw.deviceId` (ADR-0014) and `lw.cutThreshold`, because whether you have
+   * seen the tour is a property of THIS BROWSER, not of a deck. The accepted
+   * cost is that a second person on a shared machine gets no tour, and that
+   * Help is their way in.
+   *
+   * Writing the flag here rather than in the auto-fire effect is what makes
+   * Help idempotent and makes the two entry points genuinely one path.
+   */
+  const startTour = useCallback((): void => {
+    localStorage.setItem('lw.tutorialSeen', 'yes')
+    setTouring(true)
+  }, [])
+
+  /*
+   * §20.1: once, immediately after the first commander is chosen.
+   *
+   * Both conditions, and they are different questions. `freshlyCreated` is "is
+   * there a workspace, and did it just appear" — the landing page has no deck
+   * rail, feed or analysis rail to tour, so a tour opened there could only ask
+   * the reader to memorise a layout instead of recognising one. The flag is
+   * "has this browser had its turn". Someone who has been building for a week
+   * when this ships is not freshly created, so the tour does not ambush them
+   * over a full deck; Help is how they ask for it.
+   */
+  useEffect(() => {
+    if (!freshlyCreated) return
+    if (localStorage.getItem('lw.tutorialSeen') !== null) return
+    startTour()
+  }, [freshlyCreated, startTour])
+
+  /**
+   * Where focus lands when the tour ends (§20.6).
+   *
+   * Two different places for two different exits, and the difference is the
+   * user's intent. Dismissing — Skip or Escape — means "not this, put me back";
+   * focus returns to Help, which is both where the tour came from and the
+   * control that brings it back, which matters more here than usual because A4
+   * makes Help the only route to a tour someone lost. Finishing means "I have
+   * read it, let me build"; focus goes to the workspace so the next Tab starts
+   * at the deck rather than at the top of the masthead.
+   */
+  const endTour = useCallback((reason: TourExit): void => {
+    setTouring(false)
+    const target = reason === 'finished' ? workspaceRef.current : helpRef.current
+    // `isConnected` for the reason `closePreview` checks it: focusing a
+    // detached node silently drops focus to nowhere.
+    if (target !== null && target.isConnected) target.focus()
+    /*
+     * And a net under that, because `isConnected` is not the only way a focus
+     * call can silently do nothing. `.workspace` is `hidden` rather than
+     * unmounted while the Graph mode is on (doc 17), and `focus()` on a
+     * `display: none` element is a no-op — the tour then unmounts under the
+     * reader and focus falls to `<body>`, so the next Tab restarts at the top
+     * of the document, which is the whole defect this function exists to
+     * prevent. Help is always on the masthead and always visible.
+     *
+     * The test is "did focus actually land", not "is it on `<body>` now":
+     * this runs from the Done button's own click handler, so the tour is still
+     * mounted and still holds focus at this instant. Waiting to look at
+     * `<body>` would mean waiting for a render that has not happened yet.
+     */
+    if (document.activeElement !== target) helpRef.current?.focus()
+  }, [])
   /**
    * Clicks the server has not seen yet.
    *
@@ -6653,12 +6781,6 @@ export const Workspace = ({
             <BracketChip bracket={analysis.bracket} onOpen={revealBracket} />
           </Boundary>
         )}
-        <button className="act" onClick={() => setImporting(true)}>
-          Import
-        </button>
-        <button className="act" onClick={exportDeck}>
-          Export
-        </button>
         {/* Doc 17 §17.1: the mode is entered from a control in the masthead and
             left the same way. `aria-pressed` rather than two buttons, because
             it is one thing being turned on and off.
@@ -6670,6 +6792,11 @@ export const Workspace = ({
             stopped working would be a real cost for a wording change. */}
         <button
           className="act"
+          // Doc 20's step 6 anchor. A hook rather than a label match, because
+          // there is no CSS selector for an accessible name and the positional
+          // alternative is what D3 forbids by name. This button has already
+          // been relabelled once — it used to say Web.
+          data-tour="graph"
           aria-pressed={webMode}
           title={webMode ? 'Back to the deck list' : "See the deck as a graph of what it's doing"}
           onClick={() => (webMode ? leaveDeckWeb() : enterDeckWeb())}
@@ -6684,6 +6811,7 @@ export const Workspace = ({
             teaches people not to press it. */}
         <button
           className="act"
+          data-tour="quickbuild"
           aria-pressed={quickbuilding}
           disabled={analysis === null}
           title={
@@ -6695,7 +6823,43 @@ export const Workspace = ({
         >
           Quickbuild
         </button>
+        {/* Doc 20 D5 and §20.4. It stays ON the row rather than joining Import
+            and Export in the menu, and that is A1's whole point: A4 sets the
+            seen flag when the tour OPENS, so a refresh at step 1 costs a
+            first-timer the tour, and Help is the only way back. A mitigation
+            behind a ⋯ is not a mitigation.
+
+            No `aria-pressed`. Graph and Quickbuild are things you turn on and
+            leave on; this starts something that ends on its own, so it is a
+            plain action button. */}
+        <button
+          className="act"
+          data-tour="help"
+          ref={helpRef}
+          title="A quick tour of the workspace"
+          onClick={startTour}
+        >
+          Help
+        </button>
+        {/* A1. Import and Export are session bookends — what you do at the
+            start and the end of a sitting — so they are the pair that leaves
+            the row, and the row keeps the three tools you reach for while
+            building. This is what bounds the row's growth: ADR-0032 measured
+            that a fifth control puts the tools onto a second line on every
+            phone. */}
+        <OverflowMenu
+          items={[
+            { label: 'Import', onSelect: () => setImporting(true) },
+            { label: 'Export', onSelect: exportDeck },
+          ]}
+        />
       </header>
+
+      {/* Doc 20. Mounted only while it runs: the overlay is promoted into the
+          top layer on mount, and a permanently mounted one would need a second
+          mechanism to hide it that the popover API already provides by not
+          being shown. */}
+      {touring ? <Tour onExit={endTour} /> : null}
 
       {tuningTargets && analysis !== null ? (
         <TargetSheet
@@ -6782,7 +6946,17 @@ export const Workspace = ({
         />
       ) : null}
 
-      <div className="workspace" hidden={webMode} data-detail={detailOpen ? 'open' : 'closed'}>
+      {/* `tabIndex={-1}` so the tour can hand focus back here when it FINISHES
+          (§20.6) without putting the container into the tab order. Landing on
+          the workspace means the next Tab starts at the deck rail rather than
+          at the top of the masthead. */}
+      <div
+        className="workspace"
+        ref={workspaceRef}
+        tabIndex={-1}
+        hidden={webMode}
+        data-detail={detailOpen ? 'open' : 'closed'}
+      >
         <section className="region" aria-label="Deck">
           <h2>Deck · {deckSize}</h2>
 
@@ -7841,9 +8015,20 @@ export const Workspace = ({
 export const App = (): React.JSX.Element => {
   const [deck, setDeck] = useState<api.Deck | null>(null)
   const [loading, setLoading] = useState(true)
+  /**
+   * Whether this deck arrived by choosing a commander just now (doc 20 §20.1).
+   *
+   * The tutorial's trigger is a TRANSITION, not a state: the moment the
+   * workspace first exists and is empty. Only this component can tell the two
+   * apart, because only it sees both the landing page and the restore from
+   * `roundtable.deck` — from inside `Workspace` a fresh deck and a reloaded one
+   * look identical.
+   */
+  const [freshlyCreated, setFreshlyCreated] = useState(false)
 
-  const open = useCallback((d: api.Deck): void => {
+  const open = useCallback((d: api.Deck, created = false): void => {
     localStorage.setItem('roundtable.deck', d.id)
+    setFreshlyCreated(created)
     setDeck(d)
   }, [])
 
@@ -7866,14 +8051,20 @@ export const App = (): React.JSX.Element => {
   // the saved deck arrives — which reads as having lost it.
   if (loading) return <p className="boot">Loading…</p>
 
-  if (deck === null) return <Start onCreated={open} />
+  if (deck === null) return <Start onCreated={(d) => open(d, true)} />
 
   return (
     <Workspace
       deck={deck}
       key={deck.id}
+      freshlyCreated={freshlyCreated}
       onSwitch={(id) => {
-        void api.getDeck(id).then(open).catch(noop)
+        // Switching to a deck that already exists is not a first commander, so
+        // it does not fire the tour even on a browser that has never seen one.
+        void api
+          .getDeck(id)
+          .then((d) => open(d))
+          .catch(noop)
       }}
       onNew={() => {
         localStorage.removeItem('roundtable.deck')

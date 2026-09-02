@@ -785,7 +785,7 @@ describe('the masthead stacks into two groups', () => {
      * spot, and a wrapper is a merge conflict where a pseudo-element is not.
      */
     const body =
-      /@media \(max-width:\s*\d+px\)\s*\{(\s*\.masthead[\s\S]*?\.masthead > \.act\s*\{[^}]*\})/.exec(
+      /@media \(max-width:\s*\d+px\)\s*\{(\s*\.masthead[\s\S]*?\.masthead > \.overflow-menu\s*\{[^}]*\})/.exec(
         sheet,
       )?.[1]
     expect(body).toBeDefined()
@@ -794,7 +794,16 @@ describe('the masthead stacks into two groups', () => {
     expect(body).toMatch(/\.masthead::after\s*\{[^}]*height:\s*0/)
     // Ordered between the two groups, so the tools land after it.
     expect(body).toMatch(/\.masthead::after\s*\{[^}]*order:\s*1/)
-    expect(body).toMatch(/\.masthead > \.act\s*\{[^}]*order:\s*2/)
+    /*
+     * BOTH kinds of tool are ordered onto the second line, and the second half
+     * is the one that is easy to miss. Graph, Quickbuild and Help are `.act`
+     * children of the masthead; the overflow trigger (doc 20 A1) is an `.act`
+     * inside a positioning wrapper, so `.masthead > .act` does not reach it.
+     * Without the wrapper in this rule the menu keeps the default order of 0
+     * and lands on line ONE beside the bracket chip — the tools cut in half,
+     * which is the exact collision this block exists to remove.
+     */
+    expect(body).toMatch(/\.masthead > \.act,\s*\.masthead > \.overflow-menu\s*\{[^}]*order:\s*2/)
     /*
      * `gap` applies on both axes, so a zero-height line between two lines is
      * still a line with a gap on each side of it — measured, 32px where the
@@ -892,6 +901,173 @@ describe('the masthead stacks into two groups', () => {
     expect(label).toMatch(/overflow:\s*hidden/)
     expect(label).toMatch(/text-overflow:\s*ellipsis/)
     expect(label).toMatch(/white-space:\s*nowrap/)
+  })
+
+  it('leaves the overflow trigger the bare .act the threshold was derived against', () => {
+    /*
+     * 25.9px is the smallest term in the derivation above and the easiest one
+     * to inflate by accident. It is a bare `.act` — 2px/7px of padding, a 1px
+     * border, one ⋯ at 0.72rem — and a `min-width`, a little breathing room or
+     * a bigger glyph would each move the threshold while leaving the comment
+     * that explains it standing.
+     *
+     * So the trigger is pinned to declare NOTHING that changes its box. This
+     * is not a ban: it is a tripwire. If the button genuinely needs a width,
+     * `masthead.overflow` above moves with it and the threshold is re-derived.
+     */
+    /*
+     * The POSITIVE half first, because the negative half alone was worthless:
+     * there is no `.overflow-trigger` rule in this sheet at all, so a regex
+     * looking for one yielded `''` and every `not.toMatch` below passed
+     * against an empty string. It would have passed just as happily against
+     * `.act.overflow-trigger { padding: 1rem }`.
+     *
+     * 25.9px IS a `.act`'s box — its padding, its border and its font around a
+     * single ⋯ — so those are what the threshold actually rests on, and moving
+     * any of them moves it.
+     */
+    const act = /(?:^|\n)\.act \{([^}]*)\}/.exec(sheet)?.[1] ?? ''
+    expect(act).toMatch(/padding:\s*2px 7px/)
+    expect(act).toMatch(/font-size:\s*0\.72rem/)
+    expect(act).toMatch(/border:\s*1px solid/)
+
+    /*
+     * And now the tripwire, over EVERY rule whose selector mentions the
+     * trigger rather than over one regex's idea of the rule — grouped
+     * selectors, descendant selectors and `.act.overflow-trigger` all count.
+     */
+    const boxy = /(?:^|;)\s*(?:width|min-width|padding|font-size|border-width|border)\s*:/
+    const offenders: string[] = []
+    for (const rule of sheet.matchAll(/([^{}@]+)\{([^}]*)\}/g)) {
+      if (!rule[1]!.includes('.overflow-trigger')) continue
+      if (boxy.test(rule[2]!)) offenders.push(rule[1]!.trim())
+    }
+    expect(offenders).toEqual([])
+    // Nor does the wrapper the trigger sits in, which is the masthead's actual
+    // flex item and so the box the wrap calculation sees.
+    // Anchored to the start of a line, or this matches the `.masthead >
+    // .overflow-menu` ordering rule in the media query instead — which is a
+    // real rule about a different question, and it would have passed the
+    // "declares no width" half vacuously.
+    const wrapper = /(?:^|\n)\.overflow-menu \{([^}]*)\}/.exec(sheet)?.[1] ?? ''
+    expect(wrapper).toMatch(/flex:\s*0 0 auto/)
+    for (const property of ['width', 'min-width', 'padding']) {
+      expect(wrapper).not.toMatch(new RegExp(`(?:^|;)\\s*${property}\\s*:`))
+    }
+  })
+})
+
+/**
+ * The tour's overlay, which must not clip (doc 20 §20.6).
+ *
+ * The lesson this repo already paid for once: `.region` carries
+ * `container-type: inline-size`, which makes it a containing block for
+ * fixed-position descendants, and `.analysis-scroll` is `overflow-y: auto`. No
+ * `z-index` defeats either — clipping is not stacking. The hints were moved
+ * into the top layer for exactly this, and the tour uses the same mechanism.
+ *
+ * jsdom cannot see a clip, so what is pinned here is the half that IS in the
+ * sheet: that the layer undoes the UA's `[popover]` box instead of inheriting
+ * a centred, bordered, opaque one. The clipping itself was checked in a browser
+ * and is recorded in doc 20 §20.8.
+ */
+describe('the tour overlay', () => {
+  const sheet = strip(join(here, 'styles.css'))
+  const layer = /\.tour-layer \{([^}]*)\}/.exec(sheet)?.[1] ?? ''
+
+  it('covers the viewport rather than being centred as a fit-content box', () => {
+    // The UA sheet gives `[popover]` `inset: 0; width: fit-content; margin:
+    // auto`, which would draw the whole tour as a small box in the middle.
+    expect(layer).toMatch(/position:\s*fixed/)
+    expect(layer).toMatch(/inset:\s*0/)
+    expect(layer).toMatch(/width:\s*100%/)
+    expect(layer).toMatch(/height:\s*100%/)
+    expect(layer).toMatch(/margin:\s*0/)
+  })
+
+  it('undoes the UA popover chrome, which would otherwise draw over the page', () => {
+    expect(layer).toMatch(/border:\s*0/)
+    expect(layer).toMatch(/padding:\s*0/)
+    // `background: canvas` is opaque, and would hide the very regions the tour
+    // exists to point at.
+    expect(layer).toMatch(/background:\s*none/)
+    // `overflow: auto` on the layer would clip the spotlight at its own edge,
+    // which is the bug being avoided, reintroduced one level up.
+    expect(layer).toMatch(/overflow:\s*visible/)
+  })
+
+  it('clears the masthead and the deck menu on the no-popover fallback path', () => {
+    const z = Number(/z-index:\s*(\d+)/.exec(layer)?.[1])
+    const mastheadZ = Number(/\.masthead\s*\{[^}]*z-index:\s*(\d+)/.exec(sheet)?.[1])
+    const deckPopZ = Number(/\.deck-pop \{[^}]*z-index:\s*(\d+)/.exec(sheet)?.[1])
+    expect(z).toBeGreaterThan(mastheadZ)
+    expect(z).toBeGreaterThan(deckPopZ)
+  })
+
+  /*
+   * The collision this whole file exists for, in a new place.
+   *
+   * "Step 3 of 7" is a `<p>` inside `.tour-card`, so a bare `.tour-progress`
+   * (0-1-0) loses to `.tour-card p` (0-1-1) on specificity AND on order — the
+   * micro-label was silently rendering at the body's 0.86rem with a full
+   * paragraph's bottom margin, keeping only the colour, tracking and caps that
+   * `.tour-card p` does not set. Resolved through the same cascade walker that
+   * caught the basic-land row, rather than by reading the rule and trusting it.
+   */
+  it('lets the step counter keep its own type size against .tour-card p', () => {
+    document.body.innerHTML = `
+      <div class="tour-card">
+        <p class="tour-progress">Step 3 of 7</p>
+        <h2>The scoreboard</h2>
+        <p>Composition, curve, combos and bracket.</p>
+      </div>`
+    const label = document.querySelector('.tour-progress')!
+    expect(winner(label, 'font-size')?.value).toBe('0.72rem')
+    expect(winner(label, 'margin')?.value).toBe('0 0 calc(var(--step) / 2)')
+    // And the body paragraph beside it is untouched.
+    const body = document.querySelectorAll('.tour-card p')[1]!
+    expect(winner(body, 'font-size')?.value).toBe('0.86rem')
+  })
+
+  it('draws the dim and the hole as one box, so they cannot drift apart', () => {
+    const spot = /\.tour-spot \{([^}]*)\}/.exec(sheet)?.[1] ?? ''
+    // One enormous spread shadow IS the scrim. A second element for the dim
+    // would have to be kept in register with this one through every scroll.
+    expect(spot).toMatch(/box-shadow:\s*0 0 0 100vmax/)
+    expect(spot).toMatch(/border:\s*2px solid var\(--brass\)/)
+  })
+
+  it('does not animate the spotlight, which is what keeps it on its region', () => {
+    /*
+     * A tripwire, and the reason is a mechanism rather than a measurement.
+     *
+     * The spotlight had a 180ms transition on left/top/width/height.
+     * `Tour.tsx` repositions the box on every `scroll` event — a top-layer
+     * element does not move with the page behind it — and every step begins
+     * with a smooth scroll that fires one per frame. Each of those restarts
+     * the transition from wherever it had got to, so the ring trails the page
+     * for the whole scroll and settles 180ms after it stops. The animation
+     * fights the listener that exists to keep the ring ON its region.
+     *
+     * What was seen in a browser, with its cause, since the cause is not the
+     * ordinary one: at a 1320px viewport step 7's ring was still drawn as the
+     * deck rail's 10,805px column while the inline style already read 85.6 ×
+     * 35.3, and `transition: none` snapped it to 86 × 35 in the same frame —
+     * in a window that turned out to be occluded, where transitions are
+     * suspended altogether.
+     *
+     * `prefers-reduced-motion` is honoured in `Tour.tsx` instead, on the scroll
+     * itself, which is where A2 puts it and the only motion the tour has left.
+     */
+    const spot = /\.tour-spot \{([^}]*)\}/.exec(sheet)?.[1] ?? ''
+    expect(spot).not.toMatch(/(?:^|;)\s*transition\s*:/)
+    expect(spot).not.toMatch(/(?:^|;)\s*animation\s*:/)
+    // And nothing sneaks one back in from a media block either.
+    for (const block of sheet.matchAll(
+      /@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/g,
+    )) {
+      expect(block[1]).not.toContain('.tour-spot')
+    }
   })
 })
 

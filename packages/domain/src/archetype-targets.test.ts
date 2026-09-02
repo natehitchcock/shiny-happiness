@@ -4,12 +4,22 @@ import type { Bracket } from './bracket.js'
 import { dimensionKey, roleDimension, typeDimension } from './composition.js'
 import { curveTarget } from './curve.js'
 import { assessArchetype, compositionTargets } from './archetype-targets.js'
+import type { Role } from './role.js'
 
 const LAND = dimensionKey(roleDimension('land'))
 const RAMP = dimensionKey(roleDimension('ramp'))
 const DRAW = dimensionKey(roleDimension('draw'))
 const REMOVAL = dimensionKey(roleDimension('spot-removal'))
 const CREATURE = dimensionKey(typeDimension('creature'))
+
+/** Every role that answers an opponent's card. See ADR-0037. */
+const ANSWER_KEYS = [
+  'spot-removal',
+  'counterspell',
+  'graveyard-hate',
+  'bounce',
+  'board-wipe',
+].map((role) => dimensionKey(roleDimension(role as Role)))
 
 const idealsOf = (archetype: ArchetypeKey, secondary: ArchetypeKey | null = null, bracket = 3) =>
   new Map(
@@ -169,11 +179,20 @@ describe('compositionTargets', () => {
     })
   })
 
-  it('gives control more draw and removal than aggro, and far fewer creatures', () => {
+  it('gives control more draw and more answers than aggro, and far fewer creatures', () => {
+    // ADR-0037 split the answer column into spot-removal, counterspell,
+    // graveyard-hate and bounce, so `spot-removal` alone no longer carries the
+    // claim this test is making. Control and aggro now sit at the SAME
+    // spot-removal number (6) and are still nothing alike: control holds 14
+    // answers to aggro's 7, and the difference is entirely in the columns that
+    // used to be hidden inside "removal". Summing them is the assertion that
+    // survives the split; comparing one column was only ever a proxy for it.
     const control = idealsOf('control')
     const aggro = idealsOf('aggro')
+    const answers = (ideals: Map<string, number>) =>
+      ANSWER_KEYS.reduce((sum, key) => sum + (ideals.get(key) ?? 0), 0)
     expect(control.get(DRAW)!).toBeGreaterThan(aggro.get(DRAW)!)
-    expect(control.get(REMOVAL)!).toBeGreaterThan(aggro.get(REMOVAL)!)
+    expect(answers(control)).toBeGreaterThan(answers(aggro))
     expect(control.get(CREATURE)!).toBeLessThan(aggro.get(CREATURE)!)
   })
 
