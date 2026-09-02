@@ -3,11 +3,14 @@ import type { Pool } from 'pg'
 import { getDeck } from '@roundtable/db'
 import type { CandidateGroupKey, ComboId, ScoringWeights } from '@roundtable/domain'
 import {
+  BRACKET_DATA,
   acceptedSet,
   comboDegree,
+  deckGameChangers,
   deckId,
   excludedSet,
   isOk,
+  loadBracketRules,
   matchesQuery,
   parseQuery,
   recommend,
@@ -45,6 +48,34 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
 
       const context = await loadDeckContext(pool, deck)
 
+      /**
+       * How many more Game Changers this deck may take before it breaks the
+       * bracket the builder chose (ADR-0044).
+       *
+       * Computed HERE rather than in `recommend`, because the Game Changers
+       * list lives in the corpus — Scryfall's `game_changer` boolean, so it
+       * rides the nightly ingest — and `packages/domain` does no IO (R1).
+       * `context.gameChangers` is already loaded for the analysis endpoint;
+       * this is the same set read by the same loader, so the two endpoints
+       * cannot disagree about which cards count.
+       *
+       * `0` WHEN THE RULES WILL NOT LOAD. `loadBracketRules` refuses when the
+       * corpus supplies no Game Changers at all, precisely so a deck full of
+       * them cannot pass Bracket 1 vacuously (`bracket-rules.ts`). Reading that
+       * refusal as "unlimited" here would reintroduce the same vacuous pass one
+       * layer up, on the one surface that presents a card as a pick the builder
+       * need not think about.
+       */
+      const bracketRules = loadBracketRules(BRACKET_DATA, context.gameChangers)
+      const allowed = bracketRules.ok
+        ? (bracketRules.value.byBracket.get(deck.targetBracket)?.gameChangersAllowed ?? 0)
+        : 0
+      const held = bracketRules.ok
+        ? deckGameChangers(bracketRules.value, [...acceptedSet(deck)]).length
+        : 0
+      const gameChangerBudget =
+        allowed === 'unlimited' ? ('unlimited' as const) : Math.max(0, allowed - held)
+
       const result = recommend({
         pool: context.pool,
         comboIndex: context.comboIndex,
@@ -78,6 +109,10 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
         // No corpus statistics exist (ADR-0008), so groups 6-7 report as
         // unavailable rather than being silently absent.
         stats: null,
+        // What the staples phase may spend without pushing the deck past its
+        // own bracket (ADR-0044). Read by nothing else — every other group
+        // surfaces bracket flags and filters on none of them (doc 03 §3.2).
+        gameChangerBudget,
         ...(body.limitPerGroup !== undefined ? { limitPerGroup: body.limitPerGroup } : {}),
         ...(deck.budget?.maxCardUsd !== undefined ? { maxBudgetUsd: deck.budget.maxCardUsd } : {}),
       })

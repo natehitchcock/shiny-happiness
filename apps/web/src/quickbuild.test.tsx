@@ -1201,3 +1201,76 @@ describe('a queue the builder has drained is refilled, not declared empty', () =
     await screen.findByText(/Nothing in your colours fills this gap/i)
   })
 })
+
+/**
+ * The opening phase, in the panel (ADR-0044).
+ *
+ * The domain decides WHICH gaps exist and in what order; these pin what the
+ * panel does once it has a `staples` gap — which group it asks for, what it
+ * puts in the heading, and that it stops claiming the build order is what put
+ * the card there.
+ */
+describe('the staples phase opens the loop', () => {
+  const stapleGap: QuickbuildGap = {
+    kind: 'staples',
+    key: 'staple',
+    label: 'staples',
+    short: 11,
+  }
+  const stapleLandGap: QuickbuildGap = {
+    kind: 'staples',
+    key: 'staple-land',
+    label: 'staple lands',
+    short: 5,
+  }
+  const staplesPlan = (over: Partial<QuickbuildPlan> = {}) =>
+    plan({ gaps: [stapleGap, stapleLandGap, rampGap], ordering: 'build-order', ...over })
+
+  it('asks for the staples group and adds no query clause of its own', async () => {
+    /*
+     * The group key IS the filter. `recommend` has already applied the curated
+     * list, the colour identity, the accepted set, the exclusions, the budget
+     * cap and the bracket allowance; there is no query that could express "is
+     * on the curated list", and a weaker second copy of that decision is what
+     * ADR-0031 is about.
+     */
+    const { fetchCandidates } = setup({ plan: staplesPlan() })
+    await waitFor(() => expect(fetchCandidates).toHaveBeenCalled())
+    expect(fetchCandidates).toHaveBeenCalledWith('', ['staple'], 8)
+  })
+
+  it('asks for the lands group once the spells phase has closed', async () => {
+    const { fetchCandidates } = setup({ plan: staplesPlan({ gaps: [stapleLandGap, rampGap] }) })
+    await waitFor(() => expect(fetchCandidates).toHaveBeenCalled())
+    expect(fetchCandidates).toHaveBeenCalledWith('', ['staple-land'], 8)
+  })
+
+  it('carries the builder’s own filter alone, with no trailing clause glued on', () => {
+    // `t:artifact ` with a trailing space is a different query string, and the
+    // panel prints the filter back to the builder verbatim (Q3).
+    expect(combinedQuery('t:artifact', stapleGap)).toBe('t:artifact')
+    expect(combinedQuery('', stapleGap)).toBe('')
+  })
+
+  it('says what is on offer rather than what the deck is short of', async () => {
+    // There is no target behind this number. "11 more staples" would assert the
+    // deck is eleven staples short of something the product never measured.
+    setup({ plan: staplesPlan() })
+    await screen.findByRole('heading', { name: /11 staples you don’t have yet/i })
+  })
+
+  it('names the curated list as an opinion, and drops the build-order sentence', async () => {
+    setup({ plan: staplesPlan() })
+    await screen.findByText(/Our opinion, not a statistic/i)
+    expect(screen.queryByText(/Working your archetype’s build order/i)).toBeNull()
+  })
+
+  it('hands the sentence back to the derived order once the staples are spent', async () => {
+    // The phase ends by its gaps leaving the plan, so the panel needs no
+    // terminal state of its own: it renders the next gap, and the ordering rule
+    // underneath is the true sentence again.
+    setup({ plan: plan({ gaps: [rampGap], ordering: 'build-order' }) })
+    await screen.findByText(/Working your archetype’s build order/i)
+    expect(screen.queryByText(/Our opinion, not a statistic/i)).toBeNull()
+  })
+})

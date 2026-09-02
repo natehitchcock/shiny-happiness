@@ -40,8 +40,9 @@ look at an unfamiliar card: **is this card big, and is it worth its mana.**
 and has no meaning across groups (pillar P5), so it cannot be read as "this card
 is better than that one" and must not be shown as though it could. Both metrics
 here are the opposite kind of number: they are properties of the card alone, the
-same in every deck, and they mean the same thing in the `staple` group as in
-`combo-3plus`.
+same in every deck, and they mean the same thing in the `other` group as in
+`combo-3plus`. (That group was called `staple` until ADR-0044 gave the name to
+the curated list; the point being made about it is unchanged.)
 
 That is what makes them columns rather than scoring terms. A column is an extra
 fact about each row (doc 13 and `App.tsx`: "a column does NOT filter"), and a

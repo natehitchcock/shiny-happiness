@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -b && node -e \"const f=require('fs');f.cpSync('src/brackets','dist/brackets',{recursive:true});f.cpSync('src/efficiency','dist/efficiency',{recursive:true});f.cpSync('src/impact','dist/impact',{recursive:true})\"",
+    "build": "tsc -b && node -e \"const f=require('fs');f.cpSync('src/brackets','dist/brackets',{recursive:true});f.cpSync('src/efficiency','dist/efficiency',{recursive:true});f.cpSync('src/impact','dist/impact',{recursive:true});f.cpSync('src/staples','dist/staples',{recursive:true})\"",
     "clean": "tsc -b --clean"
   }
 }
