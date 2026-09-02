@@ -72,6 +72,11 @@ const CARDS: ReadonlyMap<OracleId, Card> = new Map(
     card('signet', 'ramp', ['artifact'], 2),
     card('bolt', 'spot-removal', ['instant'], 1),
     card('goblin', 'synergy', ['creature'], 3),
+    // The two cards a deck is allowed more than one of, and the only way this
+    // file can see the copies bug at all: `mountain-1`/`mountain-2` are two
+    // DIFFERENT oracle ids, so a fixture built from them counts the same
+    // whether the implementation reads a Set or a list (ADR-0034).
+    card('rat', 'synergy', ['creature'], 2),
   ].map((c) => [c.oracleId, c]),
 )
 
@@ -134,6 +139,94 @@ describe('countComposition', () => {
   it('honours a role override function', () => {
     const counts = countComposition(deckOf(['sol']), CARDS, () => 'draw')
     expect(counts.byRole.get('draw')).toBe(2) // sol + commander, both forced
+  })
+})
+
+/*
+ * The reported defect, in the words it arrived in: "basic lands need to count
+ * towards your land count" (ADR-0034).
+ *
+ * It reads as a land bug because Commander is singleton and basics are nearly
+ * the only card a deck runs in multiples — but the defect is not about lands.
+ * `countComposition` iterated `acceptedSet`, a `Set` of oracle ids, so EVERY
+ * duplicate collapsed to one: twenty Mountains were one land, and a Relentless
+ * Rats pile was one creature at one point on the curve. Every field on
+ * `CompositionCounts` was affected, so every field is asserted here.
+ *
+ * Each case needs a REAL duplicate — the same oracle id twice. A fixture of
+ * `mountain-1` and `mountain-2` is two distinct cards and counts identically
+ * under both readings, which is exactly why the bug survived this file.
+ */
+describe('countComposition counts copies, not distinct cards', () => {
+  const withBasics = deckOf(['mountain-1', 'mountain-1', 'mountain-1', 'sol'])
+
+  it('counts twenty basics as twenty lands, not as one', () => {
+    const twenty = deckOf(Array.from({ length: 20 }, () => 'mountain-1'))
+    expect(countComposition(twenty, CARDS).byRole.get('land')).toBe(20)
+  })
+
+  it('counts every copy towards the deck total', () => {
+    // 3 Mountains + sol + the commander.
+    expect(countComposition(withBasics, CARDS).total).toBe(5)
+  })
+
+  it('counts every copy under its type', () => {
+    expect(countComposition(withBasics, CARDS).byType.get('land')).toBe(3)
+  })
+
+  it('counts every copy in the dimension index the targets are read against', () => {
+    const counts = countComposition(withBasics, CARDS)
+    expect(counts.byDimension.get(dimensionKey(roleDimension('land')))).toBe(3)
+    expect(counts.byDimension.get(dimensionKey(typeDimension('land')))).toBe(3)
+  })
+
+  it('keeps the role counts summing to the total once copies are counted', () => {
+    // The invariant the single-copy fixture above also asserts. It has to hold
+    // under duplicates too, or the meters add up to a different deck than the
+    // header does.
+    const counts = countComposition(withBasics, CARDS)
+    const roleTotal = [...counts.byRole.values()].reduce((a, b) => a + b, 0)
+    expect(roleTotal).toBe(counts.total)
+  })
+
+  it('counts duplicate NON-lands into the curve bucket and the average', () => {
+    /*
+     * The case that proves this is not a land fix. Lands are excluded from the
+     * curve by design, so a basics-heavy deck's curve barely moves — but a deck
+     * may run any number of Relentless Rats, and four of them are four cards at
+     * mana value two, not one.
+     */
+    const rats = deckOf(['rat', 'rat', 'rat', 'rat'])
+    const counts = countComposition(rats, CARDS)
+    expect(counts.manaCurve[2]).toBe(4)
+    // Weighted by copies: cmdr(4) + four rats at 2 → 12/5 = 2.4. Counting the
+    // rats once gives 3.0, which is a curve the deck does not have.
+    expect(counts.averageManaValue).toBeCloseTo(2.4, 5)
+  })
+
+  it('counts a commander that also has an accepted entry exactly once', () => {
+    /*
+     * Import a decklist with the commander in the hundred, then set it as the
+     * commander, and the deck holds both rows. `acceptedCopies` applies the same
+     * guard `validateDeck` does for the singleton rule, so the header must not
+     * read one card higher than the deck is.
+     */
+    const doubled = { ...deckOf(['cmdr', 'sol']), entries: [entry('cmdr'), entry('sol')] }
+    expect(countComposition(doubled, CARDS).total).toBe(2)
+    expect(countComposition(doubled, CARDS).byType.get('creature')).toBe(1)
+  })
+
+  it('still ignores excluded copies, however many there are', () => {
+    // Excluding is per-card, not per-copy: three excluded Mountains are zero
+    // lands, not three.
+    const deck = {
+      ...deckOf([]),
+      entries: Array.from({ length: 3 }, () => ({
+        ...entry('mountain-1'),
+        zone: 'excluded' as const,
+      })),
+    }
+    expect(countComposition(deck, CARDS).byRole.get('land')).toBeUndefined()
   })
 })
 

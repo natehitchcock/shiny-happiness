@@ -4,10 +4,18 @@ Date: 2026-08-31
 
 ## Status
 
-Accepted.
+Accepted. Extended by
+[ADR-0034](0034-composition-counts-copies.md).
 
 > **Number 0024 is taken by this ADR.** 0023 is damage-versus-life-loss, dated
 > the same day. The next agent should take 0025.
+
+> **Defect 3 below was fixed here for the colour charts only.** It was still
+> under the composition meters a session later, where it was reported again as
+> "basic lands need to count towards your land count" — and the workaround
+> pattern this ADR names ("a label written to route around a bug") had recurred
+> too, as a client-side dedupe of the card list to match the broken bar. See
+> ADR-0034, which calls itself the third sighting of one defect.
 
 ## Context
 

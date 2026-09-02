@@ -84,6 +84,21 @@ type Zone   = 'accepted' | 'excluded'
 type Origin = 'core' | 'manual' | 'recommended' | 'imported'
 ```
 
+**`DeckEntry` has no quantity: a deck holds ONE ENTRY ROW PER COPY.** Twenty
+Mountains are twenty rows with the same `oracleId`. This is what makes the two
+readings of "accepted" genuinely different questions, and the domain names them
+apart for that reason (ADR-0034):
+
+- `acceptedSet(deck)` — a `Set` of oracle ids. The right shape for **membership
+  and combo detection**: a combo either has its pieces or it does not, and a
+  second Mountain adds nothing. This is the `A` of §2.3.
+- `acceptedCopies(deck)` — one id per copy. The right shape for **anything that
+  counts the deck**: composition, the curve, the colour charts, the price total.
+
+Reaching for the wrong one has been the same bug three times — once in the
+colour pie (ADR-0024) and once under every composition meter (ADR-0034). A
+caller that counts and uses `acceptedSet` is wrong by construction.
+
 ### Card states — the full lattice
 
 A card, relative to a given deck, is in exactly one state:

@@ -2577,12 +2577,19 @@ const BracketCheck = ({
  * the bar and the list under the cursor have to agree, and the obvious
  * client-side filter makes them disagree in two different ways.
  *
- *   DUPLICATES. `countComposition` iterates `acceptedSet(deck)`, which is a
- *   `Set` of oracle ids — so thirty Mountains count ONCE. A filter over the
- *   deck's entries would list thirty rows beside a bar reading 1. `ids` is
- *   therefore the deduplicated set, and the caller passes `acceptedIds`, which
- *   is built the same way and includes the commanders exactly as `acceptedSet`
- *   does.
+ *   DUPLICATES. `countComposition` counts COPIES (ADR-0034), so thirty
+ *   Mountains are thirty lands. `ids` is therefore one id per copy and the
+ *   caller passes `acceptedCopyIds`, built the same way as the domain's
+ *   `acceptedCopies` and including the commanders exactly as it does.
+ *
+ *   This block used to say the opposite, and it was right at the time: the bar
+ *   counted distinct cards, so the list had to as well. When the bar was fixed
+ *   this became the mirror-image defect — a bar reading 37 above a list of one
+ *   Mountain, and `countCaveat` printing "the 36 not listed are cards this page
+ *   has not loaded", which is a fabricated explanation for a real disagreement.
+ *   Deduplicating HERE was the rejected alternative for exactly that reason.
+ *   Repeated names are grouped for display by `groupCopies`, which changes what
+ *   is drawn and not what is counted.
  *
  *   TWO DIMENSIONS AT ONCE. A composition dimension is a role OR a type, and a
  *   creature that ramps is counted under both — so a card can legitimately
@@ -2670,6 +2677,35 @@ const hostOf = (url: string): string => {
  * must never happen is a heading claiming 12 above a list of 11, which is the
  * failure this whole panel was written to avoid.
  */
+/** One card and how many of it the list holds. */
+export interface CopyGroup {
+  readonly card: api.Card
+  readonly copies: number
+}
+
+/**
+ * Collapse repeats for DISPLAY only (ADR-0034).
+ *
+ * The list counts copies, because the bar does. Drawn literally that is
+ * twenty-four identical "Mountain" lines and then "and 13 more" — a panel that
+ * answers "which cards are these?" with one word repeated. It also hands React
+ * twenty-four rows under the same `key`.
+ *
+ * So the arithmetic and the rendering are separated: `cards.length` stays the
+ * copy count that `countCaveat` checks against the bar, and this decides what
+ * is DRAWN. Grouping in `cardsInDimension` instead was rejected — that would
+ * shorten the count the caveat reads and put the "cards this page has not
+ * loaded" explanation back on a deck whose cards are all loaded.
+ */
+export const groupCopies = (cards: readonly api.Card[]): readonly CopyGroup[] => {
+  const byId = new Map<string, CopyGroup>()
+  for (const card of cards) {
+    const held = byId.get(card.oracleId)
+    byId.set(card.oracleId, { card, copies: (held?.copies ?? 0) + 1 })
+  }
+  return [...byId.values()]
+}
+
 const Breakdown = ({
   title,
   cards,
@@ -2681,6 +2717,12 @@ const Breakdown = ({
   bar: number
 }): React.JSX.Element => {
   const caveat = countCaveat(cards.length, bar)
+  // Capped by GROUP, and the overflow line counts the COPIES those hidden
+  // groups hold — "and 13 more" has to mean thirteen more cards, not thirteen
+  // more names, or it contradicts the count in the heading above it.
+  const groups = groupCopies(cards)
+  const shown = groups.slice(0, 24)
+  const hidden = cards.length - shown.reduce((n, g) => n + g.copies, 0)
   return (
     <>
       <strong>
@@ -2689,15 +2731,14 @@ const Breakdown = ({
       {cards.length === 0 ? (
         <span className="hint-line dim">Nothing here yet.</span>
       ) : (
-        cards.slice(0, 24).map((c) => (
-          <span className="hint-line" key={c.oracleId}>
-            {c.name}
+        shown.map((g) => (
+          <span className="hint-line" key={g.card.oracleId}>
+            {g.card.name}
+            {g.copies > 1 ? ` ×${String(g.copies)}` : ''}
           </span>
         ))
       )}
-      {cards.length > 24 ? (
-        <span className="hint-line dim">and {cards.length - 24} more.</span>
-      ) : null}
+      {hidden > 0 ? <span className="hint-line dim">and {hidden} more.</span> : null}
       {caveat === null ? null : <span className="hint-line dim">{caveat}</span>}
     </>
   )
@@ -6245,13 +6286,39 @@ export const Workspace = ({
     }
   }, [query])
 
-  /** Accepted cards by id, for the preview's "works with your deck" pass. */
+  /**
+   * Accepted cards by id, for the preview's "works with your deck" pass.
+   *
+   * A SET, and deliberately still one. Its two readers — `nameMatchStatus` and
+   * the preview — ask "is this card in the deck?", and a second Mountain does
+   * not change that answer. The lists under the meters ask a different question
+   * and use `acceptedCopyIds`; see the domain's `acceptedSet`/`acceptedCopies`
+   * pair, which splits the same two readings for the same reason (ADR-0034).
+   */
   const acceptedIds = useMemo(
     () =>
       new Set([
         ...optimistic.commanders,
         ...optimistic.entries.filter((e) => e.zone === 'accepted').map((e) => e.oracleId),
       ]),
+    [optimistic],
+  )
+
+  /**
+   * The same cards, ONE ID PER COPY — the client's mirror of the domain's
+   * `acceptedCopies`, and the rule every composition bar is counted by.
+   *
+   * Commanders first, and a commander that also holds an accepted entry counted
+   * once: the domain applies that guard and a list counted without it would sit
+   * one card above the bar it is explaining.
+   */
+  const acceptedCopyIds = useMemo(
+    () => [
+      ...optimistic.commanders,
+      ...optimistic.entries
+        .filter((e) => e.zone === 'accepted' && !optimistic.commanders.includes(e.oracleId))
+        .map((e) => e.oracleId),
+    ],
     [optimistic],
   )
 
@@ -7460,7 +7527,7 @@ export const Workspace = ({
                   content={
                     <Breakdown
                       title={r.name}
-                      cards={cardsInDimension(acceptedIds, cards, dimensionKeyOf(r.dimension))}
+                      cards={cardsInDimension(acceptedCopyIds, cards, dimensionKeyOf(r.dimension))}
                       bar={r.actual}
                     />
                   }
@@ -7599,10 +7666,12 @@ export const Workspace = ({
               <Curve
                 curve={analysis.curve}
                 locked={lockedByBucket}
-                // `acceptedIds` is the client's copy of the domain's
-                // `acceptedSet` — deduplicated, commanders included — so the
-                // list under a bar is counted by the rule that produced the bar.
-                cardsAt={(bucket) => cardsInBucket(acceptedIds, cards, bucket)}
+                // `acceptedCopyIds` is the client's copy of the domain's
+                // `acceptedCopies` — one id per copy, commanders included — so
+                // the list under a bar is counted by the rule that produced the
+                // bar (ADR-0034). Lands never reach a bucket, so this changes
+                // the curve panel only for a deck running several of one spell.
+                cardsAt={(bucket) => cardsInBucket(acceptedCopyIds, cards, bucket)}
               />
               <p className="note">
                 Average mana value {analysis.curve.averageManaValue.toFixed(2)}

@@ -279,6 +279,13 @@ deck has no shape at all. Above it the deck holds enough cards that a dimension
 being short is a fact about *this deck* rather than a restatement of its
 archetype.
 
+The threshold is compared against `counts.total`, and **`total` counts copies
+since ADR-0034**. A deck of thirty distinct cards plus eight basics used to read
+30 and follow the build order; it reads 38 now and switches to largest-first.
+That is the correct reading — it really does hold 38 cards — but the regime a
+given deck lands in moved with that fix, so the argument above is about a
+different set of decks than it was when it was written.
+
 The handover is safe to place anywhere in that region because **the two
 orderings coincide on an empty deck**: with nothing accepted every deficit
 equals its own ideal, so "largest gap" and "largest commitment" are the same
@@ -331,6 +338,14 @@ times over, not incidental:
 So a land shortfall is always a `fills-land` composition gap and can never be a
 curve gap. Confirmed empirically: `role:land` appeared as a composition gap on
 all eight decks measured.
+
+> **That eight-of-eight measurement was taken against a broken count and should
+> not be read as evidence about decks** (ADR-0034). `countComposition` was
+> counting distinct oracle ids, so every deck holding basics reported a land gap
+> it did not have — Yedora Sacrifice Engine measured 8 lands while holding 27.
+> The structural claim above is unaffected: a land still cannot be a curve gap,
+> because lands are excluded from `manaCurve`. What is void is the frequency.
+> Re-measured after the fix, Yedora's largest gap is **ramp**, not land.
 
 ### One number the panel states differently from the rails
 

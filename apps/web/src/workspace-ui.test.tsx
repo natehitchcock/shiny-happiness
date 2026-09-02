@@ -744,12 +744,19 @@ describe('what is behind a bar', () => {
     return trigger.closest('.hint')?.querySelector('.hint-pop')?.textContent ?? ''
   }
 
-  it('lists thirty Mountains once, because the bar counts them once', async () => {
+  it('counts thirty Mountains as thirty, because the bar counts copies', async () => {
     /*
-     * THE MEASURED TRAP. `countComposition` iterates `acceptedSet(deck)`, which
-     * is a `Set` of oracle ids — so thirty Mountains are one land as far as
-     * every bar on this dashboard is concerned. A filter over the deck's
-     * ENTRIES would put thirty rows under a bar reading 1.
+     * THE MEASURED TRAP, INVERTED (ADR-0034).
+     *
+     * This test used to assert `land — 1 card` and a single Mountain, and it
+     * was a faithful description of the app: `countComposition` iterated
+     * `acceptedSet`, a `Set` of oracle ids, so thirty basics were one land on
+     * every bar. That was the reported defect — "basic lands need to count
+     * towards your land count" — so the OLD expectation was wrong about what
+     * the product should do, not about what it did.
+     *
+     * The count is now copies at both ends. The commander is in it too, and is
+     * a creature rather than a land, so the land bar reads exactly thirty.
      */
     const thirty = Array.from({ length: 30 }, () => ({
       oracleId: 'mtn',
@@ -765,7 +772,7 @@ describe('what is behind a bar', () => {
           min: 34,
           max: 38,
           locked: 0,
-          actual: 1,
+          actual: 30,
           source: 'archetype',
         },
       ],
@@ -775,10 +782,45 @@ describe('what is behind a bar', () => {
     await waitFor(() => expect(screen.getByLabelText(/^land:/)).toBeDefined())
 
     const panel = await openHint(/^land:/)
-    expect(panel).toMatch(/land — 1 card/)
+    expect(panel).toMatch(/land — 30 cards/)
+    // Grouped for display, so the panel is one line rather than thirty — but
+    // the line says how many, and the heading above it counts all thirty.
+    expect(panel).toMatch(/Mountain ×30/)
     expect(panel.match(/Mountain/g)).toHaveLength(1)
-    // And the two numbers agree, so no caveat is printed.
+    // And the two numbers agree, so no caveat is printed. Before the grouping
+    // landed this is where the regression would show: a bar of 30 over a list
+    // of 1 prints "The bar counts 30", blaming cards that are fully loaded.
     expect(panel).not.toMatch(/The bar counts/)
+  })
+
+  it('names a single copy without a multiplier', async () => {
+    // The ×N suffix is for repeats only; "Mountain ×1" would be noise on the
+    // ninety-odd singleton rows that make up the rest of every Commander deck.
+    mocked.getAnalysis.mockResolvedValue({
+      ...analysis,
+      targets: [
+        {
+          dimension: { role: 'land' },
+          ideal: 36,
+          min: 34,
+          max: 38,
+          locked: 0,
+          actual: 1,
+          source: 'archetype',
+        },
+      ],
+    })
+    render(
+      <Workspace
+        deck={withDeck([{ oracleId: 'mtn', zone: 'accepted', locked: false }], [mountain])}
+      />,
+    )
+    await waitFor(() => expect(mocked.getRecommendations).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByLabelText(/^land:/)).toBeDefined())
+
+    const panel = await openHint(/^land:/)
+    expect(panel).toMatch(/land — 1 card/)
+    expect(panel).not.toMatch(/×/)
   })
 
   it('counts a creature that ramps under both its role and its type', async () => {

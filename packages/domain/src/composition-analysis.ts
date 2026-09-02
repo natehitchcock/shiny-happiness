@@ -6,7 +6,7 @@ import {
   type CompositionDimension,
   type CompositionTarget,
 } from './composition.js'
-import { acceptedSet, type Deck } from './deck.js'
+import { acceptedCopies, type Deck } from './deck.js'
 import type { OracleId } from './ids.js'
 import type { Role } from './role.js'
 
@@ -44,7 +44,16 @@ export const countComposition = (
   let manaValueSum = 0
   let nonLandCount = 0
 
-  for (const oracleId of acceptedSet(deck)) {
+  // ONE ENTRY PER COPY (ADR-0034). This iterated `acceptedSet`, a `Set` of
+  // oracle ids, so twenty Mountains counted as one land and the panel reported
+  // DISTINCT CARDS while calling the number a card count. The rejected
+  // alternative was to special-case basics — count them from entries and keep
+  // the Set for everything else — which would have fixed the reported symptom
+  // and left Relentless Rats, Dragon's Approach and every other "any number of"
+  // card still collapsing to one. The defect is the shape of the iteration, not
+  // the cards it was noticed on. See `acceptedSet`'s docblock: a Set is right
+  // for combo detection and wrong for counting, and both readings are kept.
+  for (const oracleId of acceptedCopies(deck)) {
     const card = cards.get(oracleId)
     if (card === undefined) continue
     total += 1

@@ -7,7 +7,7 @@ scope (files it may touch), explicit dependencies, and a definition of done.
 
 ## 11.0 Current state — read this first
 
-Last updated: 2026-08-31, end of the fourth build session.
+Last updated: 2026-09-01, end of the fourth build session.
 
 **It runs.** `pnpm --filter @roundtable/web dev` with the API up gives a working
 deck workspace against 34,492 real cards, 110,577 printings and 108,046 real
@@ -122,6 +122,22 @@ chart wearing one — and each figure states what its own slices sum to on scree
 exists for. The client's **"N lands" hedge is gone with them**: it was worded
 that way to work around the Set, and a label written around a bug should not
 outlive the bug.
+
+**The composition panel counts copies now, and that was the same Set again.**
+[ADR-0034](adr/0034-composition-counts-copies.md). The report was "basic lands
+need to count towards your land count", and the cause was one line:
+`countComposition` iterated `acceptedSet` too, so `total`, `byRole`, `byType`,
+`byDimension`, `manaCurve` and `averageManaValue` were all counts of DISTINCT
+CARDS. Yedora Sacrifice Engine read 67 cards and 8 lands while holding 86 and
+27; its meters said "add 23 more lands" to a deck with 27, and the colour pie
+beside them — fixed by ADR-0024 — already said 86. It now counts
+`acceptedCopies`, so the paragraph above describes two of the three sightings of
+one defect rather than the whole of it. Composition TARGETS did not move (they
+are absolute counts against 99), and the curve did not move either (lands are
+excluded from it by design); what moved is every deficit, and Yedora's largest
+gap stops being land and becomes ramp. The card list behind each bar had been
+deduplicated to MATCH the broken bar, so it was fixed in the same pass and
+repeats are grouped for display as `Forest ×20`.
 
 The app is called **Lotus Wizard** in the interface. The name is tentative and
 **not cleared** — `LEGAL-01` owns that, and there is a real question to answer

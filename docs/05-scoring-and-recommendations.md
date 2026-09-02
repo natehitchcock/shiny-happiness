@@ -135,6 +135,11 @@ The header shows `dimension current/ideal` with a deficit/surplus colour, and ea
 deficit opens the corresponding `fills-<dimension>` candidate group. That is the whole
 loop: *see the gap → tap the gap → see cards that close it.*
 
+`current` is counted over the deck's accepted **copies**, not its distinct cards
+(ADR-0034): twenty Mountains are twenty lands. The ideals in the table above are
+absolute counts against 99 and do not scale with the deck's size, so this is the
+only side of the comparison that moves.
+
 Show targets as a **range with the ideal marked**, never a single number. A deck
 at 34 lands is not broken and the UI must not say it is.
 

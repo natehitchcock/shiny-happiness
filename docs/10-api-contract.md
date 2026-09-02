@@ -343,6 +343,12 @@ it is committed to. Counts come from precomputed histograms, not live queries.
 ```
 GET /api/v1/decks/:id/analysis
   → {
+      // COUNTED OVER ACCEPTED COPIES (ADR-0034) — twenty Mountains are twenty
+      // lands, and `total` is the deck's card count, not its distinct-card
+      // count. This block iterated `acceptedSet`, a Set of oracle ids, until
+      // ADR-0034; every field below was a distinct-card count on any deck
+      // holding a repeat. `byManaValue` still excludes lands, so it moves only
+      // for a deck running several copies of one SPELL.
       counts: {
         total: number,
         byRole: Record<Role, number>,
