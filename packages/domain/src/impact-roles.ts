@@ -6,7 +6,7 @@ import bands from './impact/by-role.data.json' with { type: 'json' }
  *
  * THE PROBLEM THIS SOLVES. `impact` is a property of the card and is not
  * comparable across roles. Measured on the corpus: Sol Ring 0.68, Command Tower
- * 0.68, a basic Forest 0.425, Wrath of God 6.12, Craterhoof Behemoth 6.0. A
+ * 0.68, a basic Forest 0, Wrath of God 6.12, Craterhoof Behemoth 6.0. A
  * builder shown "6.12 of 18.48" with no other context reasonably concludes that
  * anything under 6 is a bad card — and that conclusion condemns their entire
  * mana base. The number is right; the missing half is *compared to what*.
@@ -57,6 +57,22 @@ export interface RoleImpactBand {
  * GENERATED from the corpus by `pnpm --filter @roundtable/ingest impact-roles`.
  * The file carries the date it was generated and the corpus size, so a reader
  * can check it rather than trust it.
+ *
+ * STALE AS SHIPPED, and knowingly (doc 18 §18.13). The reach-and-stakes audit
+ * changed which tier 2,369 cards land in, and these quartiles are quartiles OF
+ * THAT MODEL — so they describe the model as it was on 2026-08-31. Regenerating
+ * needs a corpus database, which this change did not have, and the numbers
+ * below are the file's own rather than a guess at what it will say.
+ *
+ * Measured, the drift is small: `q1` is unchanged for every one of the eighteen
+ * roles the file holds and the largest single move is `board-wipe`'s median,
+ * 7.2 to 6.12. No role crosses `roleImpactIsMostlyUnreadable`'s half-way line
+ * in either direction, so no card's caveat changes.
+ *
+ * The more pressing reason to run it is unrelated to that pass: ADR-0037 added
+ * `counterspell` and `bounce`, and this file has no band for either. That
+ * degrades correctly — `roleImpactBand` returns `null` and the pane omits the
+ * comparison line — but a counterspell currently gets no placement at all.
  *
  * Typed as a record over `string` rather than `Role`: the file is data, and a
  * regeneration against a corpus that never derived some role must read as an

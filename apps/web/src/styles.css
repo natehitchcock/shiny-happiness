@@ -2623,6 +2623,20 @@ select {
   text-align: left;
   white-space: normal;
   cursor: auto;
+  /*
+   * THE PANEL IS PROSE, WHEREVER ITS TRIGGER LIVES.
+   *
+   * `text-transform` and `letter-spacing` inherit, and the top layer does not
+   * stop them — the box is painted above everything but it is still a DOM
+   * descendant of the trigger. The metric explainers (doc 18 §18.14) put a
+   * trigger inside `.rt-metric-label`, which is `text-transform: uppercase`
+   * with tracking, and seven lines of explanation came out SHOUTING IN CAPS
+   * WITH GAPPED LETTERS. Reset here rather than at the one call site: any hint
+   * anchored in a heading, a label or a badge would have hit the same thing,
+   * and a popover is never the same kind of text as the word that opened it.
+   */
+  text-transform: none;
+  letter-spacing: normal;
 }
 /* Pinned by a tap. Brass because it is now a thing the user decided, the same
    way a locked card is. */

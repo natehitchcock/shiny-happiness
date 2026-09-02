@@ -236,6 +236,57 @@ const normalise = (card: ImpactInput): string => {
     .toLowerCase()
 }
 
+/**
+ * A clause that COUNTS or COMPARES a group rather than affecting it.
+ *
+ * Removed before breadth is measured, and the reason is Regal Bunnicorn: its
+ * whole text is *"power and toughness are each equal to the number of nonland
+ * permanents you control"*, which affects nothing at all and scored 6.0 — the
+ * same reach as Craterhoof Behemoth, off a two-mana creature. Zanam Djinn's
+ * *"as long as blue is the most common color among all permanents"* is a
+ * condition on its own stats and scored 7.2, above Wrath of God. Measured, 160
+ * commander-legal cards took an unbounded reach out of a clause that only
+ * counted.
+ *
+ * MEASURING HEADS, NOT THE PREPOSITION. The rule is a short explicit list of
+ * phrases that introduce a measurement — `the number of`, `most common … among`,
+ * `mana value among`, `for each kind/type/different` — and never `among` on its
+ * own. "Deals X damage divided as you choose among X targets" is a targeting
+ * clause wearing the same preposition, and a bare `among` rule silently turned
+ * every such spell into a card that reaches nothing.
+ *
+ * A MATCH STOPS AT THE MEASURED NOUN, NOT AT THE END OF THE CLAUSE, and that
+ * bound was bought with a regression. Running to the clause end also swallowed
+ * whatever came AFTER the count, which on a damage card is the whole effect:
+ * Hallar's *"deals damage equal to the number of +1/+1 counters on it **to each
+ * opponent**"* lost its "each opponent" and fell from 15.96 to 0.808, as did
+ * Armageddon Clock and Dáin of the Ancient Halls. So the head is followed by at
+ * most three intervening words, then the group noun it counts, then an optional
+ * controller phrase — and the run refuses to cross `to`, `and`, `or`, `each`,
+ * `all` or `every`, because each of those begins something the count is not.
+ *
+ * That bound is also what makes it safe on a card carrying BOTH shapes:
+ * Craterhoof says "creatures you control gain trample … where X is the number of
+ * creatures you control", and only the second half is a count.
+ */
+const MEASURING_HEAD = [
+  String.raw`(?:the |a )?(?:number|amount|greatest|highest|lowest|total) (?:of|among)`,
+  String.raw`most common [a-z]+ among`,
+  String.raw`(?:colors?|card types?|mana values?|kinds?) among`,
+  String.raw`for each (?:card type|kind|type|different)(?: of| among)?`,
+].join('|')
+
+/** The group nouns a count can be taken over. */
+const COUNTED_NOUN =
+  '(?:creatures?|permanents?|artifacts?|enchantments?|lands?|planeswalkers?|tokens?|cards?|counters?|players?|opponents?|spells?|colors?)'
+
+const MEASURED = new RegExp(
+  `\\b(?:${MEASURING_HEAD}) (?:all |each |every |the )?` +
+    `(?:(?!to |and |or |each |all |every )[a-z0-9+/'-]+ ){0,3}?${COUNTED_NOUN}\\b` +
+    String.raw`(?: (?:you|they) controls?| (?:your opponents|an opponent) controls?| you own)?`,
+  'g',
+)
+
 const MASS_QUANTIFIED =
   /\b(all|each|every) (other |target )?(creature|permanent|player|opponent|land|artifact|enchantment|nonland|spell|card)/
 /**
@@ -246,18 +297,62 @@ const MASS_QUANTIFIED =
  */
 const MASS_PLURAL =
   /\b(creatures|permanents|artifacts|enchantments|lands|tokens|opponents) (you control|you don't control|your opponents control|an opponent controls)\b/
-const EACH_PLAYER = /\beach (opponent|player)\b|\bopponents\b/
 /**
- * A mass creature effect that names no controller — the symmetric ones.
+ * The effect reaches PEOPLE, not their board.
  *
- * The negative lookahead is load-bearing. "Destroy all creatures" hits your own
- * board; "destroy all creatures an opponent controls" does not, and the two must
- * not score the same. Without it every restricted wrath took the symmetry
- * discount it does not deserve — a 15% error on exactly the cards this axis
- * exists to separate.
+ * `(?! control)` separates the two things the bare word `opponents` does. "Each
+ * opponent loses 3 life" is aimed at a person; "creatures your opponents
+ * control get -1/-1" is aimed at a board, and the possessive is doing nothing
+ * but naming whose. Without the exclusion Doomwake Giant, Bolg and 46 other
+ * one-sided anthems were priced at `player` stakes — Bolg reached 18.48, the
+ * exact ceiling of the model, for shrinking the opposing team by one.
+ *
+ * The defect predates this pass and was invisible: `yoursOnly` used to claim
+ * these cards first and hand them `own`, which was also wrong but in the other
+ * direction. Fixing the scope test is what exposed it.
  */
-const ALL_CREATURES =
-  /\b(all|each|every) (other )?creatures?\b(?! (you|an opponent|your opponents|target)\b)/
+const EACH_PLAYER = /\beach (opponent|player)\b|\bopponents\b(?! control)/
+/**
+ * A mass effect on the battlefield that names no controller — the symmetric ones.
+ *
+ * The first negative lookahead is load-bearing. "Destroy all creatures" hits
+ * your own board; "destroy all creatures an opponent controls" does not, and the
+ * two must not score the same. Without it every restricted wrath took the
+ * symmetry discount it does not deserve — a 15% error on exactly the cards this
+ * axis exists to separate.
+ *
+ * IT IS NOT ONLY CREATURES, and that was the defect. This looked for
+ * `all creatures` alone, so `Destroy all artifacts, creatures, and enchantments`
+ * — where `all` is followed by `artifacts` — never matched, and Nevinyrral's
+ * Disk, Jokulhaups, Akroma's Vengeance and 117 other wipes were reported as
+ * one-sided: the pane told a builder the Disk spares their board. A wipe that
+ * names a coordinated LIST of types is the same card as a wipe that names one.
+ *
+ * `card`/`cards` is excluded for the opposite reason: "all land cards from your
+ * graveyard" is a ZONE, not a board. Splendid Reclamation returns your own
+ * lands and takes nothing from anybody, and without that exclusion every
+ * graveyard recursion spell joined the wrath population and lost 15% for
+ * hitting a board it never touches.
+ *
+ * `(?=(…))\1` IS AN ATOMIC GROUP, and it is the whole reason this works. The
+ * restriction on a coordinated list sits after the LAST noun — "destroy all
+ * artifacts, creatures, and enchantments you don't control" — so an ordinary
+ * greedy list would simply backtrack to "artifacts, creatures", find a comma
+ * instead of a controller, and match anyway. Capturing the list inside a
+ * lookahead and replaying it with a backreference consumes it in one bite that
+ * cannot be given back, so the negative lookahead is always asked about the end
+ * of the whole list. JavaScript has no `(?>…)`; this is the standard stand-in.
+ */
+const MASS_UNRESTRICTED =
+  /\b(?:all|each|every) (?:other )?(?:nonland |non-land |noncreature |non-creature )?(?=((?:creature|permanent|artifact|enchantment|land|planeswalker)s?(?:,? (?:and |or )?(?:creature|permanent|artifact|enchantment|land|planeswalker)s?)*))\1\b(?! (?:you|an opponent|your opponents|target|card|cards)\b)/
+/**
+ * The text puts somebody else's side of the board in scope.
+ *
+ * What stops a mass effect scoped entirely to the caster — Craterhoof, an
+ * anthem, Agatha's Soul Cauldron — being read as an attack on an opponent.
+ */
+const NAMES_OPPOSING_SIDE =
+  /you don't control|an opponent controls|your opponents control|\bopponents?\b|\ball players\b|\beach player\b/
 /** Cyclonic Rift's unbounded mode lives in a keyword, not in a sentence. */
 const OVERLOAD = /\boverload\b/
 const X_TARGET = /\bx target/
@@ -283,8 +378,26 @@ const ACTIVATED = /(^|\n)[^\n:]{0,60}:\s/
 const SACRIFICE_SELF = /sacrifice ~/
 
 const TARGET_PLAYER = /target (player|opponent)/
+/**
+ * The effect lands on somebody else's side.
+ *
+ * THE LOOKAHEAD IS THE FIX. An unrestricted `target creature` reads as
+ * `opposing` on purpose (doc 18 §18.5) — the caster picks the target and picks
+ * the opponent's. But this pattern matched the bare `target creature` INSIDE
+ * `target creature you control` and returned before the `you control` branch
+ * was ever reached, so 1,070 commander-legal cards were reported as hitting an
+ * opponent's board while exiling, untapping or pumping the caster's own
+ * creature. Emiel the Blessed blinks your own Unicorn; Embercleave attaches to
+ * your own attacker.
+ *
+ * The window is bounded and stops at clause punctuation, so it reads the
+ * restriction on THIS target and cannot borrow one from the next sentence.
+ * "Exile target creature. You control the game" would still be `opposing`, and
+ * a card that hits one of each — "target creature you control fights target
+ * creature an opponent controls" — still matches on the unrestricted half.
+ */
 const OPPOSING =
-  /you don't control|an opponent controls|target (creature|permanent|artifact|enchantment|land|planeswalker|spell)/
+  /you don't control|an opponent controls|target (?:creature|permanent|artifact|enchantment|land|planeswalker|spell)s?\b(?![^.,;:\n]{0,24} you control)/
 const YOU_CONTROL = /you control/
 
 /**
@@ -299,22 +412,65 @@ export const cardImpact = (card: ImpactInput): CardImpact => {
   if (card.oracleText.trim() === '') return NO_IMPACT
 
   const text = normalise(card)
-  const types = card.typeLine.toLowerCase()
+  /*
+   * A card whose text was ENTIRELY reminder text has no rules text either.
+   *
+   * The check above runs on the raw string, so a basic Forest — whose whole
+   * printed text is the parenthetical `({T}: Add {G}.)` — walked past it and
+   * took the `none` floor, 0.425. doc 18 §18.10 item 6 already established that
+   * reminder text is stripped before anything is matched; the emptiness test
+   * was simply asked before the strip rather than after. 22 commander-legal
+   * cards are affected: every basic, every original dual, Icehide Golem and
+   * Dryad Arbor. Both checks are kept because the first is the cheap one and
+   * covers the 339 genuinely textless creatures without normalising at all.
+   */
+  if (text.trim() === '') return NO_IMPACT
 
-  const quantified = MASS_QUANTIFIED.test(text)
-  const plural = MASS_PLURAL.test(text)
-  const eachPlayer = EACH_PLAYER.test(text)
-  // A mass effect over a plural you control and nothing else: an anthem hits
-  // your board only, so it is `own` stakes rather than `opposing`, and it is
-  // one-sided rather than symmetric even though it names no opponent.
-  const yoursOnly = plural && !quantified && YOU_CONTROL.test(text)
+  const types = card.typeLine.toLowerCase()
+  /*
+   * The text with every COUNTING clause removed — what the effect touches,
+   * rather than every plural the sentence mentions. See `MEASURED`. Only the
+   * scope questions read this; persistence, fragility and `scales` are facts
+   * about the whole card and still read the full text.
+   */
+  const effect = text.replace(MEASURED, ' ')
+
+  const quantified = MASS_QUANTIFIED.test(effect)
+  const plural = MASS_PLURAL.test(effect)
+  const eachPlayer = EACH_PLAYER.test(effect)
+  const unrestrictedMass = MASS_UNRESTRICTED.test(effect)
+  /*
+   * A mass effect whose whole scope is the caster's own side.
+   *
+   * An anthem hits your board only, so it is `own` stakes rather than
+   * `opposing`, and it is one-sided rather than symmetric even though it names
+   * no opponent.
+   *
+   * IT NO LONGER REQUIRES THE PLURAL TO BE UNQUANTIFIED. That restriction is
+   * what sent Agatha's Soul Cauldron to an opponent: it says "creatures you
+   * control" three times and names an opponent nowhere, but one of those
+   * clauses carries `all`, so `quantified` was true, `yoursOnly` was false, and
+   * the `breadth === 'unbounded'` branch below claimed it before `you control`
+   * was ever consulted. 935 cards were reported as attacking a board they
+   * cannot touch.
+   *
+   * `unrestrictedMass` is what bounds it, and it has to: a wrath may mention
+   * "you control" in a rider and still destroy everything, so an unrestricted
+   * mass effect overrides the scope test rather than losing to it.
+   */
+  const yoursOnly =
+    (plural || quantified) &&
+    !unrestrictedMass &&
+    !eachPlayer &&
+    YOU_CONTROL.test(effect) &&
+    !NAMES_OPPOSING_SIDE.test(effect)
 
   let breadth: BreadthTier
-  if (quantified || plural || OVERLOAD.test(text)) breadth = 'unbounded'
-  else if (X_TARGET.test(text)) breadth = 'variable'
-  else if (UP_TO_SEVERAL.test(text)) breadth = 'several'
-  else if (UP_TO_TWO.test(text)) breadth = 'few'
-  else if (TARGET.test(text) || ANY_TARGET.test(text)) breadth = 'one'
+  if (quantified || plural || OVERLOAD.test(effect)) breadth = 'unbounded'
+  else if (X_TARGET.test(effect)) breadth = 'variable'
+  else if (UP_TO_SEVERAL.test(effect)) breadth = 'several'
+  else if (UP_TO_TWO.test(effect)) breadth = 'few'
+  else if (TARGET.test(effect) || ANY_TARGET.test(effect)) breadth = 'one'
   else breadth = 'none'
 
   const scales = breadth === 'variable' || FOR_EACH.test(text) || COST_X.test(card.manaCost ?? '')
@@ -330,16 +486,16 @@ export const cardImpact = (card: ImpactInput): CardImpact => {
 
   let stakes: StakesTier
   if (yoursOnly) stakes = 'own'
-  else if (TARGET_PLAYER.test(text) || ANY_TARGET.test(text) || eachPlayer) stakes = 'player'
+  else if (TARGET_PLAYER.test(effect) || ANY_TARGET.test(effect) || eachPlayer) stakes = 'player'
   else if (breadth === 'unbounded') stakes = 'opposing'
-  else if (OPPOSING.test(text)) stakes = 'opposing'
-  else if (YOU_CONTROL.test(text)) stakes = 'own'
+  else if (OPPOSING.test(effect)) stakes = 'opposing'
+  else if (YOU_CONTROL.test(effect)) stakes = 'own'
   else stakes = 'self'
 
   const symmetry: Symmetry =
     breadth !== 'unbounded'
       ? 'none'
-      : ALL_CREATURES.test(text) && !eachPlayer && !yoursOnly
+      : unrestrictedMass && !eachPlayer && !yoursOnly
         ? 'symmetric'
         : 'one-sided'
 

@@ -30,7 +30,23 @@ export interface EfficiencyBaseline {
   readonly statPointsPerImpactPoint: number
 }
 
-/** The measured baseline this build ships with. */
+/**
+ * The measured baseline this build ships with.
+ *
+ * IMPACT IS AN INPUT TO ONE HALF OF THIS, and the coupling is easy to miss:
+ * `statPointsPerImpactPoint` is fitted against the MEAN IMPACT of all creatures
+ * at each mana value, so every change to `cardImpact` moves it. The other half
+ * — `vanillaStatlineByManaValue` and `vanillaStatlineFit` — reads only power,
+ * toughness and oracle text, and cannot move for that reason.
+ *
+ * `r` is therefore STALE AS SHIPPED by about 3.6% (doc 18 §18.6, §18.13): the
+ * reach-and-stakes audit removed false positives that were inflating mean
+ * impact, and the same measured gap over a smaller mean gives 0.4644 rather
+ * than 0.4484. Regenerate with `pnpm --filter @roundtable/ingest baseline`
+ * against a corpus database. It is stale in a benign direction — every score is
+ * uniformly a little low, so the ordering between cards is essentially
+ * untouched — but a reader comparing this file to the model should know why.
+ */
 export const EFFICIENCY_BASELINE: EfficiencyBaseline = baseline
 
 /**
