@@ -498,6 +498,42 @@ export const unsavedNotice = (
 }
 
 /**
+ * A decision the wire ate, in words.
+ *
+ * The third of the three ways a command can fail to land, and the last one that
+ * was still silent. `rejectionNotice` is the server saying no; `unsavedNotice`
+ * is the client giving up after rebasing onto a deck that would not hold still;
+ * this is the request never getting an answer at all.
+ *
+ * The product owner allowed exactly one dropped action — *"if there is a
+ * catastrophic loss of connection"* — and this is the sentence that makes the
+ * allowance honest. `sendWithRetry` has already spent four attempts by the time
+ * this is reached, so it is not a blip: the card is not in the deck, and only
+ * the user can decide whether to click it again.
+ *
+ * The cause is read off the error rather than guessed. `status === 0` is
+ * `ApiError`'s "there was no response", which is a dropped connection; anything
+ * else is a server that answered and refused, and telling somebody to check
+ * their network when the network is fine sends them looking in the wrong place.
+ */
+export const droppedNotice = (
+  lost: readonly { readonly type: string; readonly oracleId?: string }[],
+  cards: ReadonlyMap<string, api.Card>,
+  cause: unknown,
+): string | null => {
+  const first = lost[0]
+  if (first === undefined) return null
+  const subject =
+    (first.oracleId === undefined ? undefined : cards.get(first.oracleId)?.name) ?? 'That card'
+  // Only the first, plus a count, for the reason `rejectionNotice` gives.
+  const more = lost.length === 1 ? '' : ` (${plural(lost.length - 1, 'other card')} too.)`
+  const offline = !(cause instanceof api.ApiError) || cause.status === 0
+  return offline
+    ? `${subject} was not saved — the connection dropped.${more} Try it again once you are back online.`
+    : `${subject} was not saved — the server could not store it.${more} Try it again.`
+}
+
+/**
  * What a name-match row can actually do about this card.
  *
  * The "Cards named like…" list is the ONE place in the app that deliberately
@@ -5002,6 +5038,20 @@ export const Workspace = ({
    * happened yet.
    */
   const refusalsRef = useRef<readonly api.CommandResult['rejected'][number][]>([])
+  /**
+   * The batch currently on the wire, so the next one waits for it (ADR-0041).
+   *
+   * The deck has to be written in the order the user clicked it. Concurrent
+   * sends could not promise that: a batch that earned a 409 was rebased and
+   * re-sent AFTER the batches behind it had already committed, so two clicks on
+   * the same card in quick succession could land the wrong way round and undo
+   * one of them.
+   *
+   * Only the SEND waits. The recompute that follows it does not, which is what
+   * separates this from the "serialise the sends" that ADR-0036 rejected — see
+   * the long note in `load`.
+   */
+  const sendGate = useRef<Promise<unknown>>(Promise.resolve())
   /** The suggestions region, so the column legend can find the columns in it. */
   const suggestionsRef = useRef<HTMLElement>(null)
   /** The filter box — the last resort for focus when the feed empties out. */
@@ -5125,11 +5175,7 @@ export const Workspace = ({
        *
        * Looping is the fix because each round is strictly closer to done: the
        * rebase drops commands whose intent is already true and re-sends the
-       * rest at a version that is strictly newer. The rejected alternative was
-       * to serialise the sends behind a promise chain so no two batches are
-       * ever in flight — that removes the conflict, and with it the whole point
-       * of superseding a run, because the newest decision would then have to
-       * wait behind every slow recompute ahead of it.
+       * rest at a version that is strictly newer.
        *
        * Bounded, because an unbounded loop against a deck another client is
        * writing to is a spin. Five rounds is far more than the three runs this
@@ -5138,67 +5184,145 @@ export const Workspace = ({
        */
       const CONFLICT_ROUNDS = 5
       let replay: readonly DeckCommand[] = commands.map(wire)
-      for (let round = 0; ; round += 1) {
-        try {
-          const result = await sendWithRetry(current.id, replay, current.version)
-          current = result.deck
-          // The rebase path rejects for exactly the same reasons the first
-          // attempt does, and a user whose card was refused after a conflict
-          // is owed the same sentence as one whose card was refused outright.
-          rejected = result.rejected
-          break
-        } catch (error) {
-          // A 409 means only that our version is behind — the clicks are still
-          // valid. Re-read the deck and send them again, rather than dropping
-          // work the user did and making them click it a second time.
-          if (!(error instanceof api.ApiError) || error.status !== 409) throw error
-          const conflict = error.body as api.CommandConflict | null
-          const fresh = await api.getDeck(current.id)
-          current = fresh
 
-          /*
-           * Rebase rather than re-send blindly (API-06, doc 12 §12.7).
-           *
-           * `since` is what the server accepted while we were behind. Without
-           * it this could only re-send the same batch and hope: a card another
-           * client had just excluded came back with no record, and a card it
-           * had just added came back as a spurious `not-singleton` the user
-           * never caused. `rebaseCommands` drops only the commands whose intent
-           * is ALREADY TRUE — which is not discarding a user action, because
-           * the state they asked for exists — and replays everything else,
-           * conflicts included, since our intent is the more recent one.
-           *
-           * `sinceComplete === false` means the log does not cover the gap, so
-           * `since` is a partial account of it. Rebasing against a partial
-           * account is worse than not rebasing at all: it would drop a command
-           * on the strength of history it cannot see. In that case fall back to
-           * the old behaviour and re-send everything — the server still judges
-           * each command, so the outcome is no worse than it was before API-06.
-           */
-          const rebased =
-            conflict?.sinceComplete === true
-              ? rebaseCommands(replay, conflict.since)
-              : { replay, superseded: [], overrides: [] }
+      /*
+       * One batch on the wire at a time, so the deck is written in the order
+       * the user clicked (ADR-0041).
+       *
+       * Reserved SYNCHRONOUSLY, before the first `await`, so the queue is in
+       * the order `load` was called — which is the order the buffers closed,
+       * which is the order the clicks happened.
+       *
+       * ADR-0036 rejected "serialise the sends", and this is not quite that.
+       * It rejected serialising the RUN — send plus recompute — on the grounds
+       * that the newest decision would then wait behind every slow recompute
+       * ahead of it, which is exactly what the pipeline exists to prevent. Only
+       * the send half is held here. The recompute stays concurrent and a run is
+       * still superseded the moment the user clicks again, so nothing about the
+       * bar or the settle changes.
+       *
+       * What it buys is order. Concurrent sends meant a batch that earned a 409
+       * was re-sent AFTER the batches behind it had already committed, so
+       * "one more Wastes" then "one fewer Wastes" could land in the other
+       * order and leave a copy behind that the user had removed. Found by the
+       * randomised playtest suite; see `playtest-integrity.test.tsx`.
+       *
+       * The wait costs nothing the user can see: the click is already on screen
+       * optimistically, and the batch behind it was going to wait for a version
+       * number anyway — it just used to wait by being refused and re-sent.
+       */
+      const ahead = sendGate.current
+      let release = (): void => undefined
+      sendGate.current = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      try {
+        // `catch` and not `finally`: a batch that failed must not take the ones
+        // behind it down with it. They have their own retries and their own
+        // report, and one lost connection is not a reason to drop later clicks.
+        await ahead.catch(() => undefined)
+        /*
+         * Re-read AFTER the wait, never before.
+         *
+         * The version captured at the top of `load` is from before the batch
+         * ahead committed, so sending it would earn the conflict this queue
+         * exists to remove. `serverDeckRef` is written by whichever `load` last
+         * finished sending, so by here it is the truth.
+         */
+        current = serverDeckRef.current ?? current
 
-          if (rebased.replay.length === 0) {
-            // Everything we queued had already happened. Sending an empty batch
-            // would be a round trip that can only answer "nothing to do".
+        for (let round = 0; ; round += 1) {
+          try {
+            const result = await sendWithRetry(current.id, replay, current.version)
+            current = result.deck
+            // The rebase path rejects for exactly the same reasons the first
+            // attempt does, and a user whose card was refused after a conflict
+            // is owed the same sentence as one whose card was refused outright.
+            rejected = result.rejected
             break
-          }
-          replay = rebased.replay
+          } catch (error) {
+            // A 409 means only that our version is behind — the clicks are still
+            // valid. Re-read the deck and send them again, rather than dropping
+            // work the user did and making them click it a second time.
+            if (!(error instanceof api.ApiError) || error.status !== 409) {
+              /*
+               * The one drop the user said they would accept — and only on the
+               * condition that they hear about it.
+               *
+               * *"The only time a dropped action is acceptable is if there is a
+               * catastrophic loss of connection."* `sendWithRetry` has already
+               * spent four attempts over 1.5 s, so reaching here means the
+               * batch is genuinely not going to land. It used to leave as a
+               * rejected promise and `usePipeline` discards a superseded run's
+               * rejection — which is the same channel, and the same silence,
+               * that ADR-0036 took the 409 path off. It fixed the 409 route and
+               * left this one, so a lost connection during a fast sequence
+               * still said nothing at all.
+               *
+               * Said here rather than left to `pipeline.error`: that banner
+               * names the fault ("Failed to fetch") and not the card, and it is
+               * suppressed entirely when the run has been superseded. The
+               * rethrow below still happens, so a run that is NOT superseded
+               * shows both — what broke, and what it cost.
+               */
+              const lost = droppedNotice(replay, cardsRef.current, error)
+              if (lost !== null) setNotice(lost)
+              throw error
+            }
+            const conflict = error.body as api.CommandConflict | null
+            const fresh = await api.getDeck(current.id)
+            current = fresh
 
-          if (round >= CONFLICT_ROUNDS) {
-            // The one outcome that must never be silent. Everything above this
-            // line exists to avoid reaching here; reaching it means the user's
-            // decision is not in the deck and only they can decide what to do
-            // about it, so they are told which card and why.
-            const text = unsavedNotice(replay, cardsRef.current)
-            if (text !== null) setNotice(text)
-            break
+            /*
+             * Rebase rather than re-send blindly (API-06, doc 12 §12.7).
+             *
+             * `since` is what the server accepted while we were behind. Without
+             * it this could only re-send the same batch and hope: a card another
+             * client had just excluded came back with no record, and a card it
+             * had just added came back as a spurious `not-singleton` the user
+             * never caused. `rebaseCommands` drops only the commands whose
+             * intent is ALREADY TRUE — which is not discarding a user action,
+             * because the state they asked for exists — and replays everything
+             * else, conflicts included, since our intent is the more recent one.
+             *
+             * `sinceComplete === false` means the log does not cover the gap,
+             * so `since` is a partial account of it. Rebasing against a partial
+             * account is worse than not rebasing at all: it would drop a command
+             * on the strength of history it cannot see. In that case fall back
+             * to the old behaviour and re-send everything — the server still
+             * judges each command, so the outcome is no worse than it was
+             * before API-06.
+             */
+            const rebased =
+              conflict?.sinceComplete === true
+                ? rebaseCommands(replay, conflict.since)
+                : { replay, superseded: [], overrides: [] }
+
+            if (rebased.replay.length === 0) {
+              // Everything we queued had already happened. Sending an empty
+              // batch would be a round trip that can only answer "nothing to
+              // do".
+              break
+            }
+            replay = rebased.replay
+
+            if (round >= CONFLICT_ROUNDS) {
+              // The one outcome that must never be silent. Everything above
+              // this line exists to avoid reaching here; reaching it means the
+              // user's decision is not in the deck and only they can decide
+              // what to do about it, so they are told which card and why.
+              const text = unsavedNotice(replay, cardsRef.current)
+              if (text !== null) setNotice(text)
+              break
+            }
           }
         }
+        // Inside the gate, so the batch waiting behind this one reads the
+        // version this one produced rather than the one it started from.
+        serverDeckRef.current = current
+      } finally {
+        release()
       }
-      serverDeckRef.current = current
       // Banked, not returned. See `refusalsRef`.
       if (rejected !== undefined && rejected.length > 0) {
         refusalsRef.current = [...refusalsRef.current, ...rejected]
