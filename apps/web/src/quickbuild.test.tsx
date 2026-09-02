@@ -79,6 +79,7 @@ const plan = (over: Partial<QuickbuildPlan> = {}): QuickbuildPlan => ({
   reach: 'band',
   beyond: [],
   // 58 of 100, which is the deck in the report.
+  held: 58,
   unallocated: 42,
   unroled: 25,
   ...over,
@@ -919,6 +920,37 @@ describe('a cursor must not walk off a plan that shrinks underneath it', () => {
   })
 
   /*
+   * The gap the builder chose stays chosen while it is open, even as the plan
+   * around it is recomputed and reordered on every accept.
+   *
+   * A wrapping index passes the test above and fails this one: it cannot go out
+   * of range, but `at % length` points somewhere arbitrary the moment the
+   * length changes. Measured in the browser — "Different gap" onto tutor, two
+   * gaps then closed, and the panel was working a gap nobody had asked for.
+   * That is the reshuffling D3 says must not happen.
+   */
+  it('keeps the gap the builder chose while it is still open', async () => {
+    const base = props({ plan: plan({ gaps: [rampGap, removalGap, curveGap] }) })
+    const view = render(<Quickbuild {...base} />)
+    await screen.findByText('Ai')
+    await press(screen.getByRole('button', { name: /Different gap/i }))
+    expect(screen.getByRole('heading', { name: '3 more spot removal' })).toBeTruthy()
+    // Ramp closes; spot removal is now second of two rather than second of three.
+    await rerenderWith(view, base, plan({ gaps: [curveGap, removalGap] }))
+    expect(screen.getByRole('heading', { name: '3 more spot removal' })).toBeTruthy()
+  })
+
+  it('falls back to the leading gap once the chosen one closes', async () => {
+    const base = props({ plan: plan({ gaps: [rampGap, removalGap, curveGap] }) })
+    const view = render(<Quickbuild {...base} />)
+    await screen.findByText('Ai')
+    await press(screen.getByRole('button', { name: /Different gap/i }))
+    expect(screen.getByRole('heading', { name: '3 more spot removal' })).toBeTruthy()
+    await rerenderWith(view, base, plan({ gaps: [rampGap, curveGap] }))
+    expect(screen.getByRole('heading', { name: '4 more ramp' })).toBeTruthy()
+  })
+
+  /*
    * THE SECOND DEFECT. `passed` — the skip cursor — was a bare number with no
    * memory of which gap it belonged to. Skipping twice on one gap and then
    * having that gap close left a cursor of six pointing into the next gap's
@@ -1027,8 +1059,19 @@ describe('the ending is a question, not a full stop', () => {
   })
 
   it('says the deck is whole when it is', () => {
-    setup({ plan: plan({ gaps: [], beyond: [], unallocated: 0 }) })
-    expect(ending().textContent).toMatch(/holds all 100 cards/)
+    setup({ plan: plan({ gaps: [], beyond: [], held: 100, unallocated: 0 }) })
+    expect(ending().textContent).toMatch(/holds 100 of 100/)
+  })
+
+  /*
+   * An over-full deck reads back as exactly `DECK_SIZE` through `unallocated`,
+   * which floors at zero — so the count is carried on the plan instead. Telling
+   * someone holding 110 cards that they hold all 100 is a worse failure than
+   * the silence this ending replaced.
+   */
+  it('does not tell an over-full deck that it holds a hundred cards', () => {
+    setup({ plan: plan({ gaps: [], beyond: [], held: 110, unallocated: 0 }) })
+    expect(ending().textContent).toMatch(/holds 110 of 100/)
   })
 
   /*
@@ -1048,5 +1091,113 @@ describe('the ending is a question, not a full stop', () => {
     const focusable = [...panel.querySelectorAll('button')].map((b) => b.textContent)
     expect(focusable.some((t) => /Keep quickbuilding/.test(t ?? ''))).toBe(true)
     expect(focusable.some((t) => /Back to the suggestion list/.test(t ?? ''))).toBe(true)
+  })
+})
+
+/*
+ * The third defect behind "Quickbuild ended while gaps remained", and the one
+ * found by driving a real deck rather than by reading.
+ *
+ * The queue treated `deep` as "there is nothing further to top up". That is
+ * true of the server's answer and false of the deck: a builder working one
+ * large gap consumes all twenty-four held candidates, and the panel then said
+ * "Nothing in your colours fills this gap" about a gap with thousands of cards
+ * left. Observed in the browser at 96 of 100 on an eight-card land gap, with
+ * `POST /recommendations` returning eight more for the same query at the same
+ * moment.
+ */
+describe('a queue the builder has drained is refilled, not declared empty', () => {
+  const twentyFour = Array.from({ length: 24 }, (_, i) => candidate(`A${i}`))
+  const four = twentyFour.slice(0, 4)
+
+  /*
+   * A short first page forces the DEEP fetch, which is what sets `deep` and so
+   * what used to close the queue for good. Starting from a full first page
+   * would leave `deep` false and the ordinary deepening would refill it, which
+   * would make these tests pass against the defect they exist to pin.
+   */
+
+  const drain = (fetchCandidates: Parameters<typeof Quickbuild>[0]['fetchCandidates']) => {
+    const props = {
+      plan: plan({ gaps: [rampGap] }),
+      filter: '',
+      fetchCandidates,
+      onAdd: vi.fn(),
+      onReject: vi.fn(),
+      onClose: vi.fn(),
+      onReach: vi.fn(),
+      cutCount: 0,
+    }
+    const view = render(<Quickbuild {...props} retiredIds={new Set<string>()} />)
+    const retire = async (ids: readonly string[]): Promise<void> => {
+      await act(async () => {
+        view.rerender(<Quickbuild {...props} retiredIds={new Set(ids)} />)
+      })
+    }
+    return { retire }
+  }
+
+  it('asks again once every held candidate has been taken', async () => {
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce(four)
+      .mockResolvedValueOnce(twentyFour)
+      .mockResolvedValue([candidate('B0'), candidate('B1'), candidate('B2')])
+    const { retire } = drain(fetchCandidates)
+    await screen.findByText('A0')
+    // The deep page lands, so nothing further would ever have been asked for.
+    await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(2))
+    await retire(twentyFour.map((c) => c.oracleId))
+    await screen.findByText('B0')
+    expect(screen.queryByText(/Nothing in your colours/i)).toBeNull()
+    expect(options()).toHaveLength(OPTIONS_SHOWN)
+  })
+
+  /*
+   * And it does NOT ask again while the deck has not moved, which is what stops
+   * the refill being a request loop. `recommend` never offers a card the deck
+   * already holds, so its answer for one gap changes exactly when the deck
+   * does; asking twice about the same deck returns the same list twice.
+   */
+  it('does not ask again when the deck has not changed since the fetch', async () => {
+    const fetchCandidates = vi.fn().mockResolvedValue([candidate('Only')])
+    render(
+      <Quickbuild
+        plan={plan({ gaps: [rampGap] })}
+        filter=""
+        fetchCandidates={fetchCandidates}
+        onAdd={vi.fn()}
+        onReject={vi.fn()}
+        onClose={vi.fn()}
+        onReach={vi.fn()}
+        cutCount={0}
+        retiredIds={new Set<string>()}
+      />,
+    )
+    await screen.findByText('Only')
+    // One first page, one deepening, and then nothing: a single candidate is
+    // below a trio, but the deck has not moved so there is nothing new to get.
+    await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(2))
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    expect(fetchCandidates.mock.calls.length).toBe(2)
+  })
+
+  /*
+   * The gap really being empty still says so. The refill must not turn an
+   * honest "nothing fills this" into a silent blank panel.
+   */
+  it('still says the gap is empty when the refill comes back with nothing', async () => {
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce(four)
+      .mockResolvedValueOnce(twentyFour)
+      .mockResolvedValue([])
+    const { retire } = drain(fetchCandidates)
+    await screen.findByText('A0')
+    await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(2))
+    await retire(twentyFour.map((c) => c.oracleId))
+    await screen.findByText(/Nothing in your colours fills this gap/i)
   })
 })

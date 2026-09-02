@@ -1326,6 +1326,20 @@ describe('the three Quickbuild options are one box each, not a box in a box', ()
     expect(winner(focused, 'border-left-color')?.value).toBe('var(--brass)')
   })
 
+  /*
+   * The half a stylesheet cannot win by specificity, and the half that was
+   * actually visible: `Detail` renders `style={{ width: w }}` with `w`
+   * defaulting to `levelSpec(3).width`, so every option carried a hard inline
+   * `width: 340px`. Measured in the running app at 1600 px: 340 px of card
+   * inside a 446 px box, three times, leaving a 106 px strip of empty pane down
+   * the right of each. Inline beats a stylesheet, so this is `!important` for
+   * the same reason `.preview-art .rt-face` is.
+   */
+  it('overrides the width Detail sets inline, which no selector can outrank', () => {
+    const declared = /\.quickbuild-option > \.rt-detail\s*\{[^}]*\}/.exec(css)?.[0] ?? ''
+    expect(declared).toMatch(/width:\s*100%\s*!important/)
+  })
+
   it('lets the inner card fill the box the grid gave the option', () => {
     // A grid item stretches; a block inside it does not. The option has to be a
     // flex column before anything in it can take the height.

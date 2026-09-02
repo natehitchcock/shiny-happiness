@@ -3895,14 +3895,35 @@ select {
    inside them does. `min-height: 0` is what lets `.rt-detail-body`'s own
    `overflow-y: auto` engage instead of pushing the box taller — without it a
    flex item refuses to shrink below its content and the equal heights are the
-   tallest card's height everywhere. */
+   tallest card's height everywhere.
+ *
+ * `width: 100% !important` is the OTHER half of "not filling their parent
+ * pane", and it is the half no amount of specificity could have fixed:
+ * `Detail` renders `style={{ width: w }}` with `w` defaulting to
+ * `levelSpec(3).width`, so every option card carried a hard inline `width:
+ * 340px` — measured in the running app at 340 px inside a 446 px box, a 106 px
+ * strip of empty pane down the right of all three. The nominal width is
+ * genuinely wanted where `Detail` normally mounts (the 21rem detail column) and
+ * the `<img>` still needs it as a number to reserve its box before the art
+ * loads, so the prop is left alone and this mount overrides the result. Same
+ * reason and same remedy as `.preview-art .rt-face` above; only `width` is set
+ * inline here, so only `width` has to go. */
 .quickbuild-option > .rt-detail {
   flex: 1 1 auto;
   min-height: 0;
+  width: 100% !important;
   border: 0;
   border-radius: 0;
   padding: 0;
   background: none;
+}
+
+/* The art keeps its natural size and centres, rather than being upscaled to
+   whatever the pane happens to be. `Detail` asks for a 340 px image; stretching
+   that across a 446 px column is a blurrier picture for no information, and the
+   text beside it is what the builder is reading at this level. */
+.quickbuild-option .rt-detail-image {
+  align-self: center;
 }
 
 /* The focused option is marked by a RULE as well as a colour, and the panel

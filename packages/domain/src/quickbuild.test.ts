@@ -731,8 +731,24 @@ describe('reach — the band is where Quickbuild stops having an opinion, not wh
     expect(quickbuildPlan(inputFor([], 'midrange')).unroled).toBe(DECK_SIZE - roleIdeals)
   })
 
+  /*
+   * `unallocated` floors at zero, so an over-full deck cannot be recovered from
+   * it — `DECK_SIZE - 0` reads back as exactly a hundred. `held` is carried for
+   * that reason alone: a panel telling someone with 121 cards that they hold
+   * all 100 is a worse failure than the silence the ending replaced.
+   */
   it('never asks for a negative number of cards on an over-full deck', () => {
     const plan = quickbuildPlan(inputFor([...lands(60), ...filler(60)], 'midrange'))
     expect(plan.unallocated).toBe(0)
+    // The commander is in `acceptedCopies` but not in this fixture's card map,
+    // so `countComposition` cannot count it. The real app always holds the
+    // commander's card and reads one higher; nothing here depends on which.
+    expect(plan.held).toBe(120)
+    expect(DECK_SIZE - plan.unallocated).not.toBe(plan.held)
+  })
+
+  it('carries the deck’s own count, so the panel never has to reconstruct it', () => {
+    expect(quickbuildPlan(inputFor(atEveryBand(), 'midrange')).held).toBe(56)
+    expect(quickbuildPlan(inputFor([], 'midrange')).held).toBe(0)
   })
 })

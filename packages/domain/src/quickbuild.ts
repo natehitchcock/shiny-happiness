@@ -90,8 +90,18 @@ export interface QuickbuildPlan {
    */
   readonly beyond: readonly QuickbuildGap[]
   /**
+   * Accepted copies, commanders included — `input.total`, carried through.
+   *
+   * Carried rather than left to be recovered from `unallocated`, because
+   * `unallocated` floors at zero and an over-full deck would then read back as
+   * exactly `DECK_SIZE`. A panel saying "the deck holds all 100 cards" to
+   * someone holding 110 is a worse failure than the silence it replaced.
+   */
+  readonly held: number
+  /**
    * Cards still needed for a legal deck — the user's "you just need to pick X
-   * more cards", stated rather than left to be subtracted.
+   * more cards", stated rather than left to be subtracted. Zero on a deck that
+   * is at or over `DECK_SIZE`; `held` is what says which.
    */
   readonly unallocated: number
   /**
@@ -520,6 +530,7 @@ export const quickbuildPlan = (input: QuickbuildInput): QuickbuildPlan => {
     overFull,
     reach,
     beyond: reach === 'ideal' ? [] : sort(gapsAt('ideal')),
+    held: total,
     unallocated: Math.max(0, DECK_SIZE - total),
     unroled: Math.max(0, DECK_SIZE - roleIdeals),
   }
