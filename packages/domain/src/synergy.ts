@@ -292,6 +292,31 @@ const PRODUCES: readonly Rule[] = [
   { tag: 'creature-death', test: /\bsacrifice (a|another|an|one|two|X|\d+) creature/i },
   { tag: 'creature-death', test: /\bsacrifices? (a|another|an|one|two|X|\d+) creatures?\b/i },
   { tag: 'creature-death', test: /\beach player sacrifices\b/i },
+  /*
+   * A creature that eats ITSELF (ADR-0038).
+   *
+   * The three rules above all ask for an indefinite article, because they were
+   * written to find sacrifice OUTLETS. "Sacrifice this creature:" is the other
+   * half of the same event and was reachable by nothing: 510 commander-legal
+   * cards, from Sakura-Tribe Elder and Viscera Seer's food to every Nantuko
+   * Husk victim with a death-triggered ability of its own.
+   *
+   * `creature-death` and NOT `sacrifice-fodder`, and the split is the point. An
+   * outlet wants fodder because you feed it your board; a creature that can only
+   * eat itself asks for nothing, so it produces the death and wants nothing —
+   * which is why the `wants` rule below still asks for "a" or "another".
+   *
+   * Deliberately includes the drawback shape: "At the beginning of the end step,
+   * sacrifice this creature" (Arc Runner, Ball Lightning) is not a plan, but a
+   * deck built on "whenever a creature dies" genuinely gets a trigger out of it.
+   * That is the argument `destroy all creatures` already makes two rules down.
+   *
+   * The pre-2024 templating spells the card's own NAME here instead ("Sacrifice
+   * Ashnod's Altar"), which a regex table cannot see. Left, and counted: the
+   * name-substitution experiment that would reach it is refused below, on the
+   * `creature-etb` rule, for a measured reason.
+   */
+  { tag: 'creature-death', test: /\bsacrifices? this creature\b/i },
 
   /*
    * An edict is not a sacrifice outlet (ADR-0022).
@@ -550,9 +575,28 @@ const PRODUCES: readonly Rule[] = [
   { tag: 'graveyard-creature', test: /\bdies\b.{0,60}\bgraveyard\b/i },
 
   { tag: 'plus1-counter', test: /\bput(s)? .{0,30}\+1\/\+1 counter/i },
-  // A creature that arrives with counters on it is a +1/+1 deck's payload, and
-  // that templating never says "put".
-  { tag: 'plus1-counter', test: /\benters with (a|an|one|two|three|four|X|\d+) \+1\/\+1 counter/i },
+  /*
+   * A permanent that arrives with counters on it is a +1/+1 deck's payload, and
+   * that templating never says "put".
+   *
+   * The amount used to be a CLOSED LIST — `(a|an|one|two|three|four|X|\d+)` —
+   * and the corpus writes it four other ways the list has no room for: "two
+   * ADDITIONAL +1/+1 counters" (Moritte of the Frost, the reported card, and
+   * every riot creature), "a NUMBER OF +1/+1 counters … equal to" (Undergrowth
+   * Scavenger, Rhizome Lurcher), "THAT MANY" (devour), and "X additional"
+   * (Altered Ego). 117 commander-legal cards, read in a sample of 13, all real.
+   * The gap is `[^.\n]`, so it cannot leave the sentence it started in.
+   *
+   * The second rule is the same claim about a card coming BACK: "return target
+   * creature card from your graveyard to the battlefield with two additional
+   * +1/+1 counters on it" is Evil Reawakened, Prison Break, Graceful Restoration
+   * and Cauldron's Gift. 11 cards. Folding them into the rule above was tried
+   * and dropped: they never say "enters", so reaching them would mean deleting
+   * that word, and "enters with" is exactly what keeps this claim off the payoff
+   * side — see the `wants` rule below, where the same words invert.
+   */
+  { tag: 'plus1-counter', test: /\benters with [^.\n]{0,40}\+1\/\+1 counter/i },
+  { tag: 'plus1-counter', test: /\bto the battlefield with [^.\n]{0,30}\+1\/\+1 counter/i },
   {
     tag: 'plus1-counter',
     test: /\bdistribute (a|two|three|four|five|X|\d+) \+1\/\+1 counters?\b|\bdouble the number of \+1\/\+1 counters\b/i,
@@ -569,6 +613,28 @@ const PRODUCES: readonly Rule[] = [
     test: /\bplay an additional land\b|\bput(s)? .{0,30}land .{0,20}battlefield/i,
   },
   { tag: 'landfall', test: /\bland cards?\b[^.]{0,60}\bonto the battlefield\b/i },
+  /*
+   * The fetch that never says "land" (ADR-0038).
+   *
+   * Both rules above ask for the word, and the format's most-played landfall
+   * enabler does not print it: a fetchland reads "search your library for a
+   * Plains or Island card, put it onto the battlefield". So Flooded Strand,
+   * Misty Rainforest, every Panorama and Landscape, Farseek, Nature's Lore,
+   * Krosan Verge, Ranger's Path and Wood Elves derived nothing. 75 cards.
+   *
+   * The basic land TYPES are named rather than allowing any noun, and that is
+   * what keeps the tutors out: "{T}, Sacrifice a land: Search your library for
+   * a Mercenary permanent card, put it onto the battlefield" (Bog Glider) has
+   * the word "land" in its COST, and a rule that read the whole clause would
+   * call every sacrifice-a-land tutor a landfall enabler. Requiring the type to
+   * appear AFTER "search your library for" is the whole of the precision.
+   *
+   * `\b` on the types matters: without it "landwalk" and "Islandwalk" match.
+   */
+  {
+    tag: 'landfall',
+    test: /\bsearch(?:es)? (?:your|their) library for [^.\n]{0,80}\b(?:Plains|Island|Swamp|Mountain|Forest)\b[^.\n]{0,60}\bonto the battlefield\b/i,
+  },
 
   // Nothing produced `attack-trigger` at all, so 1,848 cards wanted an event no
   // card in the corpus could supply. These are the cards that cause attacks:
@@ -909,7 +975,48 @@ const WANTS: readonly Rule[] = [
     tag: 'plus1-counter',
     test: /\bproliferate\b|\bremove (a|one|two|three|X|\d+) \+1\/\+1 counter|\+1\/\+1 counter is put on|\btarget [a-z ]{0,25}with (a |one or more )?\+1\/\+1 counters? on|\bcreatures? [a-z ]{0,25}with \+1\/\+1 counters? on (them|it)/i,
   },
+  /*
+   * The same payoff with an article in it (ADR-0038).
+   *
+   * The last branch above reads "creatures … with +1/+1 counters on them" and
+   * the corpus far more often writes the singular: "each creature you control
+   * with A +1/+1 counter on it has trample" is Abzan Battle Priest, Bramblewood
+   * Paragon, Tuskguard Captain, Sapphire Drake, Gnarlid Colony — 42 cards.
+   *
+   * The leading DETERMINER is what stops this being a direction inversion, and
+   * it is there because of a measurement rather than a hunch. Adding the article
+   * to the existing branch and nothing else reached 182 cards instead of 42, and
+   * the extra 140 were PRODUCERS: "THIS creature ENTERS WITH a +1/+1 counter on
+   * it for each Zombie card in your graveyard" is Diregraf Colossus, and every
+   * bloodthirst reminder text reads the same way. A payoff talks about "each",
+   * "another", "all", "target" or "attacking" creatures; a card making its own
+   * counters says "this".
+   *
+   * An explicit `(?!enters)` on the gap was written to say that out loud, and
+   * dropped: it moves exactly ZERO cards in the corpus, because the determiner
+   * already refuses every one of them, and it survived every mutation the tests
+   * could make. That is the same ruling the `itself` exclusion got above — a
+   * branch a test cannot fail on is machinery.
+   */
+  {
+    tag: 'plus1-counter',
+    test: /\b(?:each|another|other|all|target|attacking) creatures?[a-z' ]{0,25} with (?:a |one or more )?\+1\/\+1 counters? on (?:them|it)\b/i,
+  },
   { tag: 'attack-trigger', test: /\bwhenever .{0,30}attacks\b/i },
+  /*
+   * The attack trigger Magic stopped writing as "attacks" (ADR-0038).
+   *
+   * The rule above asks for the inflected verb, and the modern template does not
+   * use it: "Whenever you attack" is one trigger for the whole team rather than
+   * one per creature. Adeline, Ellivere, Bast, Doors of Durin, Thorough
+   * Investigation — 149 commander-legal cards, and every one of them wants the
+   * same extra combats and the same evasion the rule above already looks for.
+   *
+   * The qualified forms come along, and should: "whenever you attack WITH ONE OR
+   * MORE ELVES" and "…with eight or more creatures" are harder conditions on the
+   * same event, exactly as "deals combat damage to a player" is two rules down.
+   */
+  { tag: 'attack-trigger', test: /\bwhenever you attack\b/i },
   // A combat damage trigger is an attack trigger with a harder condition: it
   // only ever fires because the creature attacked. It wants the same evasion,
   // the same pump and the same extra combats.
@@ -924,11 +1031,68 @@ const WANTS: readonly Rule[] = [
     tag: 'creature-etb',
     test: /\bwhenever (a|another) (nontoken )?creature (you control )?enters\b|\bwhenever one or more creatures enter\b/i,
   },
+  /*
+   * The same trigger, written with the card's own NAME (ADR-0038).
+   *
+   * "When this creature enters" is the 2024 template. 527 commander-legal
+   * creatures still print "When Tolsimir enters", "Whenever Ellivere enters or
+   * attacks", "When Aang enters" — and every one of them matched nothing, which
+   * made this the single largest rule gap in the file.
+   *
+   * NO `i` FLAG, and that is the whole of the precision. The capital letter is
+   * what says "this is a name". Read case-insensitively the subject pattern also
+   * fits "whenever AN ARTIFACT you control enters" and "when A LAND enters", and
+   * Reckless Fireweaver would ask to be blinked because somebody else's
+   * permanent entered. Audited rather than assumed: over all 527 matches the
+   * capitalised subject traces back to the card's own name in 527 cases and
+   * fails to in none.
+   *
+   * The type line is asked first, because a name in an enters trigger says
+   * nothing about whether a CREATURE entered — Embercleave, Esika's Chariot and
+   * Eye of Vecna all read this way and are not creatures. `[\s\S]*` crosses the
+   * newline the type line is joined on, which is safe for the reason the module
+   * comment gives: the type line is prefixed to every face by construction, so
+   * this gap can only ever run from the type line into one face's own text.
+   *
+   * SUBSTITUTING the name out of the text was written, measured and REJECTED.
+   * It reaches 12 more cards than this rule — the ones whose name carries a full
+   * stop, "J. Jonah Jameson", "Ms. Marvel", "U.S.Agent" — and it costs 30 cards
+   * their existing tags, because a card's name is also ordinary English: all 20
+   * cards named "… Storm" lose `spell-cast`, since the keyword STORM is what
+   * that rule reads and substitution eats the word. Cheaper to miss twelve
+   * cards than to break thirty.
+   */
+  { tag: 'creature-etb', test: /^[^\n]*\bCreature\b[\s\S]*\b[Ww]hen(?:ever)? [A-Z][^,.\n]{0,28} enters\b/ },
 
   {
     tag: 'spell-cast',
     test: /\bprowess\b|\bmagecraft\b|\bstorm\b|\bwhenever you cast (an instant|a sorcery|your first|an? noncreature)|\binstant and sorcery spells you (cast|control)\b|\bwhenever you copy an instant\b/i,
   },
+  /*
+   * The trigger that names no card type at all (ADR-0038).
+   *
+   * The rule above lists the types a spellslinger deck casts, and 246 cards ask
+   * for none of them: "Whenever you cast a spell" is Aetherflux Conduit, Song of
+   * Creation, Arjun, every extort creature and every heroic creature. An instant
+   * or sorcery — which is the whole of what `spell-cast` produces — satisfies it
+   * by definition, so the pairing is true in the direction that matters.
+   *
+   * The qualified forms are IN and are the imprecision this rule accepts:
+   * "whenever you cast a spell with mana value 5 or greater" is not turned on by
+   * a Ponder. Six cards, against 246, and pinning them out would need a lookahead
+   * no test could fail on — the same trade the file makes on `itself` above.
+   */
+  { tag: 'spell-cast', test: /\bwhenever you cast a spell\b/i },
+  /*
+   * A payoff for the tokens themselves (ADR-0038).
+   *
+   * `token`'s payoffs were "for each creature you control" and "creatures you
+   * control get" — both of which are anthems for a whole board. The anthem that
+   * only reaches TOKENS is a stronger claim about the same deck and read as
+   * nothing: Intangible Virtue, Phantom General, Teysa Karlov, Combine Chrysalis.
+   * 37 cards, read one by one, all token decks.
+   */
+  { tag: 'token', test: /\btokens you control (?:get|gain|have)\b/i },
 ]
 
 export interface SynergyProfile {

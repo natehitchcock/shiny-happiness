@@ -308,4 +308,117 @@ describe('a superseded run cannot land', () => {
     advance(BAR_TO_HALFWAY + 32)
     expect(applied).toEqual(['RESULT1'])
   })
+
+  it('takes the clicks still in the buffer with it when a filter refreshes', async () => {
+    // A refresh used to empty the buffer and send nothing: `items.current = []`
+    // followed by `launch.current([])`. Anything clicked in the 600 ms before a
+    // filter committed was therefore never sent AT ALL, while the optimistic
+    // overlay showed it landing until the refresh's own answer swept it away.
+    // A silent drop, and the user's second report says a drop is only ever
+    // acceptable when the connection is gone.
+    const { hook, batches, resolveRun } = setupMany()
+    const result = hook.result as { current: ReturnType<typeof usePipeline<string>> }
+
+    act(() => result.current.schedule('a'))
+    advance(100) // still inside the buffer — nothing has been sent
+    act(() => result.current.refresh())
+
+    // The new question, carrying the click that had not gone out yet.
+    expect(batches).toEqual([['a']])
+    await resolveRun(0)
+    advance(BAR_TO_HALFWAY + 32)
+  })
+})
+
+/**
+ * The count above the bar is "what you have done since the view last moved".
+ *
+ * Reported: *"I clicked add card when the loading bar was at the middle, and
+ * the count of cards to add reset back to 1 (it was 2 before I clicked add).
+ * When the bar resets, it should continue to count changes since the last time
+ * it refreshed the view. This includes removals and adds."*
+ *
+ * The count was derived from the SEND BUFFER, which the tick empties the moment
+ * a batch goes on the wire. Those two cards are still un-applied — the user
+ * cannot see them anywhere else — so counting them as gone was wrong. The
+ * buffer and the tally are now different lists, and only the tally survives a
+ * new run starting.
+ */
+describe('the pending count', () => {
+  const setupCounting = (): {
+    hook: ReturnType<typeof renderHook>
+    resolveRun: (index: number) => Promise<void>
+  } => {
+    const releases: ((value: string) => void)[] = []
+    const hook = renderHook(() =>
+      usePipeline<string>({
+        run: () => new Promise((r) => releases.push(r as (value: string) => void)),
+        apply: () => undefined,
+        // The count, straight out, so the assertions do not depend on which
+        // phase the bar happens to be in when they are made.
+        describe: (queued) => `n=${String(queued.length)}`,
+      }),
+    )
+    return {
+      hook,
+      resolveRun: async (index) => {
+        await act(async () => {
+          releases[index]?.(`RESULT${String(index)}`)
+          await Promise.resolve()
+        })
+      },
+    }
+  }
+
+  it('keeps counting a click made while the previous batch is in flight', async () => {
+    const { hook } = setupCounting()
+    const result = hook.result as { current: ReturnType<typeof usePipeline<string>> }
+
+    act(() => result.current.schedule('a'))
+    act(() => result.current.schedule('b'))
+    advance(100)
+    expect(result.current.label).toBe('n=2')
+
+    // The buffer closes and the batch is away. The two cards are on the wire
+    // and NOT on screen yet, which is precisely why they still count.
+    advance(BUFFER_MS + 32)
+    expect(result.current.label).toBe('n=2')
+
+    // The third click, made at the bar's halfway mark. The user has done three
+    // things since the list last moved, so the bar says three.
+    act(() => result.current.schedule('c'))
+    expect(result.current.label).toBe('n=3')
+  })
+
+  it('counts removals alongside adds', async () => {
+    // The report names both: "This includes removals and adds." Nothing in the
+    // pipeline knows the difference — the point is that neither kind is lost
+    // when a run starts — but the report is explicit, so the test is too.
+    const { hook } = setupCounting()
+    const result = hook.result as { current: ReturnType<typeof usePipeline<string>> }
+
+    act(() => result.current.schedule('add-a'))
+    advance(BUFFER_MS + 32)
+    act(() => result.current.schedule('remove-b'))
+    advance(BUFFER_MS + 32)
+    act(() => result.current.schedule('add-c'))
+    expect(result.current.label).toBe('n=3')
+  })
+
+  it('starts over once the view has actually refreshed', async () => {
+    // The other half of the rule. "Since the last time it refreshed the view"
+    // has to END somewhere, and the end is the apply — the moment the cards
+    // appear in the deck under their own steam and the overlay is swept.
+    const { hook, resolveRun } = setupCounting()
+    const result = hook.result as { current: ReturnType<typeof usePipeline<string>> }
+
+    act(() => result.current.schedule('a'))
+    act(() => result.current.schedule('b'))
+    advance(BUFFER_MS + 32)
+    await resolveRun(0)
+    advance(BAR_TO_HALFWAY + SETTLE_MS + 64)
+
+    expect(result.current.phase).toBe('idle')
+    expect(result.current.label).toBe('n=0')
+  })
 })

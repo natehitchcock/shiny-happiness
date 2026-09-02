@@ -8,33 +8,44 @@
  * start disagreeing about a number that doc 18 §18.8 put on one wire precisely
  * so they could not.
  *
- * READ-ONLY, therefore no controls. AGENTS.md R4 governs anything interactive;
- * there is nothing here to tap, focus or activate, so there is nothing to give
- * a keyboard equivalent or a focus ring to. The one thing that could have been
- * a control — a "what is this?" disclosure over the explanations — was rejected
- * in favour of simply printing them: a metric a reader has never seen has to
- * explain itself on first sight, and an explanation behind a button is an
- * explanation for people who already suspect they need it.
- *
- * `impactRole` was held to the same rule, and it is the case that tested it.
- * The app has a `Hint` popover now — top-layer, unclipped, keyboard and
+ * EVERY FINDING IS PRINTED; ONLY THE METHOD IS BEHIND A DISCLOSURE. The tier
+ * rows, the role comparison and the "effects only" caveat are all unconditional
+ * text, and the reason is the same for all three: a metric a reader has never
+ * seen has to explain itself on first sight. `impactRole` is the case that
+ * tested it. The app has a `Hint` popover — top-layer, unclipped, keyboard and
  * touch-equivalent — and the obvious move was to hang the role figures off it.
  * Rejected twice over. The pane is 21rem and a bottom sheet on a phone, but it
  * is showing ONE card, so it never needed the eighteen-row table that width
  * would have forced behind a disclosure; one row fits in two lines of prose.
- * And the reader who most needs this line is the one looking at Sol Ring's 0.68
+ * And the reader who most needs that line is the one looking at Sol Ring's 0.68
  * and quietly concluding the app rates it badly — they have no reason to press
  * anything, because they do not yet know they have been misled. Help that only
- * opens on request cannot reach them. (`Hint` also lives in `apps/web`, and
- * `@roundtable/ui` does not import from an app — but that is a consequence of
- * the layering, not the reason.)
+ * opens on request cannot reach them.
+ *
+ * `explain` is the ONE thing that goes behind a button, and it is admitted on
+ * exactly the argument that excluded the others rather than in spite of it
+ * (doc 18 §18.14). "How is this worked out?" fails the other way round: a
+ * reader who wants the method knows they want it and goes looking, so a
+ * disclosure reaches them. And the answer is seven lines per metric, which in
+ * 21rem would bury the three tier rows it exists to explain. Nothing that was
+ * printed before is now hidden.
+ *
+ * AGENTS.md R4 stays satisfied in one place: the disclosure is a SLOT, and the
+ * app fills it with `Hint`, which is already a real button with a focus ring, a
+ * name and a touch target. Nothing in this package is tappable. (`Hint` also
+ * lives in `apps/web` and `@roundtable/ui` does not import from an app — but
+ * that is a consequence of the layering, not the reason.)
  */
 
 import type { JSX } from 'react'
 import {
+  EFFICIENCY_ALGORITHM_LABEL,
   EFFICIENCY_CAVEAT,
+  IMPACT_ALGORITHM_LABEL,
   IMPACT_MAX,
+  efficiencyAlgorithm,
   efficiencyWorking,
+  impactAlgorithm,
   impactFraction,
   impactNotes,
   impactRoleLine,
@@ -44,6 +55,30 @@ import {
   type ImpactRoleView,
   type ImpactView,
 } from './metrics.js'
+
+/**
+ * Renders one algorithm explanation as a disclosure — supplied by the app.
+ *
+ * A SLOT, NOT AN IMPORT. The explanation belongs behind the app's `Hint`: it
+ * is eight lines, the pane is 21rem and a bottom sheet on a phone, and `Hint`
+ * is already the top-layer, unclipped, keyboard-and-touch-equivalent popover
+ * this app uses for on-demand help. But `Hint` lives in `apps/web` and
+ * `@roundtable/ui` does not import from an app, so the app passes a renderer in
+ * and this file only decides WHERE it goes and WHAT it says.
+ *
+ * That also puts AGENTS.md R4 where it can be satisfied once: `Hint` already
+ * has the button, the focus ring, the touch target and the escape key, and
+ * nothing interactive is added here.
+ *
+ * Optional, so the L3 `Detail` primitive — which has no `Hint` to give — draws
+ * exactly what it drew before.
+ */
+export type MetricExplainer = (explanation: {
+  /** Accessible name for the trigger. */
+  readonly label: string
+  /** The explanation, one line per row. */
+  readonly lines: readonly string[]
+}) => JSX.Element
 
 export interface CardMetricsProps {
   /** Absent while detail is still in flight, and for any surface that has none. */
@@ -57,12 +92,20 @@ export interface CardMetricsProps {
    * unresolved import. The pane then reads exactly as it did before.
    */
   readonly impactRole?: ImpactRoleView | undefined
+  /**
+   * How to draw "how is this worked out?" (report 5).
+   *
+   * Absent on any surface with no popover to put it in, and the pane is
+   * unchanged when it is.
+   */
+  readonly explain?: MetricExplainer | undefined
 }
 
 export const CardMetrics = ({
   impact,
   efficiency,
   impactRole,
+  explain,
 }: CardMetricsProps): JSX.Element | null => {
   // Nothing at all rather than a heading over two blanks. Detail arrives after
   // the card does, and a section that flashes empty reads as a broken panel.
@@ -75,7 +118,12 @@ export const CardMetrics = ({
       {impact === undefined ? null : (
         <div className="rt-metric">
           <p className="rt-metric-head">
-            <span className="rt-metric-label">Impact</span>
+            <span className="rt-metric-label">
+              Impact
+              {explain === undefined
+                ? null
+                : explain({ label: IMPACT_ALGORITHM_LABEL, lines: impactAlgorithm() })}
+            </span>
             {/*
              * The range is printed, not implied. "6.12" alone is unreadable —
              * this is the whole reason the meter and the "of 18.48" are here.
@@ -144,7 +192,12 @@ export const CardMetrics = ({
       {efficiency === undefined ? null : (
         <div className="rt-metric">
           <p className="rt-metric-head">
-            <span className="rt-metric-label">Efficiency</span>
+            <span className="rt-metric-label">
+              Efficiency
+              {explain === undefined
+                ? null
+                : explain({ label: EFFICIENCY_ALGORITHM_LABEL, lines: efficiencyAlgorithm() })}
+            </span>
             {/* "per mana" rather than a bare float: the unit is what stops this
                 being read as a second score on the same scale as impact. */}
             <span className="rt-metric-value">

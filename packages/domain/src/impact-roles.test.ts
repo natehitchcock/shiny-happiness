@@ -112,6 +112,23 @@ describe('roleImpactBand', () => {
 })
 
 describe('the shipped bands', () => {
+  /*
+   * NO EXEMPTIONS, and there is a story in that.
+   *
+   * ADR-0037 added `counterspell` and `bounce`, which had no cards until the
+   * operator re-ran the ingest — the bands are generated from `cards.roles`, so
+   * regenerating early would have written zero-card entries, which
+   * `impact-roles.ts` is explicit must never happen: a role with no cards has
+   * to read as ABSENT, not as zeroes.
+   *
+   * So the exemption shipped with a test asserting the two roles really were
+   * unmeasured, which failed the moment the bands were regenerated and demanded
+   * its own deletion. That is exactly what happened, one commit later.
+   *
+   * Left as a plain total assertion rather than an emptied list: an empty
+   * exemption list is an invitation to add the next role to it instead of
+   * measuring it.
+   */
   it('covers every role in the vocabulary', () => {
     for (const role of ROLE_PRECEDENCE) {
       expect(roleImpactBand(role), role).not.toBeNull()

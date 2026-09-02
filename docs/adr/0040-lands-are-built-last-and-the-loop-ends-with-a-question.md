@@ -57,23 +57,30 @@ reads — and returns the keys whose ideal moved. Today that set is exactly
 `{ role:land }`. `buildOrder` sorts those after everything else and is otherwise
 unchanged.
 
-It is a probe rather than the string `role:land` for a reason that matters right
-now: a role-taxonomy change is in flight. A new role is deferred if and only if
-the model makes its ideal deck-dependent, and land stops being deferred the day
-that stops being true of land. Neither outcome needs an edit.
+It is a probe rather than the string `role:land` for a reason that stopped being
+hypothetical during this work: **ADR-0037's role-taxonomy change landed
+mid-flight**, splitting `counterspell` and `bounce` out of `spot-removal` and
+raising `graveyard-hate`. The probe still returns exactly `{ role:land }`
+— it went looking rather than being told — land is still last in all nine,
+`creature` still leads all nine, and the three new roles took their places by
+their own ideals. **No code changed.** Four test expectations that pinned
+concrete counts moved, which is the whole cost and is what those tests exist to
+report. A new role is deferred if and only if the model makes its ideal
+deck-dependent, and land stops being deferred the day that stops being true of
+land; neither outcome needs an edit here.
 
 Measured, the resulting order (bracket 3):
 
 ```
-aggro        creature(32) > ramp(9)  > draw(8)  > spot-removal(7) > … > land(35)
-midrange     creature(26) > ramp(11) > draw(9)  > spot-removal(8) > … > land(36)
-control      creature(14) > spot-removal(12) > draw(12) > ramp(11) > … > land(36)
-combo        creature(20) > ramp(13) > draw(10) > tutor(8) > … > land(34)
-tokens       creature(24) > token-maker(14) > ramp(10) > … > land(35)
+aggro        creature(32) > ramp(9)  > draw(8)  > spot-removal(6) > … > land(35)
+midrange     creature(26) > ramp(11) > draw(9)  > spot-removal(6) > … > land(36)
+control      creature(14) > draw(12) > ramp(11) > spot-removal(6) > counterspell(5) > … > land(36)
+combo        creature(20) > ramp(13) > draw(10) > tutor(8) > protection(7) > … > land(34)
+tokens       creature(24) > token-maker(14) > ramp(10) > draw(8) > … > land(35)
 stax         creature(16) > stax(12) > ramp(12) > draw(8) > … > land(35)
-voltron      creature(12) > ramp(10) > draw(8) > spot-removal(8) > equipment(7) > … > land(36)
-aristocrats  creature(30) > ramp(10) > draw(9) > recursion(7) > … > land(35)
-ramp         creature(22) > ramp(15) > draw(9) > spot-removal(6) > … > land(37)
+voltron      creature(12) > ramp(10) > draw(8) > equipment(7) > protection(7) > … > land(36)
+aristocrats  creature(30) > ramp(10) > draw(9) > recursion(7) > sac-outlet(5) > … > land(35)
+ramp         creature(22) > ramp(15) > draw(9) > spot-removal(5) > … > land(37)
 ```
 
 Land last in all nine; every archetype's identity dimension still rises on its
@@ -136,7 +143,11 @@ being short somewhere is arithmetic rather than evidence — worst-first restate
 the archetype and the plan is the only thing that tells the dimensions apart. At
 or above it a shortfall is a fact about this deck.
 
-Measured: 56 for midrange at bracket 3, 49 for aggro, 67 for stax. It was 34–37.
+Measured: 55 for midrange at bracket 3, 49 for aggro, 65 for stax. It was 34–37.
+
+> Already re-measured once: ADR-0037 split `counterspell` and `bounce` out of
+> `spot-removal`, taking midrange from 56 to 55 and stax from 67 to 65. The
+> derivation did not move, which is the point of deriving it.
 
 The same number is where the loop runs out of opinion, which is what makes the
 handover, the stopping condition and the "58 of 100" in the report one idea
@@ -150,8 +161,8 @@ Doc 19 §19.2 said the loop "ends when every goal is inside its band", and the
 panel printed one sentence with no action on it: *"Every composition and curve
 goal is inside its band. Nothing to fill."*
 
-**The arithmetic the report ran into.** Role minima sum to 56 for midrange at
-bracket 3, so a deck reaches every band at 56 cards with 44 still to find. And a
+**The arithmetic the report ran into.** Role minima sum to 55 for midrange at
+bracket 3, so a deck reaches every band at 55 cards with 45 still to find. And a
 band's floor is three cards under its ideal, so `ramp` at 8 of 11 is inside its
 band and visibly under its meter at the same time. Both readings are honest;
 showing one of them and calling it finished is not.

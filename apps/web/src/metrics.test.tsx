@@ -214,6 +214,43 @@ describe('the preview panel draws both metrics', () => {
     expect(shown.getByText("an opponent's side, your board included")).toBeDefined()
   })
 
+  it('offers the method behind each number, through the app’s own popover', async () => {
+    /*
+     * The wiring, end to end (doc 18 §18.14). `CardMetrics` owns the slot and
+     * the copy; this app owns the disclosure, and the two only meet here — a
+     * test in `@roundtable/ui` can prove the slot is called but not that
+     * anything fills it, and a test of `Hint` can prove it opens but not that
+     * the metrics reach for it.
+     *
+     * Through `Hint` rather than a `title`: it has to open on a phone, and it
+     * brings the button, the accessible name and the focus ring that AGENTS.md
+     * R4 asks for.
+     */
+    const card = wrath()
+    const panel = await openPreview(card, { impact: impactOf(), efficiency: efficiencyOf() })
+    const shown = within(
+      await within(panel).findByRole('region', { name: 'Impact and efficiency' }),
+    )
+    const impactHelp = shown.getByRole('button', { name: 'How impact is worked out' })
+    expect(shown.getByRole('button', { name: 'How efficiency is worked out' })).toBeDefined()
+
+    // Closed until asked. The pane is unchanged for a reader who does not want
+    // the method, which is the whole argument for putting it behind a control.
+    expect(shown.queryByText(/multiplied together/)).toBeNull()
+
+    await act(async () => {
+      impactHelp.click()
+      await Promise.resolve()
+    })
+    expect(await screen.findByText(/multiplied together/)).toBeDefined()
+    // The blind spot is the reason a reader opens this at all. Scoped to the
+    // popover, because the pane prints its own shorter "Effects only" note
+    // unconditionally and this must be the explanation, not that.
+    const popover = within(await screen.findByRole('tooltip'))
+    expect(popover.getByText(/Effects only/)).toBeDefined()
+    expect(popover.getByText(/same in every deck/)).toBeDefined()
+  })
+
   it('shows efficiency as a rate, with its working and its caveat', async () => {
     const card = wrath()
     const panel = await openPreview(card, {

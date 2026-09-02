@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   EFFICIENCY_CAVEAT,
   IMPACT_MAX,
+  efficiencyAlgorithm,
   efficiencyWorking,
+  impactAlgorithm,
   impactFraction,
   impactNotes,
   impactRoleLine,
@@ -86,6 +88,44 @@ const CRATERHOOF: ImpactView = {
   persistence: 'one-shot',
   stakes: 'own',
   symmetry: 'one-sided',
+  scales: false,
+  fragile: false,
+}
+
+/**
+ * `cardImpact(AGATHAS_SOUL_CAULDRON)` — the specimen behind the reach copy.
+ *
+ * Unbounded, and every bit of that reach is the caster's own side: "creatures
+ * you control" three times, and the graveyards. It read "everything at once".
+ */
+const AGATHA: ImpactView = {
+  score: 9.6,
+  breadth: 'unbounded',
+  persistence: 'activated',
+  stakes: 'own',
+  symmetry: 'one-sided',
+  scales: false,
+  fragile: false,
+}
+
+/** `cardImpact(CYCLONIC_RIFT)` — unbounded and pointed the other way. */
+const CYCLONIC_RIFT: ImpactView = {
+  score: 7.2,
+  breadth: 'unbounded',
+  persistence: 'one-shot',
+  stakes: 'opposing',
+  symmetry: 'one-sided',
+  scales: false,
+  fragile: false,
+}
+
+/** `cardImpact(NEVINYRRALS_DISK)` — a symmetric wipe, so its reach really is everything. */
+const DISK: ImpactView = {
+  score: 9.792,
+  breadth: 'unbounded',
+  persistence: 'activated',
+  stakes: 'opposing',
+  symmetry: 'symmetric',
   scales: false,
   fragile: false,
 }
@@ -198,6 +238,109 @@ describe('impactRows', () => {
     const falls = impactRows(CRATERHOOF).find((row) => row.label === 'Falls on')
     expect(falls?.value).toBe('your own side')
     expect(falls?.value).not.toContain('never')
+  })
+
+  /*
+   * REACH SAYS WHOSE, when the model knows whose.
+   *
+   * "Everything at once" is true of a wrath and an over-claim on everything
+   * else that is `unbounded`. Agatha's Soul Cauldron reaches the creatures you
+   * control and the graveyards, and reporting that as "everything at once" is
+   * what the product owner read and disbelieved. Craterhoof had carried the
+   * same over-claim since it was written.
+   *
+   * The refinement takes no new field: `symmetry` and `stakes` are already on
+   * the wire and already decide the "Falls on" row. A symmetric mass effect
+   * really does hit everything, so it keeps the unqualified words.
+   */
+  it('says whose side an unbounded ONE-SIDED effect reaches', () => {
+    const reach = (rows: readonly { label: string; value: string }[]): string | undefined =>
+      rows.find((row) => row.label === 'Reach')?.value
+    expect(reach(impactRows(CRATERHOOF))).toBe('your whole side at once')
+    expect(reach(impactRows(AGATHA))).toBe('your whole side at once')
+    expect(reach(impactRows(CYCLONIC_RIFT))).toBe("an opponent's whole side at once")
+  })
+
+  it('leaves a symmetric mass effect saying everything, because it is everything', () => {
+    const reach = impactRows(WRATH).find((row) => row.label === 'Reach')
+    expect(reach?.value).toBe('everything at once')
+    expect(impactRows(DISK).find((row) => row.label === 'Reach')?.value).toBe('everything at once')
+  })
+
+  it('leaves the counted tiers alone', () => {
+    // The refinement is only ever about `unbounded`; a card that names one
+    // thing says so whoever it belongs to.
+    expect(impactRows(FRAGILE).find((row) => row.label === 'Reach')?.value).toBe('one thing')
+  })
+})
+
+/**
+ * HOW THE NUMBER WAS ARRIVED AT (report 5).
+ *
+ * Not the formula. A reader looking at Sol Ring's 0.68 wants to know why it is
+ * low, and `0.5 × 1.6 × 0.85` does not tell them — it restates the number in a
+ * second notation. What tells them is that only effects are read, that Sol Ring
+ * names nothing to affect, and that this is a known limit rather than a verdict.
+ *
+ * The register is the pane's own: "Reach: everything at once", "Effects only".
+ * Short sentences, the game's words, no algebra, and no constant that could
+ * drift out of step with the data file it came from.
+ */
+describe('impactAlgorithm', () => {
+  it('names the three readings the pane already shows, in the pane\'s own words', () => {
+    const said = impactAlgorithm().join(' ')
+    expect(said).toContain('Reach')
+    expect(said).toContain('Repeats')
+    expect(said).toContain('Falls on')
+    // Multiplied, not added — the shape of the model in one word.
+    expect(said).toContain('multiplied')
+  })
+
+  it('says the deck is never consulted, which is the decision behind the whole metric', () => {
+    expect(impactAlgorithm().join(' ')).toContain('same in every deck')
+  })
+
+  it('names the blind spot rather than leaving a low score unexplained', () => {
+    // doc 18 §18.2 accepts the blindness rather than patching it, and this is
+    // where a reader is told, at the moment they are looking at the number.
+    expect(impactAlgorithm().join(' ').toLowerCase()).toContain('mana')
+  })
+
+  it('quotes no constant that lives in a data file', () => {
+    // The tier values are in `impact.ts` and `r` is in `baseline.data.json`.
+    // Copy that repeats either goes stale the first time one moves, with
+    // nothing to catch it — a UI string is not covered by the model's tests.
+    const said = impactAlgorithm().join(' ')
+    for (const drifts of ['0.4484', '0.85', '2.2', '1.4', '6.0']) {
+      expect(said).not.toContain(drifts)
+    }
+  })
+})
+
+describe('efficiencyAlgorithm', () => {
+  it('explains both halves of the numerator and the plus one', () => {
+    const said = efficiencyAlgorithm().join(' ')
+    expect(said.toLowerCase()).toContain('body')
+    expect(said.toLowerCase()).toContain('text')
+    // The `+ 1` is the card itself, and it is the part a reader cannot guess.
+    expect(said).toContain('the card itself')
+  })
+
+  it('says the going rate is measured rather than assumed', () => {
+    // The whole point of §18.6: the folk "2/2 for 2" rule is wrong and the
+    // baseline is regenerated from the corpus.
+    expect(efficiencyAlgorithm().join(' ')).toContain('measured')
+  })
+
+  it('says surpluses, because that is what rejected the first formula', () => {
+    expect(efficiencyAlgorithm().join(' ').toLowerCase()).toContain('above')
+  })
+
+  it('quotes no constant that lives in a data file', () => {
+    const said = efficiencyAlgorithm().join(' ')
+    for (const drifts of ['0.4484', '6.78', '1.6993']) {
+      expect(said).not.toContain(drifts)
+    }
   })
 
   it('draws no tier rows for a card with no rules text', () => {

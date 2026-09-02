@@ -141,6 +141,38 @@ const REACH: Readonly<Record<ImpactView['breadth'], string>> = {
   unbounded: 'everything at once',
 }
 
+/**
+ * REACH SAYS WHOSE, when the model knows whose.
+ *
+ * "Everything at once" is exactly right for a wrath and an over-claim on every
+ * other unbounded card. Agatha's Soul Cauldron reaches the creatures you
+ * control and the graveyards — a real unbounded set, and nothing like
+ * everything — and reporting it as "everything at once" is the line the product
+ * owner read and disbelieved. Craterhoof Behemoth had carried the same
+ * over-claim since this file was written; it was only ever noticed on a card
+ * whose other two rows made it obvious.
+ *
+ * NO NEW FIELD. `symmetry` and `stakes` are already on the wire and already
+ * decide the "Falls on" row directly below, so the refinement costs nothing and
+ * cannot disagree with the line under it. A `symmetric` effect keeps the
+ * unqualified words because it genuinely is everything — that is what the 0.85
+ * discount is charged for.
+ *
+ * `player` stakes keep them too, and deliberately. `unbounded` + `player` is
+ * both "each opponent loses 3 life" and "all permanents target player
+ * controls", and the payload cannot tell those apart; a phrase that is true of
+ * both beats a guess that is wrong for one, which is the rule `efficiencyWorking`
+ * already follows for `statSurplus === 0`.
+ */
+const reachOf = (impact: ImpactView): string => {
+  if (impact.breadth !== 'unbounded' || impact.symmetry !== 'one-sided') {
+    return REACH[impact.breadth]
+  }
+  if (impact.stakes === 'own' || impact.stakes === 'self') return 'your whole side at once'
+  if (impact.stakes === 'opposing') return "an opponent's whole side at once"
+  return REACH.unbounded
+}
+
 const REPEATS: Readonly<Record<ImpactView['persistence'], string>> = {
   'one-shot': 'once, then it is done',
   activated: 'each time you pay for it',
@@ -192,7 +224,7 @@ export interface MetricRow {
 export const impactRows = (impact: ImpactView): readonly MetricRow[] => {
   if (impact.score === 0) return []
   return [
-    { label: 'Reach', value: REACH[impact.breadth] },
+    { label: 'Reach', value: reachOf(impact) },
     { label: 'Repeats', value: REPEATS[impact.persistence] },
     {
       label: 'Falls on',
@@ -370,3 +402,71 @@ export const efficiencyWorking = (efficiency: EfficiencyView): string => {
 /** The caveat that has to travel with a ratio. */
 export const EFFICIENCY_CAVEAT =
   'A rate, not a ranking: it divides by cost, so a small cheap card can out-rate a bomb.'
+
+/**
+ * HOW THE NUMBER WAS ARRIVED AT — the explanation behind the `Hint`.
+ *
+ * NOT THE FORMULA. A reader looking at Sol Ring's 0.68 wants to know why it is
+ * low; `0.5 × 1.6 × 0.85 = 0.68` does not tell them that, it restates the same
+ * number in a second notation and leaves them exactly as puzzled. What answers
+ * them is that the model reads effects and only effects, that Sol Ring names
+ * nothing to affect, and that this is a stated limit rather than a verdict on
+ * the card. So these lines explain the METHOD and its blind spot, and the
+ * arithmetic appears only as the shape — three readings, multiplied.
+ *
+ * The register is the pane's own — "Reach: everything at once", "Effects only".
+ * Short sentences, the game's words, and the same three labels the tier rows
+ * above already use, so the explanation and the thing it explains share a
+ * vocabulary instead of introducing a second one.
+ *
+ * NO CONSTANT IS QUOTED. The tier values live in `impact.ts` and `r` lives in
+ * `baseline.data.json`, which is regenerated from the corpus; copy repeating
+ * either goes stale the first time one moves with nothing to catch it, because
+ * a UI string is not covered by the model's tests. Every number a reader needs
+ * is already on the screen — the score, the ceiling, and `efficiencyWorking`'s
+ * three terms. This says what those numbers MEAN.
+ *
+ * Returned as lines rather than a paragraph so the popover can set them as
+ * separate rows, which is how every other `Hint` in the app is built, and so
+ * this file stays testable without a DOM.
+ *
+ * WHY THIS ONE IS BEHIND A DISCLOSURE when `impactRoleLine` refused to be.
+ * They fail differently. A reader who is not told Sol Ring is the median ramp
+ * card concludes the app is wrong and never asks — help they must request
+ * cannot reach them, which is why that line is printed. A reader who wants to
+ * know HOW the number is derived knows they want it and goes looking; and the
+ * answer is eight lines, which is a wall of text in a 21rem column and a bottom
+ * sheet on a phone. The pane is unchanged for everyone who does not ask.
+ */
+export const impactAlgorithm = (): readonly string[] => [
+  'Three readings of the card’s own text, multiplied together.',
+  'Reach — how much the effect names, from nothing it can count up to everything at once. This is the biggest of the three by far, and it is why a wrath outscores a removal spell rather than doubling it.',
+  'Repeats — once, or every time you pay, or every trigger, or every upkeep. Capped low on purpose: a permanent that repeats is worth about twice a one-shot, and past that what ends the effect is the game ending.',
+  'Falls on — itself, your side, an opponent’s, or a player. A small nudge either way, not a multiplier that decides the number.',
+  'A mass effect that catches your own board keeps a little less than all of it, because it is pointed at you as well.',
+  'Effects only, and that is the honest limit. A card whose job is mana, or a tax, or a card draw, names nothing the model can count, so it lands near the floor however good it is in play. That is a blind spot, not a verdict — which is what the line about its role is for.',
+  'Nothing is special-cased, and the deck is never consulted: this is a fact about the card, the same in every deck.',
+]
+
+/**
+ * The same, for the ratio. Companion to `efficiencyWorking`, which prints this
+ * card's three actual terms; this says what they are.
+ *
+ * The one thing a reader cannot guess is the `+ 1` in the denominator, so it is
+ * named outright. The second is that BOTH terms are surpluses — the correction
+ * that rejected the first formula for rating Grizzly Bears three times Wrath of
+ * God (doc 18 §18.6) — so "above what the mana already buys" carries it.
+ */
+export const efficiencyAlgorithm = (): readonly string[] => [
+  'What the card gives you above what its mana already buys, per mana.',
+  'Body — a creature’s power plus toughness, above what a creature of that cost normally has. The going rate is measured from the only cards whose whole contribution is their body: the ones with no rules text at all. It is lower than the old “a 2/2 for two” rule predicts, and the gap widens as cards get expensive.',
+  'A body below that rate counts as nothing rather than as a debt. A card is not improved by doing less.',
+  'Text — the impact above, converted into body at the rate the format itself trades the two: what the average creature at each cost gives up in stats to have rules text at all. Measured from the corpus, not chosen.',
+  'Both halves are surpluses, which is the whole of what this gets right. A vanilla creature gives you exactly the going rate and nothing else, so it correctly scores zero.',
+  'Divided by the mana cost plus one, and the plus one is the card itself — a spell costs you a card as well as its mana. It also keeps a nought-cost card from dividing by nothing.',
+  'A noncreature has no body term at all. It is not a creature missing one, so it gets neither the surplus nor a penalty.',
+]
+
+/** Accessible names for the two triggers. */
+export const IMPACT_ALGORITHM_LABEL = 'How impact is worked out'
+export const EFFICIENCY_ALGORITHM_LABEL = 'How efficiency is worked out'

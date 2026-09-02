@@ -308,19 +308,28 @@ dimension rises on its own — and `creature`, which `archetype-targets.ts` read
 as the threat count, now leads all nine.
 
 ```
-aggro        creature(32) > ramp(9)  > draw(8)  > spot-removal(7) > … > land(35)
-midrange     creature(26) > ramp(11) > draw(9)  > spot-removal(8) > … > land(36)
-control      creature(14) > spot-removal(12) > draw(12) > ramp(11) > … > land(36)
-combo        creature(20) > ramp(13) > draw(10) > tutor(8) > … > land(34)
-ramp         creature(22) > ramp(15) > draw(9)  > spot-removal(6) > … > land(37)
+aggro        creature(32) > ramp(9)  > draw(8)  > spot-removal(6) > … > land(35)
+midrange     creature(26) > ramp(11) > draw(9)  > spot-removal(6) > … > land(36)
+control      creature(14) > draw(12) > ramp(11) > spot-removal(6) > counterspell(5) > … > land(36)
+combo        creature(20) > ramp(13) > draw(10) > tutor(8) > protection(7) > … > land(34)
+ramp         creature(22) > ramp(15) > draw(9)  > spot-removal(5) > … > land(37)
 tokens       creature(24) > token-maker(14) > ramp(10) > draw(8) > … > land(35)
 stax         creature(16) > stax(12) > ramp(12) > draw(8) > … > land(35)
-voltron      creature(12) > ramp(10) > draw(8) > spot-removal(8) > equipment(7) > … > land(36)
-aristocrats  creature(30) > ramp(10) > draw(9) > recursion(7) > … > land(35)
+voltron      creature(12) > ramp(10) > draw(8) > equipment(7) > protection(7) > … > land(36)
+aristocrats  creature(30) > ramp(10) > draw(9) > recursion(7) > sac-outlet(5) > … > land(35)
 ```
 
 No table says "stax decks care about stax" — the number 12 already said it. And
 no table says "lands last" — `compositionTargets` already said that too.
+
+> **This has already survived one taxonomy change, which is what the probe was
+> for.** ADR-0037 split `counterspell` and `bounce` out of `spot-removal` and
+> raised `graveyard-hate` while this was being written. `deferredDimensions`
+> still returns exactly `{ role:land }` — it went looking rather than being told
+> — land is still last in all nine, `creature` still leads all nine, and the
+> three new roles took their places by their own ideals. **No code changed.**
+> Four test expectations that pinned concrete counts moved, which is the whole
+> cost and is exactly what those tests are there to report.
 
 **The rest of "bombs, win conditions, high synergy combos" is not an ordering
 problem.** `wincon` and `synergy` are roles, and **no archetype gives either an
@@ -360,7 +369,7 @@ reviewed against the first forever.
 
 **The handover threshold is the smallest deck that could be inside every band** —
 the sum of the role dimensions' minima. Measured: **56** for midrange at bracket
-3, 49 for aggro, 67 for stax.
+3, 49 for aggro, 65 for stax.
 
 It is a real lower bound because role counts do not overlap
 (`archetype-targets.ts` constraint 1: "`land + Σ roles` is therefore a real
@@ -697,12 +706,12 @@ and "no ramp gap" are both correct readings of the same deck. §19.4's note on
 the three numbers already said the panel measures to the band; what it did not
 say is what that looks like when the last gap closes.
 
-**The role minima sum to 56** for midrange at bracket 3 — that is the same
+**The role minima sum to 55** for midrange at bracket 3 — that is the same
 number as the handover threshold, and not a coincidence. So a deck reaches every
-band at 56 cards **with 44 still to find**, and the panel's "Nothing to fill."
+band at 55 cards **with 45 still to find**, and the panel's "Nothing to fill."
 read as completion to someone forty-two cards short of a legal deck.
 
-**And 25 of those slots have no target at all.** Midrange spends 74 of 99 on
+**And 25 of those slots have no target at all.** Midrange spends 75 of 100 on
 roles; the remainder is what `archetype-targets.ts` calls "the deck's unroled
 threats and payoffs". `wincon` and `synergy` are roles no archetype gives an
 ideal, so bombs and win conditions are not composition dimensions and can never
@@ -761,7 +770,7 @@ option every time. The gap sequence, in the order the panel offered it:
 ```
 build-order regime   creature → ramp → draw → spot removal → protection
                      → board wipe → tutor → LAND (last, at 34 short)
-handover at 56       ordering flips to largest-gap-first
+handover at 55       ordering flips to largest-gap-first
 largest-first        land → spot removal → protection → (ends)
 ```
 

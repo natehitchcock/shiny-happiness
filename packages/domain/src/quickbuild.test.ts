@@ -326,10 +326,16 @@ describe('handover from build order to largest-gap-first (Q2, re-derived)', () =
     for (const archetype of ARCHETYPES) {
       expect(handoverSize(targetsFor(archetype))).toBe(sumOfMinima(archetype))
     }
-    // The numbers themselves, so a change in `archetype-targets.ts` is visible.
-    expect(handoverSize(targetsFor('midrange'))).toBe(56)
+    /*
+     * The numbers themselves, so a change in `archetype-targets.ts` is visible
+     * rather than silent. They have already moved once: ADR-0037 split
+     * `counterspell` and `bounce` out of `spot-removal`, which took midrange
+     * from 56 to 55 and stax from 67 to 65. The derivation above is what did
+     * not move, and it is why updating these three lines was the whole cost.
+     */
+    expect(handoverSize(targetsFor('midrange'))).toBe(55)
     expect(handoverSize(targetsFor('aggro'))).toBe(49)
-    expect(handoverSize(targetsFor('stax'))).toBe(67)
+    expect(handoverSize(targetsFor('stax'))).toBe(65)
   })
 
   /*
@@ -634,20 +640,33 @@ describe('reach — the band is where Quickbuild stops having an opinion, not wh
       card(`${role}-${i}`, { roles: [role] as readonly Role[], primaryRole: role, manaValue }),
     )
 
-  /** Inside every composition band for midrange at bracket 3, and no further. */
-  const atEveryBand = (): readonly Card[] => [
-    ...lands(33),
-    ...roled('ramp', 8),
-    ...roled('draw', 6),
-    ...roled('spot-removal', 5),
-    ...roled('board-wipe', 1),
-    ...roled('tutor', 1),
-    ...roled('protection', 2),
-  ]
+  /**
+   * Inside every composition band, and no further.
+   *
+   * BUILT FROM THE TABLE rather than listed, so it tracks
+   * `archetype-targets.ts` instead of having to be re-counted every time a role
+   * is added. ADR-0037 split `counterspell` and `bounce` out of `spot-removal`
+   * while this was being written, and a hand-listed fixture would have gone
+   * quietly wrong at exactly the numbers these tests are about.
+   *
+   * Non-land role cards are creatures, which is what also carries the
+   * `type:creature` floor of 20 — there are 22 of them.
+   */
+  const atEveryBand = (archetype: Parameters<typeof compositionTargets>[0] = 'midrange') =>
+    targetsFor(archetype)
+      .filter((t) => t.dimension.kind === 'role')
+      .flatMap((t) =>
+        t.dimension.kind === 'role' && t.dimension.role === 'land'
+          ? lands(t.min)
+          : roled((t.dimension as { role: Role }).role, t.min),
+      )
 
-  it('is 56 cards for a midrange deck at bracket 3 — the number behind the report', () => {
-    expect(atEveryBand().length).toBe(56)
-    expect(handoverSize(targetsFor('midrange'))).toBe(56)
+  it('is exactly the handover size — the number behind the report', () => {
+    // 55 for midrange at bracket 3. It was 56 before ADR-0037 split
+    // `counterspell` and `bounce` out of `spot-removal`; the user's deck was at
+    // 58, which is the same neighbourhood either way.
+    expect(atEveryBand().length).toBe(handoverSize(targetsFor('midrange')))
+    expect(atEveryBand().length).toBe(55)
   })
 
   /*
@@ -664,12 +683,28 @@ describe('reach — the band is where Quickbuild stops having an opinion, not wh
   it('reports the SAME dimensions as gaps that are still short of the ideal', () => {
     const plan = quickbuildPlan(inputFor(atEveryBand(), 'midrange'))
     const beyond = plan.beyond.filter((g) => g.kind === 'composition')
-    expect(keys(beyond)).toContain(dimensionKey(roleDimension('ramp')))
-    expect(keys(beyond)).toContain(dimensionKey(roleDimension('spot-removal')))
-    // Ramp is at 8 against an ideal of 11, which is exactly the "below curve on
-    // ramp" the report describes.
-    expect(beyond.find((g) => g.key === dimensionKey(roleDimension('ramp')))?.short).toBe(3)
-    expect(beyond.find((g) => g.key === dimensionKey(roleDimension('spot-removal')))?.short).toBe(3)
+    /*
+     * The two the report names. Each is at the FLOOR of its band and therefore
+     * short of its ideal by the band's own half-width, which is the whole of
+     * "below curve on ramp and spot removal" while Quickbuild had nothing to
+     * say: ramp sits at 8 against an ideal of 11, and its meter reads 8 / 11.
+     *
+     * The expected distance is read off the target rather than typed, because
+     * the band widths are `archetype-targets.ts`'s to change — and it did
+     * change spot removal's under ADR-0037, from 3 to 2.
+     */
+    const shortOf = (role: Role) => {
+      const target = targetsFor('midrange').find(
+        (t) => dimensionKey(t.dimension) === dimensionKey(roleDimension(role)),
+      )!
+      return target.ideal - target.min
+    }
+    for (const role of ['ramp', 'spot-removal'] as const) {
+      const gap = beyond.find((g) => g.key === dimensionKey(roleDimension(role)))
+      expect(gap).toBeDefined()
+      expect(gap?.short).toBe(shortOf(role))
+      expect(gap?.short).toBeGreaterThan(0)
+    }
   })
 
   it('measures to the ideal, not the band, once the builder asks it to', () => {
@@ -698,7 +733,9 @@ describe('reach — the band is where Quickbuild stops having an opinion, not wh
    * holds, and it is stated rather than left for the builder to subtract.
    */
   it('counts the cards still needed for a legal deck', () => {
-    expect(quickbuildPlan(inputFor(atEveryBand(), 'midrange')).unallocated).toBe(DECK_SIZE - 56)
+    expect(quickbuildPlan(inputFor(atEveryBand(), 'midrange')).unallocated).toBe(
+      DECK_SIZE - atEveryBand().length,
+    )
     expect(quickbuildPlan(inputFor([], 'midrange')).unallocated).toBe(DECK_SIZE)
   })
 
@@ -727,8 +764,11 @@ describe('reach — the band is where Quickbuild stops having an opinion, not wh
     const roleIdeals = targetsFor('midrange')
       .filter((t) => t.dimension.kind === 'role')
       .reduce((sum, t) => sum + t.ideal, 0)
-    expect(roleIdeals).toBe(74)
+    // 75 for midrange at bracket 3, leaving 25 slots the archetype names no
+    // target for. Both moved by one under ADR-0037 and the remainder did not.
+    expect(roleIdeals).toBe(75)
     expect(quickbuildPlan(inputFor([], 'midrange')).unroled).toBe(DECK_SIZE - roleIdeals)
+    expect(quickbuildPlan(inputFor([], 'midrange')).unroled).toBe(25)
   })
 
   /*
@@ -748,7 +788,7 @@ describe('reach — the band is where Quickbuild stops having an opinion, not wh
   })
 
   it('carries the deck’s own count, so the panel never has to reconstruct it', () => {
-    expect(quickbuildPlan(inputFor(atEveryBand(), 'midrange')).held).toBe(56)
+    expect(quickbuildPlan(inputFor(atEveryBand(), 'midrange')).held).toBe(atEveryBand().length)
     expect(quickbuildPlan(inputFor([], 'midrange')).held).toBe(0)
   })
 })
