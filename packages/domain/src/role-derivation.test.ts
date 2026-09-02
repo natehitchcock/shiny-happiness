@@ -342,6 +342,51 @@ describe('taxonomy corrections', () => {
     })
   })
 
+  describe('a blink is not removal (ADR-0048)', () => {
+    it('does not call exiling your own permanent spot removal', () => {
+      // Teferi's Time Twist, verbatim, and the card the report named. It is a
+      // blink: `deriveSynergy` already reads it as `creature-etb`, which is the
+      // flicker semantic and needed no new tag. Only the ROLE was wrong.
+      expect(
+        rolesOf(
+          'Instant',
+          "Exile target permanent you control. Return that card to the battlefield under its owner's control at the beginning of the next end step.",
+        ),
+      ).not.toContain('spot-removal')
+    })
+
+    it('does not call Cloudshift removal either', () => {
+      expect(
+        rolesOf(
+          'Instant',
+          'Exile target creature you control, then return that card to the battlefield under your control.',
+        ),
+      ).not.toContain('spot-removal')
+    })
+
+    it("still calls exiling an opponent's permanent removal", () => {
+      // The guard must not cost the 346 cards that are the real thing.
+      expect(rolesOf('Instant', 'Exile target creature an opponent controls.')).toContain(
+        'spot-removal',
+      )
+    })
+
+    it('reads "you don\'t control" as the opposite of "you control"', () => {
+      // The same trap the bounce rule documents: the exclusion is a substring
+      // of its own negation, and Cyclonic Rift depends on the lookahead not
+      // being fooled by it.
+      expect(rolesOf('Instant', "Exile target creature you don't control.")).toContain(
+        'spot-removal',
+      )
+    })
+
+    it('still keeps graveyard hate out of removal', () => {
+      // The older guard on the same rule, kept and re-asserted because the two
+      // lookaheads now sit side by side and one could be lost editing the other.
+      expect(rolesOf('Instant', "Exile target player's graveyard.")).not.toContain('spot-removal')
+    })
+  })
+
   describe('report 4 — a land tutor is ramp', () => {
     it.each([
       ['Sylvan Scrying', 'Search your library for a land card, reveal it, put it into your hand.'],

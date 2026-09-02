@@ -216,8 +216,18 @@ export const IS_PREDICATES: ReadonlySet<string> = new Set([
  * Deliberately not a synonym table for the other nineteen. An alias is warranted
  * where the natural word for a thing is an ARCHETYPE and the tag has to be an
  * event; that is one tag today, and each future one should have to argue.
+ *
+ * `mill` is the second, and it argues a different case (ADR-0048). The tag is
+ * `opponent-mill` because this file's own convention puts the subject in the
+ * name — `discard`/`opponent-discard`, `sacrifice-fodder`/`opponent-sacrifice`
+ * — and self-mill already has a tag in `graveyard-creature`, so a bare `mill`
+ * would name the half that is not there. But `mill` is the word a player types,
+ * and the request that created the tag used it. Alias, not rename.
  */
-const TAG_ALIASES: ReadonlyMap<string, string> = new Map([['burn', 'damage']])
+const TAG_ALIASES: ReadonlyMap<string, string> = new Map([
+  ['burn', 'damage'],
+  ['mill', 'opponent-mill'],
+])
 
 /**
  * A tag as the user is likely to type it.

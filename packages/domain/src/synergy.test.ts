@@ -1514,13 +1514,16 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
       // count rather than softened to `toContain`: a vocabulary that grows
       // without anyone noticing is how two tags come to mean the same event.
       expect(SYNERGY_TAGS).toContain('damage')
+      // The count is 24 since ADR-0048 added `opponent-mill` and `extra-turns`;
+      // this card was the twenty-first and still is, because the list is
+      // append-only (the ORDER is a persisted contract — see `semantic-emphasis`).
       // `EVENT_TAGS` rather than `SYNERGY_TAGS` since ADR-0046, and the reason
       // the comment above gives is why the assertion survives rather than being
       // softened: the CURATED events are still a closed hand-written list, and
       // this is what keeps anyone from adding a twenty-third without saying so.
       // `SYNERGY_TAGS` is that list plus the generated families, whose length is
       // a fact about the corpus rather than a decision anyone made here.
-      expect(EVENT_TAGS).toHaveLength(22)
+      expect(EVENT_TAGS).toHaveLength(24)
     })
 
     it('is spelled as an event, not as an archetype', () => {
@@ -2404,6 +2407,186 @@ describe('deriveSynergy — a sacrifice outlet that names a creature TYPE (ADR-0
   })
 })
 
+describe('deriveSynergy — two gaps the commander sweep found (ADR-0048)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  it('reads TWO additional lands, not only one', () => {
+    // Azusa, verbatim. The determiner was a closed list of one, so the commander
+    // the landfall archetype is named after derived no landfall tag.
+    expect(
+      derive(
+        'Azusa, Lost but Seeking',
+        'Legendary Creature — Human Monk',
+        'You may play two additional lands on each of your turns.',
+      ).produces,
+    ).toContain('landfall')
+  })
+
+  it('still reads the one-land form', () => {
+    expect(
+      derive(
+        'Dryad of the Ilysian Grove',
+        'Creature — Dryad',
+        'You may play an additional land on each of your turns.',
+      ).produces,
+    ).toContain('landfall')
+  })
+
+  it('reads a token DOUBLER as making tokens', () => {
+    // Doubling Season, verbatim. A replacement effect puts the verb after its
+    // object and in the passive, so "create … token" could reach none of the
+    // fifteen most-played token cards in the format.
+    expect(
+      derive(
+        'Doubling Season',
+        'Enchantment',
+        'If one or more tokens would be created under your control, twice that many of those tokens are created instead.',
+      ).produces,
+    ).toContain('token')
+  })
+
+  it('reads the doubler as a producer, not a payoff', () => {
+    // Direction. A doubler makes tokens out of other tokens, which is still
+    // making them; calling it a payoff would invert the single most-played
+    // enchantment in the archetype.
+    expect(
+      derive(
+        'Anointed Procession',
+        'Enchantment',
+        'If an effect would create one or more tokens under your control, it creates twice that many of those tokens instead.',
+      ).wants,
+    ).not.toContain('token')
+  })
+})
+
+describe('deriveSynergy — milling an opponent (ADR-0048)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  it('reads making an opponent mill as its own event', () => {
+    // Glimpse the Unthinkable's shape. 242 cards, and no rule could see any of
+    // them: `graveyard-creature` reads self-mill only, deliberately.
+    expect(
+      derive('Whetwheel', 'Artifact', '{X}{X}, {T}: Target player mills X cards.').produces,
+    ).toContain('opponent-mill')
+  })
+
+  it('does not read SELF-mill as milling an opponent', () => {
+    // The distinction the tag exists for. ADR-0016 ruled that an opponent's
+    // graveyard is not the resource, and this is that ruling made mechanical.
+    const profile = derive(
+      'Dig Up the Body',
+      'Sorcery',
+      'Mill two cards, then you may return a creature card from your graveyard to your hand.',
+    )
+
+    expect(profile.produces).not.toContain('opponent-mill')
+    expect(profile.produces).toContain('graveyard-creature')
+  })
+
+  it('reads a symmetric mill as BOTH, because it is', () => {
+    // The ruling ADR-0022 made about "each player discards", one verb over.
+    const profile = derive(
+      'The Binding of the Titans',
+      'Enchantment — Saga',
+      'I — Each player mills three cards.',
+    )
+
+    expect(profile.produces).toContain('opponent-mill')
+    expect(profile.produces).toContain('graveyard-creature')
+  })
+
+  it('has payoffs, which is what ADR-0029 §6 measured as zero for the tag it refused', () => {
+    // Zellix, verbatim. Ten cards in the corpus, which is thin and is not none.
+    expect(
+      derive(
+        'Zellix, Sanity Flayer',
+        'Legendary Creature — Horror',
+        'Hive Mind — Whenever a player mills one or more creature cards, you create a 1/1 black Horror creature token.',
+      ).wants,
+    ).toContain('opponent-mill')
+  })
+
+  it("reads counting an OPPONENT'S graveyard as a payoff", () => {
+    expect(
+      derive(
+        'Spoils of War',
+        'Instant',
+        "X is the number of artifact and/or creature cards in an opponent's graveyard as you cast this spell.",
+      ).wants,
+    ).toContain('opponent-mill')
+  })
+
+  it('does not read counting YOUR OWN graveyard as one', () => {
+    // "For each card in your graveyard" is a self-mill payoff and belongs to
+    // `graveyard-creature`. Same graveyard ruling, other direction.
+    expect(
+      derive('Ancestral Tribute', 'Sorcery', 'You gain 2 life for each card in your graveyard.')
+        .wants,
+    ).not.toContain('opponent-mill')
+  })
+
+  it('is reachable by the word a player types', () => {
+    // `mill` is aliased to it in the search box, for the reason `burn` is
+    // aliased to `damage`: the tag name carries the subject and the typed word
+    // does not have to.
+    expect(SYNERGY_TAGS).toContain('opponent-mill')
+  })
+})
+
+describe('deriveSynergy — extra turns (ADR-0048)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  it('reads a card that takes an extra turn', () => {
+    expect(
+      derive('Time Warp', 'Sorcery', 'Target player takes an extra turn after this one.').produces,
+    ).toContain('extra-turns')
+  })
+
+  it("uses the barometer's own rule, so the two cannot disagree", () => {
+    // The three cards that DENY extra turns say "would BEGIN an extra turn",
+    // never "takes" — which is the distinction `bracket-barometers.ts` found and
+    // documented, and which this tag inherits by importing the regex instead of
+    // writing a second one. Flagging Stranglehold for GRANTING extra turns
+    // would be the reverse of the truth.
+    expect(
+      derive(
+        'Stranglehold',
+        'Enchantment',
+        "Your opponents can't search libraries.\nIf an opponent would begin an extra turn, that player skips that turn instead.",
+      ).produces,
+    ).not.toContain('extra-turns')
+  })
+
+  it('reads Emrakul, which does not say "after this one"', () => {
+    expect(
+      derive(
+        'Emrakul, the Promised End',
+        'Legendary Creature — Eldrazi',
+        "When you cast this spell, you gain control of target opponent during that player's next turn. After that turn, that player takes an extra turn.",
+      ).produces,
+    ).toContain('extra-turns')
+  })
+
+  it('pays nothing off, and the model says so rather than pretending', () => {
+    // 53 producers and zero payoff cards in the corpus. `synergyMatches` needs a
+    // `wants` on the other side, so this tag cannot score — it is vocabulary and
+    // a label, the same standing the derived keyword families have. Asserted so
+    // that the day a payoff card is printed, someone has to come and change this
+    // test on purpose.
+    const timeWarp = derive(
+      'Time Warp',
+      'Sorcery',
+      'Target player takes an extra turn after this one.',
+    )
+
+    expect(timeWarp.wants).not.toContain('extra-turns')
+    expect(interactsWith('extra-turns')).toContain('attack-trigger')
+  })
+})
+
 describe('deriveSynergy — a land that is also a creature (ADR-0047)', () => {
   const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
     deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
@@ -2411,7 +2594,7 @@ describe('deriveSynergy — a land that is also a creature (ADR-0047)', () => {
   describe('the tag', () => {
     it('is in the vocabulary, and is the twenty-second', () => {
       expect(SYNERGY_TAGS).toContain('land-creature')
-      expect(EVENT_TAGS).toHaveLength(22)
+      expect(EVENT_TAGS).toHaveLength(24)
     })
 
     it('is spelled as an event rather than as the deck that plays it', () => {

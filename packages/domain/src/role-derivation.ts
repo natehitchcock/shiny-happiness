@@ -176,8 +176,35 @@ const HEURISTICS: readonly Heuristic[] = [
    * The graveyard guard is report 5: `exile target` matched "exile target
    * player's graveyard" and "exile target card from a graveyard", which is how
    * spot-removal came to own 71 of the 107 graveyard-hate cards.
+   *
+   * The SECOND guard is the reported card: Teferi's Time Twist reads "Exile
+   * target permanent you control" and was called spot removal, when it is a
+   * blink. So is Cloudshift, so is Ephemerate, so is Ruin Ghost — 33 cards in
+   * the corpus, every one of which exiles something of YOURS.
+   *
+   * This is not a new judgement. The `bounce` rule ten lines up already carries
+   * exactly this exclusion, with exactly this reason written beside it —
+   * "self-bounce is a blink/value effect, not an answer" — and the same
+   * sentence is true one verb over. Removal is something you point at an
+   * opponent; exiling your own permanent to make it come back is the opposite
+   * kind of card, and a deck told it holds 33 answers it does not have will cut
+   * real ones to make room.
+   *
+   * The SYMMETRIC flickers are deliberately left. "Exile target creature. At
+   * the beginning of the next end step, return that card" (Long Road Home,
+   * Otherworldly Journey, Turn to Mist) names no controller, and a guard wide
+   * enough to reach them — one that looks for the card coming back, across a
+   * sentence boundary — also swallows the removal HALF of every modal card that
+   * offers both: Settle Beyond Reality's "exile target creature you don't
+   * control" and Eldrazi Confluence's. 28 more cards for the loss of a real
+   * mode on several, and the clause is the unit rather than the card
+   * (`synergy.ts` makes the same ruling twice). Measured and refused, not
+   * missed.
    */
-  { role: 'spot-removal', test: /exile target\b(?![^.\n]{0,50}\bgraveyard\b)/i },
+  {
+    role: 'spot-removal',
+    test: /exile target\b(?![^.\n]{0,50}\bgraveyard\b)(?![^.\n]{0,60}\byou control\b)/i,
+  },
   { role: 'spot-removal', test: /deals? \d+ damage to (target|any target)/i },
   { role: 'spot-removal', test: /target (player|opponent) sacrifices a creature/i },
 

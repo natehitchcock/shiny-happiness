@@ -48,6 +48,14 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   // as "manland", which is what a player calls the DECK — and an archetype does
   // not slot after "causes", the same ruling `burn` got just above.
   'land-creature': 'lands becoming creatures',
+  // ADR-0048. The subject is said out loud for the reason `discard` says it:
+  // self-mill is `graveyard-creature` and this is the other half, and a reader
+  // cannot infer which one from a word both cards use.
+  'opponent-mill': 'opponents milling',
+  // Not "extra turns" alone — the phrase slots after "causes", and "causes
+  // extra turns" is right while "benefits from extra turns" is a sentence no
+  // card in the corpus can say. See the pair table: nothing pays this off.
+  'extra-turns': 'taking extra turns',
 }
 
 /**
