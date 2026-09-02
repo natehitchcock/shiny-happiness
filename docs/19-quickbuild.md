@@ -29,7 +29,10 @@ play.
 ## 19.2 The loop
 
 ```
-  pick the deck's most pressing gap
+  offer the curated staples, then the curated staple lands   ← the opening phase
+        ↓                                                       (ADR-0044)
+  then pick the deck's most pressing gap, in the derived
+  build order                                               ← ADR-0040, untouched
         ↓
   present three candidates for THAT gap, each as full card detail
         ↓
@@ -38,8 +41,40 @@ play.
   recompute; repeat
 ```
 
-It runs out of gaps when every goal is inside its band, or the builder closes
-the panel. Both are ordinary outcomes; neither is a failure state.
+### The opening phase (ADR-0044)
+
+Two gaps of `kind: 'staples'` sit ahead of everything the build order derives:
+the cards essentially every deck in these colours wants, and then the lands.
+They are prepended rather than sorted in, because `sort` weighs composition
+against curve by *cards owed against a target* (D3) and a staples count is
+neither owed nor against a target — mixing them would need a weighting this
+spec has no basis to invent.
+
+The two counts are the `total` of the `staple` and `staple-land` candidate
+groups, read off the recommendations response the workspace already holds. They
+are **not** recomputed from the curated list and the deck: `recommend` has
+already applied the colour identity, the accepted set, the exclusions (P6), the
+per-card budget cap and the deck's remaining bracket allowance, and none of
+those inputs reach `quickbuildPlan`. The feed is on screen beside the panel, so
+a second count computed here could contradict the heading the builder is looking
+at. One definition, two surfaces.
+
+**The phase ends by arithmetic, not by a switch.** Every accept and every
+rejection removes a card from the group that produced the count, so the count
+falls by one and the gap disappears when the last one goes — `short > 0` is the
+same condition that opens a composition gap. There is no terminal state to stall
+in and no empty group to sit on. When both reach zero the plan is identical to
+the plan a caller that never sent the field would have got, and the derived
+order leads: creature first, land last.
+
+A staples gap adds **no query clause**. Its key *is* the group key, so the panel
+asks for that group and nothing else; there is no expressible filter for "is on
+the curated list", and a second, weaker copy of a decision already made is what
+ADR-0031 is about. The builder's own filter still travels with it (Q3).
+
+It runs out of gaps when the staples are spent and every goal is inside its
+band, or the builder closes the panel. Both are ordinary outcomes; neither is a
+failure state.
 
 **Running out of gaps is not the same as being finished, and §19.8 is about the
 difference.** The panel used to print one sentence and stop there, which read as

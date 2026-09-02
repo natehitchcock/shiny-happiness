@@ -56,19 +56,37 @@ pool size.
 
 | # | Group | Membership | Why it exists |
 | --- | --- | --- | --- |
-| 1 | `combo-3plus` | `comboDegree ≥ 3` | The headline feature |
-| 2 | `combo-2` | `comboDegree == 2` | Includes the two-separate-combos case (doc 02) |
-| 3 | `combo-1` | `comboDegree == 1` | |
-| 4 | `near-combo` | `comboDegree == 0 ∧ nearCombosAt1 ≥ 2` | "One card away, more than once" — surfaces *pairs* to add together |
-| 5 | `fills-<role>` | Deficit in that role ≥ 1, card's `primaryRole` matches | Directly actionable; one group per deficient role |
-| 6 | `top-<type>` | Top N by corpus inclusion for the commander, per card type | The "top ten sorceries" ask |
-| 7 | `high-synergy` | Corpus synergy above threshold | Commander-specific, non-obvious cards |
-| 8 | `staple` | High global inclusion, colour-legal | The long tail; collapsed by default |
+| 1 | `staple` | On the curated list (`staples/staples.data.json`), not a land | The cards essentially every deck in these colours wants (ADR-0044) |
+| 2 | `staple-land` | On the same list, and a land by its own `types` | The fixing that works in any deck; the split the user asked for |
+| 3 | `combo-3plus` | `comboDegree ≥ 3` | The headline feature |
+| 4 | `combo-2` | `comboDegree == 2` | Includes the two-separate-combos case (doc 02) |
+| 5 | `combo-1` | `comboDegree == 1` | |
+| 6 | `near-combo` | `comboDegree == 0 ∧ nearCombosAt1 ≥ 2` | "One card away, more than once" — surfaces *pairs* to add together |
+| 7 | `fills-<role>` | Deficit in that role ≥ 1, card's `primaryRole` matches | Directly actionable; one group per deficient role |
+| 8 | `top-<type>` | Top N by corpus inclusion for the commander, per card type | The "top ten sorceries" ask |
+| 9 | `high-synergy` | Corpus synergy above threshold | Commander-specific, non-obvious cards |
+| 10 | `other` | Everything else that is legal in your colours | The long tail; collapsed by default |
 
-Groups 1–4 need only Spellbook data. Groups 6–7 need corpus statistics, which do
+**Emission order is not membership order, and only for groups 1–2** (ADR-0044).
+The membership chain asks the combo questions first, so a curated staple that
+finishes a combo you already hold is filed under `combo-1` and appears in the
+combo section — "adding this finishes a combo you hold" is a claim about *this*
+deck and P4 asks the more specific true claim to win the card. Membership *is*
+decided above `fills-<role>`: an empty deck is short in every role, so otherwise
+every staple would land in a `fills-` group and the opening phase would never
+hold a card.
+
+**Groups 1–2 are an opinion and say so.** There is no measurement of "how often
+is this played" available here — ADR-0008 dropped EDHREC and the own-corpus
+statistic is inert — so the heading and rationale name the curated file rather
+than implying a percentage. `other` was called `staple` until ADR-0044, which
+with `stats: null` made it every eligible card in the deck's colours under a
+heading claiming they were widely played.
+
+Groups 3–6 need only Spellbook data. Groups 8–9 need corpus statistics, which do
 not exist until the project has imported enough decks (ADR-0008). **If the stats source
-is unavailable the app still works** — groups 6 and 7 are omitted with an inline
-notice, and 1–5, 8 carry the experience. This is the degradation path from §4.3.
+is unavailable the app still works** — groups 8 and 9 are omitted with an inline
+notice, and the rest carry the experience. This is the degradation path from §4.3.
 
 When a candidate query is active, group headers show the filtered count and each
 group footers any cards the query withheld (`+3 more complete 3+ combos but don't
