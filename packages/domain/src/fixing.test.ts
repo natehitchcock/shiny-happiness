@@ -215,4 +215,173 @@ describe('entering tapped', () => {
     )
     expect(b.value).toBeLessThan(a.value)
   })
+
+  /*
+   * The guard has to read the CLAUSE, not the card.
+   *
+   * Measured against the corpus: twenty legal lands say "This land enters
+   * tapped." on a line of their own and were scored as untapped anyway, because
+   * a conditional word appeared somewhere else on the card. None of them was a
+   * near miss — every one is unconditionally tapped.
+   */
+  it('does not let a later clause cancel an unconditional tapped clause', () => {
+    // Dakmor Salvage. The "if you do" is inside Dredge's REMINDER TEXT and has
+    // nothing to do with how the land enters.
+    const dredge = land({
+      name: 'Dakmor Salvage',
+      producedMana: ['B'],
+      oracleText:
+        'This land enters tapped.\n{T}: Add {B}.\nDredge 2 (If you would draw a card, you may mill two cards instead. If you do, return this card from your graveyard to your hand.)',
+    })
+    expect(fixingFor(dredge, izzet).entersTapped).toBe(true)
+  })
+
+  it('does not let a sacrifice clause cancel it either', () => {
+    // The karoo cycle, and Rupture Spire. "Sacrifice it unless you pay {1}" is
+    // a second cost, not a way to have the land enter untapped.
+    const karoo = land({
+      name: 'Coral Atoll',
+      producedMana: ['C', 'U'],
+      oracleText:
+        "This land enters tapped.\nWhen this land enters, sacrifice it unless you return an untapped Island you control to its owner's hand.\n{T}: Add {C}{U}.",
+    })
+    expect(fixingFor(karoo, izzet).entersTapped).toBe(true)
+  })
+
+  it('reads the land face of a two-faced card, not the spell face', () => {
+    // Rush of Inspiration // Crackling Falls. `oracleText` is both faces
+    // concatenated, so the INSTANT's "unless you pay {E}{E}" was cancelling the
+    // land's own "This land enters tapped".
+    const mdfc = land({
+      name: 'Rush of Inspiration // Crackling Falls',
+      typeLine: 'Instant // Land',
+      manaValue: 3,
+      oracleText:
+        'Draw two cards. Then discard a card at random unless you pay {E}{E} (two energy counters).\nThis land enters tapped.\n{T}: Add {U} or {R}.',
+    })
+    expect(fixingFor(mdfc, izzet).entersTapped).toBe(true)
+  })
+})
+
+/**
+ * What the coverage is worth once you have it.
+ *
+ * `coloursCovered` saturates: in a two-colour deck every land that taps for
+ * both colours scores the same, and the term stops ordering at exactly the
+ * point the builder still has a question. Measured on an Izzet deck, the eight
+ * suggestions under "Fills gap · land" were Matzalantli, Treasure Map, Rush of
+ * Inspiration, Azor's Gateway, The Mycosynth Gardens, Fiery Islet, Horizon of
+ * Progress and Voldaren Estate — no dual, no shockland, and four of the eight
+ * not lands at all. Steam Vents was twentieth.
+ *
+ * `producedMana` is Scryfall's "colours this card can ever make". It says
+ * nothing about what they cost you, so these all read as full coverage.
+ */
+describe('what the coverage costs', () => {
+  const izzet: Parameters<typeof fixingFor>[1] = ['R', 'U']
+  const anyColour: Card['producedMana'] = ['W', 'U', 'B', 'R', 'G']
+
+  const restricted = land({
+    name: 'Villainous Hideout',
+    producedMana: anyColour,
+    oracleText:
+      '{T}: Add {C}.\n{T}: Add one mana of any color. Spend this mana only to cast a Villain spell.',
+  })
+  const unrestricted = land({
+    name: 'Command Tower',
+    producedMana: anyColour,
+    oracleText: '{T}: Add one mana of any color.',
+  })
+
+  it('scores mana you may not spend below mana you may', () => {
+    expect(fixingFor(restricted, izzet).value).toBeLessThan(fixingFor(unrestricted, izzet).value)
+    expect(fixingFor(restricted, izzet).restricted).toBe(true)
+    expect(fixingFor(unrestricted, izzet).restricted).toBe(false)
+  })
+
+  it('scores a restricted land below a tapped one that is not restricted', () => {
+    // A restriction applies every turn; entering tapped costs one. The larger
+    // penalty belongs to the larger problem.
+    const tappedDual = land({ oracleText: 'This land enters tapped.\n{T}: Add {U} or {R}.' })
+    expect(fixingFor(restricted, izzet).value).toBeLessThan(fixingFor(tappedDual, izzet).value)
+  })
+
+  it('does not flag a land that also has an unrestricted coloured source', () => {
+    // Plaza of Heroes: one restricted any-colour ability and one that is not.
+    // The deck can still reach its colours, so the card is not discounted.
+    const plaza = land({
+      name: 'Plaza of Heroes',
+      producedMana: anyColour,
+      oracleText:
+        '{T}: Add {C}.\n{T}: Add one mana of any color. Spend this mana only to cast a legendary spell.\n{T}: Add one mana of any color among legendary permanents you control.',
+    })
+    expect(fixingFor(plaza, izzet).restricted).toBe(false)
+  })
+
+  it('keeps a restricted land above one that produces none of your colours', () => {
+    // Cavern of Souls is a real card real decks play. A discount, not a zero —
+    // the same argument the tapped penalty already makes.
+    const colourless = fixingFor(land({ producedMana: ['C'] }), izzet)
+    expect(fixingFor(restricted, izzet).value).toBeGreaterThan(colourless.value)
+  })
+
+  it('scores a land you have to cast below a real land that covers less', () => {
+    // Treasure Map // Treasure Cove taps for every colour — after you have paid
+    // {2}, spent a card, and activated it three times. It is not a land drop,
+    // and it led the land category over every dual in the format.
+    const mustCast = land({
+      name: 'Treasure Map // Treasure Cove',
+      typeLine: 'Artifact // Land',
+      manaValue: 2,
+      producedMana: anyColour,
+      oracleText: '{T}: Add {C}.',
+    })
+    const oneColourLand = land({ producedMana: ['R'] })
+
+    expect(fixingFor(mustCast, izzet).mustBeCast).toBe(true)
+    expect(fixingFor(mustCast, izzet).value).toBeLessThan(fixingFor(oneColourLand, izzet).value)
+  })
+
+  it('leaves every real land alone, because a land has no mana cost', () => {
+    expect(fixingFor(land({ producedMana: ['R', 'U'] }), izzet).mustBeCast).toBe(false)
+  })
+
+  it('stacks the discounts, so two problems are worse than one', () => {
+    const both = land({
+      name: 'Sea Gate Restoration // Sea Gate, Reborn',
+      typeLine: 'Sorcery // Land',
+      manaValue: 7,
+      producedMana: ['U'],
+      oracleText:
+        'Draw cards equal to the number of cards in your hand.\nThis land enters tapped.\n{T}: Add {U}.',
+    })
+    const tappedOnly = land({
+      producedMana: ['U'],
+      oracleText: 'This land enters tapped.\n{T}: Add {U}.',
+    })
+    expect(fixingFor(both, izzet).value).toBeLessThan(fixingFor(tappedOnly, izzet).value)
+  })
+
+  it('still puts a plain untapped dual above all of them', () => {
+    // The whole point. Steam Vents is what this category is for.
+    const shock = fixingFor(
+      land({
+        oracleText:
+          "({T}: Add {U} or {R}.)\nAs this land enters, you may pay 2 life. If you don't, it enters tapped.",
+      }),
+      izzet,
+    )
+    for (const other of [
+      restricted,
+      land({
+        name: 'Treasure Map // Treasure Cove',
+        typeLine: 'Artifact // Land',
+        manaValue: 2,
+        producedMana: anyColour,
+      }),
+      land({ oracleText: 'This land enters tapped.' }),
+    ]) {
+      expect(shock.value).toBeGreaterThan(fixingFor(other, izzet).value)
+    }
+  })
 })
