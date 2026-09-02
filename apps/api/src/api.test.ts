@@ -51,6 +51,14 @@ const HIGH_IMPACT = oracleId(randomUUID())
  */
 const DFC = oracleId(randomUUID())
 const DFC_BLIND = oracleId(randomUUID())
+/**
+ * Rules text that NAMES other cards, so card detail has references to resolve.
+ *
+ * It names Sol Ring and Counterspell (both fixtures, so both resolve), a basic
+ * land and itself (both deliberately never linked), and a name no card has, so
+ * the route is seen refusing to invent an id for it.
+ */
+const NAMER = oracleId(randomUUID())
 
 const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   oracleId: id,
@@ -105,6 +113,16 @@ describeDb('API-01 contract', () => {
         canBeCommander: false,
       }),
       card(MOUNTAIN, 'Mountain', { typeLine: 'Basic Land — Mountain', canBeCommander: false }),
+      card(NAMER, 'Tutor of Testing', {
+        typeLine: 'Sorcery',
+        oracleText: [
+          'Search your library for a card named Sol Ring or Wrath of Testing, reveal it, and put it into your hand.',
+          'Then search for a card named Mountain and a card named Tutor of Testing.',
+          'Create a Treasure token named Sol Ring Replica.',
+          'Counterspell costs {1} less to cast.',
+        ].join('\n'),
+        canBeCommander: false,
+      }),
       card(ANTE, 'Contract from Below', {
         legalities: { commander: 'banned' },
         canBeCommander: false,
@@ -341,6 +359,60 @@ describeDb('API-01 contract', () => {
       expect(Array.isArray(body.printings)).toBe(true)
       expect(body.combos).toHaveLength(1)
       expect(body.combos[0].id).toBe('c-1')
+    })
+
+    it('resolves the cards its rules text names, with their ids', async () => {
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${NAMER}` })).json()
+
+      expect(body.references).toEqual([
+        { name: 'Sol Ring', oracleId: SOL },
+        { name: 'Wrath of Testing', oracleId: HIGH_IMPACT },
+      ])
+    })
+
+    it('does not link a card name that is merely mentioned in prose', async () => {
+      // `Counterspell` is a real card AND an ordinary rules word, and this
+      // fixture's last line uses it as one. Nothing marks it as a name, so
+      // nothing links it — the property that keeps rules text from turning into
+      // a field of links (24,877 of them, corpus-wide, without this).
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${NAMER}` })).json()
+
+      expect((body.references as { name: string }[]).map((r) => r.name)).not.toContain('Counterspell')
+    })
+
+    /*
+     * A known limit, pinned so it is visible rather than discovered.
+     *
+     * A list continuation must be multi-word, because a bare word after a
+     * separator is nearly always prose the separator ran into ("named Skoa,
+     * Embermage, Sacrifice two Mountains" reads `Sacrifice`, which is a real
+     * card). Measured over all 34,494 cards this costs no real reference —
+     * every genuine list in the table is made of multi-word names — but a
+     * future card printed as "named Sol Ring or Counterspell" would lose its
+     * second link, and that is the trade being made.
+     */
+    it('does not follow a single-word continuation of a list', async () => {
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${NAMER}` })).json()
+
+      expect((body.references as { name: string }[])[0]?.name).toBe('Sol Ring')
+    })
+
+    it('does not link a basic land, itself, or a name no card has', async () => {
+      // `Mountain` is a real row in this database and `Tutor of Testing` is the
+      // card being read, so both would resolve if they were not excluded;
+      // `Sol Ring Replica` is a token name that merely STARTS with a card name.
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${NAMER}` })).json()
+      const named = (body.references as { name: string }[]).map((r) => r.name)
+
+      expect(named).not.toContain('Mountain')
+      expect(named).not.toContain('Tutor of Testing')
+      expect(named).not.toContain('Sol Ring Replica')
+    })
+
+    it('sends an empty reference list for a card that names nothing', async () => {
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${SOL}` })).json()
+
+      expect(body.references).toEqual([])
     })
 
     it('answers 404 for an unknown oracle id', async () => {

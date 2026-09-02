@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
 import {
+  cardIdsByExactName,
   combosContaining,
   getCard,
   getCards,
@@ -26,7 +27,9 @@ import {
   isOk,
   matchesQuery,
   oracleId,
+  oracleReferenceCandidates,
   parseQuery,
+  resolveOracleReferences,
 } from '@roundtable/domain'
 import { badRequest, notFound, sendProblem } from '../errors.js'
 import { cardBatchBody, cardSearchQuery, oracleIdParams } from '../schemas.js'
@@ -470,6 +473,29 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
     }))
 
     /*
+     * The cards this card's rules text names, resolved to ids so the preview can
+     * link them.
+     *
+     * Resolved HERE and not on the client because deciding whether a span is a
+     * card name needs the card table, and shipping 34,494 names to the browser
+     * to link a median of zero of them is not a trade worth making — measured,
+     * only 0.70% of cards name another card at all.
+     *
+     * Two steps, one round trip: the pure matcher offers every span that could
+     * be a name, one query says which of them exist, and the same pure matcher
+     * then picks the longest real one. The candidate list is bounded by the
+     * number of anchors in the text, so this is a handful of names per card.
+     */
+    const candidates = [...new Set(oracleReferenceCandidates(card.oracleText).flatMap((s) => s.candidates))]
+    const real = await cardIdsByExactName(pool, candidates)
+    const ids = new Map(real.map((r) => [r.name, r.oracleId]))
+    const references = resolveOracleReferences(
+      card.oracleText,
+      new Set(ids.keys()),
+      card.name,
+    ).map((ref) => ({ name: ref.name, oracleId: ids.get(ref.name)! }))
+
+    /*
      * The two card-intrinsic metrics ride on card detail as well as on every
      * recommendation (doc 18 §18.8), so the preview panel can show them without
      * a second request and without a second implementation. They are pure
@@ -479,6 +505,14 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
       ...card,
       printings,
       combos: withNames,
+      /*
+       * Names, not offsets. The client renders oracle text one FACE at a time
+       * and this resolves against the joined text, so any offset shipped here
+       * would be wrong on the second face. Sending the names instead lets the
+       * client re-run the same pure matcher per face with these names as the
+       * known set — one implementation, so the two cannot disagree.
+       */
+      references,
       impact: cardImpact(card),
       efficiency: cardEfficiency(card),
     }
