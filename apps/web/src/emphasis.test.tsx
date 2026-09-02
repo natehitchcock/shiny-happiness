@@ -119,6 +119,10 @@ const analysis: api.Analysis = {
 const recs = (over: Partial<api.Recommendations> = {}): api.Recommendations => ({
   datasetSnapshotId: null,
   emphasis: [],
+  // Spelled out for the same reason `emphasis` is: the offer of related
+  // semantics is RANKED by these, and a fixture without them silently tests
+  // the unranked fallback instead of the feature.
+  tagSupport: [],
   groups: [],
   columns: [],
   unavailable: [],
@@ -241,6 +245,69 @@ describe('choosing a commander asks what the deck is about', () => {
   it('says so rather than showing an empty prompt for a commander with no tags', async () => {
     await choose(card({ oracleId: 'bare', name: 'Plain Legend' }))
     await waitFor(() => expect(screen.getByText(/No semantics derived/i)).toBeDefined())
+  })
+
+  /*
+   * The chain, at the moment the request actually names — "when selecting a
+   * focus". The prompt is where the FIRST focus is chosen, so an expansion
+   * that only existed in the workspace would miss the click the sentence is
+   * about.
+   */
+  it('offers the related semantics here too, once one is picked', async () => {
+    await choose()
+    await waitFor(() => expect(screen.getByText(/What is this deck about/i)).toBeDefined())
+    expect(screen.queryByRole('group', { name: /Related to your focus/i })).toBeNull()
+
+    await act(async () => {
+      screen.getByLabelText('Emphasise opponents sacrificing').click()
+    })
+    const offered = screen.getByRole('group', { name: /Related to your focus/i })
+    expect(within(offered).getByLabelText('Emphasise a creature dying')).toBeDefined()
+  })
+
+  it('sends a focus picked from the offer, though the commander does not have it', async () => {
+    // Two hops off Tergrid and into the aristocrats deck, before a single card
+    // is laid down. The create endpoint deliberately does not check the
+    // emphasis against the commander's own tags, and this is why.
+    mocked.createDeck.mockResolvedValue(deck())
+    await choose()
+    await waitFor(() => expect(screen.getByText(/What is this deck about/i)).toBeDefined())
+    await act(async () => {
+      screen.getByLabelText('Emphasise opponents sacrificing').click()
+    })
+    await act(async () => {
+      within(screen.getByRole('group', { name: /Related to your focus/i }))
+        .getByLabelText('Emphasise a creature dying')
+        .click()
+    })
+    // Still on screen and still pressed — a focus the prompt could not show is
+    // a focus the builder cannot take off before creating the deck.
+    expect(screen.getByLabelText('Emphasise a creature dying').getAttribute('aria-pressed')).toBe(
+      'true',
+    )
+
+    await act(async () => {
+      screen.getByText('Start building').click()
+    })
+    await waitFor(() => expect(mocked.createDeck).toHaveBeenCalled())
+    expect(mocked.createDeck.mock.calls[0]?.[0].semanticEmphasis).toEqual([
+      'opponent-sacrifice',
+      'creature-death',
+    ])
+  })
+
+  it('makes no ranking claim here, because nothing has been counted yet', async () => {
+    // No deck exists, so no pool has been counted. Ordering the offer would
+    // present an order as a ranking and derive it from nothing; canonical
+    // order is the honest fallback.
+    await choose()
+    await waitFor(() => expect(screen.getByText(/What is this deck about/i)).toBeDefined())
+    await act(async () => {
+      screen.getByLabelText('Emphasise opponents sacrificing').click()
+    })
+    const offered = screen.getByRole('group', { name: /Related to your focus/i })
+    expect(within(offered).queryByText(/nothing in your colours/i)).toBeNull()
+    expect(within(offered).queryByText(/cards? supports? this/i)).toBeNull()
   })
 
   it('drops the picks when the commander is changed — they were about that commander', async () => {
@@ -661,5 +728,229 @@ describe('what the interface promises about a focus', () => {
     await mount(deck({ semanticEmphasis: ['opponent-discard'] }))
     expect(focusPanel().textContent).toMatch(/top three|top 3/i)
     expect(focusPanel().textContent).toMatch(/categor/i)
+  })
+})
+
+// -------------------------------------------- following the focus outwards
+
+/**
+ * The chain. "After one is selected, it should add any semantics that benefits
+ * from that focus or causes that focus, and allow you to add more from those,
+ * until you are satisfied."
+ *
+ * WHAT THE INTERFACE IS ALLOWED TO CLAIM about the relation is the load-bearing
+ * decision, and one of these tests exists only to pin it. The offer is read off
+ * `INTERACTION_PAIRS`, which is UNORDERED by construction — each row was
+ * admitted only because it reads true in both directions, and the genuinely
+ * one-way relations were refused entry (ADR-0023). So the offer is "related",
+ * and it must never wear the words "causes" or "benefits from", which already
+ * mean the OTHER relation two panels over, on a card's own `produces`/`wants`.
+ *
+ * Tergrid's shape throughout, as above: `opponent-sacrifice` and
+ * `opponent-discard` are the commander's own tags, and `opponent-sacrifice`
+ * pairs with `creature-death` and `lifeloss` — so emphasising her sacrifice
+ * half offers a way out of her own two tags and into the aristocrats deck.
+ */
+describe('the semantics offered next to a chosen focus', () => {
+  const focused = async (
+    tags: string[],
+    tagSupport: { tag: string; supporting: number }[] = [],
+  ): Promise<HTMLElement> => {
+    mocked.getRecommendations.mockResolvedValue(
+      recs({
+        emphasis: tags.map((tag) => ({ tag, supporting: 5 })),
+        tagSupport,
+      }),
+    )
+    await mount(deck({ semanticEmphasis: tags }))
+    return focusPanel()
+  }
+
+  const offer = (panel: HTMLElement): HTMLElement =>
+    within(panel).getByRole('group', { name: /Related to your focus/i })
+
+  it('offers nothing to a deck with no focus — there is nothing to relate to', async () => {
+    await mount()
+    expect(within(focusPanel()).queryByRole('group', { name: /Related to your focus/i })).toBeNull()
+  })
+
+  it('offers the semantics related to the focus, without being asked again', async () => {
+    // Not behind the "Add a focus" disclosure: the request is that picking one
+    // OFFERS the next, so a second click to see the offer is the feature not
+    // happening.
+    const panel = await focused(['opponent-sacrifice'])
+    expect(within(offer(panel)).getByLabelText('Emphasise a creature dying')).toBeDefined()
+    expect(within(offer(panel)).getByLabelText('Emphasise opponents losing life')).toBeDefined()
+  })
+
+  it('says these are RELATED, never that they cause or benefit from the focus', async () => {
+    /*
+     * The one unacceptable outcome. `INTERACTION_PAIRS` is symmetric, so it
+     * cannot tell "what causes this" from "what benefits from this" — a UI
+     * claiming either would be stating a direction the model does not hold,
+     * and would collide with the card preview, where those exact two words
+     * label a card's own `produces` and `wants`.
+     */
+    const panel = await focused(['opponent-sacrifice'])
+    const text = offer(panel).textContent ?? ''
+    // `\b` on BOTH sides — "because" ends in "cause" and would otherwise fail
+    // this test for a word that makes no claim about direction at all.
+    expect(text).not.toMatch(/\bcauses?\b/i)
+    expect(text).not.toMatch(/\bbenefits? from\b/i)
+    expect(text).toMatch(/related|alongside/i)
+  })
+
+  it('lets you go a second hop, which is what “add more from those” means', async () => {
+    mocked.patchDeck.mockResolvedValue(
+      deck({ semanticEmphasis: ['creature-death', 'opponent-sacrifice'], version: 2 }),
+    )
+    const panel = await focused(['opponent-sacrifice'])
+    await act(async () => {
+      within(offer(panel)).getByLabelText('Emphasise a creature dying').click()
+    })
+    await waitFor(() => expect(mocked.patchDeck).toHaveBeenCalled())
+    expect(mocked.patchDeck.mock.calls[0]?.[1]).toEqual({
+      semanticEmphasis: ['opponent-sacrifice', 'creature-death'],
+    })
+    // `creature-death`'s own neighbours are now on offer, and they were not
+    // reachable from the commander's two tags at all.
+    await waitFor(() =>
+      expect(within(offer(focusPanel())).getByLabelText('Emphasise making tokens')).toBeDefined(),
+    )
+  })
+
+  it('never offers a tag that is already the focus, so nothing can get stuck on', async () => {
+    // `opponent-discard` and `opponent-sacrifice` are neighbours of each other.
+    const panel = await focused(['opponent-sacrifice', 'opponent-discard'])
+    expect(within(offer(panel)).queryByLabelText('Emphasise opponents sacrificing')).toBeNull()
+    expect(within(offer(panel)).queryByLabelText('Emphasise opponents discarding')).toBeNull()
+  })
+
+  it('keeps a focus picked from the offer removable, so the chain is reversible', async () => {
+    // `creature-death` is not one of Tergrid's tags, so once emphasised it
+    // belongs to no list the panel used to render. A focus with no control on
+    // screen is the trap this whole feature is built not to set.
+    const panel = await focused(['creature-death'])
+    expect(within(panel).getByRole('button', { name: /Remove a creature dying/i })).toBeDefined()
+  })
+
+  it('leaves nothing stuck when a tag is dropped from the middle of the chain', async () => {
+    mocked.patchDeck.mockResolvedValue(
+      deck({ semanticEmphasis: ['opponent-sacrifice', 'token'], version: 2 }),
+    )
+    const panel = await focused(['opponent-sacrifice', 'creature-death', 'token'])
+    await act(async () => {
+      within(panel)
+        .getByRole('button', { name: /Remove a creature dying/i })
+        .click()
+    })
+    await waitFor(() => expect(mocked.patchDeck).toHaveBeenCalled())
+    // The whole list, one shorter — there is no remove verb on the wire.
+    expect(mocked.patchDeck.mock.calls[0]?.[1]).toEqual({
+      semanticEmphasis: ['opponent-sacrifice', 'token'],
+    })
+  })
+
+  it('leads with the semantic more of the deck’s colours actually supports', async () => {
+    const panel = await focused(
+      ['opponent-sacrifice'],
+      [
+        { tag: 'creature-death', supporting: 2 },
+        { tag: 'lifeloss', supporting: 60 },
+      ],
+    )
+    const labels = within(offer(panel))
+      .getAllByRole('button')
+      .map((b) => b.getAttribute('aria-label'))
+    expect(labels.indexOf('Emphasise opponents losing life')).toBeLessThan(
+      labels.indexOf('Emphasise a creature dying'),
+    )
+  })
+
+  it('still offers a semantic nothing supports, and says so rather than dropping it', async () => {
+    // Emphasis reorders and never filters, so zero support is a fact about the
+    // pool and not a reason to withhold the choice. It just must not lead.
+    const panel = await focused(
+      ['opponent-sacrifice'],
+      [
+        { tag: 'creature-death', supporting: 0 },
+        { tag: 'lifeloss', supporting: 12 },
+      ],
+    )
+    expect(within(offer(panel)).getByLabelText('Emphasise a creature dying')).toBeDefined()
+    expect(within(offer(panel)).getByText(/nothing in your colours/i)).toBeDefined()
+    expect(within(offer(panel)).queryByRole('alert')).toBeNull()
+  })
+
+  it('announces the offer, so it does not appear in silence (R4)', async () => {
+    const panel = await focused(['opponent-sacrifice'])
+    const status = within(panel).getByRole('status')
+    expect(status.textContent).toMatch(/a creature dying/)
+    expect(status.textContent).toMatch(/opponents losing life/)
+  })
+
+  it('offers every chip as a real button with a pressed state (R4)', async () => {
+    const panel = await focused(['opponent-sacrifice'])
+    for (const button of within(offer(panel)).getAllByRole('button')) {
+      expect(button.tagName).toBe('BUTTON')
+      expect(button.getAttribute('aria-pressed')).toBe('false')
+    }
+  })
+})
+
+// ------------------------------------------------------ the whole vocabulary
+
+/**
+ * "Maybe even have a 'show all semantics' button."
+ *
+ * Not decoration, and the measurement is why. The interaction graph is one
+ * connected component of all 21 tags, so a chain can in principle walk
+ * anywhere — but the first offer is a median of 2 neighbours and a mean of 2.9,
+ * and reaching `landfall` from `player-damage` takes five hops through tags the
+ * builder never wanted. It is also the only control that exists before a focus
+ * does.
+ */
+describe('showing every semantic', () => {
+  const showAll = async (panel: HTMLElement): Promise<void> => {
+    await act(async () => {
+      within(panel)
+        .getByRole('button', { name: /Show all semantics/i })
+        .click()
+    })
+  }
+
+  it('offers a way to the whole vocabulary even with no focus at all', async () => {
+    await mount()
+    await showAll(focusPanel())
+    expect(within(focusPanel()).getByLabelText('Emphasise lands entering')).toBeDefined()
+  })
+
+  it('is collapsed until asked for, so the panel is not a wall of 21 toggles', async () => {
+    await mount()
+    expect(within(focusPanel()).queryByLabelText('Emphasise lands entering')).toBeNull()
+  })
+
+  it('does not repeat a semantic already offered above it', async () => {
+    mocked.getRecommendations.mockResolvedValue(
+      recs({ emphasis: [{ tag: 'opponent-sacrifice', supporting: 5 }] }),
+    )
+    await mount(deck({ semanticEmphasis: ['opponent-sacrifice'] }))
+    await showAll(focusPanel())
+    // One toggle per tag, or two controls would claim the same focus and
+    // disagree the moment either moved.
+    expect(within(focusPanel()).getAllByLabelText('Emphasise a creature dying')).toHaveLength(1)
+    expect(within(focusPanel()).getAllByLabelText('Emphasise lands entering')).toHaveLength(1)
+  })
+
+  it('is a disclosure that says whether it is open (R4)', async () => {
+    await mount()
+    const button = within(focusPanel()).getByRole('button', { name: /Show all semantics/i })
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    await act(async () => button.click())
+    expect(
+      within(focusPanel())
+        .getByRole('button', { name: /all semantics/i })
+        .getAttribute('aria-expanded'),
+    ).toBe('true')
   })
 })

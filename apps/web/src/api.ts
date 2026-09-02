@@ -596,6 +596,20 @@ export interface Recommendations {
    * without this the builder has no way to tell that from one that worked.
    */
   emphasis: { tag: string; supporting: number }[]
+  /**
+   * The same count for EVERY tag, in canonical order — `emphasis` narrowed to
+   * the emphasis is this list's subset.
+   *
+   * It exists because the workspace offers the semantics RELATED to a chosen
+   * focus, and has to rank them. Those are by definition tags the deck does not
+   * emphasise, so `emphasis` cannot reach them; without a ranking the offer
+   * leads with whichever tag sorts first, which may be one no card in the
+   * deck's colours supports.
+   *
+   * Optional so a build talking to an older API renders an unranked offer
+   * rather than a broken one — `bySupport` makes no claim without counts.
+   */
+  tagSupport?: { tag: string; supporting: number }[]
 }
 
 export const getRecommendations = (

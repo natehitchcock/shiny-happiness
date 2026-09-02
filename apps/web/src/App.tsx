@@ -5,6 +5,12 @@ import { usePipeline, type Phase } from './pipeline'
 import { AUTO_QUERY_MS, useAutoQuery } from './autoquery'
 import {
   archetypeTolerance,
+  // The offer that grows out of a chosen focus, and its ordering. All three are
+  // pure reads of the model, so the client computes them rather than asking:
+  // `interactsWith` is already in this file for the tag hints, and a second
+  // opinion about which semantics are related is exactly the drift the shared
+  // package exists to prevent.
+  bySupport,
   COLORS,
   CURVE_REFERENCE_SPELLS,
   dimensionKeysOf,
@@ -39,6 +45,8 @@ import {
   // hands it the numbers the composition meters are already drawing from.
   quickbuildPlan,
   type QuickbuildReach,
+  relatedSemantics,
+  remainingSemantics,
   // Where a card name sits inside one ability of rules text. The SAME function
   // the server ran to decide which names are references at all (doc 09 §9.4), so
   // the panel cannot link a span the server did not resolve.
@@ -1189,6 +1197,24 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
   const commanderTags =
     chosen === null ? [] : [...new Set([...chosen.synergyProduces, ...chosen.synergyWants])]
 
+  /**
+   * Add or drop one tag before the deck exists. Local state — there is nothing
+   * to PATCH yet, so this is the only place emphasis is written optimistically,
+   * and it is not optimistic about anything: `createDeck` carries the answer.
+   *
+   * Shared by the commander's own semantics and by the expansion under them, so
+   * a focus followed one hop out behaves identically to one clicked directly.
+   */
+  const toggleStartEmphasis = (tag: string): void =>
+    setEmphasis((current) =>
+      current.includes(tag)
+        ? current.filter((t) => t !== tag)
+        : // Appended, not sorted: the server puts the set into canonical order
+          // on the way in (`parseSemanticEmphasis`), so re-sorting here would be
+          // a second opinion about an order that carries no meaning anyway.
+          [...current, tag],
+    )
+
   /*
    * No countdown here. The commander search is committed by Enter or by the
    * button, and by nothing else.
@@ -1452,17 +1478,25 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
               <EmphasisChoice
                 tags={commanderTags}
                 selected={emphasis}
-                onToggle={(tag) =>
-                  setEmphasis((current) =>
-                    current.includes(tag)
-                      ? current.filter((t) => t !== tag)
-                      : // Appended, not sorted: the server puts the set into
-                        // canonical order on the way in (`parseSemanticEmphasis`),
-                        // so re-sorting here would be a second opinion about an
-                        // order that carries no meaning anyway.
-                        [...current, tag],
-                  )
-                }
+                onToggle={toggleStartEmphasis}
+              />
+              {/*
+                The chain, at the moment the request literally names — "when
+                selecting a focus". This is where the FIRST focus is chosen, so
+                an expansion that only existed in the workspace would miss the
+                click the sentence is about.
+
+                `support={undefined}`: no deck exists yet, so no pool has been
+                counted. The offer is in canonical order and says nothing about
+                support, which is the honest answer — ordering it here would
+                present a ranking derived from nothing.
+              */}
+              <FocusExpansion
+                base={commanderTags}
+                selected={emphasis}
+                support={undefined}
+                onToggle={toggleStartEmphasis}
+                busy={false}
               />
             </section>
           </>
@@ -1618,19 +1652,36 @@ const EmphasisChoice = ({
   onToggle: (tag: string) => void
   busy?: boolean
 }): React.JSX.Element => {
-  if (tags.length === 0) {
+  /*
+   * The offered tags PLUS anything already chosen that is not among them.
+   *
+   * Before the expansion existed, every focus came from this list, so "what is
+   * offered" and "what is chosen" could not diverge. They can now: a focus
+   * picked from `Related to your focus` is by construction NOT one of the
+   * commander's semantics, and on the start screen there is no focus list above
+   * to carry it. Without this it would be chosen, pressed, and invisible — a
+   * focus with no control on screen, which is the trap the whole feature is
+   * built to avoid (`semantic-emphasis.ts`: reversible by construction).
+   *
+   * Appended in canonical order after the offered ones, not merged into them:
+   * the offered list is the commander's own story and its order means
+   * something.
+   */
+  const shown = [...tags, ...remainingSemantics(tags).filter((t) => selected.includes(t))]
+  if (shown.length === 0) {
     // Half the corpus derives no tags at all (ADR-0013), and a heading over an
     // empty row would read as "this card is about nothing".
     return (
       <p className="note">
         No semantics derived for this card. Our rules-text reading misses about half of Magic, so
-        this is a gap in what we can see — you can still focus a semantic from any other card.
+        this is a gap in what we can see — you can still focus a semantic from any other card, or
+        from “Show all semantics” below.
       </p>
     )
   }
   return (
     <p className="tags emphasis-choice">
-      {tags.map((tag) => (
+      {shown.map((tag) => (
         <span className="emphasis-option" key={tag}>
           <EmphasisToggle
             tag={tag}
@@ -1645,6 +1696,193 @@ const EmphasisChoice = ({
         </span>
       ))}
     </p>
+  )
+}
+
+/**
+ * One named row of semantics on offer.
+ *
+ * Same toggle and the same chip as `EmphasisChoice`, under a heading that says
+ * WHY these are being offered — which is the whole difference between the
+ * expansion and a second copy of the vocabulary. `role="group"` labelled by
+ * that heading, so a screen reader reaching a chip can be told which offer it
+ * belongs to instead of meeting twenty unexplained toggles in a row.
+ *
+ * `support` is `RecommendResult.tagSupport` as a lookup, or `undefined` where
+ * nothing has been counted — the commander prompt runs before a deck exists.
+ * Only a counted ZERO is printed. A number beside every chip would be a wall of
+ * digits nobody reads, but "nothing in your colours supports this yet" is the
+ * one case a builder needs before clicking rather than after, and dropping the
+ * chip instead would make the expansion filter, which emphasis never does.
+ */
+const SemanticOffer = ({
+  heading,
+  note,
+  tags,
+  selected,
+  support,
+  onToggle,
+  busy,
+}: {
+  heading: string
+  note: string
+  tags: readonly string[]
+  selected: readonly string[]
+  support: ReadonlyMap<string, number> | undefined
+  onToggle: (tag: string) => void
+  busy: boolean
+}): React.JSX.Element | null => {
+  const headingId = useId()
+  if (tags.length === 0) return null
+  return (
+    <div className="semantic-offer" role="group" aria-labelledby={headingId}>
+      <h4 id={headingId}>{heading}</h4>
+      <p className="note">{note}</p>
+      <p className="tags emphasis-choice">
+        {tags.map((tag) => (
+          <span className="emphasis-option" key={tag}>
+            <EmphasisToggle
+              tag={tag}
+              emphasised={selected.includes(tag)}
+              onToggle={onToggle}
+              busy={busy}
+              className="act emphasise"
+            />
+            <span className="tag" data-emphasised={selected.includes(tag)}>
+              {readable(tag)}
+            </span>
+            {support?.get(tag) === 0 ? (
+              <span className="note dim offer-unsupported">
+                nothing in your colours supports this yet
+              </span>
+            ) : null}
+          </span>
+        ))}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * What to offer once a focus exists, and the way to the rest of the vocabulary.
+ *
+ * "After one is selected, it should add any semantics that benefits from that
+ * focus or causes that focus, and allow you to add more from those, until you
+ * are satisfied. Maybe even have a 'show all semantics' button."
+ *
+ * "RELATED", NOT "CAUSES" / "BENEFITS FROM". The user's sentence names two
+ * directions and this model has two relations that could answer it — and only
+ * one of them is what `relatedSemantics` reads. `INTERACTION_PAIRS` is
+ * unordered by construction: every row was admitted only because it reads true
+ * in both directions, and the one-way relations were deliberately refused entry
+ * (ADR-0023, ADR-0029). So the direction is not something that table lost, it
+ * is something it excludes, and a UI claiming it would be inventing it. The
+ * words "causes" and "benefits from" are also already spoken for one panel
+ * over, where they label a card's own `produces` and `wants` — a genuinely
+ * directional relation that needs no table. `TagChip` already renders this same
+ * list as "Benefits, and benefits from: …", and this heading agrees with it.
+ *
+ * NOT BEHIND A DISCLOSURE. `FocusPanel` made "add a focus" a disclosure because
+ * "a row of unpressed toggles under a chosen focus reads like a question still
+ * being asked" — and the request is that the question KEEP being asked, so that
+ * reasoning is reversed here by the person it was written for. The expansion
+ * appears the moment a focus lands, which is what "it should add" means.
+ *
+ * "Show all semantics" IS behind one, and stays the honest primary route to any
+ * tag the chain does not reach. The interaction graph is a single connected
+ * component of all 21 tags, so a walk can in principle reach anything — but the
+ * first offer is a median of 2 neighbours (mean 2.9), and `landfall` is five
+ * hops from `player-damage` through tags the builder never wanted. It is also
+ * the only control that exists at all before a focus does.
+ */
+const FocusExpansion = ({
+  base,
+  selected,
+  support,
+  onToggle,
+  busy,
+  children,
+}: {
+  /** Already offered elsewhere on this screen — the commander's own semantics. */
+  base: readonly string[]
+  selected: readonly string[]
+  support: ReadonlyMap<string, number> | undefined
+  onToggle: (tag: string) => void
+  busy: boolean
+  /**
+   * Rendered BETWEEN the related offer and "Show all semantics".
+   *
+   * A slot rather than two components, because the two halves are one
+   * computation — `rest` is defined as what is left after `related`, so
+   * splitting them would mean computing `related` twice and letting the two
+   * copies disagree about what has already been offered. The caller still
+   * controls the reading order, which has to narrow: your focus, what it leads
+   * to, your commander's own, then everything.
+   */
+  children?: React.ReactNode
+}): React.JSX.Element => {
+  const [showAll, setShowAll] = useState(false)
+  /*
+   * The cast is the same one `TagChip` makes on the line above `interactsWith`.
+   * `emphasis` is `string[]` all the way down this file because it round-trips
+   * through JSON, and both functions are total over strings — an unknown tag
+   * has no neighbours and belongs to no vocabulary, so it contributes nothing
+   * rather than throwing.
+   */
+  const emphasis = selected as readonly SynergyTag[]
+  const related = bySupport(relatedSemantics(emphasis, base), support)
+  const rest = bySupport(remainingSemantics([...base, ...selected, ...related]), support)
+  return (
+    <>
+      <SemanticOffer
+        heading="Related to your focus"
+        note="These feed, and are fed by, what you have already chosen — the relation reads both ways, so this is what a deck builds alongside your focus. Pick any and its own relations are offered next."
+        tags={related}
+        selected={selected}
+        support={support}
+        onToggle={onToggle}
+        busy={busy}
+      />
+      {children}
+      {rest.length === 0 ? null : (
+        <button
+          type="button"
+          className="act"
+          aria-expanded={showAll}
+          onClick={() => setShowAll((open) => !open)}
+        >
+          Show all semantics
+        </button>
+      )}
+      {showAll ? (
+        <SemanticOffer
+          heading="Every other semantic"
+          note="Everything else we derive from rules text, whether or not it relates to your focus."
+          tags={rest}
+          selected={selected}
+          support={support}
+          onToggle={onToggle}
+          busy={busy}
+        />
+      ) : null}
+      {/*
+        The chain must not appear in silence (R4). The offer arrives as a
+        CONSEQUENCE of pressing a toggle somewhere else on the page — the
+        keyboard user's focus stays on the button they pressed, so nothing
+        moves them past the new chips and nothing would tell them the chips
+        exist. `role="status"` is polite, so it waits for the save to land and
+        never interrupts; it is rendered even when empty so the region is in
+        the accessibility tree BEFORE it has anything to say, which is what
+        makes the first change announce at all.
+      */}
+      <p className="sr-only" role="status">
+        {related.length === 0
+          ? ''
+          : `${plural(related.length, 'semantic')} related to your focus: ${related
+              .map(readable)
+              .join(', ')}.`}
+      </p>
+    </>
   )
 }
 
@@ -1830,6 +2068,7 @@ const supportText = (supporting: number | undefined): string => {
 const FocusPanel = ({
   emphasis,
   report,
+  tagSupport,
   commanderTags,
   busy,
   onToggle,
@@ -1838,6 +2077,17 @@ const FocusPanel = ({
 }: {
   emphasis: readonly string[]
   report: readonly { tag: string; supporting: number }[]
+  /**
+   * The same count for every tag, which ranks the expansion's offer.
+   *
+   * A separate prop from `report` and NOT derived from it, because the two have
+   * different lifetimes: `report` is dropped the moment a focus is saved (it
+   * describes the emphasis that has just been replaced), while these counts are
+   * emphasis-independent and are deliberately held across the save. Feeding the
+   * offer from `report` would empty its ranking on every pick, so the chips
+   * would reshuffle under the cursor of the person mid-chain.
+   */
+  tagSupport: ReadonlyMap<string, number> | undefined
   /** The candidate set, exactly as the start screen offered it. */
   commanderTags: readonly string[]
   busy: boolean
@@ -1882,28 +2132,48 @@ const FocusPanel = ({
           </p>
         </>
       )}
-      <button
-        type="button"
-        className="act"
-        aria-expanded={adding}
-        onClick={() => onAdding(!adding)}
+      {/*
+        The expansion, OUTSIDE the "Add a focus" disclosure and directly below
+        the focus it grows from. A chain the builder has to press a button to
+        see is not a chain being offered — and the second entry point into
+        emphasis, the {EMPHASIS_OFF} beside a card's own tags in a preview,
+        leaves this panel collapsed, so a focus added from there would otherwise
+        offer nothing at all.
+
+        The disclosure is passed through as the slot so the reading order
+        narrows: your focus, what it leads to, your commander's own, then the
+        whole vocabulary.
+      */}
+      <FocusExpansion
+        base={commanderTags}
+        selected={emphasis}
+        support={tagSupport}
+        onToggle={onToggle}
+        busy={busy}
       >
-        {adding ? 'Done' : 'Add a focus'}
-      </button>
-      {adding ? (
-        <>
-          <p className="note">
-            Your commander’s semantics. Any semantic on any card can be emphasised too — open a card
-            and use the {EMPHASIS_OFF} beside its tags.
-          </p>
-          <EmphasisChoice
-            tags={commanderTags}
-            selected={emphasis}
-            onToggle={onToggle}
-            busy={busy}
-          />
-        </>
-      ) : null}
+        <button
+          type="button"
+          className="act"
+          aria-expanded={adding}
+          onClick={() => onAdding(!adding)}
+        >
+          {adding ? 'Done' : 'Add a focus'}
+        </button>
+        {adding ? (
+          <>
+            <p className="note">
+              Your commander’s semantics, and anything you have already chosen. Any semantic on any
+              card can be emphasised too — open a card and use the {EMPHASIS_OFF} beside its tags.
+            </p>
+            <EmphasisChoice
+              tags={commanderTags}
+              selected={emphasis}
+              onToggle={onToggle}
+              busy={busy}
+            />
+          </>
+        ) : null}
+      </FocusExpansion>
     </section>
   )
 }
@@ -5016,6 +5286,18 @@ export const Workspace = ({
   const [emphasisReport, setEmphasisReport] = useState<
     readonly { tag: string; supporting: number }[]
   >([])
+  /**
+   * How much of the pool supports EVERY tag, which ranks the expansion's offer.
+   *
+   * Held across a focus save, unlike `emphasisReport` beside it, and the two
+   * lifetimes differ for a reason. The report describes the emphasis that a
+   * save has just replaced, so it is dropped; these counts are taken over
+   * eligible candidates and emphasis never changes eligibility, so they are the
+   * same numbers before and after and there is nothing to invalidate. Blanking
+   * them would unrank the offer for the length of a round trip, reshuffling the
+   * chips under the cursor of the person part-way through a chain.
+   */
+  const [tagSupport, setTagSupport] = useState<ReadonlyMap<string, number> | undefined>(undefined)
   /** A focus write is in flight. Holds the toggles rather than hiding them. */
   const [emphasisSaving, setEmphasisSaving] = useState(false)
   /** Whether the "add a focus" list is open — the way back into the prompt. */
@@ -5810,6 +6092,20 @@ export const Workspace = ({
       // than crash on a property of undefined — the same reading `images` and
       // `bracket` already get.
       setEmphasisReport(r.recs.emphasis ?? [])
+      /*
+       * `undefined`, not an empty Map, when the server does not send it.
+       *
+       * The two are different claims and `bySupport` acts on the difference: no
+       * counts means make no ranking claim and leave the offer in canonical
+       * order, while an empty Map of counts would sink every tag to "counted,
+       * and it was nothing". A build talking to an older API gets an unranked
+       * offer rather than one ranked by a fiction.
+       */
+      setTagSupport(
+        r.recs.tagSupport === undefined
+          ? undefined
+          : new Map(r.recs.tagSupport.map((e) => [e.tag, e.supporting])),
+      )
       setAnalysis(r.analysis)
       setQueryError(r.recs.query.errors[0]?.message ?? null)
       /*
@@ -7479,6 +7775,7 @@ export const Workspace = ({
           <FocusPanel
             emphasis={emphasis}
             report={emphasisReport}
+            tagSupport={tagSupport}
             commanderTags={commanderTags}
             busy={emphasisSaving}
             onToggle={toggleEmphasis}
