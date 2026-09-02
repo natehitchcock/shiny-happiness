@@ -3,7 +3,12 @@ import type { BracketFlag } from './bracket.js'
 import type { Card, Color } from './card.js'
 import { annotateCombos, type ComboIndex } from './combo-index.js'
 import { fixingFor, isManaSource, NO_FIXING, type DeckLands } from './fixing.js'
-import { dimensionKey, type CompositionDimension, type CompositionTarget } from './composition.js'
+import {
+  dimensionKey,
+  dimensionKeysOf,
+  type CompositionDimension,
+  type CompositionTarget,
+} from './composition.js'
 import type { CompositionCounts, Deficit } from './composition-analysis.js'
 import { findDeficits, shortfalls } from './composition-analysis.js'
 import {
@@ -335,6 +340,49 @@ const dimensionLabel = (dimension: CompositionDimension): string =>
 const countedRole = (pooled: PoolCard): Role => primaryRole(pooled.roles)
 
 /**
+ * The gap this card is offered against, or `null` (ADR-0054).
+ *
+ * A card counts toward SEVERAL dimensions — one role and each of its types.
+ * That rule is stated once, in `dimensionKeysOf`, and the meters and the web
+ * app's gold overlay already read it; grouping needs exactly one of them.
+ *
+ * THE ROLE GAP WINS, and the type gap is the fallback. The reason is P4's, and
+ * it is the same one the emission-order note below gives for letting a combo
+ * group keep a staple: the more specific claim about THIS deck wins the card.
+ * "You are six short of removal and this creature is removal" tells the builder
+ * something; "you are thirty-one short of creatures and this is a creature" is
+ * the least informative sentence a card can be offered under, because every
+ * creature in the format satisfies it equally.
+ *
+ * WORST-FIRST WAS WRITTEN AND MEASURED AND REJECTED. `shortfalls` already
+ * orders the gaps worst first, so taking the first match was one line and it
+ * matched Quickbuild's `largest-first` regime. It is also wrong in practice: a
+ * type gap is ~32 on an empty deck and no role gap is ever close, so every
+ * creature would be swallowed by `fills-creature` and the role headings would
+ * be emptied of creatures — `fills-ramp` with no mana dorks in it, and every
+ * creature that answers a permanent taken out of `fills-spot-removal`. Measured
+ * on five real commanders, it moved the whole creature half of six role groups
+ * into one heading that says nothing about any of them.
+ *
+ * `dimensionKeysOf` reads `primaryRole` — the counted role, ADR-0031 — rather
+ * than the raw role array, so the heading still names a dimension the card will
+ * move when it is accepted.
+ */
+const deficitFor = (pooled: PoolCard, deficits: readonly Deficit[]): Deficit | null => {
+  const keys = new Set(
+    dimensionKeysOf({ primaryRole: countedRole(pooled), types: pooled.card.types }),
+  )
+  const matching = deficits.filter((deficit) => keys.has(dimensionKey(deficit.dimension)))
+  return (
+    matching.find((deficit) => deficit.dimension.kind === 'role') ??
+    // Worst first among the types, which `shortfalls` already ordered, so a
+    // card that is somehow short in two type dimensions still has one answer.
+    matching[0] ??
+    null
+  )
+}
+
+/**
  * Which staples group this card may LEAD with, if any (ADR-0044).
  *
  * The curated list decides membership (`staples.ts`); this decides whether the
@@ -457,18 +505,27 @@ export const recommend = (input: RecommendInput): RecommendResult => {
   }
   const emphasis = input.emphasis ?? NO_EMPHASIS
   const limit = input.limitPerGroup ?? 60
+  /*
+   * The gaps, worst first — which `shortfalls` already guarantees, because
+   * `findDeficits` sorts by `Math.abs(delta)` descending.
+   *
+   * EVERY DIMENSION, not only the roles (ADR-0054). This loop used to read
+   * `if (deficit.dimension.kind === 'role')` and drop the rest on the floor, so
+   * `type:creature` — the second-largest gap on an empty midrange deck, at 32
+   * short — made no group, contributed no `fills-deficit` reason and never
+   * reached the `w.fill` term. `quickbuild.ts` reads the same targets correctly
+   * and said "25 more creature" at the same moment the feed had no creature
+   * gap at all: one model, two surfaces, two different answers. Doc 19 D2 says
+   * Quickbuild is a VIEW over the recommendations and never a second scorer,
+   * which is what makes the feed the side that was wrong.
+   */
   const deficits = shortfalls(findDeficits(input.counts, input.targets))
-  const deficitByRole = new Map<Role, Deficit>()
-  for (const deficit of deficits) {
-    if (deficit.dimension.kind === 'role') deficitByRole.set(deficit.dimension.role, deficit)
-  }
 
   // ---- eligibility + annotation ----
   const scratch: Scratch[] = []
   for (const pooled of input.pool) {
     if (!isEligible(pooled, input, identity)) continue
     const annotation = annotateCombos(input.comboIndex, input.accepted, pooled.card.oracleId)
-    const primary = countedRole(pooled)
     const profile = {
       produces: pooled.card.synergyProduces,
       wants: pooled.card.synergyWants,
@@ -484,7 +541,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       nearAt1: annotation.near.get(1)?.length ?? 0,
       completed: annotation.completed,
       stats: input.stats?.get(pooled.card.oracleId) ?? null,
-      deficit: deficitByRole.get(primary) ?? null,
+      deficit: deficitFor(pooled, deficits),
       matchesFilter: true,
       synergy: matches,
       emphasised: emphasisMatches(profile, matches, emphasis),
@@ -537,14 +594,17 @@ export const recommend = (input: RecommendInput): RecommendResult => {
 
   for (const s of scratch) {
     const id = s.pooled.card.oracleId
-    const primary = countedRole(s.pooled)
     const staple = offerableStaple(s.pooled, input)
     if (s.degree >= 3) s.group = 'combo-3plus'
     else if (s.degree === 2) s.group = 'combo-2'
     else if (s.degree === 1) s.group = 'combo-1'
     else if (s.nearAt1 >= 2) s.group = 'near-combo'
     else if (staple !== null) s.group = staple
-    else if (s.deficit !== null) s.group = `fills-${primary}`
+    // `fills-<dimension>`, which is a role name or a type name. Not
+    // `dimensionKey`'s prefixed form: the group key is a wire contract the web
+    // app already reads back with `dimensionName`, and only `type:creature` is
+    // ever a target, so no type name collides with a role name today.
+    else if (s.deficit !== null) s.group = `fills-${dimensionLabel(s.deficit.dimension)}`
     else if (statsAvailable && topByType.get(s.pooled.card.types[0] ?? '')?.has(id) === true) {
       s.group = `top-${s.pooled.card.types[0] ?? 'card'}`
     } else if (statsAvailable && (s.stats?.synergy ?? 0) >= SYNERGY_THRESHOLD)

@@ -3,7 +3,7 @@ import { compositionTargets } from './archetype-targets.js'
 import type { Card, CardType } from './card.js'
 import type { Combo } from './combo.js'
 import { buildComboIndex } from './combo-index.js'
-import { countComposition } from './composition-analysis.js'
+import { countComposition, findDeficits, shortfalls } from './composition-analysis.js'
 import type { Deck } from './deck.js'
 import { comboId, deckId, oracleId, printingId } from './ids.js'
 import { parseQuery } from './query/parse.js'
@@ -20,8 +20,19 @@ const card = (name: string, over: Partial<Card> = {}): Card => ({
   manaValue: 2,
   colorIdentity: ['R'],
   colors: ['R'],
-  typeLine: 'Creature — Goblin',
-  types: ['creature'] as readonly CardType[],
+  /*
+   * NOT a creature by default, and that is deliberate as of ADR-0054.
+   *
+   * `type:creature` is a composition target, and an empty midrange deck is 32
+   * short of it — so once the feed started reading type dimensions, every
+   * fixture that was incidentally a Goblin landed in `fills-creature` and 28
+   * tests about eligibility, ordering, the cut and the focus guarantee started
+   * asserting against a heading they were never about. The default is now a
+   * type no target names, so a test lands in a `fills-` group only when it says
+   * it wants to. The tests that ARE about creatures set the type themselves.
+   */
+  typeLine: 'Instant',
+  types: ['instant'] as readonly CardType[],
   oracleText: '',
   power: null,
   toughness: null,
@@ -332,6 +343,87 @@ describe('deficit groups', () => {
       }),
     )
   })
+
+  /*
+   * A TYPE gap is a gap (ADR-0054).
+   *
+   * `recommend` built its deficit index with `if (deficit.dimension.kind ===
+   * 'role')` and dropped every type dimension on the floor, so `type:creature`
+   * — the second-largest gap on an empty midrange deck, at 32 short — could
+   * never make a group, never contribute a `fills-deficit` reason and never
+   * reach the `w.fill` score term. `quickbuild.ts` reads the same targets
+   * correctly and said "25 more creature", so one model was telling two
+   * surfaces different things about one gap. Doc 19 D2 says Quickbuild is a
+   * view over the recommendations and never a second scorer, which makes the
+   * feed the one that was wrong.
+   */
+  it('routes a creature into fills-creature when the deck is short of creatures', () => {
+    const result = recommend(
+      baseInput({
+        pool: [pooled('bear', { card: card('bear', { types: ['creature'] }) })],
+      }),
+    )
+    expect(groupKeys(result)).toContain('fills-creature')
+    expect(result.groups.find((g) => g.key === 'fills-creature')!.label).toMatch(/creature/)
+  })
+
+  it('carries the type gap into the reason and the score', () => {
+    const result = recommend(
+      baseInput({
+        pool: [pooled('bear', { card: card('bear', { types: ['creature'] }) })],
+      }),
+    )
+    const rec = result.groups.flatMap((g) => g.items)[0]!
+    expect(rec.reasons).toContainEqual(
+      expect.objectContaining({
+        kind: 'fills-deficit',
+        dimension: { kind: 'type', type: 'creature' },
+      }),
+    )
+    // `fillsRoleDeficit` stays a ROLE, and is null here. A type is not a role,
+    // and inventing one would put a name in the field that no meter carries.
+    expect(rec.fillsRoleDeficit).toBeNull()
+  })
+
+  it('offers a card under its ROLE gap when it has both, even though the type gap is bigger', () => {
+    /*
+     * The more specific claim about this deck wins the card (P4) — the same
+     * ruling the emission-order note makes about a staple that finishes a
+     * combo. A mana dork on an empty midrange deck is 31 short of creatures
+     * and 9 short of ramp, and "this is a creature" is a sentence every
+     * creature in the format satisfies equally.
+     *
+     * Worst-first was written and rejected: a type gap is always the biggest,
+     * so `fills-ramp` would have held no mana dorks and `fills-spot-removal`
+     * no creatures that answer permanents.
+     */
+    const dork = card('dork', { primaryRole: 'ramp', types: ['creature'] })
+    const result = recommend(baseInput({ pool: [pooled('dork', { roles: ['ramp'], card: dork })] }))
+
+    const gaps = shortfalls(
+      findDeficits(baseInput().counts, compositionTargets('midrange', null, { bracket: 3 })),
+    )
+    const creature = gaps.find((d) => d.dimension.kind === 'type')!
+    const ramp = gaps.find((d) => d.dimension.kind === 'role' && d.dimension.role === 'ramp')!
+    // The premise: the type gap really is the larger one.
+    expect(Math.abs(creature.delta)).toBeGreaterThan(Math.abs(ramp.delta))
+
+    expect(groupKeys(result)).toContain('fills-ramp')
+    expect(groupKeys(result)).not.toContain('fills-creature')
+  })
+
+  it('does not put a non-creature in the creature gap', () => {
+    const result = recommend(
+      baseInput({
+        pool: [
+          pooled('bolt', {
+            card: card('bolt', { types: ['instant'], typeLine: 'Instant', primaryRole: 'synergy' }),
+          }),
+        ],
+      }),
+    )
+    expect(groupKeys(result)).not.toContain('fills-creature')
+  })
 })
 
 describe('every recommendation explains itself (pillar P4)', () => {
@@ -435,7 +527,9 @@ describe('query filtering (doc 13 §13.1)', () => {
   const index = buildComboIndex([combo('c1', ['creature-combo', 'A'])])
   const input = baseInput({
     pool: [
-      pooled('creature-combo'),
+      pooled('creature-combo', {
+        card: card('creature-combo', { typeLine: 'Creature — Goblin', types: ['creature'] }),
+      }),
       pooled('enchantment-combo', {
         card: card('enchantment-combo', { typeLine: 'Enchantment', types: ['enchantment'] }),
       }),
@@ -1051,7 +1145,11 @@ describe('the focus guarantee', () => {
     // guarantee reaching past the filter would make the search box a lie.
     const result = overflowing({
       emphasis: ['untap'],
-      query: ast('t:creature'),
+      // The type the plain cards carry, so the query keeps them and withholds
+      // the three artifact supporters. (It read `t:creature` while the fixture
+      // default was a Goblin; the default is now a type no target names, see
+      // `card` above.)
+      query: ast('t:instant'),
       pool: [
         ...plain(),
         supporter('sup-a', 900, { typeLine: 'Artifact', types: ['artifact'] }),
