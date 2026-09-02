@@ -241,6 +241,19 @@ describe('taxonomy corrections', () => {
       expect(rolesOf('Sorcery', text)).not.toContain('board-wipe')
     })
 
+    it('wipes when the sweep is keyed off a spell rather than aimed at the stack', () => {
+      // Celestial Kirin. The guard list must not contain "spells": "abilities"
+      // already excludes every end-the-turn card, and "spells" excluded only
+      // this one, which is a real wipe.
+      expect(
+        rolesOf(
+          'Creature — Kirin Spirit',
+          "Whenever you cast a Spirit or Arcane spell, destroy all permanents with that " +
+            "spell's mana value.",
+        ),
+      ).toContain('board-wipe')
+    })
+
     it('still wipes when a later sentence mentions a zone', () => {
       // The zone guard is scoped to the sentence, not the card. Settle the
       // Wreckage exiles a board and then talks about a library.
@@ -400,6 +413,32 @@ describe('taxonomy corrections', () => {
           "If a card would be put into an opponent's graveyard from anywhere, exile it instead.",
         ),
       ).toContain('graveyard-hate')
+      // A generic subject that is not literally the words "a card". Requiring
+      // those two words dropped all of these.
+      expect(
+        rolesOf(
+          'Legendary Creature — Human Soldier',
+          "If a creature card would be put into an opponent's graveyard from anywhere, exile " +
+            'it instead.',
+        ),
+      ).toContain('graveyard-hate')
+      expect(
+        rolesOf(
+          'Enchantment',
+          'If a card or token would be put into a graveyard from anywhere, exile it instead.',
+        ),
+      ).toContain('graveyard-hate')
+    })
+
+    it('does not read a Disturb back face exiling itself as graveyard hate', () => {
+      // The Disturb/Aura backs name themselves, and that is the only thing that
+      // tells them apart from Rest in Peace.
+      expect(
+        rolesOf(
+          'Enchantment — Aura',
+          'If Spectral Binding would be put into a graveyard from anywhere, exile it instead.',
+        ),
+      ).not.toContain('graveyard-hate')
     })
 
     it('does not read the flashback self-exile rider as graveyard hate', () => {

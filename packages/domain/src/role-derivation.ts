@@ -96,10 +96,16 @@ const HEURISTICS: readonly Heuristic[] = [
    * Wreckage — which exiles a board and then talks about a library — still wipes.
    * Rejected: a whitelist of permanent nouns, which dropped "Destroy all
    * Goblins" and "Destroy all Islands", both real wipes.
+   *
+   * `spells` is deliberately NOT in the guard list even though the stack is not
+   * the battlefield. A mutation test showed it excluded exactly one card in the
+   * corpus that "abilities" did not already exclude, and that card — Celestial
+   * Kirin, "destroy all permanents with that spell's mana value" — is a real
+   * wipe. The token bought nothing and cost a card.
    */
   {
     role: 'board-wipe',
-    test: /\b(destroy|exile) all\b(?![^.\n]{0,60}\b(graveyards?|hands?|library|libraries|stack|spells?|abilities|revealed)\b)/i,
+    test: /\b(destroy|exile) all\b(?![^.\n]{0,60}\b(graveyards?|hands?|library|libraries|stack|abilities|revealed)\b)/i,
   },
   /*
    * Mass damage — report 1's false negative. There was no rule at all, so
@@ -201,10 +207,17 @@ const HEURISTICS: readonly Heuristic[] = [
    * graveyard, the opposite of hating on one. That misread 60-odd cards
    * (Wrexial, Toshiro Umezawa, every Disturb creature) and was invisible in the
    * unit tests, which had the right phrasing in them.
+   *
+   * The subject has to be GENERIC — "a card", "a card or token", "a creature
+   * card", "an instant or sorcery card". Requiring the literal words "a card"
+   * was too narrow and dropped those last three; allowing any subject let the
+   * Disturb backs in, since they name themselves ("If Spectral Binding would be
+   * put into a graveyard from anywhere, exile it instead"). `if an? ` is what
+   * separates the two, and a mutation test is what found it.
    */
   {
     role: 'graveyard-hate',
-    test: /if a card would be put into (a|an opponent's|their|your) graveyard from anywhere, exile it instead/i,
+    test: /if an? [^.]{0,30}(card|token|permanent) would be put into (a|an opponent's|their|your) graveyard from anywhere, exile it instead/i,
   },
 
   { role: 'protection', test: /\b(hexproof|shroud|indestructible|protection from)\b/i },
