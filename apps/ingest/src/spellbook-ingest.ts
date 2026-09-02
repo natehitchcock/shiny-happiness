@@ -2,6 +2,7 @@ import type { Pool } from 'pg'
 import {
   piecesOf,
   streamVariants,
+  templatesOf,
   toCombo,
   variantSkipReason,
   type SpellbookOptions,
@@ -30,6 +31,19 @@ export interface ComboIngestReport {
    * Scryfall ingest is older than the Spellbook one.
    */
   readonly unmapped: readonly { readonly comboId: string; readonly missing: readonly string[] }[]
+  /**
+   * Combos one of whose pieces Spellbook describes as a card CLASS.
+   *
+   * Reported and NOT stored, for the same reason as `unmapped` directly above —
+   * see `variantSkipReason` in the client for the measurement and ADR-0038 for
+   * the report that found it. Kept separate from `skippedNotOk` and
+   * `skippedNoPieces` because this one is a loss the operator should see the
+   * size of: it is 4.5% of the source.
+   */
+  readonly templateRequired: readonly {
+    readonly comboId: string
+    readonly templates: readonly string[]
+  }[]
 }
 
 export interface ComboIngestOptions extends SpellbookOptions {
@@ -59,6 +73,7 @@ export const ingestSpellbook = async (
   let skippedNotOk = 0
   let skippedNoPieces = 0
   const unmapped: { comboId: string; missing: string[] }[] = []
+  const templateRequired: { comboId: string; templates: readonly string[] }[] = []
 
   let batch: Combo[] = []
   const flush = async (): Promise<void> => {
@@ -79,6 +94,10 @@ export const ingestSpellbook = async (
     }
     if (skip === 'no-pieces') {
       skippedNoPieces += 1
+      continue
+    }
+    if (skip === 'template-piece') {
+      templateRequired.push({ comboId: variant.id, templates: templatesOf(variant) })
       continue
     }
 
@@ -102,5 +121,5 @@ export const ingestSpellbook = async (
   }
   await flush()
 
-  return { read, combos, skippedNotOk, skippedNoPieces, unmapped }
+  return { read, combos, skippedNotOk, skippedNoPieces, unmapped, templateRequired }
 }

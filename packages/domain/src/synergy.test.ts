@@ -1797,3 +1797,308 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
     })
   })
 })
+
+describe('deriveSynergy — one semantic per clause (ADR-0038)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), typeLine, oracleText })
+
+  describe('a permanent that arrives carrying counters', () => {
+    it('reads the reported card', () => {
+      // Moritte was the report: "no semantics, even though she does both +1/+1
+      // counters and copy a creature". The counter half was a rule gap — the old
+      // pattern was `enters with (a|an|one|two|…) +1/+1 counter`, a closed list
+      // with no room for the word "additional".
+      const moritte = derive(
+        'Moritte of the Frost',
+        'Legendary Snow Creature — Shapeshifter',
+        "Changeling (This card is every creature type.)\nYou may have Moritte enter as a copy of a permanent you control, except it's legendary and snow in addition to its other types and, if it's a creature, it enters with two additional +1/+1 counters on it and has changeling.",
+      )
+
+      expect(moritte.produces).toContain('plus1-counter')
+    })
+
+    it('reads the counters a clone brings with it', () => {
+      const altered = derive(
+        'Altered Ego',
+        'Creature — Shapeshifter',
+        'You may have this creature enter as a copy of any creature on the battlefield, except it enters with X additional +1/+1 counters on it.',
+      )
+
+      expect(altered.produces).toContain('plus1-counter')
+    })
+
+    it('reads a count that is spelled out rather than numbered', () => {
+      const scavenger = derive(
+        'Undergrowth Scavenger',
+        'Creature — Plant Elemental',
+        'This creature enters with a number of +1/+1 counters on it equal to the number of creature cards in all graveyards.',
+      )
+
+      expect(scavenger.produces).toContain('plus1-counter')
+    })
+
+    it('still reads the plain numbered form the closed list used to reach', () => {
+      // The widened gap has to be a superset, not a replacement.
+      const polukranos = derive(
+        'Polukranos, Unchained',
+        'Legendary Creature — Zombie Hydra',
+        'Polukranos enters with six +1/+1 counters on it.',
+      )
+
+      expect(polukranos.produces).toContain('plus1-counter')
+    })
+
+    it('reads reanimation that adds counters on the way back', () => {
+      const evil = derive(
+        'Evil Reawakened',
+        'Sorcery',
+        'Return target creature card from your graveyard to the battlefield with two additional +1/+1 counters on it.',
+      )
+
+      expect(evil.produces).toContain('plus1-counter')
+    })
+  })
+
+  describe('a creature that sacrifices itself', () => {
+    it('reads the self-sacrifice as a creature dying', () => {
+      const elder = derive(
+        'Sakura-Tribe Elder',
+        'Creature — Snake Shaman',
+        'Sacrifice this creature: Search your library for a basic land card, put that card onto the battlefield tapped, then shuffle.',
+      )
+
+      expect(elder.produces).toContain('creature-death')
+    })
+
+    it('reads it even when the death is a drawback rather than an outlet', () => {
+      // A board wipe is already read this way: the card is not a sacrifice
+      // outlet, but a deck built on "whenever a creature dies" still gets one.
+      const runner = derive(
+        'Arc Runner',
+        'Creature — Elemental Ox',
+        'Haste (This creature can attack and {T} as soon as it comes under your control.)\nAt the beginning of the end step, sacrifice this creature.',
+      )
+
+      expect(runner.produces).toContain('creature-death')
+    })
+
+    it('does not mistake it for a sacrifice outlet', () => {
+      // An outlet WANTS fodder because you feed it your board. A creature that
+      // can only eat itself asks for nothing.
+      const cantor = derive(
+        'Wild Cantor',
+        'Creature — Human Druid',
+        'Sacrifice this creature: Add one mana of any color.',
+      )
+
+      expect(cantor.wants).not.toContain('sacrifice-fodder')
+    })
+  })
+
+  describe('the attack trigger Magic stopped writing as "attacks"', () => {
+    it('reads "whenever you attack"', () => {
+      // The rule asked for the inflected verb, and the modern template does not
+      // use it: "Whenever you attack" is one trigger for the whole team.
+      const adeline = derive(
+        'Adeline, Resplendent Cathar',
+        'Legendary Creature — Human Knight',
+        "Vigilance\nAdeline's power is equal to the number of creatures you control.\nWhenever you attack, for each opponent, create a 1/1 white Human creature token that's tapped and attacking that player or a planeswalker they control.",
+      )
+
+      expect(adeline.wants).toContain('attack-trigger')
+    })
+
+    it('reads the form that counts the attackers', () => {
+      const champions = derive(
+        'Champions from Beyond',
+        'Enchantment',
+        'When this enchantment enters, create X 1/1 colorless Hero creature tokens.\nFull Party — Whenever you attack with eight or more creatures, those creatures get +4/+4 until end of turn.',
+      )
+
+      expect(champions.wants).toContain('attack-trigger')
+    })
+  })
+
+  describe('fetching a land by its basic type', () => {
+    it('reads a fetchland as putting a land onto the battlefield', () => {
+      // The old rules wanted the WORD "land". A fetchland never says it — it
+      // names the basic types instead — so the most-played landfall enabler in
+      // the format read as nothing at all.
+      const strand = derive(
+        'Flooded Strand',
+        'Land',
+        '{T}, Pay 1 life, Sacrifice this land: Search your library for a Plains or Island card, put it onto the battlefield, then shuffle.',
+      )
+
+      expect(strand.produces).toContain('landfall')
+    })
+
+    it('reads the ramp spells the same way', () => {
+      const farseek = derive(
+        'Farseek',
+        'Sorcery',
+        'Search your library for a Plains, Island, Swamp, or Mountain card, put it onto the battlefield tapped, then shuffle.',
+      )
+
+      expect(farseek.produces).toContain('landfall')
+    })
+
+    it('does not read a tutor that fetches something else', () => {
+      // The word "land" is in this card's COST, not in what it fetches. A rule
+      // that read the whole clause would call every sacrifice-a-land tutor a
+      // landfall enabler.
+      const glider = derive(
+        'Bog Glider',
+        'Creature — Kor Rebel',
+        '{T}, Sacrifice a land: Search your library for a Mercenary permanent card with mana value 2 or less, put it onto the battlefield, then shuffle.',
+      )
+
+      expect(glider.produces).not.toContain('landfall')
+    })
+  })
+
+  describe("an enters trigger written with the card's own name", () => {
+    it('reads it as wanting to be blinked', () => {
+      // `when this creature enters` is the modern template; 527 commander-legal
+      // creatures still print their own name there and matched nothing.
+      const tolsimir = derive(
+        'Tolsimir, Friend to Wolves',
+        'Legendary Creature — Elf Scout',
+        'When Tolsimir enters, create Voja, Friend to Elves, a legendary 3/3 green and white Wolf creature token.',
+      )
+
+      expect(tolsimir.wants).toContain('creature-etb')
+    })
+
+    it('reads "whenever" as well as "when"', () => {
+      const ellivere = derive(
+        'Ellivere of the Wild Court',
+        'Legendary Creature — Human Knight',
+        'Whenever Ellivere enters or attacks, create a Virtuous Role token attached to another target creature you control.',
+      )
+
+      expect(ellivere.wants).toContain('creature-etb')
+    })
+
+    it('does not read a non-creature permanent as a creature entering', () => {
+      // A blink deck's whole vocabulary is creatures. An Equipment with an
+      // enters trigger is a different card, and `creature-etb` says creature.
+      const embercleave = derive(
+        'Embercleave',
+        'Legendary Artifact — Equipment',
+        'When Embercleave enters, attach it to target creature you control.',
+      )
+
+      expect(embercleave.wants).not.toContain('creature-etb')
+    })
+
+    it('does not fire on a lowercase subject', () => {
+      // The capital is what says "this is a name", and it is the whole of the
+      // rule's precision. Read case-insensitively, "whenever AN ARTIFACT you
+      // control enters" is a capital-A subject 28 characters wide, and this
+      // card would ask to be blinked because somebody else's permanent entered.
+      const fireweaver = derive(
+        'Reckless Fireweaver',
+        'Creature — Human Artificer',
+        'Whenever an artifact you control enters, this creature deals 1 damage to each opponent.',
+      )
+
+      expect(fireweaver.wants).toContain('artifact-etb')
+      expect(fireweaver.wants).not.toContain('creature-etb')
+    })
+  })
+
+  describe('the spellslinger trigger that names no card type', () => {
+    it('reads "whenever you cast a spell"', () => {
+      const conduit = derive(
+        'Aetherflux Conduit',
+        'Artifact',
+        'Whenever you cast a spell, you get an amount of {E} (energy counters) equal to the amount of mana spent to cast that spell.',
+      )
+
+      expect(conduit.wants).toContain('spell-cast')
+    })
+  })
+
+  describe('caring about counters that are already there', () => {
+    it('reads a payoff for creatures that carry counters', () => {
+      const priest = derive(
+        'Abzan Battle Priest',
+        'Creature — Human Cleric',
+        'Outlast {W}\nEach creature you control with a +1/+1 counter on it has lifelink.',
+      )
+
+      expect(priest.wants).toContain('plus1-counter')
+    })
+
+    it('does not read a creature that makes its own counters as a payoff', () => {
+      // The worst error this file can make is a direction inversion, and the
+      // article is where it would have got in: "each creature … with a +1/+1
+      // counter on it" is a payoff, and "this creature ENTERS WITH a +1/+1
+      // counter on it" is the produce side wearing nearly the same words.
+      const colossus = derive(
+        'Diregraf Colossus',
+        'Creature — Zombie Giant',
+        'This creature enters with a +1/+1 counter on it for each Zombie card in your graveyard.',
+      )
+
+      expect(colossus.produces).toContain('plus1-counter')
+      expect(colossus.wants).not.toContain('plus1-counter')
+    })
+  })
+
+  describe('a payoff for the tokens themselves', () => {
+    it('reads an anthem that only pumps tokens', () => {
+      const virtue = derive(
+        'Intangible Virtue',
+        'Enchantment',
+        'Creature tokens you control get +1/+1 and have vigilance.',
+      )
+
+      expect(virtue.wants).toContain('token')
+    })
+  })
+
+  describe('rules that were passing for no reason', () => {
+    it('reads spot removal as a creature dying', () => {
+      // Found by mutating the file: this rule had no test at all, so
+      // `destroy target creature` could be deleted and every test stayed green.
+      const murder = derive('Murder', 'Instant', 'Destroy target creature.')
+
+      expect(murder.produces).toContain('creature-death')
+    })
+
+    it('reads a board wipe as creatures dying', () => {
+      const wrath = derive(
+        'Wrath of God',
+        'Sorcery',
+        "Destroy all creatures. They can't be regenerated.",
+      )
+
+      expect(wrath.produces).toContain('creature-death')
+    })
+  })
+
+  describe('Moritte of the Frost, re-derived', () => {
+    const MORITTE = derive(
+      'Moritte of the Frost',
+      'Legendary Snow Creature — Shapeshifter',
+      "Changeling (This card is every creature type.)\nYou may have Moritte enter as a copy of a permanent you control, except it's legendary and snow in addition to its other types and, if it's a creature, it enters with two additional +1/+1 counters on it and has changeling.",
+    )
+
+    it('is no longer a card the model has nothing to say about', () => {
+      expect(MORITTE.produces).toEqual(['plus1-counter'])
+    })
+
+    it('says nothing about the copy half, and that is the decision', () => {
+      // A `copy` tag was measured and REFUSED on ADR-0029 §6's ground. The
+      // corpus holds 452 cards that copy a permanent and 76 whose text is
+      // payoff-shaped about copying — and every one of those 76 is a SPELL copy
+      // ("magecraft", "whenever you cast an instant or sorcery, copy it"),
+      // which `spell-cast` already owns. Nothing pays off having a copy of a
+      // permanent, so the tag would be inert in exactly the way ADR-0029 §6
+      // refused a mill tag for being.
+      expect(MORITTE.wants).toEqual([])
+    })
+  })
+})
