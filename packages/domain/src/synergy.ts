@@ -983,21 +983,24 @@ const WANTS: readonly Rule[] = [
    * with A +1/+1 counter on it has trample" is Abzan Battle Priest, Bramblewood
    * Paragon, Tuskguard Captain, Sapphire Drake, Gnarlid Colony — 42 cards.
    *
-   * `(?!enters)` is load-bearing and was put there by a measurement, not a
-   * hunch. Adding the article to the existing branch reached 182 cards instead
-   * of 42, and the extra 140 were PRODUCERS: "this creature ENTERS WITH a +1/+1
-   * counter on it for each Zombie card in your graveyard" is Diregraf Colossus,
-   * and every bloodthirst reminder text reads the same way. That is the
-   * direction inversion this rule's own comment above says is worse than a
-   * missing tag, arriving through a two-character change.
+   * The leading DETERMINER is what stops this being a direction inversion, and
+   * it is there because of a measurement rather than a hunch. Adding the article
+   * to the existing branch and nothing else reached 182 cards instead of 42, and
+   * the extra 140 were PRODUCERS: "THIS creature ENTERS WITH a +1/+1 counter on
+   * it for each Zombie card in your graveyard" is Diregraf Colossus, and every
+   * bloodthirst reminder text reads the same way. A payoff talks about "each",
+   * "another", "all", "target" or "attacking" creatures; a card making its own
+   * counters says "this".
    *
-   * The leading determiner does the other half of the work: a payoff talks about
-   * "each", "another", "all", "target" or "attacking" creatures, never "this"
-   * one.
+   * An explicit `(?!enters)` on the gap was written to say that out loud, and
+   * dropped: it moves exactly ZERO cards in the corpus, because the determiner
+   * already refuses every one of them, and it survived every mutation the tests
+   * could make. That is the same ruling the `itself` exclusion got above — a
+   * branch a test cannot fail on is machinery.
    */
   {
     tag: 'plus1-counter',
-    test: /\b(?:each|another|other|all|target|attacking) creatures?(?:(?!enters)[a-z' ]){0,25} with (?:a |one or more )?\+1\/\+1 counters? on (?:them|it)\b/i,
+    test: /\b(?:each|another|other|all|target|attacking) creatures?[a-z' ]{0,25} with (?:a |one or more )?\+1\/\+1 counters? on (?:them|it)\b/i,
   },
   { tag: 'attack-trigger', test: /\bwhenever .{0,30}attacks\b/i },
   /*
