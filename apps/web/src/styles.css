@@ -4014,6 +4014,35 @@ select {
   border-left-color: var(--brass-dim);
 }
 
+/* The deck is at or over 100 (ADR-0051). Rust rather than brass, because this
+   one is not a limit on what Quickbuild can help with — it is the deck already
+   being illegal, which is the same fact the legality block reports. */
+.quickbuild-full {
+  border-left-color: var(--rust);
+}
+
+/* What this particular card will cost. Rust for the same reason, and never
+   colour alone: the sentence names the arithmetic, and the Add control beside
+   it carries the same words in its accessible name. */
+.quickbuild-warns {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--step) / 4);
+  margin: calc(var(--step) / 2) 0 0;
+  padding-left: var(--step);
+  border-left: 2px solid var(--rust);
+  font-size: 0.78rem;
+  color: var(--parchment-dim);
+}
+
+/* An Add whose click has a consequence worth stating. The marker is the border
+   and the button's own name, not the fill: rust and sage are not separable
+   under deuteranopia (`packages/ui/src/tokens.ts`), which is why the bracket
+   chip carries a glyph as well as a colour. */
+.quickbuild-option .act.primary[data-warns='true'] {
+  border-color: var(--rust);
+}
+
 .quickbuild-filter code {
   font-family: var(--mono);
   color: var(--parchment);

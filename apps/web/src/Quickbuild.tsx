@@ -3,6 +3,7 @@ import { Detail, type CardView } from '@roundtable/ui'
 import {
   DECK_SIZE,
   gapQuery,
+  type BracketFlag,
   type QuickbuildGap,
   type QuickbuildPlan,
   type QuickbuildReach,
@@ -44,6 +45,37 @@ export interface QuickbuildCandidate {
    * two reasons and the builder should see both.
    */
   readonly groupLabel: string
+  /**
+   * The bracket flags the server attached, STRUCTURED (ADR-0051).
+   *
+   * `view.reasons` is already carrying these, but as prose — the workspace
+   * phrases every reason through `reasonText`, and a `bracket-warning` becomes
+   * the two words "bracket warning" in a bullet list of four. That is a fact
+   * about the card with no consequence attached, sitting where the eye is
+   * scanning for why the card is good. It is not a warning.
+   *
+   * So the flag travels beside the prose rather than instead of it: the panel
+   * needs to know a card is a Game Changer in order to combine it with the
+   * allowance below and say what the click will actually do.
+   *
+   * Optional, so a caller that does not supply it keeps working (AGENTS.md R2).
+   */
+  readonly bracketFlags?: readonly BracketFlag[]
+}
+
+/**
+ * The deck's Game Changer standing, when the workspace can say (ADR-0051).
+ *
+ * `null` means the bracket check is unavailable — `rules === null`, the state
+ * the masthead chip prints as "NOT CHECKED". The panel then says a card is a
+ * Game Changer and stops there, rather than asserting an allowance nobody gave
+ * it: a table of allowances in a component file is a rejected PR (AGENTS.md
+ * §8), and so is a fabricated one.
+ */
+export interface GameChangerStanding {
+  /** How many the deck holds now, commander included. */
+  readonly held: number
+  readonly allowed: number | 'unlimited'
 }
 
 export interface QuickbuildProps {
@@ -93,6 +125,16 @@ export interface QuickbuildProps {
    * element leaves the queue, never in which query produced it.
    */
   readonly retiredIds: ReadonlySet<string>
+  /**
+   * What the bracket allows and what the deck holds, for the warning that has
+   * to appear BEFORE the click (ADR-0051).
+   *
+   * Owned by the workspace, like `plan`, because it is read off the same
+   * `analysis.bracket` the masthead chip draws from — and the chip turning red
+   * a moment after the click is the whole complaint. Two copies of "how many
+   * Game Changers is this deck at" is two numbers to disagree.
+   */
+  readonly gameChangers?: GameChangerStanding | null
 }
 
 /** How many are offered at once. D1: three for ONE gap, not one each for three. */
@@ -243,6 +285,67 @@ const endingText = (plan: QuickbuildPlan): string => {
   )
 }
 
+/**
+ * What taking THIS CARD will cost, said before it is taken (ADR-0051).
+ *
+ * Per-card only. Being at 100 is a fact about the deck, not about any one of
+ * the three, so it is stated once in the panel's own banner rather than
+ * repeated under each option — three identical paragraphs is how a warning
+ * becomes wallpaper. It still reaches every Add control's accessible name,
+ * because a name is read one control at a time.
+ *
+ * THE DECISION THIS ENCODES: warn on the option, refuse nothing.
+ *
+ * Refusing was the tempting answer and it is the one the project has already
+ * ruled out twice. Doc 03 §3.2 says bracket flags are surfaced and never used
+ * to filter, AGENTS.md §8 lists "filtering candidates by bracket instead of
+ * flagging them" among the things that get a PR rejected, and the reason given
+ * for both is that the user is allowed to cross their own line KNOWINGLY. The
+ * defect was never that the card was offered. It was that "knowingly" was not
+ * true: the badge went red after the click and the option had carried nothing.
+ *
+ * Letting it through and saying so afterwards is what shipped, and it is the
+ * one option that is definitely wrong — by the time the legality block updates,
+ * the deck has already changed and the panel has already moved on.
+ *
+ * ADR-0044 D4 IS UNCHANGED. It governs which cards LEAD the staples phase — an
+ * over-allowance Game Changer is withheld from the `staple` groups and appears
+ * everywhere else with its `bracket-warning` reason. That is still exactly what
+ * happens. Nothing here widens what the recommender endorses, filters a
+ * candidate, or touches `gameChangerBudget`. It adds a sentence.
+ *
+ * Returns the sentences in the order they matter, most consequential first.
+ * Empty for the ordinary card, which is nearly every card.
+ */
+export const warningsFor = (
+  candidate: QuickbuildCandidate,
+  gameChangers: GameChangerStanding | null | undefined,
+): readonly string[] => {
+  const warnings: string[] = []
+
+  if ((candidate.bracketFlags ?? []).includes('game-changer')) {
+    const allowed = gameChangers?.allowed
+    if (typeof allowed === 'number' && gameChangers !== null && gameChangers !== undefined) {
+      const next = gameChangers.held + 1
+      if (next > allowed) {
+        warnings.push(
+          `${candidate.view.name} is a Game Changer, and taking it takes you to ${String(next)} of ` +
+            `the ${String(allowed)} your bracket allows.`,
+        )
+      }
+    } else {
+      // No allowance to compare against — `unlimited`, or the bracket check is
+      // unavailable. The flag is still the server's own fact and worth saying;
+      // the arithmetic is not ours to invent.
+      if (allowed !== 'unlimited') {
+        warnings.push(`${candidate.view.name} is a Game Changer.`)
+      }
+    }
+  }
+
+  return warnings
+}
+
 export const Quickbuild = ({
   plan,
   filter,
@@ -253,6 +356,7 @@ export const Quickbuild = ({
   onReach,
   cutCount,
   retiredIds,
+  gameChangers,
 }: QuickbuildProps): JSX.Element => {
   /**
    * The gap "Different gap" moved to, by KEY. `null` means the leading one.
@@ -687,6 +791,32 @@ export const Quickbuild = ({
           </div>
 
           {/*
+           * The deck is full, said ONCE at the top rather than only on each
+           * option (ADR-0051).
+           *
+           * Q5's sibling: that paragraph exists because "Quickbuild only adds"
+           * is a limit the panel has to admit to rather than go quiet about,
+           * and being at 100 cards is the same kind of fact. The panel kept
+           * offering "4 more at mana value 2" to a finished deck and the only
+           * notice of what the click had done was in the legality block below
+           * the fold.
+           *
+           * It does not stop the loop. `plan.gaps` is still what it was, the
+           * options are still offered and still take a click — the deck's shape
+           * really is short of ramp at 100 cards, and saying so is the honest
+           * report. What changes is that the arithmetic is on screen before the
+           * click instead of after it.
+           */}
+          {plan.held < DECK_SIZE ? null : (
+            <p className="quickbuild-limit quickbuild-full">
+              {`The deck already holds ${String(plan.held)} of ${String(DECK_SIZE)} cards. ` +
+                `Anything added here makes it ${String(plan.held + 1)}, which is not a legal ` +
+                `Commander deck — so these are trades against something already in the list, ` +
+                `not additions to it.`}
+            </p>
+          )}
+
+          {/*
            * Q3 — the filter is respected AND said out loud, every time it is
            * doing anything. The stated risk is that a stale filter makes the
            * panel look broken; saying it is what stops that.
@@ -738,7 +868,33 @@ export const Quickbuild = ({
                 Option {focus + 1} of {showing.length}
               </p>
               <ul className="quickbuild-options" aria-label="Three candidates for this gap">
-                {showing.map((candidate, at) => (
+                {showing.map((candidate, at) => {
+                  const warnings = warningsFor(candidate, gameChangers)
+                  /*
+                   * The consequence goes in the Add control's OWN name, not
+                   * only in the paragraph beside it.
+                   *
+                   * A screen-reader user moving control to control never reads
+                   * the paragraph — they hear "Add, button" and press it. The
+                   * warning has to be on the thing being pressed, which is the
+                   * same reasoning that moved the composition meter's `title`
+                   * into its trigger's accessible name.
+                   *
+                   * Short forms, because an accessible name is spoken and the
+                   * full sentences are two lines each. The visible text carries
+                   * the whole of it.
+                   */
+                  const spoken = [
+                    plan.held >= DECK_SIZE
+                      ? `takes the deck to ${String(plan.held + 1)} of ${String(DECK_SIZE)}`
+                      : null,
+                    (candidate.bracketFlags ?? []).includes('game-changer') &&
+                    typeof gameChangers?.allowed === 'number' &&
+                    gameChangers.held + 1 > gameChangers.allowed
+                      ? `takes you to ${String(gameChangers.held + 1)} of ${String(gameChangers.allowed)} Game Changers`
+                      : null,
+                  ].filter((s): s is string => s !== null)
+                  return (
                   <li
                     key={candidate.oracleId}
                     className={at === focus ? 'quickbuild-option is-focused' : 'quickbuild-option'}
@@ -757,7 +913,21 @@ export const Quickbuild = ({
                       card={candidate.view}
                       actions={
                         <>
-                          <button className="act primary" onClick={() => onAdd(candidate.oracleId)}>
+                          {/* The name changes ONLY when there is something to
+                              say. An unwarned Add is still called "Add" — the
+                              `<li>` already names the card and the option
+                              number, so renaming every button would add a
+                              repetition to all three to serve the rare one. */}
+                          <button
+                            className="act primary"
+                            data-warns={spoken.length > 0}
+                            onClick={() => onAdd(candidate.oracleId)}
+                            {...(spoken.length === 0
+                              ? {}
+                              : {
+                                  'aria-label': `Add ${candidate.view.name} — ${spoken.join(', and ')}`,
+                                })}
+                          >
                             Add
                           </button>
                           <button className="act" onClick={() => onReject(candidate.oracleId)}>
@@ -766,9 +936,22 @@ export const Quickbuild = ({
                         </>
                       }
                     />
+                    {/* Under the card and over the group line, which is where
+                        the eye already is when it reaches the buttons. Not a
+                        `role="alert"`: three of these would interrupt a screen
+                        reader three times for something nobody has acted on
+                        yet, and the Add control already carries it. */}
+                    {warnings.length === 0 ? null : (
+                      <p className="quickbuild-warns">
+                        {warnings.map((w) => (
+                          <span key={w}>{w}</span>
+                        ))}
+                      </p>
+                    )}
                     <p className="quickbuild-group">Offered under {candidate.groupLabel}</p>
                   </li>
-                ))}
+                  )
+                })}
               </ul>
               <div className="quickbuild-actions">
                 {/*

@@ -374,9 +374,13 @@ export const legalityText = (
       const expected = p.expected ?? 100
       const off = expected - actual
       if (off === 0) return `The deck has ${String(actual)} cards.`
+      // `plural`, because the one-card case is the one this sentence is read in
+      // most: the click that takes a finished deck to 101 said "1 cards over
+      // 100". Declared below this function and only ever called after module
+      // init, so the reference is live by the time anything renders.
       return off > 0
-        ? `${String(off)} cards short of ${String(expected)} — the deck has ${String(actual)}.`
-        : `${String(-off)} cards over ${String(expected)} — the deck has ${String(actual)}.`
+        ? `${plural(off, 'card')} short of ${String(expected)} — the deck has ${String(actual)}.`
+        : `${plural(-off, 'card')} over ${String(expected)} — the deck has ${String(actual)}.`
     }
     case 'not-singleton':
       return `${subject}: ${String(p.copies ?? 0)} copies, and Commander allows ${String(p.allowed ?? 1)}.`
@@ -6357,6 +6361,30 @@ export const Workspace = ({
   }
 
   /**
+   * Reject from the DECK RAIL, and say where the card went (ADR-0051).
+   *
+   * A Restore path already existed before this — the "Rejected" section at the
+   * foot of the rail, with "Suggest again" and "Add" on every row — and the
+   * playtest still reported there was none they could find. That is not a
+   * missing control, it is a control below a hundred rows of deck. So the
+   * banner names it at the moment of the click, which is the one moment the
+   * user is looking for it.
+   *
+   * The same sentence `rejectionText` already uses for `previously-excluded`,
+   * deliberately: two spellings of "your way back is the Rejected list" is two
+   * things to keep true.
+   *
+   * Only from the rail. The feed's own Reject goes through `decide`, which
+   * announces the count into the live region and does not need a banner for
+   * every one of ninety-eight rows someone is working through.
+   */
+  const reject = (oracleId: string): void => {
+    act(oracleId, 'exclude')
+    const name = cards.get(oracleId)?.name ?? 'That card'
+    setNotice(`${name} will not be suggested again. Put it back from the Rejected list below.`)
+  }
+
+  /**
    * The suggestion row after this one, by oracle id.
    *
    * Read off the DOM rather than recomputed from `visibleGroups`, because the
@@ -6954,6 +6982,28 @@ export const Workspace = ({
    * `null` while the analysis is loading, which is also why the masthead button
    * is disabled until then.
    */
+  /**
+   * What the bracket allows and what the deck holds, for Quickbuild's
+   * before-the-click warning (ADR-0051).
+   *
+   * Read off `analysis.bracket` through the SAME `gameChangerAllowance` the
+   * masthead chip uses. The complaint was that the chip went red after the
+   * click; two independent readings of "how many Game Changers is this deck at"
+   * would be the same failure with an extra way to disagree.
+   *
+   * `null` when the allowance cannot be established — `rules === null`, which
+   * the chip prints as "NOT CHECKED". The panel then names the flag and asserts
+   * no arithmetic, because a fabricated allowance is a rejected PR
+   * (AGENTS.md §8).
+   */
+  const gameChangerStanding = useMemo(() => {
+    const bracket = analysis?.bracket
+    if (bracket === undefined) return null
+    const allowed = gameChangerAllowance(bracket)
+    if (allowed === null) return null
+    return { held: (bracket.gameChangers ?? []).length, allowed }
+  }, [analysis])
+
   const quickbuild = useMemo(() => {
     if (analysis === null) return null
     return quickbuildPlan({
@@ -7056,6 +7106,19 @@ export const Workspace = ({
               reasons: item.reasons.map((r) => reasonText(r, item)),
             },
             groupLabel,
+            /*
+             * The same facts as the `bracket-warning` reasons above, kept
+             * structured (ADR-0051).
+             *
+             * `reasonText` renders one as the two words "bracket warning",
+             * which is where a Game Changer's flag went to die: a bullet among
+             * the reasons the card is GOOD, with no consequence attached. The
+             * panel needs the flag itself to combine with the deck's allowance
+             * and say what the click will do.
+             */
+            bracketFlags: item.reasons.flatMap((r) =>
+              r.kind === 'bracket-warning' && r.flag !== undefined ? [r.flag] : [],
+            ),
           },
         ]
       })
@@ -7540,7 +7603,28 @@ export const Workspace = ({
       // The client's count, not the server's — the server's is a snapshot from
       // the last recompute, and a lock has to show up before the next one.
       const locked = lockedByDimension.get(dimensionKeyOf(t.dimension)) ?? t.locked
-      const settled = locked >= t.actual && t.actual >= t.min
+      /*
+       * `t.actual > 0` is the whole fix, and it is about what "settled" MEANS.
+       *
+       * Settled is "every card counted toward this role has been committed, so
+       * there is nothing left to decide here". At zero cards both remaining
+       * halves are vacuously true — nothing is locked out of nothing, and the
+       * band floor is `max(0, ideal - width)`, which is 0 for every role with
+       * an ideal of 2 or less. So `counterspell 0/1` and `graveyard-hate 0/1`
+       * read as fully locked and dropped out of the rail.
+       *
+       * Measured against a live five-colour deck at bracket 3: `GET /analysis`
+       * returned 11 targets, the rail drew 9, and the two it dropped were
+       * exactly those two — while the feed beside it was heading groups "Fills
+       * gap · counterspell" and "Fills gap · graveyard-hate", because the feed
+       * measures its deficit against the IDEAL (`findDeficits`). The meter went
+       * blind precisely where it was most useful, and only came back once you
+       * already owned one of each.
+       *
+       * The `locked >= t.actual` half is untouched: it is what the gold locked
+       * overlay draws and it is the half that was right.
+       */
+      const settled = t.actual > 0 && locked >= t.actual && t.actual >= t.min
       const filled = t.actual >= t.min
       return { ...t, locked, name, settled, filled }
     })
@@ -7910,12 +7994,52 @@ export const Workspace = ({
                           {lockedIds.has(line.oracleId) ? '\u25C6' : '\u25C7'}
                         </button>
                       )}
+                      {/* TWO controls, because these are two intentions and
+                          one word cannot carry both (ADR-0051).
+
+                          This was a single button reading "Remove" that sent
+                          `exclude` — every copy gone AND the card banned under
+                          pillar P6. A playtest took five lands out of a
+                          five-colour deck with it and `fills-land` went to zero
+                          candidates. Doc 19 D5 argues against exactly this trap
+                          for Quickbuild: "a builder clicking past a card they
+                          might want later would silently exile it".
+
+                          REJECTED: renaming the one button to "Never suggest"
+                          so the label matched the command. It is honest and it
+                          leaves a builder with no way at all to take a card out
+                          of their own deck without banning it — and the domain
+                          has had `remove` for that since ADR-0012, which the
+                          basic-land stepper two sections down already uses.
+
+                          REJECTED: `remove` only, with rejection left to the
+                          suggestion feed. A card already in the deck is
+                          precisely where you learn you never want to see it
+                          again, and the alternative loop is remove, wait for it
+                          to be re-suggested, then reject. */}
                       <button
-                        className="act exclude"
-                        onClick={() => act(line.oracleId, 'exclude')}
-                        aria-label={`Remove ${cards.get(line.oracleId)?.name ?? 'card'}`}
+                        className="act"
+                        onClick={() => act(line.oracleId, 'remove')}
+                        aria-label={
+                          line.copies > 1
+                            ? `Remove one copy of ${cards.get(line.oracleId)?.name ?? 'card'} from the deck`
+                            : `Remove ${cards.get(line.oracleId)?.name ?? 'card'} from the deck`
+                        }
+                        title={
+                          line.copies > 1
+                            ? 'Takes one copy out of the deck. It can still be suggested again'
+                            : 'Takes it out of the deck. It can still be suggested again'
+                        }
                       >
                         Remove
+                      </button>
+                      <button
+                        className="act exclude"
+                        onClick={() => reject(line.oracleId)}
+                        aria-label={`Never suggest ${cards.get(line.oracleId)?.name ?? 'card'} again`}
+                        title="Takes it out and stops it being suggested. Undo it from the Rejected list at the foot of this column"
+                      >
+                        Never suggest
                       </button>
                     </>
                   )}
@@ -8047,6 +8171,7 @@ export const Workspace = ({
                  * is acted on.
                  */
                 retiredIds={retiredIds}
+                gameChangers={gameChangerStanding}
               />
             </Boundary>
           ) : null}

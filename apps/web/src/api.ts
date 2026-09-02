@@ -5,6 +5,7 @@
  * same-origin in production, so no base URL is ever configured in the client.
  */
 import type {
+  BracketFlag,
   CardEfficiency,
   CardImpact,
   DeckColumn,
@@ -155,6 +156,15 @@ export interface Reason {
   withOracleIds?: string[]
   /** Whose target a `fills-deficit` gap is measured against (doc 16). */
   source?: 'archetype' | 'custom'
+  /**
+   * Which bracket rule a `bracket-warning` names.
+   *
+   * The server has sent it since `recommend` started emitting the reason; this
+   * type simply never declared it, so the only thing any surface could do with
+   * a bracket warning was print the words "bracket warning". Quickbuild needs
+   * the flag itself to say what taking the card costs (ADR-0051).
+   */
+  flag?: BracketFlag
   /**
    * Whether a `keyword-synergy` reason names a tag the builder EMPHASISED.
    *
