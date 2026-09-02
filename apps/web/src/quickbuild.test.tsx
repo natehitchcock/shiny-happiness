@@ -1326,6 +1326,30 @@ describe('the staples phase opens the loop', () => {
     await screen.findByRole('heading', { name: /2 staples you don’t have yet/i })
   })
 
+  it('drops the plural on the last one, which the count now reaches every time', async () => {
+    // Reached on the way out of every staples phase, not occasionally: the
+    // heading counts down as the builder adds.
+    setup({ plan: staplesPlan() }, [candidate('Ai', 'Staples')])
+    await screen.findByRole('heading', { name: /^1 staple you don’t have yet$/i })
+  })
+
+  it('does the same for the lands label', async () => {
+    setup({ plan: staplesPlan({ gaps: [stapleLandGap, rampGap] }) }, [candidate('Ai', 'Staples')])
+    await screen.findByRole('heading', { name: /^1 staple land you don’t have yet$/i })
+  })
+
+  it('stops counting at zero rather than posing a riddle', async () => {
+    /*
+     * "0 staple lands you don't have yet" is true and unreadable, and it is
+     * also the one count that could mislead: zero because the builder took them
+     * all and zero because the server never had any are different facts, and
+     * the line UNDER the heading is what distinguishes them.
+     */
+    setup({ plan: staplesPlan({ gaps: [stapleLandGap, rampGap] }) }, [])
+    await screen.findByRole('heading', { name: /No staple lands left to offer/i })
+    expect(screen.queryByRole('heading', { name: /0 staple lands/i })).toBeNull()
+  })
+
   it('does not blame the colours for a list the builder emptied themselves', async () => {
     /*
      * The playtest's exact line: "5 staple lands you don't have yet" over

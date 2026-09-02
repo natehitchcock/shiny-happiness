@@ -227,12 +227,30 @@ export const combinedQuery = (filter: string, gap: QuickbuildGap): string => {
  * would replace a true number with a different true number answering a
  * different question.
  */
-const gapHeading = (gap: QuickbuildGap, offering: number | null): string =>
-  gap.kind === 'staples'
-    ? `${offering ?? gap.short} ${gap.label} you don’t have yet`
-    : gap.kind === 'curve'
-      ? `${gap.short} more at ${gap.label}`
-      : `${gap.short} more ${gap.label}`
+const gapHeading = (gap: QuickbuildGap, offering: number | null): string => {
+  if (gap.kind === 'curve') return `${gap.short} more at ${gap.label}`
+  if (gap.kind !== 'staples') return `${gap.short} more ${gap.label}`
+  const left = offering ?? gap.short
+  /*
+   * At zero the heading stops counting.
+   *
+   * "0 staple lands you don't have yet" is technically true and reads as a
+   * puzzle, and it would also be the one heading that could be wrong: zero
+   * because the builder took them all and zero because the server never had
+   * any are different facts, and the sentence under the heading is what tells
+   * them apart. So the heading says the neutral thing that holds either way
+   * and leaves the explanation to the line that has it.
+   */
+  if (left === 0) return `No ${gap.label} left to offer`
+  /*
+   * The count now walks down to one on the way out, so the singular is reached
+   * every time rather than occasionally. The two labels the domain emits here
+   * are `staples` and `staple lands` — both regular plurals — so trimming the
+   * final `s` is exact for both, and is deliberately not a general pluraliser,
+   * which is not this file's to own. Pinned in `quickbuild.test.tsx`.
+   */
+  return `${left} ${left === 1 ? gap.label.replace(/s$/, '') : gap.label} you don’t have yet`
+}
 
 /**
  * What the panel says when it runs out of gaps — the report's second half.
