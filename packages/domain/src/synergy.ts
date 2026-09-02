@@ -112,7 +112,7 @@ export const SYNERGY_TAGS: readonly SynergyTag[] = [
  * because it reads true in both directions — the one-way relations were refused
  * entry and carried on the payoff side instead — so a row's direction is not
  * information this shape discarded, it is information the criterion excludes.
- * Directing the table would mean inventing it thirty times. Read ADR-0045 before
+ * Directing the table would mean inventing it once per row. Read ADR-0045 before
  * reopening this; the case that would justify it is a feature that must tell
  * "what causes X" from "what X causes" ACROSS tags, and none has arrived yet.
  */
