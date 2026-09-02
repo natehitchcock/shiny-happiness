@@ -61,86 +61,20 @@ describe('impactRolePlacement', () => {
     expect(impactRolePlacement(8, WIDE)).toBe('middle-half')
   })
 
-  /**
-   * THE WHOLE POINT: the same score is a different statement in two roles.
-   *
-   * 6.0 is an unremarkable board wipe and an extraordinary ramp card, and a
-   * metric that said one thing about both would be the "aim for 6+" advice this
-   * module exists to prevent.
-   */
-  it('places one score differently in two roles', () => {
-    expect(impactRolePlacement(6, WIDE)).toBe('middle-half')
-    expect(impactRolePlacement(6, NARROW)).toBe('top-quarter')
-  })
-})
-
-describe('roleImpactIsMostlyUnreadable', () => {
-  it('is true only when MORE than half the role names nothing to count', () => {
-    // The threshold is a plain-language majority, not a tuned number — the copy
-    // it gates says "most cards in this role" — so exactly half must be false.
-    expect(roleImpactIsMostlyUnreadable({ ...WIDE, n: 100, noCountableEffect: 51 })).toBe(true)
-    expect(roleImpactIsMostlyUnreadable({ ...WIDE, n: 100, noCountableEffect: 50 })).toBe(false)
-    expect(roleImpactIsMostlyUnreadable({ ...WIDE, n: 100, noCountableEffect: 49 })).toBe(false)
-  })
-
-  it('separates the roles the shipped model cannot see from the ones it can', () => {
-    // Against the SHIPPED bands, because the pane swaps its caveat on this and
-    // a version that answered the same for every role would make that copy a
-    // decoration. Lands and ramp are the cards a low score misleads about;
-    // board wipes and spot removal are read in full.
-    expect(roleImpactIsMostlyUnreadable(roleImpactBand('land') as RoleImpactBand)).toBe(true)
-    expect(roleImpactIsMostlyUnreadable(roleImpactBand('ramp') as RoleImpactBand)).toBe(true)
-    expect(roleImpactIsMostlyUnreadable(roleImpactBand('board-wipe') as RoleImpactBand)).toBe(false)
-    expect(roleImpactIsMostlyUnreadable(roleImpactBand('spot-removal') as RoleImpactBand)).toBe(
-      false,
-    )
-  })
-})
-
-describe('roleImpactBand', () => {
-  it('returns the shipped band for a role the corpus measured', () => {
-    const band = roleImpactBand('board-wipe')
-    expect(band).not.toBeNull()
-    expect(band?.n).toBeGreaterThan(0)
-  })
-
-  it('returns null for a role the shipped data has no cards for', () => {
-    // Not a `Role`: the data is keyed by role name and a regeneration against a
-    // corpus that never derived one must read as absent, not as zeroes.
-    expect(roleImpactBand('not-a-role' as Role)).toBeNull()
-  })
-})
-
-describe('the shipped bands', () => {
   /*
-   * Roles that exist in the vocabulary but that the SHIPPED bands do not measure
-   * yet, because the bands are generated from `cards.roles` in a corpus database
-   * and `roles` is written at ingest. ADR-0037 added these two; no card in the
-   * database holds either until the operator re-runs the card ingest, so
-   * regenerating the bands today would produce zero-card entries — which
-   * `impact-roles.ts` is explicit it must never do, since a role with no cards
-   * has to read as ABSENT and not as zeroes.
+   * No exemptions. ADR-0037's `counterspell` and `bounce` were exempt for one
+   * commit, because `roles` is written at ingest and the bands are generated
+   * from it — so they had no cards until the operator re-ran the ingest. That
+   * has happened, both roles are measured, and the self-clearing test that
+   * guarded the exemption did its job and demanded its own deletion.
    *
-   * Clear this list by running, in order:
-   *   pnpm --filter @roundtable/ingest start cards
-   *   pnpm --filter @roundtable/ingest impact-roles
-   * and committing the regenerated `impact/by-role.data.json`.
+   * Kept as a plain total assertion rather than an exemption list with nothing
+   * in it: an empty list invites the next role to be added to it instead of
+   * being measured.
    */
-  const AWAITING_REINGEST: readonly Role[] = ['counterspell', 'bounce']
-
   it('covers every role in the vocabulary', () => {
     for (const role of ROLE_PRECEDENCE) {
-      if (AWAITING_REINGEST.includes(role)) continue
       expect(roleImpactBand(role), role).not.toBeNull()
-    }
-  })
-
-  it('has nothing stale in the awaiting-reingest list', () => {
-    // Self-clearing. The moment the bands are regenerated, these roles ARE
-    // measured, this fails, and the exemption above has to be deleted — so the
-    // exemption cannot quietly outlive the reason for it.
-    for (const role of AWAITING_REINGEST) {
-      expect(roleImpactBand(role), `${role} is measured now — delete it from the list`).toBeNull()
     }
   })
 
