@@ -1,5 +1,6 @@
 import type { Card } from './card.js'
 import type { OracleId } from './ids.js'
+import { SEMANTIC_TAGS, deriveSemanticTokens, type SemanticTag } from './semantic-tokens.js'
 
 /**
  * Mechanical synergy (ADR-0011).
@@ -39,7 +40,18 @@ import type { OracleId } from './ids.js'
  * override table is a first-class, growing artifact.
  */
 
-export type SynergyTag =
+/**
+ * The curated events. Twenty-one, hand-written, each with an ADR behind it.
+ *
+ * `SynergyTag` is wider than this: ADR-0046 adds the two OPEN vocabularies —
+ * subtypes and keywords — which cannot be hand-curated because the game keeps
+ * printing new ones. They live in `semantic-tokens.ts` and are generated from
+ * the corpus. Everything in THIS file is about the closed list: the regex
+ * tables below and `INTERACTION_PAIRS` are all event-only, and the pairs table
+ * stays small precisely because the new families need no pairs at all — their
+ * relation is same-tag-opposite-direction, which the model already has.
+ */
+export type EventTag =
   | 'creature-death'
   | 'token'
   | 'lifegain'
@@ -63,7 +75,9 @@ export type SynergyTag =
   | 'damage'
   | 'land-creature'
 
-export const SYNERGY_TAGS: readonly SynergyTag[] = [
+export type SynergyTag = EventTag | SemanticTag
+
+export const EVENT_TAGS: readonly EventTag[] = [
   'creature-death',
   'token',
   'lifegain',
@@ -87,6 +101,17 @@ export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'damage',
   'land-creature',
 ]
+
+/**
+ * Every tag, curated and derived.
+ *
+ * APPEND-ONLY, and that is a persisted contract rather than a style note:
+ * `semantic-emphasis.ts` sorts a deck's stored emphasis into this array's ORDER
+ * and migration 0014 documents the guarantee, so inserting a tag in the middle
+ * silently reorders scoring ties for decks that already exist. The events come
+ * first and keep their existing indices; the generated families are appended.
+ */
+export const SYNERGY_TAGS: readonly SynergyTag[] = [...EVENT_TAGS, ...SEMANTIC_TAGS]
 
 /**
  * Which events feed which other events.
@@ -293,8 +318,13 @@ const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
   ['land-creature', 'plus1-counter'],
 ]
 
+// Over the EVENTS only. The table above is event-only by construction, and the
+// derived families need no entry in it: their relation is same-tag-opposite-
+// direction, which the model already has. `interactsWith` answers `[]` for them
+// through its own `?? []`, which is the same "gap, not a claim" the docblock
+// below already describes.
 const INTERACTIONS = ((): ReadonlyMap<SynergyTag, readonly SynergyTag[]> => {
-  const map = new Map<SynergyTag, SynergyTag[]>(SYNERGY_TAGS.map((t) => [t, []]))
+  const map = new Map<SynergyTag, SynergyTag[]>(EVENT_TAGS.map((t) => [t, []]))
   for (const [a, b] of INTERACTION_PAIRS) {
     map.get(a)?.push(b)
     map.get(b)?.push(a)
@@ -1228,7 +1258,10 @@ const WANTS: readonly Rule[] = [
    * that rule reads and substitution eats the word. Cheaper to miss twelve
    * cards than to break thirty.
    */
-  { tag: 'creature-etb', test: /^[^\n]*\bCreature\b[\s\S]*\b[Ww]hen(?:ever)? [A-Z][^,.\n]{0,28} enters\b/ },
+  {
+    tag: 'creature-etb',
+    test: /^[^\n]*\bCreature\b[\s\S]*\b[Ww]hen(?:ever)? [A-Z][^,.\n]{0,28} enters\b/,
+  },
 
   {
     tag: 'spell-cast',
@@ -1279,9 +1312,23 @@ const WANTS: readonly Rule[] = [
 export interface SynergyProfile {
   readonly produces: readonly SynergyTag[]
   readonly wants: readonly SynergyTag[]
+  /**
+   * What the card IS or HAS, as opposed to what it causes (ADR-0048).
+   *
+   * A third direction, and the reason is that two verbs could not say what the
+   * derived families mean: a card does not *cause* flying, it *has* it, and
+   * Ambush Commander does not *produce* Elf, it *is* one. Membership crammed
+   * into `produces` made 298 of the 317 keyword tags look inert.
+   *
+   * Optional, with the same reading `oracleTextFaces` and `canBeCommander`
+   * already have in this codebase: absent means "derived before the column
+   * existed", not "this card has nothing". `[]` would be a claim; absence is a
+   * gap, and every such card gets its answer at the next re-ingest.
+   */
+  readonly has?: readonly SynergyTag[]
 }
 
-export const EMPTY_PROFILE: SynergyProfile = { produces: [], wants: [] }
+export const EMPTY_PROFILE: SynergyProfile = { produces: [], wants: [], has: [] }
 
 export type SynergyOverrides = ReadonlyMap<OracleId, SynergyProfile>
 
@@ -1337,7 +1384,8 @@ const apply = (rules: readonly Rule[], texts: readonly string[]): SynergyTag[] =
  * Splitting a string we were never handed would be a guess.
  */
 export const deriveSynergy = (
-  card: Pick<Card, 'oracleId' | 'oracleText' | 'typeLine'> & Partial<Pick<Card, 'oracleTextFaces'>>,
+  card: Pick<Card, 'oracleId' | 'name' | 'oracleText' | 'typeLine' | 'keywords'> &
+    Partial<Pick<Card, 'oracleTextFaces'>>,
   options: { readonly curated?: SynergyOverrides } = {},
 ): SynergyProfile => {
   const curated = (options.curated ?? CURATED_SYNERGY).get(card.oracleId)
@@ -1347,7 +1395,29 @@ export const deriveSynergy = (
   // whole text is the only answer available and is the right one for the first.
   const faces = card.oracleTextFaces ?? [card.oracleText]
   const texts = faces.map((face) => `${card.typeLine}\n${face}`)
-  return { produces: apply(PRODUCES, texts), wants: apply(WANTS, texts) }
+  /*
+   * The derived families (ADR-0046), unioned in rather than folded into the
+   * rule tables above.
+   *
+   * `name` and `keywords` are REQUIRED rather than optional, and the reason is
+   * that both silently weaken the answer when absent: without the name a card
+   * that spells itself out in its own text asks to be paired with its own
+   * tribe, and without keywords a flier produces nothing. An optional field
+   * that quietly changes what a card means is worse than a call site to update.
+   */
+  const semantic = deriveSemanticTokens(card)
+  return {
+    produces: [...apply(PRODUCES, texts), ...semantic.produces],
+    wants: [...apply(WANTS, texts), ...semantic.wants],
+    /*
+     * `has` is derived-only, and that is the boundary ADR-0048 draws rather
+     * than an omission. The curated twenty-two are EVENTS — a card causes a
+     * creature to die or pays off when one does — and there is no third thing
+     * to say about an event. Membership is a question you can only ask of what
+     * a card IS, which is exactly the two families in `semantic-tokens.ts`.
+     */
+    has: semantic.has,
+  }
 }
 
 /**
@@ -1361,6 +1431,8 @@ export interface DeckSynergy {
   /** Tag → weight. */
   readonly produces: ReadonlyMap<SynergyTag, number>
   readonly wants: ReadonlyMap<SynergyTag, number>
+  /** What the deck's cards ARE or HAVE (ADR-0048). Its tribe, and its evasion. */
+  readonly has: ReadonlyMap<SynergyTag, number>
 }
 
 export const COMMANDER_WEIGHT = 4
@@ -1372,13 +1444,14 @@ export const deckSynergy = (
 ): DeckSynergy => {
   const produces = new Map<SynergyTag, number>()
   const wants = new Map<SynergyTag, number>()
+  const has = new Map<SynergyTag, number>()
 
   const add = (
     into: Map<SynergyTag, number>,
-    tags: readonly SynergyTag[],
+    tags: readonly SynergyTag[] | undefined,
     weight: number,
   ): void => {
-    for (const tag of tags) into.set(tag, (into.get(tag) ?? 0) + weight)
+    for (const tag of tags ?? []) into.set(tag, (into.get(tag) ?? 0) + weight)
   }
 
   for (const id of commanders) {
@@ -1386,6 +1459,7 @@ export const deckSynergy = (
     if (profile === undefined) continue
     add(produces, profile.produces, COMMANDER_WEIGHT)
     add(wants, profile.wants, COMMANDER_WEIGHT)
+    add(has, profile.has, COMMANDER_WEIGHT)
   }
   for (const id of accepted) {
     if (commanders.includes(id)) continue
@@ -1393,9 +1467,10 @@ export const deckSynergy = (
     if (profile === undefined) continue
     add(produces, profile.produces, 1)
     add(wants, profile.wants, 1)
+    add(has, profile.has, 1)
   }
 
-  return { produces, wants }
+  return { produces, wants, has }
 }
 
 export interface SynergyMatch {
@@ -1450,12 +1525,37 @@ export const synergyMatches = (
 ): readonly SynergyMatch[] => {
   const matches: SynergyMatch[] = []
 
-  for (const tag of candidate.produces) {
+  /*
+   * Which directions pair (ADR-0048).
+   *
+   * `has` is a second way of SUPPLYING a tag, so it pairs with `wants` exactly
+   * as `produces` does and in both directions: a flier supplies what Favorable
+   * Winds wants, and Favorable Winds pays off a deck full of fliers.
+   *
+   * `has` ↔ `has` is NOT scored, for the same reason `produces` ↔ `produces` is
+   * not: two Elves are redundancy, not synergy. What makes a tribe a deck is
+   * the card that WANTS the tribe, and that card is already the other half of
+   * both pairings above. `has` ↔ `produces` is refused on the same ground — a
+   * card that is an Elf and a card that makes Elf tokens are two copies of the
+   * same effect.
+   *
+   * "Has can still imply certain benefits from and causes" was the ask, and the
+   * answer is that the implication is already carried, by the pairing being
+   * symmetric rather than by a rule. A flier gets credit in a deck with a flying
+   * payoff (`has` → `wants`) and the payoff gets credit in a deck of fliers
+   * (`wants` → `has`); there is nothing left for an implication to add. What it
+   * would add if written — a shared `has` counting as a theme — is the
+   * redundancy the paragraph above refuses. No second relation is hardcoded in
+   * the scorer, and if one is ever wanted it belongs in the rules that emit the
+   * tags, not here.
+   */
+  const supplied = new Set<SynergyTag>([...candidate.produces, ...(candidate.has ?? [])])
+  for (const tag of supplied) {
     const weight = deck.wants.get(tag) ?? 0
     if (weight > 0) matches.push({ tag, direction: 'enables', weight })
   }
   for (const tag of candidate.wants) {
-    const weight = deck.produces.get(tag) ?? 0
+    const weight = (deck.produces.get(tag) ?? 0) + (deck.has.get(tag) ?? 0)
     if (weight > 0) matches.push({ tag, direction: 'payoff', weight })
   }
 

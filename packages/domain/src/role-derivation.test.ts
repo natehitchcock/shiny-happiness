@@ -248,7 +248,7 @@ describe('taxonomy corrections', () => {
       expect(
         rolesOf(
           'Creature — Kirin Spirit',
-          "Whenever you cast a Spirit or Arcane spell, destroy all permanents with that " +
+          'Whenever you cast a Spirit or Arcane spell, destroy all permanents with that ' +
             "spell's mana value.",
         ),
       ).toContain('board-wipe')
@@ -325,9 +325,7 @@ describe('taxonomy corrections', () => {
     })
 
     it('derives bounce for mass return-to-hand', () => {
-      expect(rolesOf('Instant', "Return all creatures to their owners' hands.")).toContain(
-        'bounce',
-      )
+      expect(rolesOf('Instant', "Return all creatures to their owners' hands.")).toContain('bounce')
     })
 
     it('does not call returning your own permanent interaction', () => {
@@ -391,7 +389,10 @@ describe('taxonomy corrections', () => {
       // `all cards from` used to be bare. Latent while the role had no
       // primaries; a visible mislabel the moment precedence gave it some.
       expect(
-        rolesOf('Creature — Nightmare', 'When this creature enters, exile all cards from your hand.'),
+        rolesOf(
+          'Creature — Nightmare',
+          'When this creature enters, exile all cards from your hand.',
+        ),
       ).not.toContain('graveyard-hate')
       expect(rolesOf('Sorcery', 'Exile all cards from your library.')).not.toContain(
         'graveyard-hate',
@@ -505,12 +506,10 @@ describe('a sacrifice outlet that names a creature TYPE (ADR-0047)', () => {
   it('does not read sacrificing a Food, a Clue or a land as an outlet', () => {
     // The same deny list as `synergy.ts`, and the same measured trap: 45 cards
     // sacrifice a Food and none of them is a sacrifice outlet for creatures.
-    expect(
-      rolesOf('Creature — Plant Druid', 'Sacrifice a Food: You gain 3 life.'),
-    ).not.toContain('sac-outlet')
-    expect(
-      rolesOf('Artifact', 'Sacrifice a Clue: Draw a card.'),
-    ).not.toContain('sac-outlet')
+    expect(rolesOf('Creature — Plant Druid', 'Sacrifice a Food: You gain 3 life.')).not.toContain(
+      'sac-outlet',
+    )
+    expect(rolesOf('Artifact', 'Sacrifice a Clue: Draw a card.')).not.toContain('sac-outlet')
     expect(
       rolesOf('Creature — Human', 'Sacrifice a Mountain: This creature gets +2/+0.'),
     ).not.toContain('sac-outlet')

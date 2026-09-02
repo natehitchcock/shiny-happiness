@@ -45,11 +45,7 @@
  */
 
 /** Rules phrases after which Magic writes a literal card name. */
-const ANCHORS: readonly RegExp[] = [
-  /\bnamed\s+/g,
-  /\bPartner with\s+/g,
-  /\bmeld them into\s+/g,
-]
+const ANCHORS: readonly RegExp[] = [/\bnamed\s+/g, /\bPartner with\s+/g, /\bmeld them into\s+/g]
 
 /**
  * Separators that continue a list of names: "named A, B, and C", "named A or B".
@@ -255,7 +251,8 @@ export const resolveOracleReferences = (
          * that forgets simply gets no links and no error — which is how this
          * shipped green and broke in a browser.
          */
-        if (!known.has(candidate) && !mine.has(candidate) && !BASIC_LANDS.has(candidate)) return false
+        if (!known.has(candidate) && !mine.has(candidate) && !BASIC_LANDS.has(candidate))
+          return false
         if (!endsHere(text.slice(at + candidate.length))) return false
         /*
          * A continuation item must be multi-word. The anchor's FIRST item may be

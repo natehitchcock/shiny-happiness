@@ -6,6 +6,7 @@ import {
   deckSynergy,
   deriveSynergy,
   interactsWith,
+  EVENT_TAGS,
   SYNERGY_TAGS,
   synergyMatches,
   synergyScore,
@@ -14,10 +15,20 @@ import {
   type SynergyTag,
 } from './synergy.js'
 
-const card = (name: string, typeLine: string, oracleText: string) => ({
+const card = (
+  name: string,
+  typeLine: string,
+  oracleText: string,
+  keywords: readonly string[] = [],
+) => ({
   oracleId: oracleId(name),
+  // The name and the keywords are what the derived families read (ADR-0046).
+  // Both are required rather than optional, because a missing name silently
+  // turns off the refusal that keeps a card from wanting its own tribe.
+  name,
   typeLine,
   oracleText,
+  keywords,
 })
 
 // Real oracle text, abbreviated only where the tail is irrelevant.
@@ -419,10 +430,104 @@ describe('synergyMatches', () => {
     expect(synergyMatches(deriveSynergy(COUNTERSPELL), bloodArtistCommander)).toEqual([])
   })
 
+  describe('the third direction (ADR-0048)', () => {
+    // A deck that wants fliers — Favorable Winds and nothing else.
+    const wantsFliers: DeckSynergy = {
+      produces: new Map(),
+      wants: new Map([['ability:flying', 4] as const]),
+      has: new Map(),
+    }
+    // A deck full of fliers and no payoff.
+    const fullOfFliers: DeckSynergy = {
+      produces: new Map(),
+      wants: new Map(),
+      has: new Map([['ability:flying', 6] as const]),
+    }
+
+    it('lets a card SUPPLY a tag by having it, not only by causing it', () => {
+      // The whole point. A flier does not cause flying, so under two directions
+      // it could satisfy Favorable Winds only by lying about what it does.
+      const flier: SynergyProfile = { produces: [], wants: [], has: ['ability:flying'] }
+      const matches = synergyMatches(flier, wantsFliers)
+
+      expect(matches).toHaveLength(1)
+      expect(matches[0]?.direction).toBe('enables')
+      expect(matches[0]?.weight).toBe(4)
+    })
+
+    it('pays off a deck that HAS the tag, as well as one that produces it', () => {
+      const payoff: SynergyProfile = { produces: [], wants: ['ability:flying'], has: [] }
+      const matches = synergyMatches(payoff, fullOfFliers)
+
+      expect(matches[0]?.direction).toBe('payoff')
+      expect(matches[0]?.weight).toBe(6)
+    })
+
+    it('adds the two ways a deck supplies a tag rather than picking one', () => {
+      // A deck with six fliers and a card that grants flying supplies both, and
+      // the payoff is worth more there than in a deck with only one of them.
+      const deck: DeckSynergy = {
+        produces: new Map([['ability:flying', 2] as const]),
+        wants: new Map(),
+        has: new Map([['ability:flying', 6] as const]),
+      }
+      const payoff: SynergyProfile = { produces: [], wants: ['ability:flying'], has: [] }
+
+      expect(synergyMatches(payoff, deck)[0]?.weight).toBe(8)
+    })
+
+    it('does NOT score two cards that merely have the same thing', () => {
+      // Two Elves are redundancy, not synergy — the ruling `produces` already
+      // carries. What makes a tribe a deck is the card that WANTS the tribe.
+      const elf: SynergyProfile = { produces: [], wants: [], has: ['subtype:elf'] }
+      const deckOfElves: DeckSynergy = {
+        produces: new Map(),
+        wants: new Map(),
+        has: new Map([['subtype:elf', 9] as const]),
+      }
+
+      expect(synergyMatches(elf, deckOfElves)).toEqual([])
+    })
+
+    it('does NOT score having a tag against a deck that makes it', () => {
+      // An Elf and an Elf-token maker are two copies of the same effect.
+      const elf: SynergyProfile = { produces: [], wants: [], has: ['subtype:elf'] }
+      const deckMakesElves: DeckSynergy = {
+        produces: new Map([['subtype:elf', 5] as const]),
+        wants: new Map(),
+        has: new Map(),
+      }
+
+      expect(synergyMatches(elf, deckMakesElves)).toEqual([])
+    })
+
+    it('credits a card once when it both has and causes the same tag', () => {
+      // A Bird that also grants flying supplies the tag twice over and is still
+      // one card doing one thing for the deck.
+      const both: SynergyProfile = {
+        produces: ['ability:flying'],
+        wants: [],
+        has: ['ability:flying'],
+      }
+
+      expect(synergyMatches(both, wantsFliers)).toHaveLength(1)
+    })
+
+    it('treats a profile with no `has` as a card that has not been asked', () => {
+      // Absent is not `[]` with a different spelling — but it must not throw and
+      // must not invent a match. A card read before the field existed simply
+      // supplies nothing through this direction.
+      const old = { produces: [], wants: [] } as SynergyProfile
+
+      expect(synergyMatches(old, wantsFliers)).toEqual([])
+    })
+  })
+
   it('puts the strongest match first, so the reason names the real one', () => {
     const deck = {
       produces: new Map([['token', 1] as const]),
       wants: new Map([['creature-death', 8] as const, ['landfall', 1] as const]),
+      has: new Map(),
     }
     const candidate: SynergyProfile = { produces: ['landfall', 'creature-death'], wants: [] }
 
@@ -582,8 +687,10 @@ describe('enchantment-etb', () => {
   const derive = (typeLine: string, oracleText: string): SynergyProfile =>
     deriveSynergy({
       oracleId: oracleId('00000000-0000-4000-8000-000000000001'),
+      name: 'Test Card',
       typeLine,
       oracleText,
+      keywords: [],
     })
 
   it('reads any enchantment as putting one onto the battlefield', () => {
@@ -633,7 +740,13 @@ describe('enchantment-etb', () => {
   })
 
   it('leaves a vanilla creature alone', () => {
-    expect(derive('Creature — Bear', '')).toEqual({ produces: [], wants: [] })
+    // `has` carries `subtype:bear` since ADR-0046 — the card IS a Bear, which is
+    // true and is a different claim from causing or wanting anything. The two
+    // EVENT directions are what this test is about and they stay empty.
+    const profile = derive('Creature — Bear', '')
+
+    expect(profile.produces).toEqual([])
+    expect(profile.wants).toEqual([])
   })
 })
 
@@ -641,8 +754,10 @@ describe('a creature that pays off its own death', () => {
   const derive = (typeLine: string, oracleText: string): SynergyProfile =>
     deriveSynergy({
       oracleId: oracleId('00000000-0000-4000-8000-000000000002'),
+      name: 'Test Card',
       typeLine,
       oracleText,
+      keywords: [],
     })
 
   it('reads the one-shot "When this creature dies" form', () => {
@@ -676,7 +791,10 @@ describe('a creature that pays off its own death', () => {
   })
 
   it('still leaves a vanilla creature alone', () => {
-    expect(derive('Creature — Bear', '')).toEqual({ produces: [], wants: [] })
+    const profile = derive('Creature — Bear', '')
+
+    expect(profile.produces).toEqual([])
+    expect(profile.wants).toEqual([])
   })
 })
 
@@ -684,8 +802,10 @@ describe('plus1-counter direction', () => {
   const derive = (typeLine: string, oracleText: string): SynergyProfile =>
     deriveSynergy({
       oracleId: oracleId('00000000-0000-4000-8000-000000000003'),
+      name: 'Test Card',
       typeLine,
       oracleText,
+      keywords: [],
     })
 
   it('does not call a counter-MAKER a counter payoff', () => {
@@ -745,8 +865,10 @@ describe('deriveSynergy — whose event it is', () => {
   ): SynergyProfile =>
     deriveSynergy({
       oracleId: oracleId(name),
+      name,
       typeLine,
       oracleText,
+      keywords: [],
       ...(faces === undefined ? {} : { oracleTextFaces: faces }),
     })
 
@@ -1030,6 +1152,7 @@ describe('synergyMatches — a card that is its own engine', () => {
     const deck: DeckSynergy = {
       produces: new Map([['opponent-discard', 3] as const]),
       wants: new Map([['opponent-discard', 2] as const]),
+      has: new Map(),
     }
 
     const directions = synergyMatches(engine, deck).map((m) => m.direction)
@@ -1044,6 +1167,7 @@ describe('synergyMatches — a card that is its own engine', () => {
     const deck: DeckSynergy = {
       produces: new Map(),
       wants: new Map([['opponent-discard', 2] as const]),
+      has: new Map(),
     }
 
     const matches = synergyMatches(engine, deck)
@@ -1054,7 +1178,7 @@ describe('synergyMatches — a card that is its own engine', () => {
 
 describe('deriveSynergy — damage is not life loss (ADR-0023)', () => {
   const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
-    deriveSynergy({ oracleId: oracleId(name), typeLine, oracleText })
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
 
   // Real oracle text throughout, abbreviated only where the tail is irrelevant.
   const IMPACT_TREMORS = derive(
@@ -1356,12 +1480,14 @@ describe('deriveSynergy — damage is not life loss (ADR-0023)', () => {
 
 describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
   const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
-    deriveSynergy({ oracleId: oracleId(name), typeLine, oracleText })
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
   const deriveFaces = (name: string, typeLine: string, faces: readonly string[]): SynergyProfile =>
     deriveSynergy({
       oracleId: oracleId(name),
+      name,
       typeLine,
       oracleText: faces.join('\n'),
+      keywords: [],
       oracleTextFaces: faces,
     })
 
@@ -1388,7 +1514,13 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
       // count rather than softened to `toContain`: a vocabulary that grows
       // without anyone noticing is how two tags come to mean the same event.
       expect(SYNERGY_TAGS).toContain('damage')
-      expect(SYNERGY_TAGS).toHaveLength(22)
+      // `EVENT_TAGS` rather than `SYNERGY_TAGS` since ADR-0046, and the reason
+      // the comment above gives is why the assertion survives rather than being
+      // softened: the CURATED events are still a closed hand-written list, and
+      // this is what keeps anyone from adding a twenty-third without saying so.
+      // `SYNERGY_TAGS` is that list plus the generated families, whose length is
+      // a fact about the corpus rather than a decision anyone made here.
+      expect(EVENT_TAGS).toHaveLength(22)
     })
 
     it('is spelled as an event, not as an archetype', () => {
@@ -1803,7 +1935,7 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
 
 describe('deriveSynergy — one semantic per clause (ADR-0038)', () => {
   const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
-    deriveSynergy({ oracleId: oracleId(name), typeLine, oracleText })
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
 
   describe('a permanent that arrives carrying counters', () => {
     it('reads the reported card', () => {
@@ -2090,7 +2222,11 @@ describe('deriveSynergy — one semantic per clause (ADR-0038)', () => {
     )
 
     it('is no longer a card the model has nothing to say about', () => {
-      expect(MORITTE.produces).toEqual(['plus1-counter'])
+      // The EVENT it produces. Moritte also carries membership tags from its own
+      // type line since ADR-0046, and those are a different question from what
+      // the card causes — so the event half is asserted exactly and the
+      // namespaced half is excluded by its prefix rather than retyped.
+      expect(MORITTE.produces.filter((t) => !t.includes(':'))).toEqual(['plus1-counter'])
     })
 
     it('says nothing about the copy half, and that is the decision', () => {
@@ -2108,7 +2244,7 @@ describe('deriveSynergy — one semantic per clause (ADR-0038)', () => {
 
 describe('deriveSynergy — a sacrifice outlet that names a creature TYPE (ADR-0038)', () => {
   const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
-    deriveSynergy({ oracleId: oracleId(name), typeLine, oracleText })
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
 
   it('reads the reported card', () => {
     // "ambush commander has no semantic tags. why is that?" — because every
@@ -2124,7 +2260,11 @@ describe('deriveSynergy — a sacrifice outlet that names a creature TYPE (ADR-0
   })
 
   it('reads the archetypal tribal outlet', () => {
-    const prospector = derive('Skirk Prospector', 'Creature — Goblin', 'Sacrifice a Goblin: Add {R}.')
+    const prospector = derive(
+      'Skirk Prospector',
+      'Creature — Goblin',
+      'Sacrifice a Goblin: Add {R}.',
+    )
 
     expect(prospector.produces).toContain('creature-death')
   })
@@ -2218,7 +2358,11 @@ describe('deriveSynergy — a sacrifice outlet that names a creature TYPE (ADR-0
      * own "sacrifice a creature" and mean something else by it. Krark-Clan
      * Ironworks would become a sacrifice outlet for creatures it cannot eat.
      */
-    const ironworks = derive('Krark-Clan Ironworks', 'Artifact', 'Sacrifice an artifact: Add {C}{C}.')
+    const ironworks = derive(
+      'Krark-Clan Ironworks',
+      'Artifact',
+      'Sacrifice an artifact: Add {C}{C}.',
+    )
 
     expect(ironworks.produces).not.toContain('creature-death')
     expect(ironworks.produces).toContain('artifact-etb')
@@ -2262,12 +2406,12 @@ describe('deriveSynergy — a sacrifice outlet that names a creature TYPE (ADR-0
 
 describe('deriveSynergy — a land that is also a creature (ADR-0047)', () => {
   const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
-    deriveSynergy({ oracleId: oracleId(name), typeLine, oracleText })
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
 
   describe('the tag', () => {
     it('is in the vocabulary, and is the twenty-second', () => {
       expect(SYNERGY_TAGS).toContain('land-creature')
-      expect(SYNERGY_TAGS).toHaveLength(22)
+      expect(EVENT_TAGS).toHaveLength(22)
     })
 
     it('is spelled as an event rather than as the deck that plays it', () => {
@@ -2412,7 +2556,7 @@ describe('deriveSynergy — a land that is also a creature (ADR-0047)', () => {
       const arbor = derive(
         'Dryad Arbor',
         'Land Creature — Forest Dryad',
-        "(This land isn't a spell, it's affected by summoning sickness, and it has \"{T}: Add {G}.\")",
+        '(This land isn\'t a spell, it\'s affected by summoning sickness, and it has "{T}: Add {G}.")',
       )
 
       expect(arbor.produces).not.toContain('land-creature')

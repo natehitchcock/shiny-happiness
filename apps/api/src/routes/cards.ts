@@ -486,14 +486,14 @@ export const registerCardRoutes = (app: FastifyInstance, pool: Pool): void => {
      * then picks the longest real one. The candidate list is bounded by the
      * number of anchors in the text, so this is a handful of names per card.
      */
-    const candidates = [...new Set(oracleReferenceCandidates(card.oracleText).flatMap((s) => s.candidates))]
+    const candidates = [
+      ...new Set(oracleReferenceCandidates(card.oracleText).flatMap((s) => s.candidates)),
+    ]
     const real = await cardIdsByExactName(pool, candidates)
     const ids = new Map(real.map((r) => [r.name, r.oracleId]))
-    const references = resolveOracleReferences(
-      card.oracleText,
-      new Set(ids.keys()),
-      card.name,
-    ).map((ref) => ({ name: ref.name, oracleId: ids.get(ref.name)! }))
+    const references = resolveOracleReferences(card.oracleText, new Set(ids.keys()), card.name).map(
+      (ref) => ({ name: ref.name, oracleId: ids.get(ref.name)! }),
+    )
 
     /*
      * The two card-intrinsic metrics ride on card detail as well as on every

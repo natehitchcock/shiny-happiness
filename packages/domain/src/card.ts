@@ -139,6 +139,26 @@ export interface Card {
   /** Events this card pays off on. */
   readonly synergyWants: readonly SynergyTag[]
   /**
+   * What this card IS or HAS — its subtypes and its keywords (ADR-0048).
+   *
+   * A third direction rather than more of `synergyProduces`, because a card
+   * does not *cause* flying, it *has* it. `synergyProduces` keeps its meaning:
+   * "create a 1/1 Soldier token" and "target creature gains flying" are causes,
+   * and neither card IS the thing it makes.
+   *
+   * NOT STORED. `synergyProduces` and `synergyWants` are columns because
+   * computing them means running the rule tables over `oracleText`; this is two
+   * set intersections over `typeLine` and `keywords`, which every read already
+   * carries. The rule ADR-0048 settles: store a derivation whose inputs the
+   * read does not need, derive one whose inputs it already carries.
+   *
+   * So the repository fills it on every read and there is no stale-row state.
+   * Optional only because a `Card` built by hand — in a test, or by a caller
+   * that has no vocabulary — may legitimately not have one; every card that
+   * came out of the database does.
+   */
+  readonly synergyHas?: readonly SynergyTag[]
+  /**
    * On Wizards' Game Changers list, which the brackets reference (DATA-05).
    *
    * Read from Scryfall's `game_changer` boolean rather than a checked-in array

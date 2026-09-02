@@ -140,7 +140,13 @@ describe('a tag tooltip says how to filter by it', () => {
     await openPreview()
 
     // The chip under "Benefits from" — the tag this card wants.
-    const chip = screen.getByText('artifact etb')
+    //
+    // The words, not the wire spelling. The chip used to render
+    // `tag.replace(/-/g,' ')` and so read "artifact etb" at a person; ADR-0046
+    // made it `readable()`, both because the curated table already had better
+    // words for it and because a namespaced tag would otherwise have printed
+    // its namespace on screen.
+    const chip = screen.getByText('artifacts entering')
     await act(async () => (chip.closest('button') as HTMLButtonElement).click())
 
     const tip = screen.getByRole('tooltip')

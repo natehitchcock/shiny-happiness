@@ -52,7 +52,8 @@ globalThis.ResizeObserver = NoopResizeObserver as unknown as typeof ResizeObserv
  * Both were copied from the card table rather than invented, because text that
  * "looks like" oracle text is precisely what a matcher agrees with wrongly.
  */
-const KHER_KEEP_TEXT = '{T}: Add {C}.\n{3}{R}, {T}: Create a 0/1 red Kobold creature token named Kobolds of Kher Keep.'
+const KHER_KEEP_TEXT =
+  '{T}: Add {C}.\n{3}{R}, {T}: Create a 0/1 red Kobold creature token named Kobolds of Kher Keep.'
 const CAULDRON_TEXT =
   '{2}, {T}, Sacrifice a creature: You gain 4 life.\n{1}, {T}, Sacrifice a creature named Festering Newt: Each opponent loses 4 life.'
 
@@ -76,14 +77,23 @@ const base = (over: Partial<api.Card>): api.Card => ({
   ...over,
 })
 
-const KHER = base({ oracleId: 'kher', name: 'Kher Keep', typeLine: 'Land', oracleText: KHER_KEEP_TEXT })
+const KHER = base({
+  oracleId: 'kher',
+  name: 'Kher Keep',
+  typeLine: 'Land',
+  oracleText: KHER_KEEP_TEXT,
+})
 const KOBOLDS = base({
   oracleId: 'kobolds',
   name: 'Kobolds of Kher Keep',
   typeLine: 'Creature — Kobold',
   oracleText: '',
 })
-const CAULDRON = base({ oracleId: 'cauldron', name: 'Bubbling Cauldron', oracleText: CAULDRON_TEXT })
+const CAULDRON = base({
+  oracleId: 'cauldron',
+  name: 'Bubbling Cauldron',
+  oracleText: CAULDRON_TEXT,
+})
 const NEWT = base({ oracleId: 'newt', name: 'Festering Newt', typeLine: 'Creature — Salamander' })
 /**
  * A card that names ITSELF after an anchor — real text, and the only shape in
@@ -109,8 +119,16 @@ const HELM = base({
   oracleText:
     'Equipped creature has first strike, trample, and haste.\nIf you control Equipment named Helm of Kaldra, Sword of Kaldra, and Shield of Kaldra, create Kaldra, a legendary 4/4 colorless Avatar creature token.',
 })
-const SWORD = base({ oracleId: 'sword', name: 'Sword of Kaldra', typeLine: 'Legendary Artifact — Equipment' })
-const SHIELD = base({ oracleId: 'shield', name: 'Shield of Kaldra', typeLine: 'Legendary Artifact — Equipment' })
+const SWORD = base({
+  oracleId: 'sword',
+  name: 'Sword of Kaldra',
+  typeLine: 'Legendary Artifact — Equipment',
+})
+const SHIELD = base({
+  oracleId: 'shield',
+  name: 'Shield of Kaldra',
+  typeLine: 'Legendary Artifact — Equipment',
+})
 /** Shield, but with the rules text that names the other two — the middle of a chain. */
 const SHIELD_NAMER = base({
   ...SHIELD,
@@ -152,7 +170,10 @@ const skoaDeck: api.Deck = {
 }
 
 /** Card detail as the route now sends it, with the references it resolved. */
-const detailFor = (card: api.Card, references: { name: string; oracleId: string }[]): api.CardDetail =>
+const detailFor = (
+  card: api.Card,
+  references: { name: string; oracleId: string }[],
+): api.CardDetail =>
   ({ ...card, printings: [], combos: [], references }) as unknown as api.CardDetail
 
 const DETAILS: Record<string, api.CardDetail> = {
@@ -314,10 +335,16 @@ describe('a card named in oracle text', () => {
           : (DETAILS[id] ?? detailFor(base({ oracleId: id, name: id }), [])),
       ),
     )
-    render(<Workspace deck={{ ...deck, entries: [{ oracleId: 'helm', zone: 'accepted', locked: false }] }} />)
+    render(
+      <Workspace
+        deck={{ ...deck, entries: [{ oracleId: 'helm', zone: 'accepted', locked: false }] }}
+      />,
+    )
     await openPreview('Helm of Kaldra')
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Open Sword of Kaldra' })).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Open Sword of Kaldra' })).toBeTruthy(),
+    )
     expect(screen.getByRole('button', { name: 'Open Shield of Kaldra' })).toBeTruthy()
     // …and the card still does not link to itself.
     expect(screen.queryByRole('button', { name: 'Open Helm of Kaldra' })).toBeNull()
@@ -441,13 +468,19 @@ describe('getting back', () => {
           : detailFor(SHIELD_NAMER, []),
       ),
     )
-    render(<Workspace deck={{ ...deck, entries: [{ oracleId: 'helm', zone: 'accepted', locked: false }] }} />)
+    render(
+      <Workspace
+        deck={{ ...deck, entries: [{ oracleId: 'helm', zone: 'accepted', locked: false }] }}
+      />,
+    )
     await openPreview('Helm of Kaldra')
     await waitFor(() => screen.getByRole('button', { name: 'Open Shield of Kaldra' }))
     await follow('Shield of Kaldra')
 
     expect(document.activeElement).not.toBe(document.body)
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Back to Helm of Kaldra' }))
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Back to Helm of Kaldra' }),
+    )
   })
 
   it('forgets the trail when a card is opened from a list again', async () => {
@@ -496,7 +529,11 @@ describe('getting back', () => {
             : detailFor(SWORD, []),
       ),
     )
-    render(<Workspace deck={{ ...deck, entries: [{ oracleId: 'helm', zone: 'accepted', locked: false }] }} />)
+    render(
+      <Workspace
+        deck={{ ...deck, entries: [{ oracleId: 'helm', zone: 'accepted', locked: false }] }}
+      />,
+    )
     await openPreview('Helm of Kaldra')
     await waitFor(() => screen.getByRole('button', { name: 'Open Shield of Kaldra' }))
     await follow('Shield of Kaldra')
@@ -547,7 +584,9 @@ describe('a combo piece named in a suggestion row', () => {
               comboDegree: 1,
               nearCombosAt1: 0,
               completedCombos: ['c1'],
-              combos: [{ id: 'c1', pieces: ['newt', 'cauldron'], produces: ['infinite life loss'] }],
+              combos: [
+                { id: 'c1', pieces: ['newt', 'cauldron'], produces: ['infinite life loss'] },
+              ],
               reasons: [{ kind: 'completes-combos', count: 1 }],
             },
           ],

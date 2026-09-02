@@ -619,7 +619,10 @@ describe('adding the same basic land over and over', () => {
       await drain()
 
       const context = `gap ${String(gap)} ms · applied ${JSON.stringify(server.applied)}`
-      expect(server.state.accepted.filter((id) => id === BASIC), context).toHaveLength(8)
+      expect(
+        server.state.accepted.filter((id) => id === BASIC),
+        context,
+      ).toHaveLength(8)
     })
   }
 

@@ -107,41 +107,46 @@ describe('pluralOfSubtype', () => {
 })
 
 describe('deriveSemanticTokens — the subtype a card IS', () => {
-  it('produces every subtype on its own type line', () => {
-    const { produces } = deriveSemanticTokens(card('Creature — Elf Druid', ''), VOCAB)
+  it('HAS every subtype on its own type line, and does not claim to cause it', () => {
+    // ADR-0048. A card is an Elf; it does not cause one. The distinction is not
+    // cosmetic — `produces` pairs with `wants` and so does `has`, but a token
+    // maker genuinely CAUSES a Soldier and is not one, and only a third
+    // direction can say both things.
+    const { has, produces } = deriveSemanticTokens(card('Creature — Elf Druid', ''), VOCAB)
 
-    expect(produces).toContain('subtype:elf')
-    expect(produces).toContain('subtype:druid')
+    expect(has).toContain('subtype:elf')
+    expect(has).toContain('subtype:druid')
+    expect(produces).not.toContain('subtype:elf')
   })
 
   it('spells the tag lowercase and kebab, which is what the filter normalises to', () => {
     // `normaliseTag` lowercases and hyphenates every value the search box takes,
     // so a tag stored in any other spelling is a tag `produces:` cannot reach.
-    const { produces } = deriveSemanticTokens(card('Creature — Elf', ''), VOCAB)
+    const { has } = deriveSemanticTokens(card('Creature — Elf', ''), VOCAB)
 
-    expect(produces).toContain('subtype:elf')
-    expect(produces).not.toContain('subtype:Elf')
+    expect(has).toContain('subtype:elf')
+    expect(has).not.toContain('subtype:Elf')
   })
 
   it('refuses a subtype that is not in the vocabulary', () => {
     // 153 subtype words are named by no card in the corpus. A tag nothing wants
     // cannot appear in any of the three match directions, so emitting it is
     // storage spent on a claim that can never be read.
-    const { produces } = deriveSemanticTokens(card('Creature — Elf Brushwagg', ''), VOCAB)
+    const { has } = deriveSemanticTokens(card('Creature — Elf Brushwagg', ''), VOCAB)
 
-    expect(produces).toContain('subtype:elf')
-    expect(produces).not.toContain('subtype:brushwagg')
+    expect(has).toContain('subtype:elf')
+    expect(has).not.toContain('subtype:brushwagg')
   })
 
   it('never emits a card TYPE as a tag', () => {
     // 17,751 commander-legal cards are creatures. A tag on 56% of the corpus
     // pairs with everything and distinguishes nothing — ADR-0029 §6's ground.
-    const { produces, wants } = deriveSemanticTokens(
+    const { has, produces, wants } = deriveSemanticTokens(
       card('Legendary Creature — Elf', 'Destroy target creature.'),
       VOCAB,
     )
 
-    for (const tag of [...produces, ...wants]) {
+    for (const tag of [...has, ...produces, ...wants]) {
       expect(tag).not.toBe('subtype:creature')
       expect(tag).not.toBe('subtype:legendary')
     }
@@ -156,11 +161,11 @@ describe('deriveSemanticTokens — the subtype a card WANTS', () => {
       'Creature — Elf Druid',
       '{T}, Sacrifice this creature: Untap all Forests.',
     )
-    const { produces, wants } = deriveSemanticTokens(llanowar, VOCAB)
+    const { has, wants } = deriveSemanticTokens(llanowar, VOCAB)
 
     expect(wants).toContain('subtype:forest')
-    expect(produces).toContain('subtype:elf')
-    expect(produces).toContain('subtype:druid')
+    expect(has).toContain('subtype:elf')
+    expect(has).toContain('subtype:druid')
   })
 
   it('reads a tribal lord as wanting the tribe it also is', () => {
@@ -171,9 +176,9 @@ describe('deriveSemanticTokens — the subtype a card WANTS', () => {
       'Creature — Elf Druid',
       'Other Elf creatures you control get +1/+1.',
     )
-    const { produces, wants } = deriveSemanticTokens(archdruid, VOCAB)
+    const { has, wants } = deriveSemanticTokens(archdruid, VOCAB)
 
-    expect(produces).toContain('subtype:elf')
+    expect(has).toContain('subtype:elf')
     expect(wants).toContain('subtype:elf')
   })
 
@@ -190,7 +195,7 @@ describe('deriveSemanticTokens — the subtype a card WANTS', () => {
     // Direction inversion is the worst error this model can make. A card that
     // makes Soldiers is the enabler; calling it the payoff would report the
     // reason backwards, and pillar P4 says the reason carries the why.
-    const { produces, wants } = deriveSemanticTokens(
+    const { has, produces, wants } = deriveSemanticTokens(
       card(
         'Creature — Human Soldier',
         'When this creature enters, create two 1/1 white Soldier creature tokens.',
@@ -198,6 +203,9 @@ describe('deriveSemanticTokens — the subtype a card WANTS', () => {
       VOCAB,
     )
 
+    // Both, and they are different claims: the card IS a Soldier and it MAKES
+    // more. Only the third direction can say both.
+    expect(has).toContain('subtype:soldier')
     expect(produces).toContain('subtype:soldier')
     expect(wants).not.toContain('subtype:soldier')
   })
@@ -262,6 +270,41 @@ describe('deriveSemanticTokens — the subtype a card WANTS', () => {
     expect(deriveSemanticTokens(winnower, VOCAB).wants).toContain('subtype:elf')
   })
 
+  it("does not read a KEYWORD's own name as a subtype reference", () => {
+    // Magister of Worth, verbatim. `Will` is a planeswalker type and "Will of
+    // the council" is an ability word; 19 cards appeared to want Will Kenrith
+    // and most of them were voting. Multi-word keyword names only — a one-word
+    // keyword that is also a subtype is genuinely ambiguous and blanking it
+    // would cost the real references.
+    const magister = named(
+      'Magister of Worth',
+      'Creature — Angel',
+      'Flying\nWill of the council — When this creature enters, starting with you, each player votes for grace or condemnation.',
+      ['Flying'],
+    )
+    const vocab: SemanticVocabulary = {
+      subtypes: ['Will', 'Angel'],
+      abilities: ['Flying', 'Will of the council'],
+    }
+
+    expect(deriveSemanticTokens(magister, vocab).wants).not.toContain('subtype:will')
+  })
+
+  it('still reads a real reference to the same word elsewhere in the text', () => {
+    // The blanking must not cost Will Kenrith's own superfriends payoffs.
+    const stalwarts = named(
+      "Will's Stalwarts",
+      'Creature — Human Soldier',
+      'As long as you control a Will planeswalker, this creature gets +3/+0.',
+    )
+    const vocab: SemanticVocabulary = {
+      subtypes: ['Will', 'Soldier'],
+      abilities: ['Will of the council'],
+    }
+
+    expect(deriveSemanticTokens(stalwarts, vocab).wants).toContain('subtype:will')
+  })
+
   it('does not read a lowercase counter name as a subtype', () => {
     // Trap Digger, verbatim. Magic capitalises a subtype whenever it names one,
     // and a "trap counter" is not a Trap. Mine Layer and Helix Pinnacle's tower
@@ -290,31 +333,37 @@ describe('deriveSemanticTokens — the subtype a card WANTS', () => {
 
 describe('deriveSemanticTokens — keywords', () => {
   it('produces a keyword the card has', () => {
-    const { produces } = deriveSemanticTokens(card('Creature — Bird', 'Flying', ['Flying']), VOCAB)
+    const { has, produces } = deriveSemanticTokens(
+      card('Creature — Bird', 'Flying', ['Flying']),
+      VOCAB,
+    )
 
-    expect(produces).toContain('ability:flying')
+    expect(has).toContain('ability:flying')
+    // A card with flying does not CAUSE flying, and the distinction is what the
+    // grant rule below needs in order to mean anything.
+    expect(produces).not.toContain('ability:flying')
   })
 
   it('kebabs a two-word keyword', () => {
-    const { produces } = deriveSemanticTokens(
+    const { has } = deriveSemanticTokens(
       card('Creature — Knight', 'First strike', ['First strike']),
       VOCAB,
     )
 
-    expect(produces).toContain('ability:first-strike')
+    expect(has).toContain('ability:first-strike')
   })
 
   it('refuses a keyword outside the vocabulary', () => {
     // 490 of 813 Scryfall keywords sit on exactly one card, because Scryfall
     // files one-off ability words ("Bad Wolf", "Allons-y!") under `keywords`.
     // Only 25 keywords in the whole corpus have any payoff card at all.
-    const { produces } = deriveSemanticTokens(
+    const { has } = deriveSemanticTokens(
       card('Sorcery', 'Buyback {3}', ['Buyback', 'Flying']),
       VOCAB,
     )
 
-    expect(produces).toContain('ability:flying')
-    expect(produces).not.toContain('ability:buyback')
+    expect(has).toContain('ability:flying')
+    expect(has).not.toContain('ability:buyback')
   })
 
   it('reads an anthem for a keyword as wanting it', () => {
@@ -362,8 +411,9 @@ describe('deriveSemanticTokens — keywords', () => {
       'Defender\nWhen this creature dies, create a 2/2 red Dragon creature token with flying and "{R}: This token gets +1/+0 until end of turn."',
       ['Defender'],
     )
-    const { produces, wants } = deriveSemanticTokens(egg, VOCAB)
+    const { has, produces, wants } = deriveSemanticTokens(egg, VOCAB)
 
+    expect(has).toContain('subtype:dragon')
     expect(produces).toContain('subtype:dragon')
     expect(wants).not.toContain('ability:flying')
   })
@@ -422,10 +472,80 @@ describe('deriveSemanticTokens — keywords', () => {
   })
 })
 
+describe('deriveSemanticTokens — granting is causing (ADR-0048)', () => {
+  it('reads a card that hands out a keyword as PRODUCING it', () => {
+    // 495 cards grant flying and said nothing about flying at all before there
+    // was a third direction: the grant clause was stripped out of the payoff
+    // read to stop a direction inversion, and then thrown away because
+    // `produces` meant something else and `has` did not exist.
+    const { has, produces, wants } = deriveSemanticTokens(
+      card('Instant', 'Target creature gains flying until end of turn.'),
+      VOCAB,
+    )
+
+    expect(produces).toContain('ability:flying')
+    // The card does not HAVE flying and does not WANT it. Three directions, and
+    // this card is in exactly one of them.
+    expect(has).not.toContain('ability:flying')
+    expect(wants).not.toContain('ability:flying')
+  })
+
+  it('reads an anthem that grants a keyword to the team as producing it', () => {
+    const { produces } = deriveSemanticTokens(
+      card('Enchantment', 'Creatures you control have trample.'),
+      VOCAB,
+    )
+
+    expect(produces).toContain('ability:trample')
+  })
+
+  it('reads a token made WITH a keyword as producing it', () => {
+    // Putting a flier onto the battlefield is causing flying exactly as granting
+    // it is. This is the clause the want side removes, read here for the claim
+    // it does support rather than dropped.
+    const { produces } = deriveSemanticTokens(
+      card('Sorcery', 'Create a 1/1 colorless Thopter artifact creature token with flying.'),
+      VOCAB,
+    )
+
+    expect(produces).toContain('ability:flying')
+  })
+
+  it('does not read merely HAVING the keyword as producing it', () => {
+    // The line the whole direction exists to draw. A Bird has flying; it does
+    // not cause it. Without this the distinction would be a relabelling.
+    const { has, produces } = deriveSemanticTokens(
+      card('Creature — Bird', 'Flying', ['Flying']),
+      VOCAB,
+    )
+
+    expect(has).toContain('ability:flying')
+    expect(produces).not.toContain('ability:flying')
+  })
+
+  it('gives the three directions to one card without collapsing them', () => {
+    // A Bird that grants flying to the team and pays off fliers. All three, all
+    // different, all true — which is only sayable with three verbs.
+    const { has, produces, wants } = deriveSemanticTokens(
+      card(
+        'Creature — Bird Soldier',
+        'Flying\nOther creatures you control gain flying.\nCreatures you control with flying get +1/+1.',
+        ['Flying'],
+      ),
+      VOCAB,
+    )
+
+    expect(has).toContain('ability:flying')
+    expect(produces).toContain('ability:flying')
+    expect(wants).toContain('ability:flying')
+  })
+})
+
 describe('deriveSemanticTokens — degenerate and boundary inputs', () => {
   it('gives an empty profile for a card with no text and no subtypes', () => {
-    const { produces, wants } = deriveSemanticTokens(card('Artifact', ''), VOCAB)
+    const { has, produces, wants } = deriveSemanticTokens(card('Artifact', ''), VOCAB)
 
+    expect(has).toEqual([])
     expect(produces).toEqual([])
     expect(wants).toEqual([])
   })
@@ -434,7 +554,7 @@ describe('deriveSemanticTokens — degenerate and boundary inputs', () => {
     // The reason `deriveSynergy` reads faces: a gap that crosses the join reads
     // a subject on the front face against a verb on the back, and those two
     // abilities never share a game state.
-    const { produces } = deriveSemanticTokens(
+    const { has, produces } = deriveSemanticTokens(
       {
         name: 'Two Sides',
         typeLine: 'Creature — Elf // Sorcery',
@@ -445,16 +565,19 @@ describe('deriveSemanticTokens — degenerate and boundary inputs', () => {
       VOCAB,
     )
 
-    expect(produces).toContain('subtype:elf')
+    // The type line is the CARD's, so its subtype is membership; the token the
+    // back face makes is something the card causes.
+    expect(has).toContain('subtype:elf')
     expect(produces).toContain('subtype:soldier')
   })
 
   it('never emits the same tag twice', () => {
-    const { produces } = deriveSemanticTokens(
+    const { has, produces } = deriveSemanticTokens(
       card('Creature — Elf Elf', 'Create a 1/1 green Elf Warrior creature token.'),
       VOCAB,
     )
 
+    expect(has.filter((t) => t === 'subtype:elf')).toHaveLength(1)
     expect(produces.filter((t) => t === 'subtype:elf')).toHaveLength(1)
   })
 

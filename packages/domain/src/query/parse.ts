@@ -214,15 +214,43 @@ const validateValue = (
     return { message: `unknown role "${value}"`, suggestion: null }
   }
   if (
-    (field === 'produces' || field === 'wants' || field === 'tag') &&
+    (field === 'produces' || field === 'wants' || field === 'has' || field === 'tag') &&
     !SYNERGY_TAG_VALUES.has(normaliseTag(value))
   ) {
-    // The list is short and closed, so the whole of it is the suggestion. A
-    // near-miss on a name the user read off a chip is the likely mistake, and
-    // guessing which one would be worse than showing all seventeen.
+    /*
+     * The suggestion used to be the WHOLE vocabulary, on the stated ground that
+     * "the list is short and closed, so the whole of it is the suggestion …
+     * showing all seventeen". ADR-0046 took it to 608, and 608 tags joined with
+     * commas is a seven-kilobyte error string under a search box.
+     *
+     * So it is a near-miss list now: the tags that share the typed value's
+     * prefix, then the tags that contain it, then — only if neither found
+     * anything — the first few curated events, which are the ones a person is
+     * most likely to have meant. `is:` already truncates this way one branch
+     * up, and this follows it rather than inventing a second style.
+     */
+    const typed = normaliseTag(value)
+    const all = [...SYNERGY_TAG_VALUES]
+    // Shared leading characters, which is what a typo leaves intact:
+    // "artifcat-etb" and "artifact-etb" agree for five. Cheap, and it finds the
+    // transposition that an exact `includes` cannot.
+    const shared = (tag: string): number => {
+      let i = 0
+      while (i < tag.length && i < typed.length && tag[i] === typed[i]) i += 1
+      return i
+    }
+    const near = all
+      .map((tag) => ({ tag, score: tag.includes(typed) ? typed.length + 1 : shared(tag) }))
+      .filter((entry) => entry.score >= 3)
+      .sort((a, b) => b.score - a.score || a.tag.localeCompare(b.tag))
+      .map((entry) => entry.tag)
+    const shown = (near.length > 0 ? near : all).slice(0, 6)
+    const found = near.length > 0 ? near.length : all.length
     return {
       message: `unknown synergy tag "${value}"`,
-      suggestion: `known: ${[...SYNERGY_TAG_VALUES].join(', ')}`,
+      suggestion: `${near.length > 0 ? 'did you mean' : 'known'}: ${shown.join(', ')}${
+        found > shown.length ? '…' : ''
+      }`,
     }
   }
   if ((field === 'color' || field === 'identity') && !/^[wubrgc]+$/i.test(value)) {

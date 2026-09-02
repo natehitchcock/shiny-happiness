@@ -40,6 +40,7 @@ export type QueryField =
    */
   | 'produces'
   | 'wants'
+  | 'has'
   | 'tag'
   /**
    * The two card-intrinsic metrics (doc 18), which the suggestion table already
@@ -122,6 +123,9 @@ export const FIELD_ALIASES: ReadonlyMap<string, QueryField> = new Map([
   ['causes', 'produces'],
   ['wants', 'wants'],
   ['benefits', 'wants'],
+  // The third direction (ADR-0048). `has` was free — `is` is taken by the
+  // predicate field and `kw`/`type` are the Scryfall-style card filters.
+  ['has', 'has'],
   ['tag', 'tag'],
   ['synergy', 'tag'],
   // Short spelling first, long spelling canonical — the shape `mv`/`cmc` and
@@ -155,6 +159,7 @@ export const CANONICAL_FIELD: Readonly<Record<QueryField, string>> = {
   group: 'group',
   produces: 'produces',
   wants: 'wants',
+  has: 'has',
   tag: 'tag',
   /*
    * The FULL word, not `imp`/`eff`. The abbreviated canonicals above are the

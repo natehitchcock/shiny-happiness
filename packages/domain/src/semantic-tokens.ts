@@ -116,11 +116,24 @@ export type SemanticTag = SubtypeTag | AbilityTag
 export interface SemanticVocabulary {
   readonly subtypes: readonly string[]
   readonly abilities: readonly string[]
+  /**
+   * The subtypes that are somebody's NAME rather than a tribe — every subtype
+   * that appears only on a Planeswalker type line.
+   *
+   * A display fact and nothing else. Membership is decided by the same
+   * inertness rule as everything else; this list exists so the pluralisation
+   * rule can say "not this one" without a hand-written table. "Chandras" is not
+   * a word, and a rendering problem is not a reason to refuse a tag.
+   *
+   * Optional so a hand-written vocabulary in a test does not have to carry one.
+   */
+  readonly properNouns?: readonly string[]
 }
 
 export const SEMANTIC_VOCABULARY: SemanticVocabulary = {
   subtypes: rawVocabulary.subtypes,
   abilities: rawVocabulary.abilities,
+  properNouns: rawVocabulary.properNouns,
 }
 
 const slug = (word: string): string => word.toLowerCase().replace(/\s+/g, '-')
@@ -215,10 +228,24 @@ export const pluralOfSubtype = (word: string): string => {
 }
 
 /**
+ * How a subtype is written when it is named to a person.
+ *
+ * The English rule, EXCEPT for a proper name. "Elves you control" is what a
+ * card says; "Chandras you control" is not a sentence anybody would write. The
+ * exception is read from the vocabulary rather than typed here, because which
+ * subtypes are names is a fact about the corpus — they are the ones that appear
+ * only on a Planeswalker type line — and the generator already knows it.
+ */
+export const displaySubtype = (
+  word: string,
+  vocabulary: SemanticVocabulary = SEMANTIC_VOCABULARY,
+): string => (vocabulary.properNouns?.includes(word) === true ? word : pluralOfSubtype(word))
+
+/**
  * The tag in words, DERIVED rather than written.
  *
  * `apps/web/src/tags.ts` holds one hand-written phrase per curated event tag
- * and a test that asserts none is missing. That table cannot grow to 292 and
+ * and a test that asserts none is missing. That table cannot grow to 558 and
  * does not have to: a subtype's words are the subtype, and a keyword's are the
  * keyword. Both slot into the sentences both surfaces already use — "this card
  * benefits from Elves", "causes Equipment".
@@ -228,7 +255,7 @@ export const pluralOfSubtype = (word: string): string => {
  * never seen.
  */
 const WORDS: ReadonlyMap<string, string> = new Map([
-  ...SEMANTIC_VOCABULARY.subtypes.map((word) => [subtypeTag(word), pluralOfSubtype(word)] as const),
+  ...SEMANTIC_VOCABULARY.subtypes.map((word) => [subtypeTag(word), displaySubtype(word)] as const),
   ...SEMANTIC_VOCABULARY.abilities.map((word) => [abilityTag(word), word.toLowerCase()] as const),
 ])
 
@@ -237,7 +264,31 @@ export const semanticTagWords = (tag: string): string | null => WORDS.get(tag) ?
 export const isSemanticTag = (tag: string): tag is SemanticTag =>
   tag.startsWith(SUBTYPE_PREFIX) || tag.startsWith(ABILITY_PREFIX)
 
+/**
+ * Three directions, not two (ADR-0048).
+ *
+ * `has` is the MEMBERSHIP relation and it is what these two families are mostly
+ * about: a card does not *cause* flying, it *has* it; Ambush Commander does not
+ * *produce* Elf, it *is* one. Forcing membership into `produces` was a
+ * modelling error with a measurable symptom — 298 of the 317 keywords looked
+ * inert, because a tag can only appear in a match through a verb it does not
+ * have.
+ *
+ * `produces` survives here and means what it means everywhere else in the
+ * model — the card CAUSES the thing to exist:
+ *
+ *   type line says Elf                       → has `subtype:elf`
+ *   "create a 1/1 white Soldier token"       → produces `subtype:soldier`
+ *   the card has flying                      → has `ability:flying`
+ *   "target creature gains flying"           → produces `ability:flying`
+ *
+ * The token-maker and the grant are genuine causes: neither card is the thing,
+ * both make one. That line was invisible while there were only two verbs, and
+ * the grant side could not be expressed at all — it was stripped out of the
+ * `wants` read to stop a direction inversion and then dropped on the floor.
+ */
 export interface SemanticTokens {
+  readonly has: readonly SemanticTag[]
   readonly produces: readonly SemanticTag[]
   readonly wants: readonly SemanticTag[]
 }
@@ -360,6 +411,8 @@ interface Compiled {
   /** Every spelling that names a subtype, singular and plural, to the word. */
   readonly subtypeByWord: ReadonlyMap<string, string>
   readonly abilities: ReadonlyMap<string, readonly RegExp[]>
+  /** Multi-word keyword names, blanked before subtypes are read. See below. */
+  readonly phrases: readonly RegExp[]
 }
 
 const compile = (vocabulary: SemanticVocabulary): Compiled => {
@@ -370,7 +423,25 @@ const compile = (vocabulary: SemanticVocabulary): Compiled => {
   }
   const abilities = new Map<string, readonly RegExp[]>()
   for (const keyword of vocabulary.abilities) abilities.set(keyword, abilityPayoffPatterns(keyword))
-  return { subtypeByWord, abilities }
+  /*
+   * A keyword's NAME is not a subtype reference (ADR-0046).
+   *
+   * `Will` is a planeswalker type and "Will of the council" is an ability word,
+   * and the second is far commoner: of the 19 cards that appeared to want
+   * `subtype:will`, most say "Will of the council" or "Will of the
+   * Planeswalkers" and have nothing to do with Will Kenrith. Blanking the
+   * keyword's own name before the subtype words are extracted fixes it without
+   * a special case for that one word.
+   *
+   * MULTI-WORD names only, and that restriction is the point. A one-word
+   * keyword that is also a subtype is genuinely ambiguous — blanking it would
+   * cost the real references — while "Will of the council" is four words and
+   * can be nothing else.
+   */
+  const phrases = vocabulary.abilities
+    .filter((keyword) => keyword.includes(' '))
+    .map((keyword) => new RegExp(`\\b${escape(keyword)}\\b`, 'gi'))
+  return { subtypeByWord, abilities, phrases }
 }
 
 const CACHE = new WeakMap<SemanticVocabulary, Compiled>()
@@ -393,26 +464,53 @@ const compiled = (vocabulary: SemanticVocabulary): Compiled => {
  * over one joined type line and no per-face split, so decomposing it would be
  * a guess.
  */
+/**
+ * What a card IS or HAS, from its type line and its keywords alone.
+ *
+ * SEPARATE from `deriveSemanticTokens` and exported, because this half is not
+ * stored (ADR-0048) and the other two are. The rule the two ADRs together
+ * settle is worth stating: **store a derivation whose inputs the read does not
+ * need; derive one whose inputs it already carries.**
+ *
+ * `produces` and `wants` are regexes over `oracle_text`, which is the column a
+ * trimmed read most wants to be rid of, so ADR-0011 stores them and buys
+ * something real. This is two set intersections over `type_line` and
+ * `keywords`, both of which every read already carries — so storing it would
+ * mean shipping a pure function of data already on the wire. Measured: 13.0 ms
+ * for the whole 31,782-card eligible pool, against 1.98 MiB of column.
+ *
+ * The consequence is a real coupling and is named here rather than left to be
+ * discovered: `type_line` and `keywords` MUST stay in every read that expects a
+ * card to know its own tribe. `packages/db` has a test that fails if either
+ * leaves the eligible column list, because a derivation whose inputs can be
+ * silently trimmed away is a landmine rather than a saving.
+ */
+export const semanticMembership = (
+  card: Pick<Card, 'typeLine'> & Partial<Pick<Card, 'keywords'>>,
+  vocabulary: SemanticVocabulary = SEMANTIC_VOCABULARY,
+): readonly SemanticTag[] => {
+  const { subtypeByWord, abilities } = compiled(vocabulary)
+  const has = new Set<SemanticTag>()
+  for (const word of subtypesOfTypeLine(card.typeLine)) {
+    const subtype = subtypeByWord.get(word)
+    if (subtype === undefined) continue
+    has.add(subtypeTag(subtype))
+  }
+  for (const keyword of card.keywords ?? []) {
+    if (abilities.has(keyword)) has.add(abilityTag(keyword))
+  }
+  return [...has]
+}
+
 export const deriveSemanticTokens = (
   card: Pick<Card, 'name' | 'oracleText' | 'typeLine'> &
     Partial<Pick<Card, 'oracleTextFaces' | 'keywords'>>,
   vocabulary: SemanticVocabulary = SEMANTIC_VOCABULARY,
 ): SemanticTokens => {
-  const { subtypeByWord, abilities } = compiled(vocabulary)
+  const { subtypeByWord, abilities, phrases } = compiled(vocabulary)
+  const has = new Set<SemanticTag>(semanticMembership(card, vocabulary))
   const produces = new Set<SemanticTag>()
   const wants = new Set<SemanticTag>()
-
-  const own = new Set<string>()
-  for (const word of subtypesOfTypeLine(card.typeLine)) {
-    const subtype = subtypeByWord.get(word)
-    if (subtype === undefined) continue
-    own.add(subtype)
-    produces.add(subtypeTag(subtype))
-  }
-
-  for (const keyword of card.keywords ?? []) {
-    if (abilities.has(keyword)) produces.add(abilityTag(keyword))
-  }
 
   const faces = card.oracleTextFaces ?? [card.oracleText]
   for (const face of faces) {
@@ -429,7 +527,12 @@ export const deriveSemanticTokens = (
     }
 
     const remaining = plain.replace(TOKEN_CLAUSE, ' ').replace(SELF_REFERENCE, ' ')
-    for (const word of capitalisedWords(remaining)) {
+    // A keyword's own name is not a subtype reference: "Will of the council" is
+    // an ability word and Will is a planeswalker type. Blanked only for the
+    // SUBTYPE read — the keyword payoff patterns below need the name intact.
+    let forSubtypes = remaining
+    for (const phrase of phrases) forSubtypes = forSubtypes.replace(phrase, ' ')
+    for (const word of capitalisedWords(forSubtypes)) {
       const subtype = subtypeByWord.get(word)
       if (subtype !== undefined) wants.add(subtypeTag(subtype))
     }
@@ -440,7 +543,28 @@ export const deriveSemanticTokens = (
     for (const [keyword, patterns] of abilities) {
       if (patterns.some((pattern) => pattern.test(remaining))) wants.add(abilityTag(keyword))
     }
+
+    /*
+     * Granting a keyword is CAUSING it (ADR-0048), and until there was a third
+     * direction this claim had nowhere to live. The grant clause was stripped
+     * out of the payoff read to stop a direction inversion — "target creature
+     * gains flying" is not a flying payoff — and then thrown away, so 495 cards
+     * that hand out flying said nothing about flying at all.
+     *
+     * Read on `plain` rather than `remaining`, because a token made WITH a
+     * keyword is also a way of causing it: "create a 1/1 Thopter with flying"
+     * puts a flier on the battlefield exactly as "target creature gains flying"
+     * does. The token clause is removed for the WANT read and kept for this one.
+     */
+    for (const keyword of abilities.keys()) {
+      const grant = new RegExp(
+        `\\b(?:gains?|have|has)\\b[^.\\n]{0,45}\\b${escape(keyword)}\\b` +
+          `|\\bcreates?\\b[^.\\n]{0,120}?\\btokens?\\b[^.\\n]{0,60}?\\bwith\\b[^.\\n]{0,60}?\\b${escape(keyword)}\\b`,
+        'i',
+      )
+      if (grant.test(plain)) produces.add(abilityTag(keyword))
+    }
   }
 
-  return { produces: [...produces], wants: [...wants] }
+  return { has: [...has], produces: [...produces], wants: [...wants] }
 }

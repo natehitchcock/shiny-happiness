@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { oracleReferenceCandidates, resolveOracleReferences, splitOracleText } from './oracle-refs.js'
+import {
+  oracleReferenceCandidates,
+  resolveOracleReferences,
+  splitOracleText,
+} from './oracle-refs.js'
 
 /**
  * The corpus these tests are calibrated against.
@@ -52,7 +56,9 @@ describe('oracleReferenceCandidates', () => {
   })
 
   it('finds nothing in text that names no card', () => {
-    expect(oracleReferenceCandidates('Flying, vigilance. When this creature dies, draw a card.')).toEqual([])
+    expect(
+      oracleReferenceCandidates('Flying, vigilance. When this creature dies, draw a card.'),
+    ).toEqual([])
   })
 
   it('never runs a candidate past a line break', () => {
@@ -66,7 +72,9 @@ describe('resolveOracleReferences', () => {
     resolveOracleReferences(text, KNOWN, self).map((r) => ({ name: r.name }))
 
   it('links the card named after "named"', () => {
-    expect(refs('Search your library for a card named Sol Ring, reveal it.')).toEqual([{ name: 'Sol Ring' }])
+    expect(refs('Search your library for a card named Sol Ring, reveal it.')).toEqual([
+      { name: 'Sol Ring' },
+    ])
   })
 
   it('takes the LONGEST name, so a title is not cut at the comma', () => {
@@ -77,8 +85,14 @@ describe('resolveOracleReferences', () => {
 
   it('links every card in a comma-and list', () => {
     expect(
-      refs('As long as you control Equipment named Sword of Kaldra, Shield of Kaldra, and Helm of Kaldra, you win.'),
-    ).toEqual([{ name: 'Sword of Kaldra' }, { name: 'Shield of Kaldra' }, { name: 'Helm of Kaldra' }])
+      refs(
+        'As long as you control Equipment named Sword of Kaldra, Shield of Kaldra, and Helm of Kaldra, you win.',
+      ),
+    ).toEqual([
+      { name: 'Sword of Kaldra' },
+      { name: 'Shield of Kaldra' },
+      { name: 'Helm of Kaldra' },
+    ])
   })
 
   it('links both sides of an "or" list', () => {
@@ -95,11 +109,17 @@ describe('resolveOracleReferences', () => {
    * mentioned. The guard is that a name must END where the text ends it.
    */
   it('does not link a card name that a longer token name merely starts with', () => {
-    expect(refs('create a Book Equipment artifact token named Wasteland Survival Guide with "{T}: Draw."')).toEqual([])
+    expect(
+      refs(
+        'create a Book Equipment artifact token named Wasteland Survival Guide with "{T}: Draw."',
+      ),
+    ).toEqual([])
   })
 
   it('does not link across a lowercase name-connector into a token name', () => {
-    expect(refs('create a 1/3 black Demon creature token named Plaguebearer of Nurgle.')).toEqual([])
+    expect(refs('create a 1/3 black Demon creature token named Plaguebearer of Nurgle.')).toEqual(
+      [],
+    )
   })
 
   /*
@@ -130,7 +150,8 @@ describe('resolveOracleReferences', () => {
    */
   it('steps over its own name to reach the rest of a list', () => {
     const known = new Set(['Sword of Kaldra', 'Shield of Kaldra'])
-    const text = 'If you control Equipment named Helm of Kaldra, Sword of Kaldra, and Shield of Kaldra, you win.'
+    const text =
+      'If you control Equipment named Helm of Kaldra, Sword of Kaldra, and Shield of Kaldra, you win.'
 
     expect(resolveOracleReferences(text, known, 'Helm of Kaldra').map((r) => r.name)).toEqual([
       'Sword of Kaldra',
@@ -142,9 +163,11 @@ describe('resolveOracleReferences', () => {
     const known = new Set(['Sword of Kaldra'])
 
     expect(
-      resolveOracleReferences('Search for a card named Island, Sword of Kaldra.', known, 'Other').map(
-        (r) => r.name,
-      ),
+      resolveOracleReferences(
+        'Search for a card named Island, Sword of Kaldra.',
+        known,
+        'Other',
+      ).map((r) => r.name),
     ).toEqual(['Sword of Kaldra'])
   })
 
@@ -161,7 +184,11 @@ describe('resolveOracleReferences', () => {
     const known = new Set(['Sword of Kaldra'])
 
     expect(
-      resolveOracleReferences('Search for a card named Island and Sword of Kaldra.', known, 'Other'),
+      resolveOracleReferences(
+        'Search for a card named Island and Sword of Kaldra.',
+        known,
+        'Other',
+      ),
     ).toEqual([])
   })
 
@@ -198,7 +225,9 @@ describe('resolveOracleReferences', () => {
    * which effectively all were wrong.
    */
   it('does not link ordinary words that happen to be card names', () => {
-    expect(refs('Target creature gains fear until end of turn. Counterspell costs less.')).toEqual([])
+    expect(refs('Target creature gains fear until end of turn. Counterspell costs less.')).toEqual(
+      [],
+    )
     expect(refs('Sacrifice Ashnod’s Altar: add two colorless mana.')).toEqual([])
     expect(refs('Return target Island to its owner’s hand.')).toEqual([])
   })
@@ -238,7 +267,8 @@ describe('splitOracleText', () => {
   })
 
   it('rebuilds the original text exactly', () => {
-    const text = 'Equipment named Sword of Kaldra, Shield of Kaldra, and Helm of Kaldra have indestructible.'
+    const text =
+      'Equipment named Sword of Kaldra, Shield of Kaldra, and Helm of Kaldra have indestructible.'
     const rebuilt = splitOracleText(text, KNOWN, 'Other')
       .map((s) => s.text)
       .join('')

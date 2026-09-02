@@ -445,10 +445,16 @@ export const toCard = (
   // The faces go in as well as the join: a rule whose pattern spans a gap would
   // otherwise match a subject on the front face against a verb on the back,
   // which is how Tergrid's front half read as the Lantern's (ADR-0022).
+  // The name and the keywords go in as well (ADR-0046): the name is what keeps
+  // a card that spells itself out in its own rules text from asking to be
+  // paired with its own tribe, and the keywords are the whole of the
+  // `ability:` family's produce side.
   const synergy = deriveSynergy({
     oracleId: id,
+    name: raw.name,
     typeLine,
     oracleText,
+    keywords: raw.keywords ?? [],
     ...(faces.length > 1 ? { oracleTextFaces: faces } : {}),
   })
 
@@ -518,6 +524,10 @@ export const toCard = (
     universesBeyond: provenance.universesBeyond ?? false,
     synergyProduces: synergy.produces,
     synergyWants: synergy.wants,
+    // The third direction (ADR-0048). `deriveSynergy` always answers, so the
+    // `?? []` is for a curated override written before the field existed rather
+    // than for a card.
+    synergyHas: synergy.has ?? [],
     /*
      * Wizards' Game Changers list, carried on the card record we already
      * download (DATA-05).

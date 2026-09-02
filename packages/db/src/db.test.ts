@@ -17,6 +17,7 @@ import {
   comboId,
   deckId,
   printingId,
+  semanticMembership,
 } from '@roundtable/domain'
 import {
   appliedMigrations,
@@ -521,6 +522,139 @@ describeDb('packages/db against real PostgreSQL', () => {
       expect(names).toContain('Red Card')
       expect(names).toContain('Colorless Card')
       expect(names).not.toContain('Green Card')
+    })
+
+    /*
+     * The eligible read names its columns instead of `SELECT *` (ADR-0046).
+     *
+     * That is a saving with a trap in it, and this test is the trap's lid: a
+     * column left out of the list arrives as `undefined`, `toCard` maps it
+     * straight through, and the field reads as `null` — which for `loyalty`
+     * means "not a planeswalker" and for `defaultPrinting` means "no imagery
+     * yet". Both are lies that nothing would throw on. ADR-0017 hit exactly
+     * this and said so.
+     *
+     * So the assertion is a round trip against a card with every field
+     * populated, compared to what the untrimmed single-card read returns.
+     * Adding a column to `toCard` and forgetting the eligible list is a
+     * failing test rather than a silent null.
+     */
+    it('the trimmed eligible read returns the same card as the untrimmed one', async () => {
+      const full = card('Fully Populated', {
+        colorIdentity: ['R'],
+        manaCost: '{2}{R}',
+        manaValue: 3,
+        colors: ['R'],
+        typeLine: 'Legendary Creature — Elf Druid',
+        types: ['creature'],
+        oracleText: 'Whenever this creature attacks, create a Treasure token.',
+        power: '2',
+        toughness: '3',
+        loyalty: null,
+        keywords: ['Flying', 'Trample'],
+        edhrecRank: 42,
+        defaultPrinting: printingId(randomUUID()),
+        roles: ['ramp'],
+        primaryRole: 'ramp',
+        synergyProduces: ['treasure', 'subtype:elf'],
+        synergyWants: ['subtype:forest'],
+        gameChanger: false,
+        canBeCommander: true,
+      })
+      await upsertCards(db.pool, [full])
+
+      const viaEligible = (await findEligibleCards(db.pool, ['R'])).find(
+        (c) => c.name === 'Fully Populated',
+      )
+      const viaSingle = await getCard(db.pool, full.oracleId)
+
+      expect(viaEligible).toBeDefined()
+      expect(viaSingle).not.toBeNull()
+      // `oracleTextFaces` is the one field deliberately left out, and absent is
+      // already its documented meaning ("single-faced, or ingested before the
+      // column existed") rather than a wrong value. Everything else must match.
+      const expected: Record<string, unknown> = { ...(viaSingle as Card) }
+      delete expected['oracleTextFaces']
+      expect(viaEligible).toEqual(expected)
+    })
+
+    /*
+     * The coupling the trim creates, enforced rather than remembered.
+     *
+     * `synergyHas` is DERIVED in `toCard` from `type_line` and `keywords`
+     * (ADR-0048) rather than stored, which is what keeps a third array off the
+     * wire. The cost is that those two columns are now load-bearing for
+     * something a reader of the SELECT would not guess: drop either and every
+     * card's tribe and evasion tags silently become `[]`, tribal matching stops
+     * working, and nothing throws.
+     *
+     * The next person to trim this read will be doing exactly what the comment
+     * above it recommends. This is what stops them.
+     */
+    it('derives the membership tags from columns the trimmed read still carries', async () => {
+      const elf = card('Trimmed Elf Druid', {
+        colorIdentity: ['G'],
+        typeLine: 'Legendary Creature — Elf Druid',
+        types: ['creature'],
+        keywords: ['Flying'],
+      })
+      await upsertCards(db.pool, [elf])
+
+      const found = (await findEligibleCards(db.pool, ['G'])).find(
+        (c) => c.name === 'Trimmed Elf Druid',
+      )
+
+      // If `type_line` left the column list, these two go quiet.
+      expect(found?.synergyHas).toContain('subtype:elf')
+      expect(found?.synergyHas).toContain('subtype:druid')
+      // And this one is `keywords`.
+      expect(found?.synergyHas).toContain('ability:flying')
+    })
+
+    it('agrees with the domain about what a card is, rather than storing an answer', async () => {
+      // The claim is that the column was not needed, so the read has to produce
+      // exactly what the domain would compute from the same card. Asserted
+      // against `semanticMembership` itself rather than a retyped list, so a
+      // vocabulary regeneration cannot make the two drift apart.
+      const beast = card('Trimmed Beast', {
+        colorIdentity: ['G'],
+        typeLine: 'Creature — Beast Warrior',
+        types: ['creature'],
+        keywords: ['Trample', 'Vigilance'],
+      })
+      await upsertCards(db.pool, [beast])
+
+      const found = (await findEligibleCards(db.pool, ['G'])).find(
+        (c) => c.name === 'Trimmed Beast',
+      )
+
+      expect(found?.synergyHas).toEqual(semanticMembership(beast))
+    })
+
+    it('does not silently null a column the trimmed list forgot', async () => {
+      // The specific fields whose null is indistinguishable from a real answer.
+      // Named one by one so a failure says which claim broke.
+      const withPrinting = card('Has A Printing', {
+        colorIdentity: ['R'],
+        defaultPrinting: printingId(randomUUID()),
+        edhrecRank: 7,
+        primaryRole: 'ramp',
+        roles: ['ramp'],
+        canBeCommander: true,
+        keywords: ['Flying'],
+      })
+      await upsertCards(db.pool, [withPrinting])
+
+      const found = (await findEligibleCards(db.pool, ['R'])).find(
+        (c) => c.name === 'Has A Printing',
+      )
+
+      expect(found?.defaultPrinting).toBe(withPrinting.defaultPrinting)
+      expect(found?.edhrecRank).toBe(7)
+      expect(found?.primaryRole).toBe('ramp')
+      expect(found?.canBeCommander).toBe(true)
+      expect(found?.keywords).toEqual(['Flying'])
+      expect(found?.universesBeyond).toBe(false)
     })
 
     it('excludes banned cards from the eligible pool', async () => {

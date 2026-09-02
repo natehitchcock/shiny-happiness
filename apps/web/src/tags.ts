@@ -10,6 +10,8 @@
  * The phrases are written to slot into a sentence after "causes" or "benefits
  * from", which is how both surfaces use them.
  */
+import { semanticTagWords } from '@roundtable/domain'
+
 const TAG_WORDS: Readonly<Record<string, string>> = {
   'creature-death': 'a creature dying',
   token: 'making tokens',
@@ -54,5 +56,35 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
  * workspace's tag hint read "enchantment etb" — the wire spelling, in a
  * sentence written for a person. Added here because the deck web names the same
  * three in its edge descriptions and would have inherited the same jargon.
+ *
+ * The table above stays the size it is. ADR-0046 added 558 more tags, and they
+ * are DERIVED rather than written: a subtype's words are the subtype and a
+ * keyword's are the keyword, so `semanticTagWords` answers for all of them
+ * without anybody typing a phrase. The order matters — the curated table wins,
+ * because a hand-written phrase exists precisely where the derived one would be
+ * wrong, and `semanticTagWords` returns `null` for anything outside its own
+ * vocabulary so the hyphen-stripping fallback still catches a tag neither knows.
  */
-export const readable = (tag: string): string => TAG_WORDS[tag] ?? tag.replace(/-/g, ' ')
+export const readable = (tag: string): string =>
+  TAG_WORDS[tag] ?? semanticTagWords(tag) ?? tag.replace(/-/g, ' ')
+
+/**
+ * Which sentence the membership direction takes (ADR-0048).
+ *
+ * `has` is one direction in the model and TWO frames on screen, because "is an
+ * Elf" and "has flying" are not the same sentence and a single heading over
+ * both would have to pick one and be wrong about the other. The split is free:
+ * it is the tag's own prefix, so nothing has to be stored or written down.
+ *
+ * `is` for a subtype, which is what a card IS. `has` for a keyword, which is
+ * what it can DO. Anything else — no curated event carries this direction, but
+ * the function is total — falls to `has`, which is the weaker claim.
+ */
+export const membershipFrame = (tag: string): 'is' | 'has' =>
+  tag.startsWith('subtype:') ? 'is' : 'has'
+
+/** The row heading over a group of membership chips. */
+export const MEMBERSHIP_LABEL: Readonly<Record<'is' | 'has', string>> = {
+  is: 'Is',
+  has: 'Has',
+}

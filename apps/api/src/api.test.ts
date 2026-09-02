@@ -384,7 +384,9 @@ describeDb('API-01 contract', () => {
       // a field of links (24,877 of them, corpus-wide, without this).
       const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${NAMER}` })).json()
 
-      expect((body.references as { name: string }[]).map((r) => r.name)).not.toContain('Counterspell')
+      expect((body.references as { name: string }[]).map((r) => r.name)).not.toContain(
+        'Counterspell',
+      )
     })
 
     /*
@@ -567,9 +569,12 @@ describeDb('API-01 contract', () => {
         url: '/api/v1/cards/search?q=' + encodeURIComponent('impact>0'),
       })
       expect(above.statusCode).toBe(200)
-      expect(above.json().items.map((c: Card) => c.oracleId).sort()).toEqual(
-        [HIGH_IMPACT, NAMER].sort(),
-      )
+      expect(
+        above
+          .json()
+          .items.map((c: Card) => c.oracleId)
+          .sort(),
+      ).toEqual([HIGH_IMPACT, NAMER].sort())
 
       // The same card, and only that card: efficiency is impact valued in stat
       // points over the cost, so a textless card with no body scores zero too.
@@ -581,9 +586,12 @@ describeDb('API-01 contract', () => {
       // The same two cards: efficiency is impact valued over the cost, so a card
       // with impact and a cost has efficiency too. The textless fixtures score
       // zero on both, which is what makes either query a test of the field.
-      expect(efficient.json().items.map((c: Card) => c.oracleId).sort()).toEqual(
-        [HIGH_IMPACT, NAMER].sort(),
-      )
+      expect(
+        efficient
+          .json()
+          .items.map((c: Card) => c.oracleId)
+          .sort(),
+      ).toEqual([HIGH_IMPACT, NAMER].sort())
 
       // And it is excluded from the complement, so the two halves partition the
       // corpus rather than both matching.

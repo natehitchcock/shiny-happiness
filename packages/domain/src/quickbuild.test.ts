@@ -852,9 +852,9 @@ describe('staples come first, and hand over to the derived order', () => {
     const plan = quickbuildPlan({ ...empty(), staples: { spells: -3, lands: 0.5 } })
     expect(keys(plan.gaps)).not.toContain('staple')
     expect(keys(plan.gaps)).not.toContain('staple-land')
-    expect(quickbuildPlan({ ...empty(), staples: { spells: 1.7, lands: 0 } }).gaps[0]).toMatchObject(
-      { key: 'staple', short: 1 },
-    )
+    expect(
+      quickbuildPlan({ ...empty(), staples: { spells: 1.7, lands: 0 } }).gaps[0],
+    ).toMatchObject({ key: 'staple', short: 1 })
   })
 
   it('still leads on a deck past the handover, because a missing staple is missing', () => {

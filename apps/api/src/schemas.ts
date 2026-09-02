@@ -4,6 +4,7 @@ import {
   COLORS,
   COLUMN_METRICS,
   ROLE_PRECEDENCE,
+  MAX_EMPHASIS,
   SYNERGY_TAGS,
 } from '@roundtable/domain'
 import type { ArchetypeKey, Bracket, Color, Origin, Role } from '@roundtable/domain'
@@ -57,13 +58,29 @@ export const oracleIdParams = {
  *
  * The enum comes from the domain's own `SYNERGY_TAGS`, not a list retyped here
  * — two tags were added this morning (ADR-0022) and a parallel copy would have
- * 400'd them. `maxItems` is the vocabulary size because the value is a SET;
- * duplicates are dropped on read, so a longer array carries no more meaning.
+ * 400'd them. It is 608 members since ADR-0046, which is a large enum for Ajv
+ * to compile but is compiled once per process and is still the only spelling of
+ * this vocabulary anyone maintains.
  */
 const semanticEmphasis = {
   type: ['array', 'null'],
   items: { type: 'string', enum: [...SYNERGY_TAGS] },
-  maxItems: SYNERGY_TAGS.length,
+  /*
+   * A real cap, not the vocabulary size (ADR-0046, ADR-0048).
+   *
+   * This used to be `SYNERGY_TAGS.length` on the argument that deduplication
+   * bounds the value anyway. That bound was 19 when it was written and is 608
+   * now, and 608 emphasised tags means 608 `{tag, supporting}` objects on every
+   * recompute and 608 rows in the focus panel.
+   *
+   * REJECTED at the boundary rather than truncated, and that is the difference
+   * between this and `parseSemanticEmphasis`. Silently keeping twelve of a
+   * client's fifteen would leave the client believing it saved fifteen, and the
+   * three it lost would reappear as "why did my focus not stick". A 400 with
+   * `maxItems` in it says which rule was broken. The domain still truncates on
+   * READ, because a row written by an older build must stay openable.
+   */
+  maxItems: MAX_EMPHASIS,
 } as const
 
 /**
