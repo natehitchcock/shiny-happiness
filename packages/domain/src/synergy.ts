@@ -103,6 +103,16 @@ export const SYNERGY_TAGS: readonly SynergyTag[] = [
  * Written as unordered PAIRS rather than an adjacency map, so symmetry is
  * structural. "A interacts with B but B does not interact with A" is not a
  * thing that can be expressed here, and therefore not a thing that can drift.
+ *
+ * ADR-0023 and ADR-0029 both left a note here that an ORDERED table was becoming
+ * overdue. ADR-0045 settles it: the answer is no, and the reason is the
+ * admission criterion two paragraphs up. Every row in this table was let in only
+ * because it reads true in both directions — the one-way relations were refused
+ * entry and carried on the payoff side instead — so a row's direction is not
+ * information this shape discarded, it is information the criterion excludes.
+ * Directing the table would mean inventing it thirty times. Read ADR-0045 before
+ * reopening this; the case that would justify it is a feature that must tell
+ * "what causes X" from "what X causes" ACROSS tags, and none has arrived yet.
  */
 const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
   // Aristocrats: bodies you do not mind losing, a way to lose them, and the

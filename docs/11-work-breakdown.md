@@ -7,7 +7,7 @@ scope (files it may touch), explicit dependencies, and a definition of done.
 
 ## 11.0 Current state — read this first
 
-Last updated: 2026-09-01, end of the fourth build session.
+Last updated: 2026-09-02, during the fifth build session.
 
 **It runs.** `pnpm --filter @roundtable/web dev` with the API up gives a working
 deck workspace against 34,492 real cards, 110,577 printings and 108,046 real
@@ -276,6 +276,37 @@ chip showing a focus the server does not have — it says
 "Could not save the focus — … Nothing changed." instead. `supporting: 0` reads
 "Nothing in your colours supports this yet — your suggestions are unchanged", in
 the ordinary note style: not an error, because nothing is broken.
+
+**Choosing a focus now offers the next one.** Both surfaces — the commander
+prompt and the Focus block — show a **Related to your focus** row under what has
+been chosen, and picking from it offers *its* relations, until the builder
+stops. It is deliberately NOT behind the "Add a focus" disclosure: the request
+was that picking one offers the next, and the other way into emphasis (the ✧
+beside a card's own tags) leaves that disclosure shut. A **Show all semantics**
+disclosure reaches the rest of the vocabulary, and a focus picked from an offer
+stays visible and pressed in the chosen list, so nothing can be emphasised
+without a control to take it off again.
+
+The relation is `INTERACTION_PAIRS`, which is **unordered by construction**, so
+the interface says "related" and never "causes"/"benefits from" — those two
+words already label a card's own `produces`/`wants` one panel over.
+[ADR-0045](adr/0045-the-offer-is-related-and-the-table-stays-unordered.md)
+settles the direction question that ADR-0023 and ADR-0029 both deferred, and
+refuses it with the argument rather than deferring again: every one of the 30
+pairs was *admitted* on the criterion that it reads true both ways, so direction
+is not information that table lost.
+
+The offer is ranked by `RecommendResult.tagSupport`, a new field carrying the
+`supporting` count for all 21 tags rather than the emphasised few — the offer is
+by definition unemphasised, so the existing report cannot reach it. A tag with
+zero support is still offered and says so; it just does not lead.
+
+**The expansion saturates, which is why "show all" is a real control and not a
+maybe.** The interaction graph is one connected component of all 21 tags, first
+offer is a median of 2 neighbours (mean 2.9), and two hops off `creature-death`
+already reaches 18 of 21. Measured in the browser on a mono-black Tergrid deck:
+three picks along the hubs (`opponent-sacrifice` → `creature-death` → `token`)
+left 7 chips on offer and 6 in "show all". The full table is in the ADR.
 
 **Every card now says how big it is and what it costs you.**
 [Doc 18](18-card-impact-and-efficiency.md) is built: two CARD-INTRINSIC metrics,

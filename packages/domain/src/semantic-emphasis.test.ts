@@ -296,9 +296,17 @@ describe('bySupport', () => {
   })
 
   it('makes no claim at all without counts — the start screen has none yet', () => {
-    // Canonical order, unchanged. Sorting by a number nobody has computed would
-    // be an order presented as a ranking and derived from nothing.
-    expect(bySupport(['token', 'landfall'], undefined)).toEqual(['token', 'landfall'])
+    // The input, UNCHANGED — deliberately given out of canonical order, because
+    // "return it as it came" and "sort it canonically" are the same answer for
+    // a canonical input and a test that cannot tell them apart would not notice
+    // an order invented from nothing.
+    expect(bySupport(['landfall', 'token'], undefined)).toEqual(['landfall', 'token'])
+  })
+
+  it('makes no claim from an empty set of counts either', () => {
+    // A response that carried the field but counted nothing is still "nobody
+    // has answered", not "every tag scored zero".
+    expect(bySupport(['landfall', 'token'], new Map())).toEqual(['landfall', 'token'])
   })
 
   it('sinks a tag nothing in the deck’s colours supports, rather than hiding it', () => {
