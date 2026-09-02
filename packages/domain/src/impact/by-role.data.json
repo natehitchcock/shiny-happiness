@@ -40,14 +40,14 @@
       "q1": 0.425,
       "median": 0.68,
       "q3": 0.935,
-      "noCountableEffect": 1019
+      "noCountableEffect": 1023
     },
     "board-wipe": {
       "n": 519,
       "q1": 6.12,
       "median": 6.12,
       "q3": 8.4,
-      "noCountableEffect": 70
+      "noCountableEffect": 71
     },
     "bounce": {
       "n": 281,
@@ -66,23 +66,23 @@
     "draw": {
       "n": 3738,
       "q1": 0.68,
-      "median": 0.95,
-      "q3": 2.24,
-      "noCountableEffect": 2026
+      "median": 0.935,
+      "q3": 1.9,
+      "noCountableEffect": 2061
     },
     "equipment": {
       "n": 619,
       "q1": 0.425,
       "median": 0.808,
-      "q3": 1.2,
-      "noCountableEffect": 422
+      "q3": 1,
+      "noCountableEffect": 425
     },
     "evasion": {
       "n": 7335,
       "q1": 0.425,
       "median": 0.808,
-      "q3": 2.06,
-      "noCountableEffect": 4270
+      "q3": 1.92,
+      "noCountableEffect": 4331
     },
     "graveyard-hate": {
       "n": 112,
@@ -95,36 +95,36 @@
       "n": 1194,
       "q1": 0.68,
       "median": 0.68,
-      "q3": 0.99,
-      "noCountableEffect": 896
+      "q3": 0.95,
+      "noCountableEffect": 900
     },
     "protection": {
       "n": 1205,
       "q1": 0.425,
       "median": 0.95,
-      "q3": 2.64,
-      "noCountableEffect": 606
+      "q3": 2.28,
+      "noCountableEffect": 617
     },
     "ramp": {
       "n": 1508,
-      "q1": 0.6,
+      "q1": 0.5,
       "median": 0.68,
-      "q3": 1.36,
-      "noCountableEffect": 1031
+      "q3": 1.2,
+      "noCountableEffect": 1042
     },
     "recursion": {
       "n": 939,
       "q1": 0.85,
       "median": 1.2,
       "q3": 2.28,
-      "noCountableEffect": 256
+      "noCountableEffect": 258
     },
     "sac-outlet": {
       "n": 294,
       "q1": 0.68,
       "median": 0.808,
       "q3": 2.24,
-      "noCountableEffect": 158
+      "noCountableEffect": 159
     },
     "spot-removal": {
       "n": 2703,
@@ -136,30 +136,30 @@
     "stax": {
       "n": 93,
       "q1": 0.425,
-      "median": 0.7,
+      "median": 0.6,
       "q3": 1.92,
-      "noCountableEffect": 52
+      "noCountableEffect": 53
     },
     "synergy": {
       "n": 11629,
       "q1": 0.5,
-      "median": 1.2,
-      "q3": 2.28,
-      "noCountableEffect": 5506
+      "median": 1,
+      "q3": 2.24,
+      "noCountableEffect": 5634
     },
     "token-maker": {
       "n": 2799,
       "q1": 0.5,
       "median": 0.935,
-      "q3": 2.28,
-      "noCountableEffect": 1648
+      "q3": 2.2,
+      "noCountableEffect": 1680
     },
     "tutor": {
       "n": 211,
       "q1": 0.425,
       "median": 0.5,
       "q3": 0.935,
-      "noCountableEffect": 161
+      "noCountableEffect": 162
     },
     "wincon": {
       "n": 116,
