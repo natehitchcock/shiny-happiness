@@ -252,6 +252,8 @@ POST /api/v1/decks/:id/recommendations
     unavailable: Array<{ key: CandidateGroupKey, reason: string }>,
     // The deck's emphasis and how far it reaches. `[]` when there is none.
     emphasis: Array<{ tag: SynergyTag, supporting: number }>,
+    // The same count for EVERY tag, in SYNERGY_TAGS order. Always 21 entries.
+    tagSupport: Array<{ tag: SynergyTag, supporting: number }>,
     query?: {
       matched: number,              // pool size after the filter
       total: number,                // pool size before it
@@ -293,6 +295,18 @@ that worked. `supporting` is the count of eligible candidates carrying that tag,
 before the query filter, so `0` lets the client say *"nothing in your colours
 produces or wants landfall"* rather than leaving the builder to wonder why their
 click did nothing.
+
+`tagSupport` is that same count for the whole vocabulary rather than the
+emphasised few, and it exists because the client offers the semantics **related
+to** a chosen focus and has to rank them. Those are by definition tags the deck
+does *not* emphasise, so `emphasis` is structurally unable to reach them; with
+no ranking the offer leads with whichever tag sorts first, including one nothing
+in the deck's colours supports. Every tag appears, **including at zero** —
+omitting the zeroes would make *"counted, and it was nothing"* indistinguishable
+on the wire from *"not counted"*, and the client orders those two differently.
+It is emphasis-independent by construction (the counts run over eligible
+candidates, and emphasis never changes eligibility), which is what lets the
+client hold it across a focus save instead of blanking it.
 
 **`items` may be up to three longer than `limitPerGroup`** when the deck has a
 focus ([ADR-0026](adr/0026-a-focus-guarantees-its-top-three-in-every-category.md)).

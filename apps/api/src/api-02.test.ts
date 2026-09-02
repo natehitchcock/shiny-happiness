@@ -1427,6 +1427,32 @@ describeDb('API-02 contract', () => {
       ])
     })
 
+    it('says how much of the pool supports every tag, so an offer can be ranked', async () => {
+      // The interface offers the semantics RELATED to a chosen focus, and those
+      // are by definition not emphasised — so `emphasis` above cannot rank them
+      // and the offer would fall back to the alphabet, leading with whichever
+      // tag sorts first even when nothing in the deck's colours supports it.
+      const body = await suggest((await freshDeck(['untap'])).id)
+      const support = new Map(
+        body.tagSupport.map((e: { tag: string; supporting: number }) => [e.tag, e.supporting]),
+      )
+      expect(support.get('untap')).toBe(1)
+      // Counted and found to be nothing — reported, not omitted. The client
+      // ranks a counted zero above a tag it has no count for at all.
+      expect(support.get('landfall')).toBe(0)
+      expect(body.tagSupport.length).toBeGreaterThan(body.emphasis.length)
+    })
+
+    it('reports the tag support even with no emphasis, because the offer precedes one', async () => {
+      // "Show all semantics" is reachable before any focus exists, and it is
+      // ranked by the same counts.
+      const body = await suggest((await freshDeck()).id)
+      expect(body.emphasis).toEqual([])
+      expect(
+        body.tagSupport.find((e: { tag: string }) => e.tag === 'untap'),
+      ).toEqual({ tag: 'untap', supporting: 1 })
+    })
+
     it('says the card rose because of the emphasis, not an ordinary synergy (P4)', async () => {
       const body = await suggest((await freshDeck(['untap'])).id)
       const item = body.groups

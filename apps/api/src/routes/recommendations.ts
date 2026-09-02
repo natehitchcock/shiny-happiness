@@ -238,6 +238,18 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
          * an emphasis that worked.
          */
         emphasis: result.emphasis,
+        /*
+         * The same count for every tag, which is what lets the interface RANK
+         * the semantics it offers next to a chosen focus.
+         *
+         * Those are by definition tags the deck does not emphasise, so the
+         * report above cannot reach them; without this the offer would be
+         * ordered by nothing, and would lead with whichever tag sorts first
+         * even when the deck's colours contain no card that supports it.
+         *
+         * 21 entries, computed in the pass that already produced `emphasis`.
+         */
+        tagSupport: result.tagSupport,
         query: {
           matched: result.groups.reduce((n, g) => n + g.total, 0),
           total: context.pool.length,
