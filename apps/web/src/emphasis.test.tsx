@@ -896,6 +896,20 @@ describe('the semantics offered next to a chosen focus', () => {
       expect(button.getAttribute('aria-pressed')).toBe('false')
     }
   })
+
+  it('still offers the chain against a server that sends no counts at all', async () => {
+    // An older API does not know the field. The offer is the model talking, not
+    // the pool, so it must survive that — unranked and making no claim about
+    // support, rather than absent or broken.
+    const older = recs({ emphasis: [{ tag: 'opponent-sacrifice', supporting: 5 }] })
+    delete older.tagSupport
+    mocked.getRecommendations.mockResolvedValue(older)
+    await mount(deck({ semanticEmphasis: ['opponent-sacrifice'] }))
+
+    const offered = offer(focusPanel())
+    expect(within(offered).getByLabelText('Emphasise a creature dying')).toBeDefined()
+    expect(within(offered).queryByText(/nothing in your colours/i)).toBeNull()
+  })
 })
 
 // ------------------------------------------------------ the whole vocabulary

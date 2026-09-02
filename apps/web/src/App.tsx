@@ -6093,13 +6093,15 @@ export const Workspace = ({
       // `bracket` already get.
       setEmphasisReport(r.recs.emphasis ?? [])
       /*
-       * `undefined`, not an empty Map, when the server does not send it.
+       * `undefined` when the server does not send it — a build talking to an
+       * older API gets an unranked offer rather than a broken one.
        *
-       * The two are different claims and `bySupport` acts on the difference: no
-       * counts means make no ranking claim and leave the offer in canonical
-       * order, while an empty Map of counts would sink every tag to "counted,
-       * and it was nothing". A build talking to an older API gets an unranked
-       * offer rather than one ranked by a fiction.
+       * An empty Map would behave identically today, and that is a property of
+       * `bySupport` rather than a coincidence: it treats no counts and zero
+       * counts as the same thing, because a server that answered would answer
+       * about all 21 tags, so an empty set can only mean nobody answered. This
+       * is written as `undefined` anyway because that is what is meant, and a
+       * reader should not have to know that guard exists to see it is safe.
        */
       setTagSupport(
         r.recs.tagSupport === undefined
