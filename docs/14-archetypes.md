@@ -60,17 +60,30 @@ reasoning for each row now lives beside it in
 `packages/domain/src/archetype-targets.ts`, because a number nobody can argue
 with is a number nobody can correct.
 
-| | land | ramp | draw | spot-rem. | wipe | tutor | protect. | creature |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| aggro | 35 | 9 | 8 | 7 | 1 | 2 | 4 | 32 |
-| midrange | 36 | 11 | 9 | 8 | 3 | 3 | 4 | 26 |
-| control | 36 | 11 | 12 | 12 | 5 | 3 | 5 | 14 |
-| combo | 34 | 13 | 10 | 6 | 1 | 8 | 7 | 20 |
-| ramp | 37 | 15 | 9 | 6 | 3 | 3 | 4 | 22 |
-| aristocrats | 35 | 10 | 9 | 7 | 3 | 4 | 4 | 30 |
-| voltron | 36 | 10 | 8 | 8 | 2 | 5 | 7 | 12 |
-| tokens | 35 | 10 | 8 | 7 | 2 | 3 | 4 | 24 |
-| stax | 35 | 12 | 8 | 8 | 3 | 5 | 5 | 16 |
+[ADR-0037](adr/0037-interaction-is-two-leaf-roles-not-an-umbrella.md) split what
+used to be one "spot-removal" column into four: `spot-rem.`, `counter`, `gy-hate`
+and `bounce`. The first three are a **carve-up of the old number**, not an
+addition — 426 counterspells and 96 graveyard-removal cards used to be counted as
+spot removal, so a row that kept its old figure and gained the new ones would
+double-book the 99-card budget. `bounce` is additive, because its cards came from
+the unclassified pool rather than from removal. A blank means the archetype wants
+none, which is a decision argued in the row's docblock, not an unfinished cell.
+
+| | land | ramp | draw | spot-rem. | counter | gy-hate | bounce | wipe | tutor | protect. | creature |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| aggro | 35 | 9 | 8 | 6 | — | 1 | — | 1 | 2 | 4 | 32 |
+| midrange | 36 | 11 | 9 | 6 | 1 | 1 | 1 | 3 | 3 | 4 | 26 |
+| control | 36 | 11 | 12 | 6 | 5 | 1 | 2 | 5 | 3 | 5 | 14 |
+| combo | 34 | 13 | 10 | 3 | 2 | 1 | 1 | 1 | 8 | 7 | 20 |
+| ramp | 37 | 15 | 9 | 5 | — | 1 | — | 3 | 3 | 4 | 22 |
+| aristocrats | 35 | 10 | 9 | 7 | — | — | — | 3 | 4 | 4 | 30 |
+| voltron | 36 | 10 | 8 | 7 | — | 1 | — | 2 | 5 | 7 | 12 |
+| tokens | 35 | 10 | 8 | 6 | — | 1 | — | 2 | 3 | 4 | 24 |
+| stax | 35 | 12 | 8 | 5 | 2 | 1 | — | 3 | 5 | 5 | 16 |
+
+Aristocrats is the only row with no graveyard hate, and deliberately: it runs the
+table's highest `recursion` at 7, and Commander graveyard hate is overwhelmingly
+symmetric, so it would switch off the deck's own engine.
 
 Archetype-specific dimensions, applied only where the archetype names them:
 

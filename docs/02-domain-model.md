@@ -196,7 +196,16 @@ type Role =
   | 'recursion' | 'wincon' | 'synergy' | 'stax'
   // added for archetype targets — see doc 14 and ADR-0005
   | 'sac-outlet' | 'token-maker' | 'anthem' | 'equipment' | 'aura' | 'evasion'
+  // added by ADR-0037: countering and bouncing are not spot removal
+  | 'counterspell' | 'bounce'
 ```
+
+**"Interaction" is a derived view, not a role.** It is the sum of
+`counterspell`, `bounce` and `spot-removal`. Making it a role would either
+overlap the three — which breaks the "exactly one counted role" rule below and
+turns the 99-card budget into a lie — or hide them, so a builder could no longer
+ask for three counterspells. See
+[ADR-0037](adr/0037-interaction-is-two-leaf-roles-not-an-umbrella.md).
 
 Role assignment is **derived and imperfect**. The pipeline, in precedence order:
 

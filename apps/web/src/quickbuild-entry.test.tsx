@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from './api'
 import { Workspace } from './App'
@@ -121,15 +121,31 @@ const toggle = async (): Promise<void> => {
 }
 
 describe('the Quickbuild button (§19.1)', () => {
-  it('sits in the masthead beside Import, Export and Graph', async () => {
+  /*
+   * §19.1 wrote this as "beside Import, Export and Graph", and the row it named
+   * no longer exists. Doc 20 A1 moved Import and Export behind an overflow menu
+   * so that adding Help would not make the row five buttons — ADR-0032 measured
+   * that a fifth control puts the tools onto a second line on every phone. So
+   * Quickbuild's neighbours are now Graph, Help and the menu, and the two that
+   * left are asserted to be BEHIND the menu rather than simply gone: the
+   * difference between moving a control and dropping one is the whole of A1.
+   */
+  it('sits in the masthead beside Graph and Help, with Import and Export behind ⋯', async () => {
     render(<Workspace deck={deck} />)
     await waitFor(() => expect(button()).toBeTruthy())
     const masthead = button().closest('header')
     expect(masthead).not.toBeNull()
-    for (const name of ['Import', 'Export', 'Graph']) {
-      expect(masthead!.querySelector(`button`)).toBeTruthy()
-      expect(screen.getByRole('button', { name })).toBeTruthy()
+    for (const name of ['Graph', 'Help', 'More tools']) {
+      expect(within(masthead!).getByRole('button', { name })).toBeTruthy()
     }
+    // Off the row, but not lost: they are one click away and still named.
+    expect(screen.queryByRole('button', { name: 'Import' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Export' })).toBeNull()
+    await act(async () => {
+      within(masthead!).getByRole('button', { name: 'More tools' }).click()
+    })
+    expect(screen.getByRole('menuitem', { name: 'Import' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Export' })).toBeTruthy()
   })
 
   it('reports open and closed through aria-pressed, not two buttons', async () => {

@@ -112,9 +112,35 @@ describe('roleImpactBand', () => {
 })
 
 describe('the shipped bands', () => {
+  /*
+   * Roles that exist in the vocabulary but that the SHIPPED bands do not measure
+   * yet, because the bands are generated from `cards.roles` in a corpus database
+   * and `roles` is written at ingest. ADR-0037 added these two; no card in the
+   * database holds either until the operator re-runs the card ingest, so
+   * regenerating the bands today would produce zero-card entries — which
+   * `impact-roles.ts` is explicit it must never do, since a role with no cards
+   * has to read as ABSENT and not as zeroes.
+   *
+   * Clear this list by running, in order:
+   *   pnpm --filter @roundtable/ingest start cards
+   *   pnpm --filter @roundtable/ingest impact-roles
+   * and committing the regenerated `impact/by-role.data.json`.
+   */
+  const AWAITING_REINGEST: readonly Role[] = ['counterspell', 'bounce']
+
   it('covers every role in the vocabulary', () => {
     for (const role of ROLE_PRECEDENCE) {
+      if (AWAITING_REINGEST.includes(role)) continue
       expect(roleImpactBand(role), role).not.toBeNull()
+    }
+  })
+
+  it('has nothing stale in the awaiting-reingest list', () => {
+    // Self-clearing. The moment the bands are regenerated, these roles ARE
+    // measured, this fails, and the exemption above has to be deleted — so the
+    // exemption cannot quietly outlive the reason for it.
+    for (const role of AWAITING_REINGEST) {
+      expect(roleImpactBand(role), `${role} is measured now — delete it from the list`).toBeNull()
     }
   })
 
