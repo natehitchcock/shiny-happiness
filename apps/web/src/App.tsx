@@ -2208,6 +2208,8 @@ const Preview = ({
   onBack,
   backTo,
   backDepth,
+  backRef,
+  closeRef,
 }: {
   /** The hydrated card, already in memory. Everything readable comes from here. */
   card: api.Card | undefined
@@ -2243,6 +2245,16 @@ const Preview = ({
   backTo: { oracleId: string; name: string } | null
   /** How many cards are behind this one, so Back knows when it is the last step. */
   backDepth: number
+  /**
+   * The header controls, owned by the WORKSPACE and only attached here.
+   *
+   * This panel unmounts across an in-panel navigation to a card the deck does
+   * not hold — `card` is undefined and `detail` is cleared for the fetch, so for
+   * a moment there is nothing to draw. A ref living in here would be torn down
+   * with it, and the focus restore has to outlive that gap.
+   */
+  backRef: React.RefObject<HTMLButtonElement | null>
+  closeRef: React.RefObject<HTMLButtonElement | null>
 }): React.JSX.Element | null => {
   // `detail` is the fallback, not the source: a card reached from somewhere that
   // never hydrated it still previews once its detail lands.
@@ -2255,8 +2267,6 @@ const Preview = ({
   // the bigger screen.
   const shownId = shown?.oracleId ?? null
   const ref = useRef<HTMLElement>(null)
-  /** Where focus goes when Back disables itself under the caret. */
-  const closeRef = useRef<HTMLButtonElement>(null)
 
   /*
    * The cards this card's rules text names, and how to draw them as links.
@@ -2427,6 +2437,7 @@ const Preview = ({
           }}
           disabled={backTo === null}
           aria-label={backTo === null ? 'Back — nothing to go back to' : `Back to ${backTo.name}`}
+          ref={backRef}
         >
           Back
         </button>
@@ -5056,9 +5067,20 @@ export const Workspace = ({
    * Only in-panel links push here; opening a card from any list clears it. See
    * `followReference` for why.
    */
-  const [trail, setTrail] = useState<readonly string[]>([])
+  const [trail, setTrail] = useState<readonly { oracleId: string; name: string }[]>([])
   /** The control that opened the preview, so closing it can hand focus back. */
   const previewOpener = useRef<HTMLElement | null>(null)
+  /**
+   * The preview's Back and Close, held HERE rather than in the panel.
+   *
+   * The panel unmounts while an in-panel navigation fetches a card the deck does
+   * not hold, so a ref owned by it would not survive the gap that focus has to
+   * be restored across.
+   */
+  const backRef = useRef<HTMLButtonElement | null>(null)
+  const closeRef = useRef<HTMLButtonElement | null>(null)
+  /** Set by an in-panel navigation, so focus can follow the card that arrives. */
+  const navigatedInPanel = useRef(false)
   /*
    * On one column the right-hand rail is at the bottom of a very long page, so
    * the preview renders as a bottom sheet over the feed instead.
@@ -6444,10 +6466,21 @@ export const Workspace = ({
    */
   const followReference = (oracleId: string): void => {
     if (inspect !== null && inspect !== oracleId) {
+      /*
+       * The NAME travels with the id.
+       *
+       * A card reached by a link is usually not in the deck, so it is not in
+       * `cards` and its name cannot be looked up by id later — which left Back
+       * saying "the previous card" the moment the reader went two deep. The
+       * panel knows the name right now, so it is recorded now.
+       */
+      const name = cardsRef.current.get(inspect)?.name ?? detail?.name ?? 'the previous card'
+      const from = { oracleId: inspect, name }
       // Evict the OLDEST. The reader walks backwards from the newest end, so the
       // far end is the part they will never reach.
-      setTrail((previous) => [...previous, inspect].slice(-MAX_TRAIL))
+      setTrail((previous) => [...previous, from].slice(-MAX_TRAIL))
     }
+    navigatedInPanel.current = true
     show(oracleId)
   }
 
@@ -6456,7 +6489,8 @@ export const Workspace = ({
     const previous = trail[trail.length - 1]
     if (previous === undefined) return
     setTrail((current) => current.slice(0, -1))
-    show(previous)
+    navigatedInPanel.current = true
+    show(previous.oracleId)
   }
 
   /*
@@ -7161,17 +7195,33 @@ export const Workspace = ({
    */
   const previewCard = inspect === null ? undefined : cards.get(inspect)
   const detailOpen = (previewCard ?? detail ?? null) !== null
+  /** The card Back returns to, named — the trail carries the name with the id. */
+  const backTo = trail.length === 0 ? null : trail[trail.length - 1]!
+
   /*
-   * The card Back returns to, named.
+   * Put focus back in the panel after an in-panel navigation.
    *
-   * A card followed from a link is usually NOT in the deck, so it is usually not
-   * in `cards` either — the trail holds ids and the name has to be recovered. It
-   * is in `cards` whenever the reader started from a card they own, which is the
-   * common case; the fallback keeps the control honest and operable when it is
-   * not, rather than hiding a step of history because a name is missing.
+   * Following a card name to a card the deck does NOT hold — which is the usual
+   * case, since the interesting reference is to something you do not own — makes
+   * the panel unmount for the length of the fetch, and focus falls to `<body>`.
+   * A keyboard reader who followed a link then has to Tab from the masthead to
+   * reach the panel they are reading. The link is operable; the journey is not,
+   * and R4 is about the journey.
+   *
+   * Back rather than the heading, because Back is where a reader walking a chain
+   * of references is going next. Close when Back has just become disabled — a
+   * disabled control cannot hold focus, which is the same trap in a new place.
    */
-  const backId = trail.length === 0 ? null : trail[trail.length - 1]!
-  const backTo = backId === null ? null : { oracleId: backId, name: cards.get(backId)?.name ?? 'the previous card' }
+  useEffect(() => {
+    if (!navigatedInPanel.current) return
+    const back = backRef.current
+    const close = closeRef.current
+    // The panel has not drawn yet; stay armed and try again on the next render.
+    if (back === null && close === null) return
+    navigatedInPanel.current = false
+    const target = back !== null && !back.disabled ? back : close
+    target?.focus()
+  })
 
   return (
     <>
@@ -8210,6 +8260,8 @@ export const Workspace = ({
             onBack={backToPrevious}
             backTo={backTo}
             backDepth={trail.length}
+            backRef={backRef}
+            closeRef={closeRef}
           />
           <div className="analysis-scroll">
             <h2 style={{ marginTop: '1.25rem' }}>

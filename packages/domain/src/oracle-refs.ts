@@ -244,7 +244,18 @@ export const resolveOracleReferences = (
     if (found.some((r) => at < r.end && r.start <= at)) continue
     for (let item = 0; ; item++) {
       const hit = candidatesAt(text, at).find((candidate) => {
-        if (!known.has(candidate)) return false
+        /*
+         * `known` is what the caller considers LINKABLE. A card's own name and a
+         * basic land are still names, and the walk has to be able to step over
+         * them to reach the items after them in a list — "Equipment named Helm
+         * of Kaldra, Sword of Kaldra, and Shield of Kaldra" begins with the card
+         * itself, and a caller whose known-set is only the linkable cards would
+         * stop dead on the first item and lose both real links. Recognised here
+         * rather than by asking every caller to pad its set, because a caller
+         * that forgets simply gets no links and no error — which is how this
+         * shipped green and broke in a browser.
+         */
+        if (!known.has(candidate) && !mine.has(candidate) && !BASIC_LANDS.has(candidate)) return false
         if (!endsHere(text.slice(at + candidate.length))) return false
         /*
          * A continuation item must be multi-word. The anchor's FIRST item may be

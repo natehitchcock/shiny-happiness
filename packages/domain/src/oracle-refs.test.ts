@@ -119,6 +119,52 @@ describe('resolveOracleReferences', () => {
     ])
   })
 
+  /*
+   * `known` is what the caller considers LINKABLE, not the whole card table.
+   *
+   * A client resolving against only the references a server already picked has
+   * a hole in its set exactly where the card names itself or names a basic land
+   * — neither is ever sent, because neither is ever linked. The walk still has
+   * to step over them to reach the items after them, and these two cases are
+   * how it shipped green and rendered nothing in a browser.
+   */
+  it('steps over its own name to reach the rest of a list', () => {
+    const known = new Set(['Sword of Kaldra', 'Shield of Kaldra'])
+    const text = 'If you control Equipment named Helm of Kaldra, Sword of Kaldra, and Shield of Kaldra, you win.'
+
+    expect(resolveOracleReferences(text, known, 'Helm of Kaldra').map((r) => r.name)).toEqual([
+      'Sword of Kaldra',
+      'Shield of Kaldra',
+    ])
+  })
+
+  it('steps over a basic land to reach the rest of a list', () => {
+    const known = new Set(['Sword of Kaldra'])
+
+    expect(
+      resolveOracleReferences('Search for a card named Island, Sword of Kaldra.', known, 'Other').map(
+        (r) => r.name,
+      ),
+    ).toEqual(['Sword of Kaldra'])
+  })
+
+  /*
+   * A limit worth stating rather than discovering: after a name, " and " is
+   * ambiguous. It separates list items ("Crown of Empires and Throne of
+   * Empires") and it also sits INSIDE names ("The Mightstone and Weakstone"),
+   * and nothing in the text distinguishes the two. It is read as part of the
+   * name, because reading it as a separator would cut a real name in half — a
+   * wrong link is worse than a missing one. The cost is the item after an "and"
+   * when the item before it was not linkable.
+   */
+  it('does not split on "and" after a name it could not link', () => {
+    const known = new Set(['Sword of Kaldra'])
+
+    expect(
+      resolveOracleReferences('Search for a card named Island and Sword of Kaldra.', known, 'Other'),
+    ).toEqual([])
+  })
+
   /* Self-reference: reopening the card you are already reading is noise. */
   it('does not link the card to itself', () => {
     expect(refs('Sacrifice a creature named Sol Ring: draw a card.', 'Sol Ring')).toEqual([])

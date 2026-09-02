@@ -93,6 +93,31 @@ const NEWT = base({ oracleId: 'newt', name: 'Festering Newt', typeLine: 'Creatur
  * Kher Keep", which is never at an anchor, so it cannot tell a working
  * self-check from an absent one.
  */
+/**
+ * A card whose text names ITSELF first and two other cards after it.
+ *
+ * Real text, and the case that broke in a browser when the unit tests were all
+ * green: the server drops the self-reference from what it sends, so the client's
+ * known-name set did not contain "Helm of Kaldra" — and the walk along the list
+ * stopped dead on the first item it could not resolve, before ever reaching
+ * Sword or Shield. Every link on the card vanished.
+ */
+const HELM = base({
+  oracleId: 'helm',
+  name: 'Helm of Kaldra',
+  typeLine: 'Legendary Artifact — Equipment',
+  oracleText:
+    'Equipped creature has first strike, trample, and haste.\nIf you control Equipment named Helm of Kaldra, Sword of Kaldra, and Shield of Kaldra, create Kaldra, a legendary 4/4 colorless Avatar creature token.',
+})
+const SWORD = base({ oracleId: 'sword', name: 'Sword of Kaldra', typeLine: 'Legendary Artifact — Equipment' })
+const SHIELD = base({ oracleId: 'shield', name: 'Shield of Kaldra', typeLine: 'Legendary Artifact — Equipment' })
+/** Shield, but with the rules text that names the other two — the middle of a chain. */
+const SHIELD_NAMER = base({
+  ...SHIELD,
+  oracleText:
+    'As long as you control Equipment named Shield of Kaldra, Sword of Kaldra, and Helm of Kaldra, they have indestructible.',
+})
+
 const SKOA = base({
   oracleId: 'skoa',
   name: 'Skoa, Embermage',
@@ -263,6 +288,41 @@ describe('a card named in oracle text', () => {
     expect(screen.queryByRole('button', { name: 'Open Skoa, Embermage' })).toBeNull()
   })
 
+  it('links the rest of a list that begins with the card naming itself', async () => {
+    /*
+     * The server sends only the cards it resolved, and a self-reference is not
+     * one of them — so the client's known-name set has a hole exactly where the
+     * first list item sits. The walk has to step OVER the card's own name to
+     * reach the two after it, which means the self name belongs in the set the
+     * client walks with even though it must never become a link.
+     */
+    mocked.hydrate.mockResolvedValue({
+      cards: new Map([
+        ['helm', HELM],
+        ['cauldron', CAULDRON],
+      ]),
+      prices: new Map(),
+      images: new Map(),
+    })
+    mocked.getCardDetail.mockImplementation((id: string) =>
+      Promise.resolve(
+        id === 'helm'
+          ? detailFor(HELM, [
+              { name: 'Sword of Kaldra', oracleId: 'sword' },
+              { name: 'Shield of Kaldra', oracleId: 'shield' },
+            ])
+          : (DETAILS[id] ?? detailFor(base({ oracleId: id, name: id }), [])),
+      ),
+    )
+    render(<Workspace deck={{ ...deck, entries: [{ oracleId: 'helm', zone: 'accepted', locked: false }] }} />)
+    await openPreview('Helm of Kaldra')
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Open Sword of Kaldra' })).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Open Shield of Kaldra' })).toBeTruthy()
+    // …and the card still does not link to itself.
+    expect(screen.queryByRole('button', { name: 'Open Helm of Kaldra' })).toBeNull()
+  })
+
   it('leaves the rules text itself intact', async () => {
     render(<Workspace deck={deck} />)
     const panel = await openPreview('Kher Keep')
@@ -357,6 +417,39 @@ describe('getting back', () => {
     expect(document.activeElement).not.toBe(document.body)
   })
 
+  it('keeps focus in the panel when following a card the deck does not hold', async () => {
+    /*
+     * The panel UNMOUNTS across an in-panel navigation to a card that is not
+     * hydrated: `card` is undefined and `detail` is cleared for the fetch, so
+     * for a moment there is nothing to draw. Focus falls to `<body>`, and a
+     * keyboard reader who followed a link then has to Tab from the masthead to
+     * get back to the panel they are reading — the link is operable but the
+     * journey is not.
+     */
+    mocked.hydrate.mockResolvedValue({
+      cards: new Map([['helm', HELM]]),
+      prices: new Map(),
+      images: new Map(),
+    })
+    mocked.getCardDetail.mockImplementation((id: string) =>
+      Promise.resolve(
+        id === 'helm'
+          ? detailFor(HELM, [
+              { name: 'Sword of Kaldra', oracleId: 'sword' },
+              { name: 'Shield of Kaldra', oracleId: 'shield' },
+            ])
+          : detailFor(SHIELD_NAMER, []),
+      ),
+    )
+    render(<Workspace deck={{ ...deck, entries: [{ oracleId: 'helm', zone: 'accepted', locked: false }] }} />)
+    await openPreview('Helm of Kaldra')
+    await waitFor(() => screen.getByRole('button', { name: 'Open Shield of Kaldra' }))
+    await follow('Shield of Kaldra')
+
+    expect(document.activeElement).not.toBe(document.body)
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Back to Helm of Kaldra' }))
+  })
+
   it('forgets the trail when a card is opened from a list again', async () => {
     // The trail belongs to the panel. A live Back on a freshly opened card would
     // point at something the reader was reading before they closed the last one.
@@ -372,6 +465,45 @@ describe('getting back', () => {
       'disabled',
       true,
     )
+  })
+
+  it('names a card it returns to even when the deck does not hold it', async () => {
+    /*
+     * The interesting reference is almost always to a card the deck does NOT
+     * have, so it is not in the client's hydrated map and its name cannot be
+     * looked up by id. The name has to travel WITH the trail entry — the link
+     * that pushed it knew the name, and throwing it away leaves Back saying
+     * "the previous card", which is precisely the R4 failure of a control that
+     * does not say what it does.
+     */
+    mocked.hydrate.mockResolvedValue({
+      cards: new Map([['helm', HELM]]),
+      prices: new Map(),
+      images: new Map(),
+    })
+    mocked.getCardDetail.mockImplementation((id: string) =>
+      Promise.resolve(
+        id === 'helm'
+          ? detailFor(HELM, [
+              { name: 'Sword of Kaldra', oracleId: 'sword' },
+              { name: 'Shield of Kaldra', oracleId: 'shield' },
+            ])
+          : id === 'shield'
+            ? detailFor(SHIELD_NAMER, [
+                { name: 'Sword of Kaldra', oracleId: 'sword' },
+                { name: 'Helm of Kaldra', oracleId: 'helm' },
+              ])
+            : detailFor(SWORD, []),
+      ),
+    )
+    render(<Workspace deck={{ ...deck, entries: [{ oracleId: 'helm', zone: 'accepted', locked: false }] }} />)
+    await openPreview('Helm of Kaldra')
+    await waitFor(() => screen.getByRole('button', { name: 'Open Shield of Kaldra' }))
+    await follow('Shield of Kaldra')
+    await waitFor(() => screen.getByRole('button', { name: 'Open Sword of Kaldra' }))
+    await follow('Sword of Kaldra')
+
+    expect(screen.getByRole('button', { name: 'Back to Shield of Kaldra' })).toBeTruthy()
   })
 
   it('walks back through a chain of references one card at a time', async () => {
