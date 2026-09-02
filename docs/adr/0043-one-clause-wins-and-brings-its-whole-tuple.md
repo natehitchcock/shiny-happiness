@@ -263,6 +263,44 @@ corpus rather than papered over with a test:
   a spell grant and a `for each opponent` rider. A redundant second guard in the
   intervening-word lookahead was **deleted** rather than left untestable.
 
+### Handed off, not touched: the `spell-cast` semantics gap
+
+`synergy.ts` belongs to another task and was not edited. The report also asked
+whether `produces: []` on Quandrix is thin. Measured, and the answer splits:
+
+**The producer side is correct as it stands.** `produces: 'spell-cast'` is
+derived from one rule — `/^[^\n]*\b(Instant|Sorcery)\b/`, the type line — and
+all **7,211** cards carrying the tag are instants or sorceries. The tag means
+"this card IS the spell a prowess trigger waits for", not "this card causes
+spells to be cast". Quandrix is a creature, so `produces: []` is right under
+that definition, and widening it would make one tag mean two things — Quandrix
+would then both produce and want `spell-cast`, satisfying itself.
+
+There is a real argument on the other side, because cascade genuinely *does*
+cast extra spells: **24** commander-legal cards grant cascade, storm, replicate
+or conspire to your own spells and produce nothing, among them Maelstrom Nexus,
+Wort, the Raidmother, Djinn Illuminatus and Rain of Riches. That is a
+definitional decision for whoever owns the file, not a missing regex.
+
+**The wants side has a plain gap, and it is the actionable half.** The rule
+matches `instant and sorcery spells you cast` and a list of keywords, so it
+catches Quandrix and misses the other spellings:
+
+| population | count |
+| --- | ---: |
+| permanents granting something to `spells you cast` (the impact rule's population) | 251 |
+| …carrying **no semantic at all** (`produces: []` and `wants: []`) | **66** |
+| …not carrying `wants: 'spell-cast'` | 212 |
+| cascade granters specifically | 7, of which 4 have no `spell-cast` want |
+
+The 66 with nothing include Grand Arbiter Augustin IV, Urza, Lord Protector,
+Goblin Warchief, Chief Engineer and Flamekin Herald — cards whose entire
+function is modifying the spells you cast. Flamekin Herald says "Commander
+spells you cast", Imoti says "spells you cast with mana value 6 or greater",
+The First Sliver says "Sliver spells you cast": all the same clause, none
+matched. This is exactly the ADR-0038 property — a semantic for every clause —
+failing on a shape that clause-splitting has now made easy to name.
+
 ## Alternatives rejected
 
 **Breadth for the cascade grant.** The argument was that a static grant over an
