@@ -587,6 +587,33 @@ describe('a combo piece named in a suggestion row', () => {
     expect(await openComboHint()).toBeTruthy()
   })
 
+  it('leaves a piece this client never hydrated as plain text', async () => {
+    /*
+     * A piece the client has no card for renders as the placeholder "a card in
+     * your deck". Made into a control, its accessible name would be "Preview a
+     * card in your deck" — a control that cannot say what it opens, which is
+     * the R4 failure the labels exist to avoid. The words still appear; they
+     * are simply not a link.
+     */
+    mocked.hydrate.mockResolvedValue({
+      // `cauldron` deliberately absent, so the combo piece has no name here.
+      cards: new Map([['newt', NEWT]]),
+      prices: new Map(),
+      images: new Map(),
+    })
+    render(<Workspace deck={deck} />)
+    await waitFor(() => expect(screen.getByLabelText(/Completes 1 combos/)).toBeTruthy())
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText(/Completes 1 combos/))
+    })
+
+    const hint = document.querySelector('.hint-pop')
+    expect(hint).not.toBeNull()
+    expect(hint?.textContent).toContain('a card in your deck')
+    expect(hint?.querySelectorAll('button.partner')).toHaveLength(0)
+    expect(screen.queryByLabelText('Preview a card in your deck')).toBeNull()
+  })
+
   it('opens the piece it names, not the row it sits in', async () => {
     render(<Workspace deck={deck} />)
     const piece = await openComboHint()

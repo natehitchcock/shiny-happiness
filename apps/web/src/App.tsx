@@ -2207,7 +2207,6 @@ const Preview = ({
   onFollowReference,
   onBack,
   backTo,
-  backDepth,
   backRef,
   closeRef,
 }: {
@@ -2243,8 +2242,6 @@ const Preview = ({
    * and "Back" does not.
    */
   backTo: { oracleId: string; name: string } | null
-  /** How many cards are behind this one, so Back knows when it is the last step. */
-  backDepth: number
   /**
    * The header controls, owned by the WORKSPACE and only attached here.
    *
@@ -2419,22 +2416,20 @@ const Preview = ({
          * that closes the panel is a trap: the reader asks for the previous card
          * and loses the panel instead.
          */}
+        {/*
+         * Focus after the last step back is handled by the workspace's
+         * navigation effect, not here.
+         *
+         * A hand-off written into this handler was the first version, and it was
+         * dead by the time the panel learned to restore focus across its own
+         * unmount: both fired, the effect fired second, and mutating the handler
+         * away changed nothing. One owner for "where does focus go after a
+         * navigation" is also the only way it stays consistent between Back and
+         * following a link.
+         */}
         <button
           className="act"
-          onClick={() => {
-            /*
-             * Hand focus over BEFORE the control disables itself.
-             *
-             * This is the last step back, so Back is about to become disabled
-             * while it holds focus — and a disabled element drops focus to
-             * `<body>`, which on the sheet layout means the next Tab restarts
-             * from the masthead. The tour work hit this exact class of bug
-             * earlier today. Close is the right landing place: it is the
-             * neighbouring control and it still does something.
-             */
-            if (backDepth === 1 && closeRef.current !== null) closeRef.current.focus()
-            onBack()
-          }}
+          onClick={onBack}
           disabled={backTo === null}
           aria-label={backTo === null ? 'Back — nothing to go back to' : `Back to ${backTo.name}`}
           ref={backRef}
@@ -8259,7 +8254,6 @@ export const Workspace = ({
             onFollowReference={followReference}
             onBack={backToPrevious}
             backTo={backTo}
-            backDepth={trail.length}
             backRef={backRef}
             closeRef={closeRef}
           />
