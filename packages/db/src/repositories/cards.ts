@@ -357,6 +357,35 @@ export const gameChangerOracleIds = async (pool: Pool): Promise<OracleId[]> => {
  * only resolves if the near-miss candidates are present. Two columns of 32k
  * rows, and an import is a rare operation.
  */
+/**
+ * Exact-name lookup for a handful of names at once.
+ *
+ * Used to resolve the card names quoted inside another card's oracle text
+ * ("Search your library for a card named Sol Ring"). The matcher in
+ * `packages/domain` cannot read the table — it is pure (R1) — so it offers every
+ * span that might be a name and this decides which ones are real.
+ *
+ * Exact and case-sensitive, unlike `searchCardsByName`. That function is for a
+ * human typing into a search box and deliberately fuzzes; here the text is
+ * machine-generated oracle text that spells names exactly, and a fuzzy match
+ * would invent a reference the card never made — which is the one failure this
+ * whole feature has to avoid.
+ *
+ * Returns names, not full cards: the caller needs the id to link to and nothing
+ * else, and card detail already carries whatever else it shows.
+ */
+export const cardIdsByExactName = async (
+  pool: Pool,
+  names: readonly string[],
+): Promise<{ oracleId: OracleId; name: string }[]> => {
+  if (names.length === 0) return []
+  const { rows } = await pool.query<{ oracle_id: string; name: string }>(
+    'SELECT oracle_id, name FROM cards WHERE name = ANY($1::text[])',
+    [[...new Set(names)]],
+  )
+  return rows.map((r) => ({ oracleId: r.oracle_id as OracleId, name: r.name }))
+}
+
 export const allCardNames = async (pool: Pool): Promise<{ oracleId: OracleId; name: string }[]> => {
   const { rows } = await pool.query<{ oracle_id: string; name: string }>(
     "SELECT oracle_id, name FROM cards WHERE legality_commander <> 'not_legal'",

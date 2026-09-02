@@ -94,6 +94,23 @@ export interface CardDetail extends Card {
     produces: string[]
   }[]
   /**
+   * Other cards this card's RULES TEXT names, resolved to ids so the preview can
+   * link them ("Search your library for a card named Sol Ring").
+   *
+   * Names rather than positions: the client draws oracle text a face at a time
+   * and the server resolves against the joined text, so an offset would land in
+   * the wrong place on a second face. The client re-runs the same pure matcher
+   * (`splitOracleText`) with these names as its known set.
+   *
+   * Usually empty. Measured over the whole table, only 0.70% of cards name
+   * another card at all — the field is worth having because the reference is
+   * unfollowable when it is there, not because it is common.
+   *
+   * Optional because a server from before this shipped does not send it, and a
+   * preview talking to one must draw plain rules text rather than crash.
+   */
+  references?: { name: string; oracleId: string }[]
+  /**
    * The two card-intrinsic metrics (doc 18 §18.8).
    *
    * WHOLE OBJECTS, not bare scores. The route sends `cardImpact(card)` and

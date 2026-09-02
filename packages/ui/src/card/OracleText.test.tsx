@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
-import { OracleText } from './OracleText.js'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { OracleText, type OracleSegment } from './OracleText.js'
 
 afterEach(cleanup)
 
@@ -166,6 +166,118 @@ describe('OracleText', () => {
       // to say. The blank-face path must reach the same answer as `text === ''`.
       render(<OracleText text={'\n'} faces={['', '']} />)
       expect(screen.getByText('No rules text.')).toBeDefined()
+    })
+  })
+
+  describe('card names inside the text', () => {
+    /*
+     * `splitNames` is a FUNCTION, not a list of names.
+     *
+     * `@roundtable/ui` does not depend on `@roundtable/domain` (see types.ts),
+     * and the matcher that decides which spans are references is domain logic
+     * over the card table. Passing the split in keeps that boundary and — more
+     * importantly — keeps the answer positional. A list of names would make
+     * this component match by substring, which is exactly the mistake the
+     * matcher exists to avoid: "Sol Ring" also occurs inside the token name
+     * "Sol Ring Replica", and a substring match would link it there too.
+     */
+    const splitOnSolRing = (ability: string): readonly OracleSegment[] => {
+      const at = ability.indexOf('named Sol Ring')
+      if (at === -1) return [{ kind: 'text', text: ability }]
+      const start = at + 'named '.length
+      return [
+        { kind: 'text', text: ability.slice(0, start) },
+        { kind: 'name', text: 'Sol Ring' },
+        { kind: 'text', text: ability.slice(start + 'Sol Ring'.length) },
+      ]
+    }
+
+    const NAMES = 'Search your library for a card named Sol Ring, reveal it.'
+
+    it('draws a named card as a control', () => {
+      render(<OracleText text={NAMES} splitNames={splitOnSolRing} onOpenName={vi.fn()} />)
+      expect(screen.getByRole('button', { name: /Sol Ring/ })).toBeDefined()
+    })
+
+    it('says what the control opens, not just the name (R4)', () => {
+      // "Sol Ring" alone tells a screen-reader user nothing about what the
+      // control does. The accessible name has to name the action.
+      render(<OracleText text={NAMES} splitNames={splitOnSolRing} onOpenName={vi.fn()} />)
+      expect(screen.getByRole('button', { name: 'Open Sol Ring' })).toBeDefined()
+    })
+
+    it('opens the card it names when chosen', () => {
+      const onOpenName = vi.fn()
+      render(<OracleText text={NAMES} splitNames={splitOnSolRing} onOpenName={onOpenName} />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open Sol Ring' }))
+
+      expect(onOpenName).toHaveBeenCalledWith('Sol Ring')
+    })
+
+    it('is a real button, so it is reachable and operable by keyboard (R4)', () => {
+      // Not a styled span with a click handler. A `<button>` is focusable, has
+      // a role, and fires on Enter and Space without any of it being written
+      // here — which is why it is the element rather than a div.
+      render(<OracleText text={NAMES} splitNames={splitOnSolRing} onOpenName={vi.fn()} />)
+      const link = screen.getByRole('button', { name: 'Open Sol Ring' })
+
+      expect(link.tagName).toBe('BUTTON')
+      expect(link.getAttribute('type')).toBe('button')
+      link.focus()
+      expect(document.activeElement).toBe(link)
+    })
+
+    it('keeps the prose around the name intact', () => {
+      const { container } = render(
+        <OracleText text={NAMES} splitNames={splitOnSolRing} onOpenName={vi.fn()} />,
+      )
+      expect(container.textContent).toBe(NAMES)
+    })
+
+    it('still draws mana symbols in the prose beside a name', () => {
+      const text = '{T}: Search for a card named Sol Ring.'
+      const { container } = render(
+        <OracleText text={text} splitNames={splitOnSolRing} onOpenName={vi.fn()} />,
+      )
+      expect(container.querySelectorAll('.rt-inline-sym')).toHaveLength(1)
+      expect(screen.getByRole('button', { name: 'Open Sol Ring' })).toBeDefined()
+    })
+
+    it('draws plain text when nothing is passed to split it', () => {
+      // The default for every existing call site, and for a server that does
+      // not send references at all.
+      const { container } = render(<OracleText text={NAMES} />)
+      expect(container.querySelectorAll('button')).toHaveLength(0)
+      expect(container.textContent).toBe(NAMES)
+    })
+
+    it('draws no control when there is no handler to make it do anything', () => {
+      // A link that cannot open anything is worse than plain text: it invites a
+      // click, takes focus in the tab order, and then does nothing.
+      const { container } = render(<OracleText text={NAMES} splitNames={splitOnSolRing} />)
+
+      expect(container.querySelectorAll('button')).toHaveLength(0)
+      expect(container.textContent).toBe(NAMES)
+    })
+
+    it('draws plain text when the split finds no name', () => {
+      const { container } = render(
+        <OracleText text="Flying, vigilance." splitNames={splitOnSolRing} onOpenName={vi.fn()} />,
+      )
+      expect(container.querySelectorAll('button')).toHaveLength(0)
+    })
+
+    it('links a name on either face of a two-faced card', () => {
+      render(
+        <OracleText
+          text={`${NAMES}\nTap target permanent.`}
+          faces={['Tap target permanent.', NAMES]}
+          splitNames={splitOnSolRing}
+          onOpenName={vi.fn()}
+        />,
+      )
+      expect(screen.getByRole('button', { name: 'Open Sol Ring' })).toBeDefined()
     })
   })
 })

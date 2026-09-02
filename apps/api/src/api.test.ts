@@ -32,13 +32,17 @@ const UNDECIDED = oracleId(randomUUID())
 /** On Wizards' Game Changers list (DATA-05), so `is:gamechanger` has a subject. */
 const GAME_CHANGER = oracleId(randomUUID())
 /**
- * The only fixture with rules text, so it is the only one that scores above
- * zero on the two card-intrinsic metrics (doc 18).
+ * A fixture WITH rules text, so it scores above zero on the two card-intrinsic
+ * metrics (doc 18).
  *
- * Every other card here is deliberately textless, which made `impact>0` and
- * `impact=0` return the same thing whether or not the route evaluated the
+ * Almost every other card here is deliberately textless, which made `impact>0`
+ * and `impact=0` return the same thing whether or not the route evaluated the
  * field — a test that passed with the field stubbed out. This card is what
  * makes the two queries disagree, and therefore what makes them a test.
+ *
+ * It was the ONLY such fixture until `NAMER` arrived, which needs rules text for
+ * a different reason. Both now score above zero on both metrics; the fixtures
+ * that keep those queries honest are the textless ones, which score zero.
  */
 const HIGH_IMPACT = oracleId(randomUUID())
 /**
@@ -51,6 +55,17 @@ const HIGH_IMPACT = oracleId(randomUUID())
  */
 const DFC = oracleId(randomUUID())
 const DFC_BLIND = oracleId(randomUUID())
+/**
+ * Rules text that NAMES other cards, so card detail has references to resolve.
+ *
+ * Everything the resolver has to get right, on one card: two real fixtures it
+ * must link (`Sol Ring`, `Wrath of Testing`), a basic land and its own name,
+ * which it must not link, a token name that merely BEGINS with a card name
+ * (`Sol Ring Replica`), and `Counterspell` used as an ordinary rules word with
+ * no templating around it — a real card, and the shape a naive matcher links by
+ * the thousand.
+ */
+const NAMER = oracleId(randomUUID())
 
 const card = (id: OracleId, name: string, opts: Partial<Card> = {}): Card => ({
   oracleId: id,
@@ -105,6 +120,16 @@ describeDb('API-01 contract', () => {
         canBeCommander: false,
       }),
       card(MOUNTAIN, 'Mountain', { typeLine: 'Basic Land — Mountain', canBeCommander: false }),
+      card(NAMER, 'Tutor of Testing', {
+        typeLine: 'Sorcery',
+        oracleText: [
+          'Search your library for a card named Sol Ring or Wrath of Testing, reveal it, and put it into your hand.',
+          'Then search for a card named Mountain and a card named Tutor of Testing.',
+          'Create a Treasure token named Sol Ring Replica.',
+          'Counterspell costs {1} less to cast.',
+        ].join('\n'),
+        canBeCommander: false,
+      }),
       card(ANTE, 'Contract from Below', {
         legalities: { commander: 'banned' },
         canBeCommander: false,
@@ -343,6 +368,60 @@ describeDb('API-01 contract', () => {
       expect(body.combos[0].id).toBe('c-1')
     })
 
+    it('resolves the cards its rules text names, with their ids', async () => {
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${NAMER}` })).json()
+
+      expect(body.references).toEqual([
+        { name: 'Sol Ring', oracleId: SOL },
+        { name: 'Wrath of Testing', oracleId: HIGH_IMPACT },
+      ])
+    })
+
+    it('does not link a card name that is merely mentioned in prose', async () => {
+      // `Counterspell` is a real card AND an ordinary rules word, and this
+      // fixture's last line uses it as one. Nothing marks it as a name, so
+      // nothing links it — the property that keeps rules text from turning into
+      // a field of links (24,877 of them, corpus-wide, without this).
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${NAMER}` })).json()
+
+      expect((body.references as { name: string }[]).map((r) => r.name)).not.toContain('Counterspell')
+    })
+
+    /*
+     * A known limit, pinned so it is visible rather than discovered.
+     *
+     * A list continuation must be multi-word, because a bare word after a
+     * separator is nearly always prose the separator ran into ("named Skoa,
+     * Embermage, Sacrifice two Mountains" reads `Sacrifice`, which is a real
+     * card). Measured over all 34,494 cards this costs no real reference —
+     * every genuine list in the table is made of multi-word names — but a
+     * future card printed as "named Sol Ring or Counterspell" would lose its
+     * second link, and that is the trade being made.
+     */
+    it('does not follow a single-word continuation of a list', async () => {
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${NAMER}` })).json()
+
+      expect((body.references as { name: string }[])[0]?.name).toBe('Sol Ring')
+    })
+
+    it('does not link a basic land, itself, or a name no card has', async () => {
+      // `Mountain` is a real row in this database and `Tutor of Testing` is the
+      // card being read, so both would resolve if they were not excluded;
+      // `Sol Ring Replica` is a token name that merely STARTS with a card name.
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${NAMER}` })).json()
+      const named = (body.references as { name: string }[]).map((r) => r.name)
+
+      expect(named).not.toContain('Mountain')
+      expect(named).not.toContain('Tutor of Testing')
+      expect(named).not.toContain('Sol Ring Replica')
+    })
+
+    it('sends an empty reference list for a card that names nothing', async () => {
+      const body = (await app.inject({ method: 'GET', url: `/api/v1/cards/${SOL}` })).json()
+
+      expect(body.references).toEqual([])
+    })
+
     it('answers 404 for an unknown oracle id', async () => {
       const response = await app.inject({ method: 'GET', url: `/api/v1/cards/${randomUUID()}` })
 
@@ -471,19 +550,26 @@ describeDb('API-01 contract', () => {
       expect(zero.json().items.length).toBeGreaterThan(0)
 
       // EVALUATED, not merely accepted, and this is the assertion that says so.
-      // `HIGH_IMPACT` is the one fixture with rules text, so it is the only one
-      // over zero — a route that waved the field through without reading it
-      // would return every card here instead of exactly one, which is the
-      // silent-wrong-answer failure `UNSUPPORTED_FIELDS` exists to stop.
+      // Only the fixtures WITH rules text score above zero — a route that waved
+      // the field through without reading it would return every card here
+      // instead of exactly these, which is the silent-wrong-answer failure
+      // `UNSUPPORTED_FIELDS` exists to stop.
       //
       // An earlier version of this test asserted `items` was EMPTY, back when
       // every fixture was textless. It passed with `impact` stubbed to 0.
+      //
+      // Two cards now, not one: `NAMER` was added with rules text so card
+      // detail has references to resolve, and rules text is exactly what makes
+      // impact non-zero. Listed by hand rather than derived, for the same reason
+      // the pagination count below is a literal.
       const above = await app.inject({
         method: 'GET',
         url: '/api/v1/cards/search?q=' + encodeURIComponent('impact>0'),
       })
       expect(above.statusCode).toBe(200)
-      expect(above.json().items.map((c: Card) => c.oracleId)).toEqual([HIGH_IMPACT])
+      expect(above.json().items.map((c: Card) => c.oracleId).sort()).toEqual(
+        [HIGH_IMPACT, NAMER].sort(),
+      )
 
       // The same card, and only that card: efficiency is impact valued in stat
       // points over the cost, so a textless card with no body scores zero too.
@@ -492,7 +578,12 @@ describeDb('API-01 contract', () => {
         url: '/api/v1/cards/search?q=' + encodeURIComponent('eff>0'),
       })
       expect(efficient.statusCode).toBe(200)
-      expect(efficient.json().items.map((c: Card) => c.oracleId)).toEqual([HIGH_IMPACT])
+      // The same two cards: efficiency is impact valued over the cost, so a card
+      // with impact and a cost has efficiency too. The textless fixtures score
+      // zero on both, which is what makes either query a test of the field.
+      expect(efficient.json().items.map((c: Card) => c.oracleId).sort()).toEqual(
+        [HIGH_IMPACT, NAMER].sort(),
+      )
 
       // And it is excluded from the complement, so the two halves partition the
       // corpus rather than both matching.
@@ -867,16 +958,18 @@ describeDb('API-01 contract', () => {
       /*
        * Every seeded card, exactly once.
        *
-       * Nine: six original fixtures, plus the Game Changer that DATA-05 added,
-       * the undecided-eligibility card that commander validation added, and the
-       * one card with rules text that the impact/efficiency filter fields need.
+       * Ten: six original fixtures, plus the Game Changer that DATA-05 added,
+       * the undecided-eligibility card that commander validation added, the one
+       * card with rules text that the impact/efficiency filter fields need, and
+       * `NAMER`, whose rules text names other cards so card detail has
+       * references to resolve.
        * Deliberately a literal and not the fixture array's length — the whole
        * point of this test is that a paging bug cannot make the expectation
        * move along with it, so it has to be updated by hand when a fixture is
        * added. Two agents each added one on the same day, which is exactly the
        * case the literal is here to catch, and it did.
        */
-      expect(all.size).toBe(9)
+      expect(all.size).toBe(10)
     })
   })
   describe('Universes Beyond filter (ADR-0011)', () => {
