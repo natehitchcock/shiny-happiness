@@ -89,6 +89,13 @@ const runCombos = async (pool: Pool, limit: number | undefined): Promise<void> =
     }
     console.error('    (storing them short would claim a combo the deck has not assembled)')
   }
+  // Rows an earlier run wrote and this one rejects. Printed even at zero on a
+  // run that rejected something, because "skipped 5,266, removed 0" is the exact
+  // shape of the bug ADR-0038's first attempt shipped: the refusal worked and
+  // reached nothing already in the table.
+  if (report.templateRequired.length > 0 || report.skippedNotOk > 0) {
+    console.log(`  removed ${report.removed} rows an earlier run had written for those variants`)
+  }
   // Unmapped pieces are reported loudly, never dropped quietly (doc 04 §4.2).
   if (report.unmapped.length > 0) {
     console.error(`  ${report.unmapped.length} combos name cards not in the corpus:`)

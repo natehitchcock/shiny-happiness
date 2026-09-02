@@ -72,6 +72,40 @@ export const insertCombos = async (pool: Pool, combos: readonly Combo[]): Promis
   return rowCount ?? 0
 }
 
+/**
+ * Remove combos by id, and say how many rows went (ADR-0038).
+ *
+ * `insertCombos` is an UPSERT and was the only write this table had, so nothing
+ * a run decided against ever left it. A variant that Spellbook withdrew, or that
+ * this project decided it cannot represent, kept the row an earlier ingest wrote
+ * — for as long as the database lived.
+ *
+ * That is how the reported bug survived its own fix. The adapter correctly
+ * refused to map `2034-3388--5` (Moritte + Ashnod's Altar + the "Persist
+ * Creature" template) and the run reported 5,266 such refusals, while all 4,813
+ * pre-existing short rows stayed exactly where they were: the combo total ROSE
+ * to 109,388 on new variants, and the two-piece population — the one brackets
+ * 1-3 read — did not move by a single row, 5,184 before and after.
+ *
+ * Deliberately id-by-id rather than "delete everything this run did not write".
+ * A truncated download or a `--limit` run would make that sweep empty the table,
+ * and this one cannot: every id passed here is a variant the run actually read
+ * and positively rejected.
+ *
+ * The empty-list return is a round trip saved and matches `insertCombos`; it is
+ * NOT the safety here, and saying so is the point. Removing it on its own moves
+ * nothing, because `ANY('{}')` matches nothing. It only becomes load-bearing
+ * beside the `<> ALL` predicate that the sweep above would need — which is
+ * exactly why the sweep is not what this does.
+ */
+export const deleteCombos = async (pool: Pool, ids: readonly ComboId[]): Promise<number> => {
+  if (ids.length === 0) return 0
+  const { rowCount } = await pool.query('DELETE FROM combos WHERE combo_id = ANY($1::text[])', [
+    ids,
+  ])
+  return rowCount ?? 0
+}
+
 /** Every combo containing any of `cards`. Backed by `combos_pieces_idx`. */
 export const combosContaining = async (
   pool: Pool,

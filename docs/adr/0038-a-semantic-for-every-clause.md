@@ -195,6 +195,63 @@ use for templates:
   1–3 restrict (doc 03 §3.2). This was mis-assessing decks, not only
   mis-labelling one pairing.
 
+#### 4a. Refusing to write it was only half the fix
+
+The first attempt shipped exactly the change described below — and **the reported
+combo was still there afterwards**. The run said `5266 combos need a card CLASS
+we cannot name, and are not stored`, and `2034-3388--5` sat in the table
+untouched.
+
+`insertCombos` is an UPSERT, and it was the **only write this table had**. There
+was no `DELETE` anywhere in the combo repository. So deciding not to store a
+variant did nothing about the row an earlier ingest had already written for it —
+the refusal only ever governed rows that did not exist yet.
+
+The numbers say it more sharply than the code does. Across that run:
+
+| | before | after |
+| --- | ---: | ---: |
+| combos | 108,046 | **109,388** (rose, on new variants) |
+| two-piece combos | 5,184 | **5,184** |
+| ids carrying a `--N` template segment | 4,813 | **4,813** |
+
+An **exactly unchanged** count on the population the change targeted is the
+signal. Not "the skip is too narrow" — the skip was right, and `variantSkipReason`
+returns `template-piece` for `2034-3388--5` on the live feed, whose `requires[]`
+holds template 5, `{"name":"Persist Creature","scryfallQuery":"keyword:persist
+t:creature"}`. The diagnosis was right and the write path could not act on it.
+
+`deleteCombos` is the missing half. The ingest collects the ids it **read and
+positively rejected** and removes their rows after the writes. Re-run against the
+real corpus:
+
+| | before | after |
+| --- | ---: | ---: |
+| combos | 109,388 | **104,616** (−4,772, the number the run reported removing) |
+| **two-piece combos** | 5,184 | **3,991** (−1,193) |
+| two-piece rows carrying `--N` | 1,193 | **0** |
+| `2034-3388--5` rows | 1 | **0** |
+| Moritte + Ashnod's Altar combos | 4 | **3** |
+
+The three survivors are the real ones — with Lesser Masticore, with River Kelpie,
+and with Karmic Guide + Loyal Retainers. Only the two-card claim was false, and
+over-skipping would have traded one wrong answer for another.
+
+Scope, deliberately narrow. Only `not-ok-status` and `template-piece` prune.
+`unmapped` does **not**, and that is the line worth holding: it is a fact about
+OUR corpus being older than Spellbook's, not about the variant, so pruning on it
+would delete real combos whenever the card ingest lags and restore them next run
+— churning the table on our own staleness. And it is id-by-id rather than "delete
+everything this run did not write": that sweep empties the table on a truncated
+download or a `--limit` run, and this cannot.
+
+**What let this ship is the shape of the tests, not the shape of the code.**
+`variantSkipReason` had unit tests and they were right. Nothing tested the line
+between the decision and the database. `apps/ingest/src/spellbook-ingest.test.ts`
+now runs the ingest end to end against a real Postgres with the feed stubbed, and
+its first case is this bug: a stale two-piece row for `2034-3388--5`, an ingest,
+and the row gone.
+
 **Decision: skip and report, rather than store short.** That is the ruling this
 ingest already made one layer down about a combo naming a card the corpus does
 not have — "storing a combo whose pieces are half-missing produces a combo that
@@ -225,11 +282,23 @@ correct for what it could see; it was being handed a lie.
   stored columns computed at ingest, and the combo table is written by the same
   run, so none of this reaches the app until then. **Neither ingest was run as
   part of this change.**
-- **The combo count will DROP by roughly 4,813** on the next combo ingest. That is
-  the intended effect and it should not be read as an ingest failure.
+- **The combo count DROPS on the next combo ingest** — measured at 109,388 →
+  104,616, with the two-piece population 5,184 → 3,991. That is the intended
+  effect and it should not be read as an ingest failure. `ingest combos` prints
+  `removed N rows an earlier run had written for those variants`, and a run that
+  reports refusals beside `removed 0` is the exact shape of the bug §4a describes.
+- **`packages/db` gains its first `DELETE` on `combos`.** The table was
+  upsert-only, which is why the first attempt at this fix changed nothing.
 
 ## Found, and deliberately not done
 
+- **41 stale rows remain, from variants Spellbook has withdrawn from the feed
+  entirely.** Checked rather than assumed: of the 41 rows still carrying a `--N`
+  id after the prune, **0** are in the current feed and **0** are two-piece, so
+  none reaches the bracket check. A variant you never read cannot be positively
+  rejected, so reaching these needs the "delete every id this run did not write"
+  sweep that §4a refuses as unsafe. If it is ever wanted, it needs a guard that
+  the run completed and read a plausible number of variants — not a bare sweep.
 - **Template pieces should be MODELLED, not dropped.** Carrying the template
   count on `Combo` would make these 4,813 combos read "one piece away, and the
   piece is a card class" instead of vanishing, which is strictly better product

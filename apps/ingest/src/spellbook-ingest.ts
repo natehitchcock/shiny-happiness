@@ -7,8 +7,9 @@ import {
   variantSkipReason,
   type SpellbookOptions,
 } from '@roundtable/clients'
-import { insertCombos } from '@roundtable/db'
-import type { Combo } from '@roundtable/domain'
+import { deleteCombos, insertCombos } from '@roundtable/db'
+import { comboId } from '@roundtable/domain'
+import type { Combo, ComboId } from '@roundtable/domain'
 
 /**
  * ING-02 — Commander Spellbook combo ingest (doc 04 §4.2, ADR-0010).
@@ -44,6 +45,20 @@ export interface ComboIngestReport {
     readonly comboId: string
     readonly templates: readonly string[]
   }[]
+  /**
+   * Rows an EARLIER run wrote that this one has decided against (ADR-0038).
+   *
+   * `insertCombos` is an upsert and was the only write this table had, so
+   * deciding not to store a variant did nothing to the row a previous ingest
+   * had already written for it. Refusing `2034-3388--5` therefore changed
+   * nothing a user could see: the reported Moritte + Ashnod's Altar combo was
+   * still sitting in the table, and the two-piece population brackets 1-3 read
+   * was byte-for-byte identical across the run — 5,184 before, 5,184 after.
+   *
+   * Only ids this run actually READ and positively rejected are removed, never
+   * "everything the run did not write". See `deleteCombos`.
+   */
+  readonly removed: number
 }
 
 export interface ComboIngestOptions extends SpellbookOptions {
@@ -74,6 +89,23 @@ export const ingestSpellbook = async (
   let skippedNoPieces = 0
   const unmapped: { comboId: string; missing: string[] }[] = []
   const templateRequired: { comboId: string; templates: readonly string[] }[] = []
+  /*
+   * Variants this run read and positively rejected, for the delete below.
+   *
+   * `not-ok-status` and `template-piece` only. Both are facts about the SOURCE
+   * — Spellbook's own editors withdrew the variant, or it names a piece as a
+   * card class we cannot store — so a row written for one is wrong to keep no
+   * matter what our corpus looks like.
+   *
+   * `unmapped` is deliberately NOT here, and that is the line worth holding: it
+   * is a fact about OUR corpus being behind Spellbook's, not about the variant.
+   * Pruning on it would delete real combos every time the card ingest is older
+   * than the combo ingest, and put them back on the next run — churning the
+   * table on our own staleness. `no-pieces` is left out for the same reason it
+   * is not `template-piece`: a variant with no cards at all never produced a
+   * row to remove.
+   */
+  const rejectedIds: ComboId[] = []
 
   let batch: Combo[] = []
   const flush = async (): Promise<void> => {
@@ -90,6 +122,7 @@ export const ingestSpellbook = async (
     const skip = variantSkipReason(variant)
     if (skip === 'not-ok-status') {
       skippedNotOk += 1
+      rejectedIds.push(comboId(variant.id))
       continue
     }
     if (skip === 'no-pieces') {
@@ -98,6 +131,7 @@ export const ingestSpellbook = async (
     }
     if (skip === 'template-piece') {
       templateRequired.push({ comboId: variant.id, templates: templatesOf(variant) })
+      rejectedIds.push(comboId(variant.id))
       continue
     }
 
@@ -121,5 +155,10 @@ export const ingestSpellbook = async (
   }
   await flush()
 
-  return { read, combos, skippedNotOk, skippedNoPieces, unmapped, templateRequired }
+  // After the writes, so a run that dies partway leaves the table larger than it
+  // should be rather than smaller. An extra combo is a wrong answer; a missing
+  // one is a wrong answer AND a lost fact.
+  const removed = await deleteCombos(pool, rejectedIds)
+
+  return { read, combos, skippedNotOk, skippedNoPieces, unmapped, templateRequired, removed }
 }

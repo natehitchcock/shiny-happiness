@@ -461,13 +461,19 @@ about 4.5% of their number on the next ingest** —
 commander-legal card's oracle text into ability lines and asking which lines any
 rule fires on put a number on "each clause should have a semantic": 46.0% of
 60,216 clauses, now 47.9%, across eight new rules and no new tag. 1,714 tag
-assignments gained, none lost, and 5,018 untagged cards down to 4,568. Separately,
-the Spellbook adapter was dropping `requires[]` — the pieces Spellbook describes
-as a card CLASS rather than naming — so 4,813 stored combos were short at least
-one piece and 1,192 of those were **false two-card infinites feeding the bracket
-check**. Those variants are now skipped and reported instead, which is why the
-combo count falls on the next run. **Both stored columns are computed at ingest
-and neither ingest has been run**, so none of it has reached the app yet.
+assignments gained, none lost, and 5,018 untagged cards down to 4,568. The card
+ingest has been run and this half is live.
+
+Separately, the Spellbook adapter was dropping `requires[]` — the pieces
+Spellbook describes as a card CLASS rather than naming — so 4,813 stored combos
+were short at least one piece and 1,192 of those were **false two-card infinites
+feeding the bracket check**. Those variants are refused now, **and the rows an
+earlier run wrote for them are deleted**: the refusal alone changed nothing,
+because `insertCombos` was the only write the table had and an upsert cannot
+remove anything (ADR-0038 §4a). Measured over a real combo ingest: 109,388 →
+**104,616** combos, two-piece 5,184 → **3,991**, and the reported Moritte +
+Ashnod's Altar pairing gone while its three genuine multi-card siblings stay.
+**A falling combo count on this run is the fix, not a failure.**
 
 **No third-party question is left open except Scryfall Q4** (image serving, which
 gates `ING-04` — and which [ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md)

@@ -29,6 +29,7 @@ import {
   combosContaining,
   combosInIdentity,
   combosWithin,
+  deleteCombos,
   insertCombos,
 } from './repositories/combos.js'
 import {
@@ -884,6 +885,65 @@ describeDb('packages/db against real PostgreSQL', () => {
     it('returns nothing for a card in no combo', async () => {
       expect(await combosContaining(db.pool, [uuid()])).toEqual([])
       expect(await combosContaining(db.pool, [])).toEqual([])
+    })
+
+    /*
+     * Removing a row a previous run wrote (ADR-0038).
+     *
+     * The table had only an UPSERT, so a variant the ingest stopped accepting
+     * kept its row forever. That is how the reported Moritte + Ashnod's Altar
+     * combo survived the fix that refused it: the refusal worked, the run said
+     * so, and the row it was about never moved.
+     */
+    describe('removing rows a later run decides against', () => {
+      const doomed = uuid()
+
+      it('removes exactly the ids it is given', async () => {
+        await insertCombos(db.pool, [
+          combo('withdrawn-by-spellbook', [doomed]),
+          combo('still-good', [doomed]),
+        ])
+        expect((await combosContaining(db.pool, [doomed])).map((c) => c.id).sort()).toEqual([
+          'still-good',
+          'withdrawn-by-spellbook',
+        ])
+
+        const removed = await deleteCombos(db.pool, [comboId('withdrawn-by-spellbook')])
+
+        expect(removed).toBe(1)
+        expect((await combosContaining(db.pool, [doomed])).map((c) => c.id)).toEqual(['still-good'])
+      })
+
+      it('reports zero for an id that was never stored', async () => {
+        // The common case on a healthy corpus: the variant was rejected on this
+        // run and on every earlier one, so there is nothing to remove. A count
+        // that lied here would make "removed 0" unreadable.
+        expect(await deleteCombos(db.pool, [comboId('never-existed')])).toBe(0)
+      })
+
+      it('deletes NOTHING when given no ids', async () => {
+        /*
+         * What this pins is the CONTRACT, not the current implementation.
+         *
+         * Measured, because the claim was nearly overstated: with today's
+         * `combo_id = ANY($1)` the early return is dead weight — removing it on
+         * its own leaves every test green, since `ANY('{}')` matches nothing
+         * anyway. It is kept for the round trip it saves and to match
+         * `insertCombos`, not for safety.
+         *
+         * The pair is what has teeth. Rewrite the predicate the way a "prune
+         * everything the run did not write" refactor would — `combo_id <> ALL($1)`
+         * — and drop the early return, and an empty list empties the table. That
+         * combined mutation IS caught, and only by this test.
+         */
+        const before = await combosContaining(db.pool, [kiki, unrelated, doomed])
+
+        expect(await deleteCombos(db.pool, [])).toBe(0)
+
+        expect(await combosContaining(db.pool, [kiki, unrelated, doomed])).toHaveLength(
+          before.length,
+        )
+      })
     })
 
     /*
