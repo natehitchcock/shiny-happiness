@@ -792,3 +792,92 @@ describe('reach — the band is where Quickbuild stops having an opinion, not wh
     expect(quickbuildPlan(inputFor([], 'midrange')).held).toBe(0)
   })
 })
+
+/**
+ * The staples phase — an OPENING before the derived order begins (ADR-0044).
+ *
+ * ADR-0040's build order is derived and stays derived: land is last because its
+ * target is a function of the deck you have already built, creature is first
+ * because it holds the largest settled commitment, and nothing below changes
+ * either. The staples phase runs BEFORE that order rather than inside it.
+ */
+describe('staples come first, and hand over to the derived order', () => {
+  const empty = () => inputFor([], 'midrange')
+
+  it('leads with staples, then staple lands, then the derived order', () => {
+    const plan = quickbuildPlan({ ...empty(), staples: { spells: 12, lands: 4 } })
+    expect(keys(plan.gaps).slice(0, 2)).toEqual(['staple', 'staple-land'])
+    // And the third is still what ADR-0040 derived for an empty midrange deck.
+    expect(keys(plan.gaps)[2]).toBe(dimensionKey(typeDimension('creature')))
+  })
+
+  it('says how many are on offer, and which kind of gap it is', () => {
+    const plan = quickbuildPlan({ ...empty(), staples: { spells: 12, lands: 4 } })
+    expect(plan.gaps[0]).toMatchObject({ kind: 'staples', key: 'staple', short: 12 })
+    expect(plan.gaps[1]).toMatchObject({ kind: 'staples', key: 'staple-land', short: 4 })
+  })
+
+  it('leaves the derived order untouched underneath it', () => {
+    const withStaples = quickbuildPlan({ ...empty(), staples: { spells: 3, lands: 2 } })
+    const without = quickbuildPlan(empty())
+    expect(keys(withStaples.gaps).slice(2)).toEqual(keys(without.gaps))
+    // The land count is still last, which is the whole of ADR-0040.
+    expect(keys(withStaples.gaps).at(-1)).toBe(dimensionKey(roleDimension('land')))
+  })
+
+  it('drops a phase the moment it is exhausted, without stalling on an empty group', () => {
+    // The end of the phase is a COUNT reaching zero, which is the same
+    // condition that closes a composition gap. There is no separate "the
+    // staples are done" state to get stuck in.
+    const spent = quickbuildPlan({ ...empty(), staples: { spells: 0, lands: 4 } })
+    expect(keys(spent.gaps)[0]).toBe('staple-land')
+    expect(keys(spent.gaps)).not.toContain('staple')
+  })
+
+  it('hands over to the derived order once every staple is spent or rejected', () => {
+    const done = quickbuildPlan({ ...empty(), staples: { spells: 0, lands: 0 } })
+    expect(keys(done.gaps)).toEqual(keys(quickbuildPlan(empty()).gaps))
+    expect(done.gaps[0]?.kind).toBe('composition')
+  })
+
+  it('is absent entirely for a caller that does not know about it', () => {
+    // AGENTS.md R2: a reader that predates the field gets exactly the plan it
+    // got before, rather than an opening phase it has no way to answer.
+    expect(quickbuildPlan(empty()).gaps.every((g) => g.kind !== 'staples')).toBe(true)
+  })
+
+  it('never opens a phase on a negative or fractional count', () => {
+    // Half a staple is not a staple. Rounding 0.5 up would open a phase with
+    // nothing behind it, which is the stall this design exists to avoid.
+    const plan = quickbuildPlan({ ...empty(), staples: { spells: -3, lands: 0.5 } })
+    expect(keys(plan.gaps)).not.toContain('staple')
+    expect(keys(plan.gaps)).not.toContain('staple-land')
+    expect(quickbuildPlan({ ...empty(), staples: { spells: 1.7, lands: 0 } }).gaps[0]).toMatchObject(
+      { key: 'staple', short: 1 },
+    )
+  })
+
+  it('still leads on a deck past the handover, because a missing staple is missing', () => {
+    // `ordering` flips to `largest-first` above `handoverSize`. The staples
+    // phase is neither ordering and sits above both: "you do not have Sol Ring"
+    // is as true at 60 cards as at 0.
+    const late = quickbuildPlan({
+      ...inputFor([...lands(33), ...filler(25)], 'midrange'),
+      staples: { spells: 2, lands: 0 },
+    })
+    expect(late.ordering).toBe('largest-first')
+    expect(keys(late.gaps)[0]).toBe('staple')
+  })
+
+  it('keeps the staples out of `beyond`, which is only about reaching past a band', () => {
+    const plan = quickbuildPlan({ ...empty(), staples: { spells: 5, lands: 5 } })
+    expect(plan.beyond.every((g) => g.kind !== 'staples')).toBe(true)
+  })
+
+  it('asks the recommendations endpoint for nothing but the group', () => {
+    // The staples group IS the filter — `recommend` already applied the curated
+    // list, the colour identity, the budget and the bracket. A `query` string
+    // here would be a second, weaker copy of a decision already made.
+    expect(gapQuery({ kind: 'staples', key: 'staple', label: 'staples', short: 3 })).toBe('')
+  })
+})

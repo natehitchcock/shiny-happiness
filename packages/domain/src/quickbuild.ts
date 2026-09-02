@@ -18,12 +18,31 @@ import { CURVE_BUCKETS } from './curve.js'
 
 /** A hole in the deck that ADDING a card can close. */
 export interface QuickbuildGap {
-  readonly kind: 'composition' | 'curve'
-  /** `role:ramp`, `type:creature` or `mv:2`. Stable, and used as a React key. */
+  /**
+   * `staples` is the OPENING PHASE (ADR-0044) and is not measured against any
+   * target: there is no band, no ideal and no meter for "has the cards every
+   * deck wants". It is a gap at all because the panel's whole loop is over
+   * gaps, and a phase that had to be threaded through as a second kind of thing
+   * would be a second loop to keep in step with this one.
+   */
+  readonly kind: 'composition' | 'curve' | 'staples'
+  /**
+   * `role:ramp`, `type:creature`, `mv:2`, or — for the opening phase — the
+   * candidate group key itself, `staple` or `staple-land`. Stable, and used as
+   * a React key and as the panel's per-gap cursor.
+   */
   readonly key: string
   /** For the panel's heading. Words, not a dimension object. */
   readonly label: string
-  /** Cards needed to reach the band. Always ≥ 1 — see `quickbuildPlan`. */
+  /**
+   * Cards needed to reach the band. Always ≥ 1 — see `quickbuildPlan`.
+   *
+   * On a `staples` gap it is how many are still ON OFFER rather than how many
+   * are owed, because nothing owes a deck a staple. Both readings answer the
+   * only question the panel asks of this number — "is there anything here, and
+   * how much" — and a second field for a count with no second meaning would be
+   * a field every other gap had to leave undefined.
+   */
   readonly short: number
   /** Present on a composition gap. */
   readonly dimension?: CompositionDimension
@@ -170,6 +189,34 @@ export interface QuickbuildInput {
    * had if it were midrange — not the row some other deck would have had.
    */
   readonly bracket: Bracket
+  /**
+   * How many curated staples the deck can still be OFFERED (ADR-0044).
+   *
+   * The two numbers are the `total` of the `staple` and `staple-land`
+   * candidate groups, read straight off the recommendations response the
+   * workspace already holds. Deliberately not recomputed here from the list
+   * and the deck: `recommend` has already applied the colour identity, the
+   * accepted set, the exclusions (P6), the per-card budget and the deck's
+   * remaining bracket allowance, and this file has none of those inputs. One
+   * number, computed once, is what stops the wizard and the feed disagreeing
+   * about whether a staple is still available — which the builder would see,
+   * because both are on screen at once.
+   *
+   * HOW THE PHASE ENDS. It ends when these reach zero, and they reach zero on
+   * their own: every accept and every rejection removes a card from the group
+   * that produced them, so the count falls by one and the gap disappears the
+   * moment the last one goes. There is no separate terminal state to get stuck
+   * in and nothing to reset. The derived order then leads, exactly as it does
+   * for a caller that never sent this field at all.
+   *
+   * Optional, so a caller that predates it gets byte-identical plans
+   * (AGENTS.md R2) — and so does one whose recommendations have not landed yet,
+   * which is the honest answer while the counts are genuinely not known.
+   */
+  readonly staples?: {
+    readonly spells: number
+    readonly lands: number
+  }
 }
 
 /**
@@ -402,6 +449,16 @@ const labelForDimension = (dimension: CompositionDimension): string =>
  * sake of a case that cannot arise.
  */
 export const gapQuery = (gap: QuickbuildGap): string => {
+  /*
+   * THE STAPLES PHASE ADDS NO FILTER, and that is the point of routing it
+   * through a group key instead. `recommend` has already decided which cards
+   * are curated staples, which of them are in the deck's colours, which are
+   * still unaccepted and unrejected, and which are affordable and inside the
+   * bracket. A query string here could only be a weaker second copy of that
+   * decision — there is no expressible filter for "is on the curated list" —
+   * and a second copy is what ADR-0031 is about.
+   */
+  if (gap.kind === 'staples') return ''
   if (gap.kind === 'curve') {
     const bucket = gap.bucket ?? 0
     return bucket >= CURVE_BUCKETS - 1 ? `mv>=${CURVE_BUCKETS - 1}` : `mv=${bucket}`
@@ -524,8 +581,40 @@ export const quickbuildPlan = (input: QuickbuildInput): QuickbuildPlan => {
     .filter((t) => t.dimension.kind === 'role')
     .reduce((sum, t) => sum + t.ideal, 0)
 
+  /*
+   * The opening phase, AHEAD of the derived order (ADR-0044).
+   *
+   * Prepended rather than sorted in, because it is not measured against
+   * anything the sort compares. `sort` weighs composition and curve gaps
+   * against each other by how many cards they are short — a comparison doc 19
+   * D3 justifies because both are counts of cards owed against a target. A
+   * staples count is neither owed nor against a target, so putting it into the
+   * same sort would need a weighting this file has no basis to invent, which is
+   * exactly the thing `quickbuildPlan` refuses to do between composition and
+   * curve.
+   *
+   * ABOVE BOTH ORDERINGS, not only the build-order one. `ordering` still
+   * describes the derived part underneath and is unchanged, because it is still
+   * true of it — the panel prints which rule ordered the gaps and that sentence
+   * stays correct. A missing staple is missing at sixty cards as much as at
+   * zero, so there is no threshold at which this phase stops leading.
+   *
+   * Floored and rounded down: a count arrives over the wire, and a fractional
+   * or negative one would render as "0.5 more staples" or open a phase with
+   * nothing behind it.
+   */
+  const stapleGaps: QuickbuildGap[] = (
+    [
+      ['staple', 'staples', input.staples?.spells],
+      ['staple-land', 'staple lands', input.staples?.lands],
+    ] as const
+  ).flatMap(([key, label, count]) => {
+    const short = Math.floor(count ?? 0)
+    return short > 0 ? [{ kind: 'staples' as const, key, label, short }] : []
+  })
+
   return {
-    gaps: sort(gapsAt(reach)),
+    gaps: [...stapleGaps, ...sort(gapsAt(reach))],
     ordering,
     overFull,
     reach,
