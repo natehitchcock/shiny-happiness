@@ -1355,6 +1355,20 @@ describe('the three Quickbuild options are one box each, not a box in a box', ()
     expect(winner(inner(), 'min-height')?.value).toBe('0')
   })
 
+  /*
+   * The ending puts two buttons in this row where the loop puts one, and
+   * measured in a browser they take 184px and 134px against a 326px row at the
+   * 360px pane. They fit there, with both labels already on two lines — but
+   * `nowrap` would crush rather than stack them at anything narrower or at a
+   * larger text size, and neither is the primary action.
+   */
+  it('lets the ending’s two buttons stack rather than crush', () => {
+    document.body.innerHTML = `<div class="quickbuild-actions"></div>`
+    const actions = document.body.querySelector('.quickbuild-actions')!
+    expect(winner(actions, 'display')?.value).toBe('flex')
+    expect(winner(actions, 'flex-wrap')?.value).toBe('wrap')
+  })
+
   it('gives every option the same width and the same height', () => {
     // `1fr` tracks are equal by construction, and `auto-fit` collapses the
     // empty ones so three options always take the full width of the pane.

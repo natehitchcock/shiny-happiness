@@ -3943,8 +3943,16 @@ select {
   font-style: italic;
 }
 
+/* Wraps, because this row is no longer always one button. The ending puts two
+   here — "Keep quickbuilding to the ideals" and "Back to the suggestion list" —
+   and measured in a browser they take 184 px and 134 px against a 326 px row at
+   the 360 px pane. They fit, with both labels already on two lines; anything
+   narrower, or a larger text size, and `nowrap` would crush them rather than
+   stack them. Neither is the primary action, so a second line is the right
+   overflow. */
 .quickbuild-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--step);
   margin-top: calc(var(--step) * 1.5);
 }
