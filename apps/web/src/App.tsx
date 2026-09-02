@@ -733,8 +733,25 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
       return `curve fit at ${mv}`
     }
     case 'keyword-synergy': {
-      // Said as a mechanism, not a score: "why" is what P4 asks the reason for.
-      const tag = (r.tag ?? '').replace(/-/g, ' ')
+      /*
+       * Said as a mechanism, not a score: "why" is what P4 asks the reason for.
+       *
+       * `readable`, not the hyphen-stripper (ADR-0046). The curated tags
+       * survived the stripper by accident — their wire spelling is already
+       * hyphenated English — but the 586 namespaced ones do not, and this row
+       * read "enables your emphasised subtype:elf" while the chip four panels
+       * over read "Elves". One tag, two spellings, one screen, and the tag that
+       * reads worst is the one a tribal deck is entirely about.
+       *
+       * The article is dropped because this is a THIRD grammatical slot. The
+       * phrases in `tags.ts` are written to follow "causes" or "benefits from",
+       * and every one of them still fits after the possessive except the single
+       * one that begins with a determiner: "enables your A CREATURE DYING". One
+       * regex, total over the vocabulary — no other curated phrase and no
+       * derived subtype or keyword starts with an article — and deliberately
+       * not a second table of phrases, which is the thing ADR-0046 refuses.
+       */
+      const tag = readable(r.tag ?? '').replace(/^(?:a|an|the) /, '')
       /*
        * "your X" and "your EMPHASISED X" are different claims (P4).
        *
@@ -1204,17 +1221,37 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
   const [emphasis, setEmphasis] = useState<readonly string[]>([])
 
   /**
-   * The commander's own semantics, both directions, deduplicated.
+   * The commander's own semantics, ALL THREE directions, deduplicated.
    *
-   * Both directions because the deck can be about either half: a Tergrid deck
-   * is about opponents sacrificing (what she causes) or about their discarding
-   * (what she pays off), and offering only one of the two would decide that
-   * question for the builder. Deduplicated because a card that both causes and
-   * benefits from the same event would otherwise offer it twice, and the second
+   * All three because the deck can be about any of them: a Tergrid deck is
+   * about opponents sacrificing (what she causes) or about their discarding
+   * (what she pays off), and a Lathril deck is very often about Elves — which
+   * is neither, it is what she IS. Offering only some of the three would decide
+   * that question for the builder. Deduplicated because a card that supplies
+   * and pays off the same tag would otherwise offer it twice, and the second
    * chip would be a control that does nothing new.
+   *
+   * This said "both directions" until ADR-0048 made membership the third, and
+   * the omission was not cosmetic: 302 commander-legal cards have an empty
+   * `produces` AND `wants`, so the prompt told each of them "no semantics
+   * derived" while holding a full `has` array. Morophon, the Boundless is
+   * `subtype:shapeshifter` and `ability:changeling` and nothing else.
+   *
+   * Membership FIRST, matching the card panel's row order and for the same
+   * reason ADR-0048 gives there: it is what the card *is*, and the other two
+   * are about it. `?? []` for a card built by hand or read from a server that
+   * predates the direction.
    */
   const commanderTags =
-    chosen === null ? [] : [...new Set([...chosen.synergyProduces, ...chosen.synergyWants])]
+    chosen === null
+      ? []
+      : [
+          ...new Set([
+            ...(chosen.synergyHas ?? []),
+            ...chosen.synergyProduces,
+            ...chosen.synergyWants,
+          ]),
+        ]
 
   /**
    * Add or drop one tag before the deck exists. Local state — there is nothing
@@ -1876,7 +1913,13 @@ const FocusExpansion = ({
       {showAll ? (
         <SemanticOffer
           heading="Every other semantic"
-          note="Everything else we derive from rules text, whether or not it relates to your focus."
+          /* Not "we derive from rules text". 586 of the 608 tags in this list
+             are subtypes and keywords, and `semanticMembership` reads those off
+             the type line and the `keywords` array without ever opening
+             `oracle_text` (ADR-0048) — so the old note was false about the
+             overwhelming majority of the chips under it, and most visibly about
+             the two this screen now offers on the commander itself. */
+          note="Everything else we read off a card — its rules text, its type line and its keywords — whether or not it relates to your focus."
           tags={rest}
           selected={selected}
           support={support}
@@ -2382,27 +2425,62 @@ const Works = ({
     oneAway.push({ needs: partner(need.oracleId, need.name), lines: [line] })
   }
 
-  // Deck cards whose synergy tags pair with this card's, strongest first.
-  const produces = new Set(detail.synergyProduces)
+  /*
+   * Deck cards whose synergy tags pair with this card's.
+   *
+   * THREE directions on both sides (ADR-0048). `has` is a second way of
+   * SUPPLYING a tag, so it joins `produces` on the supply side of both
+   * pairings, exactly as it does in `synergyMatches`:
+   *
+   *   other.wants   ∩ (self.produces ∪ self.has)   → the other card is a payoff
+   *   (other.produces ∪ other.has) ∩ self.wants    → the other card supplies
+   *
+   * `has ↔ has` stays out, and so does `has ↔ produces`: two Elves are
+   * redundancy, and an Elf beside an Elf-token maker is two copies of one
+   * effect. That is the ADR's ruling and this panel has no reason to disagree
+   * with the scorer that sits behind the same screen.
+   *
+   * Reading two arrays instead of three was not a small omission here. In a
+   * deck holding fifty-nine Elves, Elvish Archdruid — "Other Elf creatures you
+   * control get +1/+1" — listed eight partners of which two were Elves, and
+   * both only because they literally CREATE Elf tokens. An ordinary Elf
+   * supplies its Elf-ness through `has` and could not be a partner at all.
+   */
+  const supplies = new Set([...detail.synergyProduces, ...(detail.synergyHas ?? [])])
   const wants = new Set(detail.synergyWants)
-  const synergy: Partner[] = []
+  const synergy: { readonly partner: Partner; readonly tag: string }[] = []
   for (const oracleId of accepted) {
     if (oracleId === self) continue
     const other = cards.get(oracleId)
     if (other === undefined) continue
-    const benefits = other.synergyWants.filter((t) => produces.has(t))
+    const benefits = other.synergyWants.filter((t) => supplies.has(t))
     const causes = other.synergyProduces.filter((t) => wants.has(t))
-    const tag = benefits[0] ?? causes[0]
+    // `produces` before `has` on the supply side: "causes Elves" is the more
+    // specific claim about a card that is both, the same precedence the deck
+    // web's rule 2 gives a combo edge over a benefits edge.
+    const membership = (other.synergyHas ?? []).filter((t) => wants.has(t))
+    const tag = benefits[0] ?? causes[0] ?? membership[0]
     if (tag === undefined) continue
-    // Said of the OTHER card, in the same two words the Semantics headings use.
-    // "wants creature death" was the odd one out and the vaguest of the three.
-    synergy.push(
-      partner(
-        oracleId,
-        other.name,
-        `— ${benefits[0] !== undefined ? 'benefits from' : 'causes'} ${tag.replace(/-/g, ' ')}`,
-      ),
-    )
+    /*
+     * Said of the OTHER card, in the same words the Semantics rows use.
+     *
+     * Membership needs its own frame and cannot borrow either of the other
+     * two. "Elvish Mystic causes Elves" is FALSE — a token maker causes an Elf
+     * and is not one, and that distinction is the whole reason `has` exists —
+     * and "benefits from" is the opposite direction. The split between "is" and
+     * "has" is the tag's own prefix, so nothing is stored to support it, and
+     * `readable` gives a plural ("Elves", "Nobles") which "one of your" takes
+     * and "is an" would not.
+     */
+    const why =
+      benefits[0] !== undefined
+        ? `benefits from ${readable(tag)}`
+        : causes[0] !== undefined
+          ? `causes ${readable(tag)}`
+          : membershipFrame(tag) === 'is'
+            ? `one of your ${readable(tag)}`
+            : `has ${readable(tag)}`
+    synergy.push({ partner: partner(oracleId, other.name, `— ${why}`), tag })
   }
 
   const dedupe = (list: readonly Partner[]): Partner[] => {
@@ -2410,11 +2488,36 @@ const Works = ({
     return list.filter((p) => (seen.has(p.oracleId) ? false : (seen.add(p.oracleId), true)))
   }
   const combosWith = dedupe(assembled).slice(0, 8)
-  // Locked first: those are cards the user has committed to, so a pairing with
-  // one is worth more than a pairing with a card they may still cut.
-  const synergyWith = dedupe(synergy)
-    .sort((a, b) => Number(b.locked) - Number(a.locked))
-    .slice(0, 8)
+  /*
+   * Locked first, then the claim the fewest other partners make.
+   *
+   * Locked first because those are cards the user has committed to, so a
+   * pairing with one is worth more than a pairing with a card they may still
+   * cut. That was the whole sort until membership joined the pairing, and on
+   * its own it produced this panel's version of a hairball: fifty-nine Elves
+   * all say "one of your Elves", they arrive before anything else in the
+   * accepted order, and the eight-row cut then fills with eight copies of one
+   * sentence while the untapper and the token maker fall off the end.
+   *
+   * So a claim shared by many partners yields to one shared by few. It is the
+   * same argument the deck web's `scarcity` makes about edges — the fortieth
+   * card saying the same thing is not news, and the only one saying something
+   * else is — applied to a list of eight instead of a graph of four hundred.
+   * The name breaks the last tie so the eight do not reshuffle between renders
+   * when hydration order changes.
+   */
+  const sharing = new Map<string, number>()
+  for (const { tag } of synergy) sharing.set(tag, (sharing.get(tag) ?? 0) + 1)
+  const synergyWith = dedupe(
+    [...synergy]
+      .sort(
+        (a, b) =>
+          Number(b.partner.locked) - Number(a.partner.locked) ||
+          (sharing.get(a.tag) ?? 0) - (sharing.get(b.tag) ?? 0) ||
+          a.partner.name.localeCompare(b.partner.name),
+      )
+      .map((s) => s.partner),
+  ).slice(0, 8)
 
   if (combosWith.length === 0 && oneAway.length === 0 && synergyWith.length === 0) return null
 
@@ -5472,7 +5575,20 @@ export const Workspace = ({
    */
   const [images, setImages] = useState<Map<string, api.ImageUris>>(new Map())
   const [query, setQuery] = useState('')
-  const [queryError, setQueryError] = useState<string | null>(null)
+  /**
+   * The first parse error the server reported, and the way out of it.
+   *
+   * Two fields rather than one joined string, because they are two different
+   * sentences: the message says what is wrong with what was typed, and the
+   * suggestion names the tags that were probably meant. `null` for the errors
+   * the parser has nothing to add to — a bad colour letter is fully explained
+   * by its own message — and drawing an empty second line for those would be a
+   * hint that hints at nothing.
+   */
+  const [queryError, setQueryError] = useState<{
+    message: string
+    suggestion: string | null
+  } | null>(null)
   const [detail, setDetail] = useState<api.CardDetail | null>(null)
   /** Which card the preview is showing, known before its detail arrives. */
   const [inspect, setInspect] = useState<string | null>(null)
@@ -6261,7 +6377,12 @@ export const Workspace = ({
           : new Map(r.recs.tagSupport.map((e) => [e.tag, e.supporting])),
       )
       setAnalysis(r.analysis)
-      setQueryError(r.recs.query.errors[0]?.message ?? null)
+      const firstQueryError = r.recs.query.errors[0]
+      setQueryError(
+        firstQueryError === undefined
+          ? null
+          : { message: firstQueryError.message, suggestion: firstQueryError.suggestion ?? null },
+      )
       /*
        * A plain set, and it is still an accumulate.
        *
@@ -6740,17 +6861,24 @@ export const Workspace = ({
   /**
    * The candidate set the focus panel offers, from the commanders' own tags.
    *
-   * The same set the start screen offered, from the same field, so someone who
-   * skipped the prompt and comes back to it later meets the identical list —
-   * and both directions, for the reason the start screen gives. Read from the
-   * hydrated cards, which already hold every commander (the recompute hydrates
-   * `current.commanders` first), so this costs no request.
+   * The same set the start screen offered, from the same fields and in the same
+   * order, so someone who skipped the prompt and comes back to it later meets
+   * the identical list — all three directions, membership first, for the reason
+   * the start screen gives. Read from the hydrated cards, which already hold
+   * every commander (the recompute hydrates `current.commanders` first), so
+   * this costs no request.
+   *
+   * Two copies of one question is exactly how the start screen came to offer a
+   * different vocabulary from this panel, which is what `EmphasisChoice`'s own
+   * comment warns about; when this list changes, the one at the top of
+   * `StartScreen` changes with it.
    */
   const commanderTags = useMemo(() => {
     const tags = new Set<string>()
     for (const id of deck.commanders) {
       const commander = cards.get(id)
       if (commander === undefined) continue
+      for (const t of commander.synergyHas ?? []) tags.add(t)
       for (const t of commander.synergyProduces) tags.add(t)
       for (const t of commander.synergyWants) tags.add(t)
     }
@@ -8513,7 +8641,20 @@ export const Workspace = ({
             */}
             <SortControl sort={sort} onChange={setSort} />
 
-            {queryError !== null ? <p className="problem">{queryError}</p> : null}
+            {/* The near-miss list on its own line under the message, not
+              appended to it. The message is what is wrong and the suggestion is
+              what to do about it, and a reader scanning for a tag name should
+              not have to read past a sentence about their typo to reach the
+              six candidates. Dimmer than the problem, because it is help rather
+              than a second fault. */}
+            {queryError !== null ? (
+              <>
+                <p className="problem">{queryError.message}</p>
+                {queryError.suggestion === null ? null : (
+                  <p className="note dim">{queryError.suggestion}</p>
+                )}
+              </>
+            ) : null}
           </div>
 
           {/*

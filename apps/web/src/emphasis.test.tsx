@@ -593,11 +593,22 @@ describe('a suggestion that rose because of the emphasis', () => {
     } satisfies api.Hydrated)
   })
 
+  /*
+   * "opponents discarding", not "opponent discard".
+   *
+   * These three asserted the hyphen-stripped wire spelling, which was never a
+   * decision — it was `readable()` not being called here, and it read the same
+   * tag two ways on one screen once ADR-0046 namespaced 586 of them
+   * ("subtype:elf" in this row, "Elves" in the chip beside it). The stripper
+   * also loses the subject ADR-0022 put in this tag's name on purpose: "your
+   * discard" does not say whose, and that is the ambiguity `discard` versus
+   * `opponent-discard` exists to settle.
+   */
   it('says the emphasised claim, not the ordinary one', async () => {
     mocked.getRecommendations.mockResolvedValue(withReason(true))
     await mount(deck({ semanticEmphasis: ['opponent-discard'] }))
     await waitFor(() =>
-      expect(screen.getByText('benefits from your emphasised opponent discard')).toBeDefined(),
+      expect(screen.getByText('benefits from your emphasised opponents discarding')).toBeDefined(),
     )
   })
 
@@ -605,7 +616,7 @@ describe('a suggestion that rose because of the emphasis', () => {
     mocked.getRecommendations.mockResolvedValue(withReason(false))
     await mount(deck({ semanticEmphasis: ['opponent-discard'] }))
     await waitFor(() =>
-      expect(screen.getByText('benefits from your opponent discard')).toBeDefined(),
+      expect(screen.getByText('benefits from your opponents discarding')).toBeDefined(),
     )
   })
 })
@@ -699,7 +710,9 @@ describe('the focus guarantee on screen', () => {
     mocked.getRecommendations.mockResolvedValue(merged())
     await mount(deck({ semanticEmphasis: ['opponent-discard'] }))
     await waitFor(() =>
-      expect(screen.getByText(/top 3 here for your emphasised opponent discard/i)).toBeDefined(),
+      expect(
+        screen.getByText(/top 3 here for your emphasised opponents discarding/i),
+      ).toBeDefined(),
     )
   })
 })

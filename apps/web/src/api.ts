@@ -604,7 +604,26 @@ export interface Recommendations {
   groups: Group[]
   columns: { query: string; matched: string[]; error?: string }[]
   unavailable: Unavailable[]
-  query: { matched: number; total: number; errors: { message: string; position: number }[] }
+  query: {
+    matched: number
+    total: number
+    /**
+     * `suggestion` has been on the wire since the query parser had one —
+     * `QueryParseError` carries it and the route returns `parseErrors`
+     * untouched — and this type simply never declared it, so the client threw
+     * it away. That is not a cosmetic loss: ADR-0046 replaced "here is the
+     * whole vocabulary" with a near-miss list precisely BECAUSE the vocabulary
+     * reached 608 tags, and it is ranked by shared leading characters so that a
+     * transposition still finds its target. Typing `has:subtype:elff` got
+     * `unknown synergy tag "subtype:elff"` and nothing else, which is the
+     * guessing game the near-miss list exists to end.
+     *
+     * `null` is a real answer — the parser sends it for the errors it has
+     * nothing to add to — and is why this is `string | null` rather than
+     * optional-and-absent. Optional as well, for a server older than the field.
+     */
+    errors: { message: string; position: number; suggestion?: string | null }[]
+  }
   /**
    * The deck's emphasis, and how many eligible candidates carry each tag.
    *
