@@ -653,6 +653,24 @@ and is now **built** — roles, curve and tolerance, all three of its open
 questions answered in §16.9 and its four divergences from the design recorded in
 §16.10.
 
+[Doc 20, the quick tutorial](20-tutorial.md), is **built**. Seven steps that
+name each region of the workspace and say what it is for, fired once immediately
+after the first commander is chosen and re-runnable from a **Help** button, with
+all five of its questions answered in §20.5 and what was built recorded beside
+each. Two things it forced are worth finding from here rather than from inside
+the doc:
+
+- **The masthead's control set changed.** Import and Export moved behind an
+  overflow menu (A1) so that adding Help did not make the tools row five
+  buttons. ADR-0032 had already derived the 1175px break against exactly that
+  shape — three buttons and a 25.9px `⋯` — and measuring the real controls found
+  every term as derived, so **the threshold did not move**. §20.4 has the table.
+- **A step whose anchor is not on the page is skipped, and the count stays
+  seven** — [ADR-0033](adr/0033-a-tour-step-with-no-anchor-is-skipped-and-the-count-stays-seven.md).
+  On the empty workspace §20.1 chooses, no card is open, so the first run is six
+  steps and the numbering visibly goes 4 → 6. D1 is why the tour does not simply
+  open one.
+
 ## 11.10 UI-01: a gallery instead of Storybook
 
 The DoD said "Storybook entries". It shipped as a page at `#gallery` and a test

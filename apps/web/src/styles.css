@@ -756,7 +756,15 @@ select {
    the name is in the same corner in the same type before and after the first
    click; only the bar around it differs, because there is nothing else in it
    yet to rule off. */
+/* It holds one thing now — Help (doc 20 §20.1: "The landing page gets nothing
+   but the Help button"). The same flex row the workspace masthead uses, and
+   the same `baseline` alignment, so the button sits ON the wordmark's line
+   rather than under it: a block `h1` is full width, and without this the two
+   stack and the landing page grows a second bar for one small button. */
 .start-masthead {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--step) * 2);
   padding: calc(var(--step) * 2) calc(var(--step) * 3);
 }
 
@@ -1629,7 +1637,16 @@ select {
     height: 0;
   }
 
-  .masthead > .act {
+  /*
+   * BOTH kinds of tool, or the group splits at the break instead of at the
+   * collision. Graph, Quickbuild and Help are `.act` buttons and the overflow
+   * trigger is a `.act` inside a positioning wrapper, so the wrapper is what
+   * this rule has to reach — without it the menu keeps the default order of 0
+   * and lands on line ONE, beside the bracket chip, which is exactly the
+   * split toolbar the whole block exists to remove.
+   */
+  .masthead > .act,
+  .masthead > .overflow-menu {
     order: 2;
   }
 }
@@ -2924,6 +2941,70 @@ select {
   gap: 6px;
 }
 
+/* ------------------------------------------------- the overflow menu (A1) */
+
+/*
+ * Import and Export, off the tools row and behind a ⋯ (doc 20 §20.4 / A1).
+ *
+ * THE TRIGGER GETS NO WIDTH OF ITS OWN, and that is load-bearing rather than
+ * lazy. ADR-0032 derived the 1175px masthead threshold against a control set
+ * that included this button at **25.9px** — a bare `.act` with its 2px/7px
+ * padding, its 1px border and a single ⋯ at 0.72rem. Any `min-width`, extra
+ * padding or larger glyph here moves that arithmetic and the threshold has to
+ * be re-derived with it, so there is deliberately nothing below that touches
+ * the trigger's box.
+ *
+ * The popup is `position: absolute`, not the top layer that `Hint` and the tour
+ * use. It sits in the masthead, which neither scrolls nor carries
+ * `container-type`, so there is no clipping ancestor to escape — the top layer
+ * would be machinery bought for a problem this surface does not have. `right:
+ * 0` because the trigger is the last thing on the row and a left-anchored
+ * 10rem panel there runs off the screen.
+ *
+ * Everything below deliberately mirrors `.deck-item`: this masthead already had
+ * one menu, and two menus that look different are two things to learn.
+ */
+.overflow-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.overflow-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 10rem;
+  padding: var(--step);
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+}
+
+.overflow-item {
+  width: 100%;
+  padding: 5px var(--step);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--parchment);
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+.overflow-item:hover {
+  background: var(--ink-3);
+  border-color: var(--rule);
+}
+.overflow-item:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: -2px;
+}
+
 /* The boot state, so a reload does not flash the Start screen before the saved
    deck arrives — which reads as having lost it. */
 .boot {
@@ -3891,3 +3972,182 @@ select {
 .quickbuild-done {
   padding: calc(var(--step) * 2) 0;
 }
+
+/* -------------------------------------------------- the quick tour (doc 20) */
+
+/*
+ * THE OVERLAY IS IN THE TOP LAYER, and everything below is written for that.
+ *
+ * The spotlight has to be drawn over `.region`, which carries `container-type:
+ * inline-size` — that establishes a containing block for fixed-position
+ * descendants, so `position: fixed` ALONE does not escape it — and over
+ * `.analysis-scroll`, which is `overflow-y: auto`. No `z-index` defeats an
+ * `overflow` ancestor, because clipping is not stacking. The hint popovers were
+ * moved into the top layer for exactly this, and `Tour.tsx` uses the same
+ * `popover` promotion rather than rediscovering the problem.
+ *
+ * These declarations therefore have two jobs. They lay the layer out, and they
+ * undo the UA stylesheet's `[popover]` rule — which centres a `fit-content` box
+ * with a border, padding and an opaque `canvas` background. Every one of those
+ * is reset here. The `z-index` is for the FALLBACK path only, where the API is
+ * missing and the layer is an ordinary fixed box: 60 clears the masthead's 10
+ * and the deck menu's 40.
+ */
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--parchment);
+  overflow: visible;
+}
+
+/*
+ * The dim and the hole are ONE element.
+ *
+ * A single enormous spread `box-shadow` fills the viewport around this box, so
+ * the "spotlight" is the absence of the scrim rather than a second element that
+ * has to be kept in register with it. Rejected: a four-panel scrim, or a
+ * `clip-path` cut-out — both are two sources of truth for one rectangle, and
+ * both go visibly out of register during the scroll each step performs.
+ *
+ * 100vmax of spread is always enough: the box is inside the viewport and vmax
+ * is the larger of the two axes, so the shadow reaches past both edges.
+ *
+ * The layer above already swallows pointer events, so this needs none of its
+ * own — and a shadow never captures them anyway.
+ */
+/*
+ * THE SPOTLIGHT SNAPS. There is deliberately no transition here.
+ *
+ * It had one — 180ms on left, top, width and height — and it was removed for a
+ * reason that is a mechanism rather than a measurement, so it is worth stating
+ * as one. `Tour.tsx` repositions this box on every `scroll` event, because a
+ * top-layer element does not move with the page behind it, and each step
+ * begins with a smooth scroll that fires one per frame. Every one of those
+ * writes a new `left`/`top`, and every write RESTARTS the 180ms transition
+ * from wherever the animation had got to. The ring therefore trails the page
+ * for the whole scroll and settles 180ms after it stops: the animation fights
+ * the listener that exists to keep the ring on its region, which is the exact
+ * failure both of them are there to prevent.
+ *
+ * It was also animating left/top/width/height — layout properties, the
+ * expensive kind — on a box up to eleven thousand pixels tall.
+ *
+ * The observation that started this is worth recording with its cause, because
+ * the cause is not the ordinary one: at a 1320px viewport the ring was still
+ * drawn as the deck rail's 10,805px column on step 7 while the inline style
+ * already read 85.6 × 35.3 for the Quickbuild button, and `transition: none`
+ * snapped it to 86 × 35 in the same frame. That browser window turned out to be
+ * occluded — `document.visibilityState` was `hidden`, which suspends CSS
+ * transitions entirely. It is evidence that the transition was what held the
+ * box back, not evidence that this happens on every machine.
+ *
+ * So the tour's only motion is the scroll each step performs, which is where A2
+ * puts it and where `prefers-reduced-motion` is honoured (`Tour.tsx` asks for
+ * an instant jump instead of a glide). A reader who asked for no motion gets
+ * none from the highlight because nobody gets any.
+ */
+.tour-spot {
+  position: fixed;
+  border: 2px solid var(--brass);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 100vmax rgb(0 0 0 / 62%);
+  pointer-events: none;
+}
+
+/* The landing step (D5) has nothing to point at, so there is no hole and no
+   dim — the card sits on the page and says how to start. */
+.tour-spot[hidden] {
+  display: none;
+}
+
+.tour-card {
+  position: fixed;
+  width: min(24rem, calc(100vw - 2rem));
+  padding: calc(var(--step) * 2);
+  background: var(--ink-2);
+  border: 1px solid var(--brass);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 55%);
+}
+
+/* Only the unanchored step. Every other placement is written as `left`/`top` by
+   `placeHint`, and an inline style beats this rule. */
+.tour-card[data-placement='centre'] {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/*
+ * "Step 3 of 7" in words as well as in the live region: §20.6 says the
+ * highlight is never the only signal, and a reader who cannot see the spotlight
+ * still needs to know where they are in the sequence.
+ *
+ * `.tour-card .tour-progress`, not `.tour-progress`. This is a `<p>` inside the
+ * card, so the bare class (0-1-0) loses to `.tour-card p` (0-1-1) below on
+ * specificity AND on order — the micro-label was silently rendering at 0.86rem
+ * with a full paragraph's bottom margin, keeping only the colour, tracking and
+ * caps that `.tour-card p` does not set. The same collision `styles.test.ts`
+ * exists to catch on the card rows.
+ */
+.tour-card .tour-progress {
+  margin: 0 0 calc(var(--step) / 2);
+  color: var(--parchment-dim);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tour-card h2 {
+  margin: 0 0 var(--step);
+  font: 600 1.05rem/1.3 var(--display);
+}
+
+.tour-card p {
+  margin: 0 0 calc(var(--step) * 1.5);
+  font-size: 0.86rem;
+}
+
+/*
+ * D2: skipping is as easy as continuing.
+ *
+ * "Skip the tour" is a full control on the same row as Next, sharing its class
+ * and — through `flex: 1 1 auto` — its size. Not a small × in a corner: a
+ * first-time user who wants to get on with it must never have to work at
+ * escaping, and A4 makes an accidental exit expensive enough that the
+ * deliberate one has to be obvious.
+ */
+.tour-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--step);
+}
+
+.tour-actions .act {
+  flex: 1 1 auto;
+  padding: 5px 10px;
+  text-align: center;
+}
+
+/*
+ * There is no `@media (prefers-reduced-motion: reduce)` block for the tour, and
+ * its absence is the decision rather than an omission.
+ *
+ * §20.6 requires the preference to be honoured here, and it is — in
+ * `Tour.tsx`, which reads the same query and asks each step's
+ * `scrollIntoView` for an instant jump instead of a glide. That scroll is the
+ * tour's only motion (see `.tour-spot` above for why the spotlight no longer
+ * animates), and it cannot be expressed in a stylesheet, so a rule here would
+ * have nothing left to turn off. `styles.test.ts` pins the spotlight's lack of
+ * a geometry transition so that re-adding one has to come with re-reading
+ * this.
+ */
