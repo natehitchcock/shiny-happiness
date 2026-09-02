@@ -1225,3 +1225,151 @@ per role and moves for the same reason. Either order is safe.
   an anthem and a spell discount in a single quoted line, so the newline unit
   cannot separate them — the one rise this pass genuinely causes, 9.6 → 11.4.
   Inherited from ADR-0038's unit, not introduced here.
+
+## 18.16 A qualifier between `target` and its noun
+
+A follow-up to §18.15, caught by a **control assertion** rather than by a
+report: `impact-roles.test.ts` asserts that `spot-removal` has
+`noCountableEffect === 0`, because the model reads every removal spell. After
+the per-clause regeneration it read 1. The assertion exists precisely so a
+scoring change cannot quietly drop cards, and it did its job.
+
+### The card, and why the obvious diagnosis is wrong
+
+```
+Shadowborn Demon                                    Creature — Demon
+Flying
+When this creature enters, destroy target non-Demon creature.
+At the beginning of your upkeep, if there are fewer than six creature cards
+in your graveyard, sacrifice a creature.
+```
+
+It reported `breadth: none`, which looks like `TARGET` failing to see past the
+qualifier. It is not. `TARGET` is a bare `\btarget\b` and matched fine — the
+removal clause did get `breadth: 'one'`. Scored per clause:
+
+| clause | tuple | score |
+| --- | --- | ---: |
+| `flying` | none / one-shot / self | 0.425 |
+| the removal | one / one-shot / **self** | 0.85 |
+| the upkeep drawback | none / **upkeep** / self | **0.935** |
+
+The drawback outscored the removal and took the card, bringing its own `none`
+with it. That is the winning-clause rule working exactly as specified — the
+fault is that the removal clause was **underpriced**.
+
+It was underpriced because `OPPOSING` required the noun to sit immediately
+after `target`. "target non-Demon creature" has a word in between, so it fell
+through to `self` (0.85) instead of `opposing` (1.2). **Repairing the stakes
+axis fixes the breadth symptom**, because the right clause wins its own card
+again — at 1.2 the removal beats the drawback's 0.935.
+
+### The population: 1,472 cards, not one
+
+Commander-legal cards containing `target <qualifier> <noun>` that take no
+`opposing` reading from anywhere in their text:
+
+| qualifier | cards |
+| --- | ---: |
+| `target nonland <noun>` | 211 |
+| `target attacking <noun>` | 167 |
+| `target attacking or blocking <noun>` | 89 |
+| `target noncreature <noun>` | 65 |
+| `target nonblack <noun>` | 53 |
+| `target tapped <noun>` | 45 |
+| `target legendary <noun>` | 34 |
+| the rest of the tail | ~800 |
+
+### The bound, and the excluded words, are both measured
+
+The qualifier run is **at most three words** and refuses `of`, `you`, `an`,
+`your`, `each` and `all`. Every one of those is load-bearing:
+
+- `of` keeps "becomes the target **of** a spell" — a trigger condition, 69
+  cards — from reading as a thing being targeted.
+- `you` / `an` / `your` stop the run before a controller phrase so it cannot
+  swallow one and reach a later noun.
+- The **three-word bound** was measured rather than guessed. Widening it to nine
+  changes 51 cards, of which 37 are already claimed by a higher rung of the
+  stakes ladder. Of the remaining 14 the wider run is **wrong on 10**, because
+  it walks past the real target onto a noun merely mentioned: "target Aura
+  attached to a **creature**" (5 cards), "target card in a graveyard other than
+  a basic **land**" (Extirpate, Surgical Extraction), "target card with the same
+  name as that **spell**" (Harness the Storm). It buys 4 genuine long qualifiers
+  and costs 10 false ones, so it stays at three.
+
+The trailing `you control` lookahead is unchanged and still does the real work:
+162 cards in the widened population say "target &lt;qualifier&gt; &lt;noun&gt;
+you control" and must not become `opposing`.
+
+### Measured
+
+**900 cards move, every one of them upward, none down.** Mean 2.3821 → 2.3954.
+The `10–15` and `15+` bands do not move at all — this fix cannot inflate the top
+of the scale, because it only ever changes a stakes tier from `self` or `own` to
+`opposing`.
+
+`spot-removal`'s `noCountableEffect` goes **1 → 0** and the control assertion
+passes without being touched. Four other roles lose a blind spot too: `draw`
+2068 → 2067, `evasion` 4341 → 4339, `synergy` 5644 → 5642, and `recursion`'s
+quartiles shift. No role gains one.
+
+**Cumulatively, §18.15 and §18.16 together** move 2,719 of 31,782 cards (8.6%):
+1,045 up, 1,674 down, mean 2.5109 → 2.3954.
+
+| band | before §18.15 | after §18.16 |
+| --- | ---: | ---: |
+| 0 | 361 | 361 |
+| 0–1 | 15,953 | 15,599 |
+| 1–3 | 9,698 | 10,124 |
+| 3–6 | 257 | 210 |
+| 6–10 | 3,574 | 4,019 |
+| 10–15 | 1,153 | 822 |
+| 15+ | 786 | 647 |
+
+The six anchors are unmoved: Wrath 6.12, Craterhoof 6.0, Sol Ring 0.68, Forest
+0, Cyclonic Rift 7.2, Swords to Plowshares 1.2. Diregraf Captain stays 6.0 and
+Quandrix stays 0.808. `IMPACT_MAX` is still 18.48 — no tier value changed here
+either.
+
+### Regenerate again
+
+Both files were regenerated for §18.15 (`r` came out **0.4945**, against the
+0.4934 this document estimated). §18.16 moves the mean again, so both need one
+more pass. Estimated `r` ≈ **0.492**, about −0.5%; the generator is
+authoritative.
+
+```
+pnpm --filter @roundtable/ingest baseline
+pnpm --filter @roundtable/ingest impact-roles
+```
+
+Until `impact-roles` is re-run, `impact-roles.test.ts` fails on the **shipped
+data file**, not on the model: the file still records the pre-fix `1`. A
+read-only reproduction of the generator over the same corpus gives `0`.
+
+### Found and deliberately NOT done: parenthetical rules text
+
+The modal charms — `Innistrad Charm`, `Ulgrotha Charm`, `Tarkir Charm`,
+`Kamigawa Charm`, `Theros Charm` — spell their modes as a card NAME with the
+actual rules text in the parenthetical:
+
+```
+Choose one —
+• Cemetery Recruitment (Return a creature card from a graveyard to its owner's hand…)
+• Duress (…)
+• Human Frailty (Destroy target Human.)
+```
+
+Reminder-text stripping runs before clause splitting, as it must for the
+Colossal Dreadmaw reason, so it eats every mode and leaves three bare names.
+All five score 0.425.
+
+**The class is exactly five cards and every one of them is `not_legal` in
+Commander.** None is in the 31,782-card corpus, none appears in any role band,
+and none can affect any number this document quotes. Distinguishing a
+parenthetical that *restates* a keyword from one that *is* the rule is not
+reliably makeable from the text alone, and it would add false-positive surface
+across 2,131 cards that legitimately lose most of their text to reminders
+(Morph, Ripple, Cycling, Flashback) in exchange for zero commander-legal cards.
+Left alone, deliberately.

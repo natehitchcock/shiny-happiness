@@ -968,3 +968,133 @@ describe('a serial class of spells is measured on repeat, never on reach', () =>
     expect(cardImpact(stormEntity).breadth).toBe('unbounded')
   })
 })
+
+/**
+ * A qualifier between `target` and its noun does not make the target yours.
+ *
+ * Caught by `impact-roles.test.ts`'s CONTROL assertion — `spot-removal` must
+ * have `noCountableEffect === 0`, because the model reads every removal spell —
+ * which went to 1 once clauses were scored separately. The card was Shadowborn
+ * Demon:
+ *
+ * ```
+ * Flying
+ * When this creature enters, destroy target non-Demon creature.
+ * At the beginning of your upkeep, if there are fewer than six creature cards
+ * in your graveyard, sacrifice a creature.
+ * ```
+ *
+ * The tempting diagnosis — that `TARGET` cannot see past a qualifier — is
+ * WRONG. `TARGET` is a bare `\btarget\b` and matched fine; the removal clause
+ * did get `breadth: 'one'`. What actually happened is that the removal clause
+ * scored 0.85 and the upkeep DRAWBACK scored 0.935, so the drawback won the
+ * card and brought its own `none` with it.
+ *
+ * The removal clause scored 0.85 because `OPPOSING` required the noun to sit
+ * immediately after `target`. "target non-Demon creature" has a word in
+ * between, so it fell through to `self` — 0.85 instead of 1.2 — and lost a
+ * comparison it should have won. Fixing the STAKES axis fixes the breadth
+ * symptom, because the right clause wins again.
+ *
+ * 1,472 commander-legal cards contain `target <qualifier> <noun>` and take no
+ * `opposing` reading from anywhere in their text. One defect, not one card.
+ */
+describe('a qualifier between "target" and its noun', () => {
+  const SHADOWBORN_DEMON = card({
+    name: 'Shadowborn Demon',
+    manaCost: '{4}{B}{B}',
+    typeLine: 'Creature — Demon',
+    oracleText:
+      'Flying\nWhen this creature enters, destroy target non-Demon creature.\nAt the beginning of your upkeep, if there are fewer than six creature cards in your graveyard, sacrifice a creature.',
+  })
+
+  it('reads "target non-Demon creature" as landing on an opponent', () => {
+    const clause = card({
+      name: 'Clause',
+      typeLine: 'Creature — Demon',
+      oracleText: 'When this creature enters, destroy target non-Demon creature.',
+    })
+    expect(cardImpact(clause).stakes).toBe('opposing')
+  })
+
+  it('lets the removal clause win its own card again', () => {
+    // The control assertion in impact-roles.test.ts is what this protects: a
+    // removal spell must never report `breadth: none`.
+    expect(cardImpact(SHADOWBORN_DEMON).breadth).toBe('one')
+  })
+
+  it('reads the other common qualifiers the same way', () => {
+    for (const text of [
+      'Destroy target attacking creature.',
+      'Destroy target nonland permanent.',
+      'Exile target legendary creature.',
+      'Counter target noncreature spell.',
+      'Destroy target attacking or blocking creature.',
+    ]) {
+      expect(cardImpact(card({ typeLine: 'Instant', oracleText: text })).stakes).toBe('opposing')
+    }
+  })
+
+  it('still refuses a target the text scopes to you', () => {
+    // The trailing `you control` lookahead has to survive the widening, or the
+    // 1,070 cards ADR-0025's pass rescued go back to being reported as
+    // attacking their own caster's board. 162 cards in the widened population
+    // say exactly this.
+    for (const text of [
+      'Exile target legendary creature you control, then return it to the battlefield.',
+      'Untap target artifact creature you control.',
+      'Copy target instant or sorcery spell you control.',
+    ]) {
+      expect(cardImpact(card({ typeLine: 'Instant', oracleText: text })).stakes).not.toBe(
+        'opposing',
+      )
+    }
+  })
+
+  it('bounds the qualifier run at three words', () => {
+    // The bound is measured, not guessed. Widening it to nine changes 51 cards,
+    // of which 37 are already claimed by a higher rung of the stakes ladder. Of
+    // the remaining 14 the wider run is WRONG on 10, because it walks past the
+    // real target and lands on a noun that is merely mentioned: "target Aura
+    // attached to a CREATURE" (5 cards), "target card in a graveyard other than
+    // a basic LAND" (Extirpate, Surgical Extraction).
+    //
+    // Harness the Storm is the cleanest of them. Its whole text is your own
+    // spell and your own graveyard; the `spell` a longer run would reach is the
+    // one being copied, not the thing being targeted.
+    const harness = card({
+      name: 'Harness the Storm',
+      manaCost: '{2}{R}',
+      typeLine: 'Enchantment',
+      oracleText:
+        'Whenever you cast an instant or sorcery spell from your hand, you may cast target card with the same name as that spell from your graveyard.',
+    })
+    expect(cardImpact(harness).stakes).not.toBe('opposing')
+  })
+
+  it('does not read "the target of a spell" as a targeting clause', () => {
+    // `of` is excluded from the qualifier run. "becomes the target of a spell"
+    // is a trigger condition, not a thing being targeted, and 69 cards say it.
+    const bare = card({
+      name: 'Bare',
+      typeLine: 'Creature — Human Shaman',
+      oracleText: 'Whenever this creature becomes the target of a spell, draw a card.',
+    })
+    expect(cardImpact(bare).stakes).not.toBe('opposing')
+  })
+
+  it('leaves the six anchors exactly where they were', () => {
+    const swords = card({
+      name: 'Swords to Plowshares',
+      manaCost: '{W}',
+      typeLine: 'Instant',
+      oracleText: 'Exile target creature. Its controller gains life equal to its power.',
+    })
+    expect(cardImpact(WRATH_OF_GOD).score).toBe(6.12)
+    expect(cardImpact(CRATERHOOF).score).toBe(6.0)
+    expect(cardImpact(SOL_RING).score).toBe(0.68)
+    expect(cardImpact(FOREST).score).toBe(0)
+    expect(cardImpact(CYCLONIC_RIFT).score).toBe(7.2)
+    expect(cardImpact(swords).score).toBe(1.2)
+  })
+})
