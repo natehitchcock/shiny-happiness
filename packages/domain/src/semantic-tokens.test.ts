@@ -601,6 +601,19 @@ describe('semanticTagWords — derived, never hand-written', () => {
     expect(semanticTagWords('ability:first-strike')).toBe('first strike')
   })
 
+  it('never pluralises a proper name', () => {
+    // Chandra is a planeswalker type — somebody's name — and "Chandras" is not
+    // a word. The exception is read from the vocabulary's own `properNouns`
+    // rather than typed here, because which subtypes are names is a fact about
+    // the corpus: they are the ones printed only on Planeswalker type lines.
+    // 33 survive the membership rules, so this is not a hypothetical.
+    expect(SEMANTIC_VOCABULARY.properNouns).toContain('Chandra')
+    expect(semanticTagWords('subtype:chandra')).toBe('Chandra')
+    // And an ordinary subtype still is pluralised, so the exception is an
+    // exception rather than the rule quietly going away.
+    expect(semanticTagWords('subtype:elf')).toBe('Elves')
+  })
+
   it('gives null for a tag that is not a semantic token, so the caller can fall back', () => {
     expect(semanticTagWords('creature-death')).toBeNull()
     expect(semanticTagWords('treasure')).toBeNull()

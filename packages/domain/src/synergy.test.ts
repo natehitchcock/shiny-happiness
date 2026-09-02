@@ -2407,6 +2407,41 @@ describe('deriveSynergy — a sacrifice outlet that names a creature TYPE (ADR-0
   })
 })
 
+describe('the third direction reaches the deck and the card (ADR-0048)', () => {
+  it('surfaces membership through deriveSynergy, not only through the token module', () => {
+    // `deriveSynergy` is what the ingest and the repository call; a `has` that
+    // stopped at `semantic-tokens.ts` would be a direction nothing could read.
+    const elf = deriveSynergy({
+      oracleId: oracleId('Llanowar Elves'),
+      name: 'Llanowar Elves',
+      typeLine: 'Creature — Elf Druid',
+      oracleText: '{T}: Add {G}.',
+      keywords: [],
+    })
+
+    expect(elf.has).toContain('subtype:elf')
+    expect(elf.has).toContain('subtype:druid')
+    // And it stays OUT of the event directions, which is the whole distinction.
+    expect(elf.produces).not.toContain('subtype:elf')
+  })
+
+  it("accumulates a commander's membership onto the deck at commander weight", () => {
+    // `deckSynergy` has three maps now, and the commander branch and the
+    // accepted-card branch each fill all three. A deck whose commander is an
+    // Elf is an Elf deck before a single Elf is added to it.
+    const commander = oracleId('Ambush Commander')
+    const accepted = oracleId('Llanowar Elves')
+    const profiles = new Map<OracleId, SynergyProfile>([
+      [commander, { produces: [], wants: [], has: ['subtype:elf'] }],
+      [accepted, { produces: [], wants: [], has: ['subtype:elf'] }],
+    ])
+
+    const deck = deckSynergy([commander], [accepted], (id) => profiles.get(id))
+
+    expect(deck.has.get('subtype:elf')).toBe(COMMANDER_WEIGHT + 1)
+  })
+})
+
 describe('deriveSynergy — two gaps the commander sweep found (ADR-0048)', () => {
   const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
     deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })

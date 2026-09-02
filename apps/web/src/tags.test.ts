@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { EVENT_TAGS, SEMANTIC_TAGS, SYNERGY_TAGS } from '@roundtable/domain'
-import { readable } from './tags.js'
+import { MEMBERSHIP_LABEL, membershipFrame, readable } from './tags.js'
 
 /**
  * `readable` has a fallback — it strips hyphens — which is exactly why it needs
@@ -76,6 +76,22 @@ describe('readable', () => {
     // archetype where every other label names an event. `burn` is accepted in
     // the search box instead, as a query value alias.
     expect(readable('damage')).not.toContain('burn')
+  })
+
+  it('gives the membership direction two frames, not one (ADR-0048)', () => {
+    // "Is an Elf" and "has flying" are not the same sentence, and one heading
+    // over both would have to pick one and be wrong about the other. The split
+    // is the tag's own prefix, so nothing is stored to support it.
+    expect(membershipFrame('subtype:elf')).toBe('is')
+    expect(membershipFrame('ability:flying')).toBe('has')
+    expect(MEMBERSHIP_LABEL[membershipFrame('subtype:elf')]).toBe('Is')
+    expect(MEMBERSHIP_LABEL[membershipFrame('ability:flying')]).toBe('Has')
+  })
+
+  it('falls to the weaker claim for anything it does not recognise', () => {
+    // Total, and "has" is the weaker of the two: claiming a card IS something
+    // is a stronger statement than claiming it has it.
+    expect(membershipFrame('creature-death')).toBe('has')
   })
 
   it('still falls back rather than throwing on a tag it has never seen', () => {
