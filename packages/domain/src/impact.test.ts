@@ -657,11 +657,16 @@ describe('the winning clause brings its whole tuple (ADR-0043)', () => {
     ]
     const at = cardImpact(DIREGRAF_CAPTAIN)
     const alone = lines.map((l) =>
-      cardImpact(card({ name: 'Diregraf Captain', typeLine: 'Creature — Zombie Soldier', oracleText: l })),
+      cardImpact(
+        card({ name: 'Diregraf Captain', typeLine: 'Creature — Zombie Soldier', oracleText: l }),
+      ),
     )
-    expect(alone.some((a) => a.breadth === at.breadth && a.stakes === at.stakes && a.persistence === at.persistence)).toBe(
-      true,
-    )
+    expect(
+      alone.some(
+        (a) =>
+          a.breadth === at.breadth && a.stakes === at.stakes && a.persistence === at.persistence,
+      ),
+    ).toBe(true)
   })
 
   it('leaves a single-line card exactly where it was', () => {
@@ -915,5 +920,51 @@ describe('a serial class of spells is measured on repeat, never on reach', () =>
         'As long as this artifact is untapped, each spell that would cost less than three mana to cast costs three mana to cast.',
     })
     expect(cardImpact(trinisphere).breadth).toBe('unbounded')
+  })
+
+  it('reads the TYPE-QUALIFIED spelling of the serial class', () => {
+    // "each CREATURE spell you cast" is the same serial class with a type word
+    // wedged in. Without the gap Herigast and Henzie kept an unbounded reach,
+    // and the new `triggered` reading multiplied it instead of replacing it.
+    const herigast = card({
+      name: 'Herigast, Erupting Nullkite',
+      manaCost: '{4}{R}{R}',
+      typeLine: 'Legendary Creature — Dragon',
+      oracleText: 'Flying\nEach creature spell you cast has emerge.',
+    })
+    expect(cardImpact(herigast).breadth).not.toBe('unbounded')
+    expect(cardImpact(herigast).persistence).toBe('triggered')
+  })
+
+  it('treats a "for each" rider on a spell grant as scaling, not as a second reach', () => {
+    // Locket of Yesterdays' whole text. The subject is a serial class of
+    // spells; the trailing count says how big the discount is. Read as a mass
+    // effect it scored 7.2, and reading the grant as `triggered` would have
+    // multiplied that to 13.68 rather than replacing it.
+    const locket = card({
+      name: 'Locket of Yesterdays',
+      manaCost: '{1}',
+      typeLine: 'Artifact',
+      oracleText:
+        'Spells you cast cost {1} less to cast for each card with the same name as that spell in your graveyard.',
+    })
+    expect(cardImpact(locket).breadth).not.toBe('unbounded')
+    expect(cardImpact(locket).score).toBeLessThan(cardImpact(SWIFT_SILENCE).score)
+  })
+
+  it('leaves a "for each" count alone on a card with no spell grant', () => {
+    // The rider strip is scoped to clauses the grant rule already claimed. The
+    // wider gap — a bare `for each <noun>` taking unbounded reach off a clause
+    // that only counts — is real and is NOT fixed here; widening the head list
+    // was measured at 2,377 cards moved with false negatives among them. Storm
+    // Entity documents the untouched state so the follow-up has an anchor.
+    const stormEntity = card({
+      name: 'Storm Entity',
+      manaCost: '{1}{R}',
+      typeLine: 'Creature — Elemental',
+      oracleText:
+        'Haste\nThis creature enters with a +1/+1 counter on it for each other spell cast this turn.',
+    })
+    expect(cardImpact(stormEntity).breadth).toBe('unbounded')
   })
 })

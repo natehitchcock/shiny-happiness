@@ -288,6 +288,50 @@ const MEASURED = new RegExp(
 )
 
 /**
+ * A `for each <thing>` RIDER on a spell grant — scaling, not a second effect.
+ *
+ * Applied only inside a clause `SPELL_GRANT` already matched, and that
+ * restriction is the whole point. Locket of Yesterdays reads "spells you cast
+ * cost {1} less to cast FOR EACH CARD with the same name as that spell in your
+ * graveyard": the subject of the clause is a serial class of spells, and the
+ * trailing `for each` says how big the discount is, not that the clause reaches
+ * a board. `MASS_QUANTIFIED` saw the bare `each card` and called it unbounded,
+ * so the card scored 7.2 — and once the grant correctly read as `triggered`,
+ * that false reach was multiplied to 13.68 rather than replaced. Six cards
+ * carry both shapes: Locket of Yesterdays, The Kenriths' Royal Funeral, Temur
+ * Battlecrier, Hamza, Guardian of Arashin, Heliod and Saheeli, Filigree Master.
+ *
+ * NOT APPLIED CORPUS-WIDE, though the same gap exists there. `MEASURING_HEAD`
+ * admits `for each card type` but not plain `for each creature you control`, so
+ * roughly two thousand cards take an unbounded reach from a clause that only
+ * counts — Storm Entity, a one-mana 1/1 whose whole text is "enters with a
+ * +1/+1 counter on it for each other spell cast this turn", scores 7.2, above
+ * Wrath of God. Widening the head list was measured and MOVED 2,377 CARDS with
+ * genuine false negatives among them: `for each opponent` is not a measurement
+ * but a distributive effect landing on people, and Smuggler's Share fell from
+ * 18.48 to 0.935 — the Hallar regression recorded above, on a different noun.
+ * That is its own pass with its own counter-example hunt, and it is not this
+ * one.
+ *
+ * PEOPLE ARE EXCLUDED BY THE NOUN LIST, not by a second guard. `COUNTED_OBJECT_NOUN`
+ * is `COUNTED_NOUN` without `players?` and `opponents?`, so "for each opponent"
+ * cannot match at all — a count over OBJECTS is a measurement, a run over
+ * PEOPLE is reach. An earlier draft also excluded the two words from the
+ * intervening-word lookahead; a mutation survived it, the corpus was checked,
+ * and no clause carries both a spell grant and a `for each opponent` rider, so
+ * the second guard was redundant and is gone rather than untestable.
+ */
+const COUNTED_OBJECT_NOUN =
+  '(?:creatures?|permanents?|artifacts?|enchantments?|lands?|planeswalkers?|tokens?|cards?|counters?|spells?|colors?)'
+
+const SPELL_GRANT_RIDER = new RegExp(
+  String.raw`\bfor each (?:other |all |the )?` +
+    `(?:(?!to |and |or |each |all |every )[a-z0-9+/'-]+ ){0,3}?${COUNTED_OBJECT_NOUN}\\b` +
+    String.raw`(?: (?:you|they) controls?| (?:your opponents|an opponent) controls?| you own)?`,
+  'g',
+)
+
+/**
  * A class of spells YOU CAST — serial, not simultaneous. Removed before breadth.
  *
  * `MASS_QUANTIFIED` lists `spell` among the nouns a mass quantifier may take,
@@ -311,9 +355,17 @@ const MEASURED = new RegExp(
  * IT REQUIRES `you cast`, and that bound is the whole safety of it. Damping
  * Sphere's "each spell a player casts costs {1} more" and Trinisphere's "each
  * spell that would cost less than three mana" really do apply to everybody and
- * keep their unbounded reach.
+ * keep their unbounded reach, as does "counter all other spells".
+ *
+ * The intervening words are for the TYPE-QUALIFIED spelling. Herigast,
+ * Erupting Nullkite says "each CREATURE spell you cast has emerge" and Henzie
+ * "Toolbox" Torre says "each creature spell you cast with mana value 4 or
+ * greater has blitz"; without the gap both kept an unbounded reach off a class
+ * that arrives one spell at a time, and the new `triggered` reading multiplied
+ * it rather than replacing it.
  */
-const SERIAL_SPELL_CLASS = /\b(?:all|each|every) (?:other )?spells? you(?:'ve| have)? cast\b/g
+const SERIAL_SPELL_CLASS =
+  /\b(?:all|each|every) (?:other )?(?:[a-z]+ ){0,3}?spells? you(?:'ve| have)? cast\b/g
 
 const MASS_QUANTIFIED =
   /\b(all|each|every) (other |target )?(creature|permanent|player|opponent|land|artifact|enchantment|nonland|spell|card)/
@@ -488,7 +540,10 @@ const clauseImpact = (clause: string, oneShot: boolean): ClauseImpact => {
    * See `MEASURED` and `SERIAL_SPELL_CLASS`. Only the scope questions read
    * this; persistence still reads the line as written.
    */
-  const effect = clause.replace(MEASURED, ' ').replace(SERIAL_SPELL_CLASS, ' ')
+  const grantsToSpells = SPELL_GRANT.test(clause)
+  const effect = (grantsToSpells ? clause.replace(SPELL_GRANT_RIDER, ' ') : clause)
+    .replace(MEASURED, ' ')
+    .replace(SERIAL_SPELL_CLASS, ' ')
 
   const quantified = MASS_QUANTIFIED.test(effect)
   const plural = MASS_PLURAL.test(effect)
@@ -525,7 +580,7 @@ const clauseImpact = (clause: string, oneShot: boolean): ClauseImpact => {
   else if (UPKEEP.test(clause)) persistence = 'upkeep'
   // A static grant to a class of your future spells is a repeat that never
   // says `whenever`. See `SPELL_GRANT` — this is the Quandrix ruling.
-  else if (WHENEVER.test(clause) || SPELL_GRANT.test(clause)) persistence = 'triggered'
+  else if (WHENEVER.test(clause) || grantsToSpells) persistence = 'triggered'
   else if (ACTIVATED.test(clause)) persistence = 'activated'
   else persistence = 'one-shot'
 
@@ -611,6 +666,15 @@ export const cardImpact = (card: ImpactInput): CardImpact => {
   const fragile = SACRIFICE_SELF.test(text)
   const oneShot = INSTANT_OR_SORCERY.test(types) || fragile
 
+  /*
+   * DEFENSIVE, and said so rather than dressed up as tested. An empty clause
+   * scores `none` breadth x `one-shot` x `self` = 0.425, which is exactly the
+   * floor a real clause can reach, so it ties and never wins — a mutation
+   * removing this filter survives, and 525 cards have a blank line for it to
+   * survive on. It is kept because "the clauses of a card" should not include
+   * blanks whatever the arithmetic happens to say, and the emptiness guard
+   * below is what keeps `reduce` total.
+   */
   const clauses = text
     .split('\n')
     .map((line) => line.trim())

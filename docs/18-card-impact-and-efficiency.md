@@ -14,9 +14,14 @@ rule of thumb disagrees with the corpus the corpus wins — see §18.6, where "a
 2/2 for 2" turns out to be about 15% below what two mana actually buys.
 
 Two generated data files are **stale as shipped** and the commands to refresh
-them are in §18.13's last section. Neither was run here: they need a corpus
+them are in §18.13's last section — and again, with newer numbers, in
+**§18.15's**, which supersedes them. Neither was run here: they need a corpus
 database, and the honest record of what they will say is a measurement, not a
 guess.
+
+**§18.15 (ADR-0043) is the most recent pass** and changes how the tiers are
+chosen: clauses are scored, not cards, and the highest-scoring clause supplies
+all four tiers at once. Tier counts quoted in §18.3–§18.5 predate it.
 
 No ADR. Every contract change is a NEW OPTIONAL FIELD — `Deck.columns`,
 `Recommendation.impact`, `Recommendation.efficiency`, and two fields on the card
@@ -998,13 +1003,11 @@ baseline, and `baseline` does not read the role bands.
 
 ### What was found and deliberately NOT done
 
-- **One tier per card is the model's real limit, and it shows on hybrid cards.**
-  Diregraf Captain is a Zombie lord *and* a drain; it takes `unbounded` breadth
-  from the anthem clause and `player` stakes from the drain clause, and
-  multiplying one clause's reach by another clause's stakes gives 15.96 for a
-  three-mana lord. This is structural, it predates the audit, and fixing it
-  means scoring clauses rather than cards — a different model, not a tuning
-  change.
+- ~~**One tier per card is the model's real limit, and it shows on hybrid
+  cards.**~~ **Fixed in §18.15 (ADR-0043).** Diregraf Captain was a Zombie lord
+  *and* a drain, taking `unbounded` breadth from the anthem clause and `player`
+  stakes from the drain clause: 15.96 for a three-mana lord. Clauses are now
+  scored rather than cards, and it reports 6.0.
 - **`TARGET` does not match the plural `targets`.** Rolling Thunder's real
   oracle text is "divided as you choose among any number of targets" and it
   reads `none`, scoring 0.425. Cheap to fix and deliberately not fixed here: it
@@ -1086,3 +1089,138 @@ New optional prop and new exports only: `CardMetricsProps.explain`,
 changed, and `impact.ts` gained no exported type. AGENTS.md R2 is satisfied
 without an ADR; ADR-0025's rule that the filter and the cell read one number is
 untouched, because no rounding moved and `metricValue` still rounds nowhere.
+
+## 18.15 One clause wins, and it brings its whole tuple (ADR-0043)
+
+> "Quandrix the Proof gives spells cascade, shouldn't that mean that his reach is
+> every spell cast? Or he repeats every spell cast?"
+
+**The repeat.** Full reasoning and the rejected alternatives are in
+[ADR-0043](adr/0043-one-clause-wins-and-brings-its-whole-tuple.md); this section
+records what the model now does and what it measured.
+
+### The tuple travels together
+
+The rule, from the product owner: *"when it comes to choosing one tier per card,
+choose all the tiers from the highest impact effect."* Every ability line is
+scored as a complete `breadth × persistence × stakes × symmetry`, and the card
+reports **the winning line's tiers together** — never the maximum of each axis
+taken independently. That closes §18.13's "real limit" bullet.
+
+The unit is the newline-separated **ability line**, reusing ADR-0038's argument:
+every pattern in `impact.ts` is written `.` or `[^…\n]`, and JavaScript's `.`
+does not match a newline, so each rule is confined to one line by construction
+and a line scored alone gives the answer it gave in context. Splitting happens
+after reminder text is stripped. The type line is not a clause.
+
+`fragile` and the instant/sorcery pin stay **card-level**, with reasons: when the
+card sacrifices itself every one of its lines stops, and a type line is not an
+ability.
+
+### Quandrix: persistence, and the measurement that decided it
+
+`Teval, Arbiter of Virtue` carries both spellings at once — the static *"Spells
+you cast have delve"* and the triggered *"Whenever you cast a spell, you lose
+life equal to its mana value"* — and already scored `none / triggered / self`
+off the second clause, a drawback. Breadth and stakes already agreed between the
+two forms. **Persistence was the only axis that differed**, and only because the
+static spelling never says `whenever`.
+
+The inversion that proved it broken: `Yidris, Maelstrom Wielder` grants cascade
+only after combat damage connects, and only that turn — 0.808. Quandrix grants it
+unconditionally and forever — 0.425, the model's floor. 251 commander-legal
+permanents carry a grant of this shape; 28 more say "this turn" and are excluded,
+because a Saga chapter is not a permanent engine.
+
+### A serial class is never board-wide
+
+`each spell you cast` is not `counter all other spells`: the first arrives one
+spell at a time across the game, the second is a stack everything sits on
+together. Reading the first as reach gave `Threefold Signal` and `Goblin
+Anarchomancer` **7.2 with `opposing` stakes** — Cyclonic Rift's number, on cards
+that cannot touch an opponent. Five cards say it; the eleven genuine mass effects
+on the stack do not move.
+
+### Measured, corpus-wide
+
+**1,902 of 31,782 cards moved (6.0%): 1,728 down, 174 up.** Mean 2.5109 → 2.3821.
+
+| band | before | after |
+| --- | ---: | ---: |
+| 0 | 361 | 361 |
+| 0–1 | 15,953 | 16,103 |
+| 1–3 | 9,698 | 9,634 |
+| 3–6 | 257 | 199 |
+| 6–10 | 3,574 | 4,016 |
+| 10–15 | 1,153 | 822 |
+| 15+ | 786 | 647 |
+
+The top deflates, which is the point: the cards losing the most were assembling
+a tuple from clauses that never met.
+
+| card | before | after |
+| --- | ---: | ---: |
+| Diregraf Captain | 15.96 | **6.0** |
+| Quandrix, the Proof | 0.425 | **0.808** |
+| Flamekin Herald, Imoti, The First Sliver, Abaddon, Wildsear | 0.425 | **0.808** |
+| Threefold Signal, Goblin Anarchomancer, Seal of the Guildpact | 7.2 | **0.808** |
+| Ancient Cellarspawn | 15.96 | **2.66** |
+| Aetherflux Reservoir | 15.96 | **2.24** |
+
+### Regression anchors
+
+| card | before | after |
+| --- | ---: | ---: |
+| Wrath of God | 6.12 | **6.12** |
+| Craterhoof Behemoth | 6.0 | **6.0** |
+| Sol Ring | 0.68 | **0.68** |
+| a basic Forest | 0 | **0** |
+| Cyclonic Rift | 7.2 | **7.2** |
+| Swords to Plowshares | 1.2 | **1.2** |
+
+All six unmoved. Craterhoof is the natural test of the winning-clause rule — it
+carries both a counting shape and an effect shape, and its second line scores 6.0
+on its own.
+
+**`IMPACT_MAX` did not move.** No tier VALUE changed, only which tier a clause
+lands in, so it is still `6.0 × 2.2 × 1.4 = 18.48` and every rendered
+"N of 18.48" keeps its denominator. The mirror in
+`packages/ui/src/card/metrics.ts` needs no edit.
+
+### What has to be regenerated
+
+Neither generator was run as part of this change; both are the reader's to run
+against a corpus database.
+
+```
+pnpm --filter @roundtable/ingest baseline        # r: 0.4644 -> ~0.4934 (estimated)
+pnpm --filter @roundtable/ingest impact-roles    # the per-role quartiles
+```
+
+Mean impact fell at every mana value, so `statPointsPerImpactPoint` — fitted
+against exactly that mean — rises by about 6.7%. The estimate reuses the shipped
+gaps, which do not depend on impact, and recomputes only the mean; the generator
+is authoritative. `impact/by-role.data.json` is quartiles of `cardImpact().score`
+per role and moves for the same reason. Either order is safe.
+
+### What was found and deliberately NOT done
+
+- **A bare `for each <noun>` still creates reach.** `MEASURING_HEAD` admits
+  `for each card type` but not `for each creature you control`, so a clause that
+  only counts still reads as a mass effect. `Storm Entity`, a one-mana 1/1,
+  scores 7.2. Widening the head list was **measured and rejected here**: it moved
+  2,377 cards and introduced false negatives, because `for each opponent` is a
+  distributive effect on people rather than a measurement — `Smuggler's Share`
+  fell 18.48 → 0.935, the Hallar regression on a different noun. Its own pass.
+  The narrow overlap where the new `triggered` reading would have *multiplied*
+  that false reach is fixed; six cards carried both shapes.
+- **A zone clause is not a board, and now says so out loud.** 173 of the 174
+  rises are per-clause scoring removing a mask: a clause saying "all X cards"
+  with no "you control" in it falls to `opposing`, where it used to borrow `own`
+  from a different clause. `Kaheera, the Orphanguard`'s companion condition and
+  `Summon: Titan`'s graveyard return read this way. The old answer was right by
+  accident. §18.13 already lists the zone axis as the right fix.
+- **Two abilities can share one line.** `Saheeli, Filigree Master`'s emblem grants
+  an anthem and a spell discount in a single quoted line, so the newline unit
+  cannot separate them — the one rise this pass genuinely causes, 9.6 → 11.4.
+  Inherited from ADR-0038's unit, not introduced here.
