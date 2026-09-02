@@ -32,7 +32,7 @@
       "n": 553,
       "q1": 6,
       "median": 6,
-      "q3": 11.4,
+      "q3": 9.6,
       "noCountableEffect": 0
     },
     "aura": {
@@ -67,8 +67,8 @@
       "n": 3738,
       "q1": 0.68,
       "median": 0.935,
-      "q3": 1.9,
-      "noCountableEffect": 2061
+      "q3": 1.6,
+      "noCountableEffect": 2068
     },
     "equipment": {
       "n": 619,
@@ -82,20 +82,20 @@
       "q1": 0.425,
       "median": 0.808,
       "q3": 1.92,
-      "noCountableEffect": 4331
+      "noCountableEffect": 4341
     },
     "graveyard-hate": {
       "n": 112,
-      "q1": 0.935,
+      "q1": 0.85,
       "median": 1.4,
-      "q3": 2.66,
+      "q3": 2.345,
       "noCountableEffect": 12
     },
     "land": {
       "n": 1194,
       "q1": 0.68,
       "median": 0.68,
-      "q3": 0.95,
+      "q3": 0.935,
       "noCountableEffect": 900
     },
     "protection": {
@@ -103,7 +103,7 @@
       "q1": 0.425,
       "median": 0.95,
       "q3": 2.28,
-      "noCountableEffect": 617
+      "noCountableEffect": 618
     },
     "ramp": {
       "n": 1508,
@@ -116,8 +116,8 @@
       "n": 939,
       "q1": 0.85,
       "median": 1.2,
-      "q3": 2.28,
-      "noCountableEffect": 258
+      "q3": 2.24,
+      "noCountableEffect": 260
     },
     "sac-outlet": {
       "n": 294,
@@ -130,29 +130,29 @@
       "n": 2703,
       "q1": 1.2,
       "median": 1.2,
-      "q3": 2.24,
-      "noCountableEffect": 0
+      "q3": 1.92,
+      "noCountableEffect": 1
     },
     "stax": {
       "n": 93,
       "q1": 0.425,
       "median": 0.6,
-      "q3": 1.92,
-      "noCountableEffect": 53
+      "q3": 1.4,
+      "noCountableEffect": 54
     },
     "synergy": {
       "n": 11629,
       "q1": 0.5,
       "median": 1,
-      "q3": 2.24,
-      "noCountableEffect": 5634
+      "q3": 1.92,
+      "noCountableEffect": 5644
     },
     "token-maker": {
       "n": 2799,
       "q1": 0.5,
       "median": 0.935,
-      "q3": 2.2,
-      "noCountableEffect": 1680
+      "q3": 1.92,
+      "noCountableEffect": 1683
     },
     "tutor": {
       "n": 211,
@@ -165,7 +165,7 @@
       "n": 116,
       "q1": 0.7,
       "median": 0.935,
-      "q3": 1.454,
+      "q3": 1.4,
       "noCountableEffect": 82
     }
   }
