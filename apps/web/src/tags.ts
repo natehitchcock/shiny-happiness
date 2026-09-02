@@ -42,6 +42,10 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   // `normaliseTag`.
   'player-damage': 'damage to opponents',
   damage: 'dealing damage',
+  // ADR-0047. Written to sit beside `landfall`'s "lands entering" rather than
+  // as "manland", which is what a player calls the DECK — and an archetype does
+  // not slot after "causes", the same ruling `burn` got just above.
+  'land-creature': 'lands becoming creatures',
 }
 
 /**
