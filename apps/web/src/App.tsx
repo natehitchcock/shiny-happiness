@@ -772,13 +772,44 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
           : `enables ${yours}`
     }
     case 'mana-fixing': {
-      // The whole point of the reason: for a land, "fills a gap" is true of
-      // every land, and what it taps for is the thing that tells them apart.
+      /*
+       * The whole point of the reason: for a land, "fills a gap" is true of
+       * every land, and what it taps for is the thing that tells them apart.
+       *
+       * `reach` is what makes the sentence TRUE (pillar P4). "Taps for 5 of
+       * your 5 colours" was rendered on every cost-gated land in the format and
+       * is false on all of them — Baldur's Gate taps for {C} and wants {2} and
+       * a board of Gates, The Grey Havens reads its colours off legendary
+       * creatures in your GRAVEYARD, Gemstone Caverns needs a luck counter,
+       * Mirrex works only on the turn it entered, and a fetchland taps for
+       * nothing whatsoever. Fixing the score and leaving this sentence would
+       * have left the product lying more quietly.
+       *
+       * Absent `reach` reads as `taps`, so a server from before it shipped
+       * renders exactly the sentence it rendered before (AGENTS.md R2).
+       */
       const n = r.coloursCovered ?? 0
       const of = r.of ?? 0
+      const reach = r.reach ?? 'taps'
       if (n === 0) return 'taps for colourless'
-      if (of <= 1) return 'taps for your colour'
-      return `taps for ${String(n)} of your ${String(of)} colours`
+      const colours = of <= 1 ? 'your colour' : `${String(n)} of your ${String(of)} colours`
+      switch (reach) {
+        // It makes no mana at all. Naming the search is the only true claim,
+        // and the deck already has something to find or this reason is absent.
+        case 'fetches':
+          return `fetches a land for ${colours}`
+        // The colours are there and the mana is earmarked. Which spells is on
+        // the card; that it is limited at all is what changes the decision.
+        case 'restricted':
+          return `${colours}, but that mana is restricted`
+        // Extra mana, a sacrificed permanent, or a board state the deck may not
+        // have. One phrase for all three, because the sentence has to be true
+        // of every card it appears on and only "not by tapping" is.
+        case 'gated':
+          return `${colours}, but not just by tapping`
+        default:
+          return `taps for ${colours}`
+      }
     }
     case 'corpus-inclusion':
       return 'played in similar decks'

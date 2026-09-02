@@ -546,6 +546,35 @@ const TYPE_COLOUR: Readonly<Record<BasicLandType, Color>> = {
 }
 const BASIC_TYPES = Object.keys(TYPE_COLOUR) as readonly BasicLandType[]
 
+/**
+ * What a deck already holds for a fetch to find.
+ *
+ * Here rather than in the API route because it is the other half of the fetch
+ * rule and the two have to agree: a route that computed "has basics" by a
+ * different reading than the one `fetchIn` searches with would recommend a
+ * fetch for a land it cannot get. Pure, so `apps/web` can compute the same
+ * answer from the same cards (doc 09 §9.4, R1).
+ *
+ * Reads the TYPE LINE, not `producedMana`: "Basic Land — Island" and "Land —
+ * Island Swamp" both make a Flooded Strand live, and only the first makes an
+ * Evolving Wilds live. Deck-relative types come from the deck's own cards, so a
+ * commander is not counted — it is not in the library to be searched up.
+ */
+export const deckLandsFrom = (cards: Iterable<Card>): DeckLands => {
+  const types = new Set<BasicLandType>()
+  let hasBasic = false
+  for (const card of cards) {
+    if (!card.types.includes('land')) continue
+    const basic = /\bBasic\b/.test(card.typeLine)
+    for (const type of BASIC_TYPES) {
+      if (!new RegExp(`\\b${type}\\b`).test(card.typeLine)) continue
+      types.add(type)
+      if (basic) hasBasic = true
+    }
+  }
+  return { types, hasBasic }
+}
+
 const SEARCHES_FOR_A_LAND =
   /search your library for .{0,80}?land .{0,60}?onto the battlefield|search your library for (?:a|an|up to)[^.]{0,80}\b(?:Plains|Island|Swamp|Mountain|Forest)\b[^.]{0,80}onto the battlefield/i
 
@@ -682,6 +711,32 @@ export const fixingFor = (card: Card, identity: readonly Color[], deck?: DeckLan
   const availability =
     (tapped || fetched?.tapped === true ? TAPPED_PENALTY : 1) * (cast ? MUST_BE_CAST_PENALTY : 1)
 
+  /*
+   * A fetch returns early, because it is the one case where `producesMana` has
+   * to say NO and the value has to say yes.
+   *
+   * The field means what it says — Flooded Strand makes no mana — and the
+   * caller reads `reach` rather than that flag to decide whether the fixing
+   * term had anything to say. Reporting `producesMana: true` to get the reason
+   * emitted would have been a second small lie told to fix the first one.
+   *
+   * The colours it reaches are already intersected with what the deck holds, so
+   * `wanted.size === 0` cannot get here with anything to report.
+   */
+  if (fetched !== null) {
+    const openness = fetched.converts ? CONVERSION : 1
+    return {
+      coloursCovered: fetched.colours.size,
+      producesMana: false,
+      entersTapped: tapped,
+      restricted: false,
+      mustBeCast: cast,
+      reach: 'fetches',
+      value:
+        openness * Math.sqrt(fetched.colours.size / Math.max(1, wanted.size)) * availability,
+    }
+  }
+
   // A colourless deck wants colourless mana, so "covers none of my colours" is
   // not a criticism there — there are no colours to cover.
   if (wanted.size === 0) {
@@ -696,24 +751,19 @@ export const fixingFor = (card: Card, identity: readonly Color[], deck?: DeckLan
     }
   }
 
-  const slots: readonly Slot[] =
-    fetched !== null
-      ? [...fetched.colours].map(() => ({
-          openness: fetched.converts ? CONVERSION : 1,
-          reach: 'fetches' as const,
-        }))
-      : (() => {
-          const read = abilitySlots(card, wanted)
-          // The corpus and the text can disagree, and where they do the corpus
-          // wins on WHAT is produced while the text wins on what it costs. A
-          // basic land's mana ability is granted by its type and appears in its
-          // rules text only as reminder text, if at all; Dryad Arbor has no
-          // mana ability written on it whatsoever.
-          if (read.parsedAnyAbility) return read.slots
-          return [...new Set(produced)]
-            .filter((colour) => wanted.has(colour as Color))
-            .map(() => ({ openness: 1, reach: 'taps' as const }))
-        })()
+  const slots: readonly Slot[] = (() => {
+    const read = abilitySlots(card, wanted)
+    // The corpus and the text can disagree, and where they do the corpus wins
+    // on WHAT is produced while the text wins on what it costs. A basic land's
+    // mana ability is granted by its type and appears in its rules text only as
+    // reminder text, if at all; Dryad Arbor has no mana ability written on it
+    // whatsoever. Sixty-eight legal lands parse no `Add` line and every one of
+    // them is of that shape, so the fallback never overrides a cost it read.
+    if (read.parsedAnyAbility) return read.slots
+    return [...new Set(produced)]
+      .filter((colour) => wanted.has(colour as Color))
+      .map(() => ({ openness: 1, reach: 'taps' as const }))
+  })()
 
   /*
    * Diminishing returns, expressed as a share of the identity with the first

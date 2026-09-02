@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Card, CardType } from './card.js'
 import { oracleId, printingId } from './ids.js'
-import { fixingFor, isManaSource, NO_FIXING } from './fixing.js'
+import { deckLandsFrom, fixingFor, isManaSource, NO_FIXING } from './fixing.js'
 
 /**
  * The defect these tests exist for.
@@ -715,5 +715,56 @@ describe('a land that fetches one', () => {
     })
     expect(fixingFor(oneShot, five).reach).not.toBe('fetches')
     expect(fixingFor(oneShot, five).producesMana).toBe(true)
+  })
+})
+
+describe('what the deck already holds for a fetch to find', () => {
+  const five: Parameters<typeof fixingFor>[1] = ['W', 'U', 'B', 'R', 'G']
+
+  it('says a fetch makes no mana, because it does not', () => {
+    // `producesMana` keeps meaning what it says. The caller decides whether the
+    // fixing term spoke by reading `reach`, not by reading this flag — setting
+    // it true to get the reason emitted would be a second small lie told to fix
+    // the first one.
+    const strand = land({
+      name: 'Flooded Strand',
+      producedMana: [],
+      oracleText:
+        '{T}, Pay 1 life, Sacrifice this land: Search your library for a Plains or Island card, put it onto the battlefield, then shuffle.',
+    })
+    const fixing = fixingFor(strand, five, {
+      types: new Set(['Island'] as const),
+      hasBasic: true,
+    })
+    expect(fixing.producesMana).toBe(false)
+    expect(fixing.reach).toBe('fetches')
+    expect(fixing.value).toBeGreaterThan(0)
+  })
+
+  it('reads land types off the type line, basic and nonbasic alike', () => {
+    // Watery Grave is "Land — Island Swamp": it makes a Polluted Delta live and
+    // an Evolving Wilds dead, and only the type line can tell you that.
+    const swamp = land({ name: 'Swamp', typeLine: 'Basic Land — Swamp', producedMana: ['B'] })
+    const grave = land({
+      name: 'Watery Grave',
+      typeLine: 'Land — Island Swamp',
+      producedMana: ['U', 'B'],
+    })
+    const tower = land({ name: 'Command Tower', typeLine: 'Legendary Land' })
+    const bolt = land({
+      name: 'Lightning Bolt',
+      typeLine: 'Instant',
+      types: ['instant'] as readonly CardType[],
+    })
+
+    const both = deckLandsFrom([swamp, grave, tower, bolt])
+    expect([...both.types].sort()).toEqual(['Island', 'Swamp'])
+    expect(both.hasBasic).toBe(true)
+
+    const duals = deckLandsFrom([grave])
+    expect([...duals.types].sort()).toEqual(['Island', 'Swamp'])
+    expect(duals.hasBasic).toBe(false)
+
+    expect(deckLandsFrom([tower, bolt])).toEqual({ types: new Set(), hasBasic: false })
   })
 })

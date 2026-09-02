@@ -2,7 +2,7 @@ import { assertNever } from './assert-never.js'
 import type { BracketFlag } from './bracket.js'
 import type { Card, Color } from './card.js'
 import { annotateCombos, type ComboIndex } from './combo-index.js'
-import { fixingFor, isManaSource, NO_FIXING } from './fixing.js'
+import { fixingFor, isManaSource, NO_FIXING, type DeckLands } from './fixing.js'
 import { dimensionKey, type CompositionDimension, type CompositionTarget } from './composition.js'
 import type { CompositionCounts, Deficit } from './composition-analysis.js'
 import { findDeficits, shortfalls } from './composition-analysis.js'
@@ -125,6 +125,28 @@ export interface RecommendInput {
    * to what it was before this input existed.
    */
   readonly emphasis?: SemanticEmphasis
+  /**
+   * The basic land types the deck ALREADY holds, so a fetchland can be scored.
+   *
+   * A fetch makes no mana; it converts a land drop into a land of your choice,
+   * and it is a blank card in a deck holding nothing it can find. That is not
+   * hypothetical — Quickbuild put Evolving Wilds, Terramorphic Expanse and
+   * Myriad Landscape into a deck with zero basic lands, and nothing on screen
+   * said so.
+   *
+   * A NEW INPUT rather than something derived here, and it has to be: basics
+   * are excluded from the candidate pool in SQL (`findEligibleCards`), so
+   * `recommend` cannot see the deck's Islands however hard it looks. The caller
+   * that loaded the deck's own cards is the only one that can answer.
+   *
+   * ABSENT MEANS NOTHING FETCHABLE, which is the second input here that does
+   * not default to no-effect, for exactly the reason `gameChangerBudget` does
+   * not: the no-effect default would spend an allowance the caller never said
+   * the deck had. A caller that forgets gets fetches scored at zero, which is
+   * what they scored before this existed — forgetting is a no-op regression,
+   * never a new way to recommend a dead card. Build it with `deckLandsFrom`.
+   */
+  readonly deckLands?: DeckLands
 }
 
 export interface CandidateGroup {
@@ -580,12 +602,22 @@ export const recommend = (input: RecommendInput): RecommendResult => {
     // Said before the deficit, because for a land it is the more specific
     // claim: "taps for two of your colours" is why THIS land rather than the
     // 435 others that also fill the same gap.
-    const fixing = isManaSource(card) ? fixingFor(card, input.colorIdentity) : NO_FIXING
-    if (fixing.producesMana && isManaSource(card)) {
+    const fixing = isManaSource(card)
+      ? fixingFor(card, input.colorIdentity, input.deckLands)
+      : NO_FIXING
+    /*
+     * `reach !== 'none'` rather than `producesMana`, because a FETCHLAND makes
+     * no mana and is still the most interesting thing this term has to say
+     * about it. `producesMana` keeps meaning what it says; `reach` is the field
+     * that answers "did the fixing term find anything", and it is the field the
+     * sentence needs anyway.
+     */
+    if (fixing.reach !== 'none' && isManaSource(card)) {
       reasons.push({
         kind: 'mana-fixing',
         coloursCovered: fixing.coloursCovered,
         of: input.colorIdentity.length,
+        reach: fixing.reach,
       })
     }
     if (s.deficit !== null) {
@@ -903,3 +935,14 @@ const rationaleFor = (key: CandidateGroupKey): string => {
 }
 
 export const dimensionKeyOf = dimensionKey
+
+/*
+ * The fixing types a CALLER needs, re-exported from the one module that owns
+ * them. `fixing.js` is not in `index.ts` on purpose — it is scoring internals —
+ * but `deckLands` is now an input to `recommend`, so the shape of it and the
+ * function that builds it have to be reachable from `@roundtable/domain` or the
+ * API cannot fill the field it is being asked for. Re-exported here rather than
+ * widening `index.ts` to the whole module, so the internals stay internal.
+ */
+export { deckLandsFrom } from './fixing.js'
+export type { BasicLandType, DeckLands, FixingReach } from './fixing.js'
