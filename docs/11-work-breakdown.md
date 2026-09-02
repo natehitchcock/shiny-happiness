@@ -455,6 +455,20 @@ API-02 performance test seeds a 20,000-card corpus and takes ~40 s.
 | Test flake (residual) | The database suites now run in their own Vitest project one at a time, which removed most of the contention and the leaked databases it caused. Roughly one run in eight still ends `51 passed (52)` — a whole file SILENTLY SKIPPED, not failed, with the count varying by file between runs. The only skip path is `databaseUrl() === null`, i.e. `DATABASE_URL` not visible to that worker, and I could not reproduce it under a five-run loop. A suite that quietly does not run protects nothing, so this is worth root-causing before it hides a real regression. |
 | Bracket UI | The API answers `bracket.violations`, `bracket.gameChangers` and `bracket.rules`, and nothing renders them. Doc 03 §3.2 describes the warning chip and the "Bracket check" panel; the masthead still prints a bare `BRACKET 3`. |
 
+**Synergy tagging was audited against a clause-coverage probe, and combos lose
+about 4.5% of their number on the next ingest** —
+[ADR-0038](adr/0038-a-semantic-for-every-clause.md). Splitting every
+commander-legal card's oracle text into ability lines and asking which lines any
+rule fires on put a number on "each clause should have a semantic": 46.0% of
+60,216 clauses, now 47.9%, across eight new rules and no new tag. 1,714 tag
+assignments gained, none lost, and 5,018 untagged cards down to 4,568. Separately,
+the Spellbook adapter was dropping `requires[]` — the pieces Spellbook describes
+as a card CLASS rather than naming — so 4,813 stored combos were short at least
+one piece and 1,192 of those were **false two-card infinites feeding the bracket
+check**. Those variants are now skipped and reported instead, which is why the
+combo count falls on the next run. **Both stored columns are computed at ingest
+and neither ingest has been run**, so none of it has reached the app yet.
+
 **No third-party question is left open except Scryfall Q4** (image serving, which
 gates `ING-04` — and which [ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md)
 routes around rather than answers: referencing Scryfall's CDN needs no
