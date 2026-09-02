@@ -1051,6 +1051,27 @@ describe('a qualifier between "target" and its noun', () => {
     }
   })
 
+  it('bounds the qualifier run at three words', () => {
+    // The bound is measured, not guessed. Widening it to nine changes 51 cards,
+    // of which 37 are already claimed by a higher rung of the stakes ladder. Of
+    // the remaining 14 the wider run is WRONG on 10, because it walks past the
+    // real target and lands on a noun that is merely mentioned: "target Aura
+    // attached to a CREATURE" (5 cards), "target card in a graveyard other than
+    // a basic LAND" (Extirpate, Surgical Extraction).
+    //
+    // Harness the Storm is the cleanest of them. Its whole text is your own
+    // spell and your own graveyard; the `spell` a longer run would reach is the
+    // one being copied, not the thing being targeted.
+    const harness = card({
+      name: 'Harness the Storm',
+      manaCost: '{2}{R}',
+      typeLine: 'Enchantment',
+      oracleText:
+        'Whenever you cast an instant or sorcery spell from your hand, you may cast target card with the same name as that spell from your graveyard.',
+    })
+    expect(cardImpact(harness).stakes).not.toBe('opposing')
+  })
+
   it('does not read "the target of a spell" as a targeting clause', () => {
     // `of` is excluded from the qualifier run. "becomes the target of a spell"
     // is a trigger condition, not a thing being targeted, and 69 cards say it.
