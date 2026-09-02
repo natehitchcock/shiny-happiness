@@ -63,7 +63,7 @@ import {
   levelSpec,
   metricValue,
 } from '@roundtable/ui'
-import type { CardView, Color, ImpactRoleView } from '@roundtable/ui'
+import type { CardView, Color, ImpactRoleView, MetricExplainer } from '@roundtable/ui'
 import type {
   CardImpact,
   ColumnMetric,
@@ -2026,6 +2026,51 @@ const useSingleColumn = (): boolean => {
 }
 
 /**
+ * "How is this worked out?" beside Impact and beside Efficiency (report 5).
+ *
+ * THROUGH `Hint`, and through the SLOT rather than an import. The explanation
+ * is seven or eight lines; the pane is 21rem and a bottom sheet on a phone, so
+ * printing it would bury the three tier rows it exists to explain. `Hint` is
+ * the app's established answer to that — top layer, unclipped, and it opens on
+ * hover, on focus and on tap, which a `title` does not.
+ *
+ * `CardMetrics` decides where the trigger sits and what it says (`metrics.ts`);
+ * this decides how a disclosure is drawn in this app. That split is what lets
+ * `@roundtable/ui` stay free of an import from an app while still putting the
+ * copy next to the numbers it explains.
+ *
+ * R4 is satisfied by `Hint` itself, which is already a real `<button>` with a
+ * focus ring and an accessible name — nothing new to keyboard-enable here. The
+ * `?` is `aria-hidden` because the button's `label` is the accessible name; a
+ * screen reader announcing "question mark" as well is noise.
+ *
+ * NOT a replacement for the printed lines. The role comparison and the "effects
+ * only" note stay in the pane unasked, for the reason doc 18 §18.12 gives: a
+ * reader who thinks the app is wrong about Sol Ring has no reason to press
+ * anything. This is for the reader who has decided they want the method, and
+ * they go looking.
+ */
+const explainMetric: MetricExplainer = ({ label, lines }) => (
+  <Hint
+    label={label}
+    content={
+      <>
+        <strong>{label}</strong>
+        {lines.map((line) => (
+          <span className="hint-line" key={line}>
+            {line}
+          </span>
+        ))}
+      </>
+    }
+  >
+    <span className="help" aria-hidden="true">
+      ?
+    </span>
+  </Hint>
+)
+
+/**
  * The widest card the preview can draw without overflowing its column.
  *
  * `CardFace` sets width AND height inline to reserve the box before the art
@@ -2309,6 +2354,7 @@ const Preview = ({
         impact={detail?.impact}
         efficiency={detail?.efficiency}
         impactRole={impactRoleView(detail?.primaryRole, detail?.impact)}
+        explain={explainMetric}
       />
       <p className="note">
         {/* ADR-0009 Q7: a price is an estimate and the interface has to say so.

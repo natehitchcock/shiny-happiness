@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { CardMetrics } from './CardMetrics.js'
+import { CardMetrics, type MetricExplainer } from './CardMetrics.js'
 import { Detail } from './Detail.js'
 import { IMPACT_MAX, type EfficiencyView, type ImpactRoleView, type ImpactView } from './metrics.js'
 import type { CardView } from './types.js'
@@ -229,11 +229,13 @@ describe('CardMetrics — degenerate and absent', () => {
 })
 
 describe('CardMetrics — read-only', () => {
-  it('adds no controls, because there is nothing here to operate', () => {
+  it('adds no controls of its own, because there is nothing here to operate', () => {
     render(<CardMetrics impact={WRATH_IMPACT} efficiency={WRATH_EFFICIENCY} />)
-    // AGENTS.md R4 governs anything interactive. These are figures. A control
-    // added here later has to bring a keyboard equivalent and a focus ring with
-    // it, and this test is what asks the question.
+    // AGENTS.md R4 governs anything interactive. These are figures, and this
+    // file still contributes no control: the ONE disclosure the pane has is
+    // supplied by the app through `explain`, and R4 is satisfied inside `Hint`,
+    // which is already a button with a focus ring and a touch target. A control
+    // added HERE later has to bring those with it, and this test is what asks.
     expect(within(metrics()).queryAllByRole('button')).toHaveLength(0)
     expect(metrics().querySelectorAll('[tabindex], a, input, select')).toHaveLength(0)
   })
@@ -243,6 +245,62 @@ describe('CardMetrics — read-only', () => {
     // The meter restates the line above it, which is already text.
     expect(metrics().querySelector('.rt-metric-meter')?.getAttribute('aria-hidden')).toBe('true')
     expect(metrics().querySelector('[role="meter"]')).toBeNull()
+  })
+})
+
+/**
+ * HOW THE NUMBERS ARE WORKED OUT, on request (report 5).
+ *
+ * The slot, not the popover. `Hint` lives in `apps/web` and this package does
+ * not import from an app, so what is checked here is the contract: one
+ * explainer per metric, each carrying its own label and its own lines, and a
+ * pane that is byte-for-byte unchanged when no explainer is supplied.
+ */
+describe('CardMetrics — the explanation slot', () => {
+  /** Stands in for the app's `Hint`. Renders the label and the lines flat. */
+  const spy: MetricExplainer = ({ label, lines }) => (
+    <span data-testid="explainer">
+      <span>{label}</span>
+      {lines.map((line) => (
+        <span key={line}>{line}</span>
+      ))}
+    </span>
+  )
+
+  it('offers one explanation for impact and a different one for efficiency', () => {
+    render(<CardMetrics impact={WRATH_IMPACT} efficiency={WRATH_EFFICIENCY} explain={spy} />)
+    const shown = within(metrics()).getAllByTestId('explainer')
+    expect(shown).toHaveLength(2)
+    expect(shown[0]?.textContent).toContain('How impact is worked out')
+    expect(shown[1]?.textContent).toContain('How efficiency is worked out')
+    // Two metrics, two methods. One shared explanation would be wrong for both.
+    expect(shown[0]?.textContent).not.toBe(shown[1]?.textContent)
+  })
+
+  it('explains the tiers using the same three words the rows above use', () => {
+    render(<CardMetrics impact={WRATH_IMPACT} explain={spy} />)
+    const said = within(metrics()).getByTestId('explainer').textContent ?? ''
+    for (const label of ['Reach', 'Repeats', 'Falls on']) expect(said).toContain(label)
+  })
+
+  it('names the blind spot, which is the whole reason a reader opens it', () => {
+    // A builder opens this because Sol Ring reads 0.68 and they think the app
+    // is wrong. The answer is that only effects are read (doc 18 §18.2).
+    render(<CardMetrics impact={WRATH_IMPACT} explain={spy} />)
+    expect(within(metrics()).getByTestId('explainer').textContent).toContain('Effects only')
+  })
+
+  it('leaves the pane exactly as it was when no explainer is supplied', () => {
+    // The L3 `Detail` primitive has no popover to give, and must not sprout a
+    // dead trigger because of it.
+    render(<CardMetrics impact={WRATH_IMPACT} efficiency={WRATH_EFFICIENCY} />)
+    expect(within(metrics()).queryAllByTestId('explainer')).toHaveLength(0)
+    expect(within(metrics()).getByText('Impact')).toBeDefined()
+  })
+
+  it('draws no explainer for a metric that is not on the pane at all', () => {
+    render(<CardMetrics impact={WRATH_IMPACT} explain={spy} />)
+    expect(within(metrics()).getAllByTestId('explainer')).toHaveLength(1)
   })
 })
 

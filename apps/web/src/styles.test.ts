@@ -1071,6 +1071,37 @@ describe('the tour overlay', () => {
   })
 })
 
+describe('a hint panel is prose wherever its trigger lives', () => {
+  /*
+   * THE REGRESSION, found in a browser and not by any test. `text-transform`
+   * and `letter-spacing` inherit, and the top layer does not stop them — the
+   * panel is painted above everything but is still a DOM descendant of its
+   * trigger. The metric explainers (doc 18 §18.14) put a trigger inside
+   * `.rt-metric-label`, which is `text-transform: uppercase` with tracking, and
+   * seven lines of explanation rendered SHOUTING IN CAPS WITH GAPPED LETTERS.
+   *
+   * Pinned here rather than at the call site because the next hint anchored in
+   * a heading, a label or a badge would hit exactly the same thing.
+   */
+  const body = (selector: string): string => {
+    const at = css.indexOf(`\n${selector} {`)
+    expect(at).toBeGreaterThan(-1)
+    return css.slice(at, css.indexOf('}', at))
+  }
+
+  it('resets the two properties that inherit into it from a label', () => {
+    expect(body('.hint-pop')).toMatch(/text-transform:\s*none/)
+    expect(body('.hint-pop')).toMatch(/letter-spacing:\s*normal/)
+  })
+
+  it('is anchored in something that really does transform its text', () => {
+    // The control. If `.rt-metric-label` ever stops shouting, the reset above
+    // is still harmless but this test should be the thing that says so rather
+    // than leaving a rule nobody can explain.
+    expect(body('.rt-metric-label')).toMatch(/text-transform:\s*uppercase/)
+  })
+})
+
 describe('the stylesheet parses', () => {
   /*
    * A merge dropped one `}` from `.bracket-source a` and `pnpm build` failed

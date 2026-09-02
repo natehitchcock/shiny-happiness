@@ -7,10 +7,16 @@ where the build diverged from this design, in the form
 [doc 16](16-archetype-customiser.md) §16.9/§16.10 set.
 
 Everything numeric in this document was measured against the local corpus on
-2026-08-31 (34,492 oracle cards, 31,782 of them commander-legal). Nothing here
-is a remembered rule of thumb, and where a remembered rule of thumb disagrees
-with the corpus the corpus wins — see §18.6, where "a 2/2 for 2" turns out to be
-about 15% below what two mana actually buys.
+2026-08-31 (34,492 oracle cards, 31,782 of them commander-legal), and the tier
+counts were re-measured against the same corpus on 2026-09-01 after the audit in
+**§18.13**. Nothing here is a remembered rule of thumb, and where a remembered
+rule of thumb disagrees with the corpus the corpus wins — see §18.6, where "a
+2/2 for 2" turns out to be about 15% below what two mana actually buys.
+
+Two generated data files are **stale as shipped** and the commands to refresh
+them are in §18.13's last section. Neither was run here: they need a corpus
+database, and the honest record of what they will say is a measurement, not a
+guess.
 
 No ADR. Every contract change is a NEW OPTIONAL FIELD — `Deck.columns`,
 `Recommendation.impact`, `Recommendation.efficiency`, and two fields on the card
@@ -78,17 +84,30 @@ lands in exactly one tier, so the counts sum to the corpus.
 
 | tier | value | cards | what it is |
 | --- | ---: | ---: | --- |
-| `none` | 0.5 | 15,597 | has text, but names nothing to affect |
-| `one` | 1.0 | 10,033 | one target |
-| `few` | 2.2 | 184 | up to two targets |
+| `none` | 0.5 | 15,987 | has text, but names nothing to affect |
+| `one` | 1.0 | 10,019 | one target |
+| `few` | 2.2 | 187 | up to two targets |
 | `several` | 3.5 | 86 | up to three, four or five targets |
-| `variable` | 3.5 | 97 | `X target(s)` — unknowable at rank time |
-| `unbounded` | 6.0 | 5,785 | all / each, or a plural you control |
+| `variable` | 3.5 | 99 | `X target(s)` — unknowable at rank time |
+| `unbounded` | 6.0 | 5,404 | all / each, or a plural you control |
+
+Re-measured 2026-09-01 over the same 31,782 cards, after §18.13's pass. The
+tier VALUES are unchanged; what moved is which cards land in which tier, and it
+moved in one direction — 381 cards left `unbounded` for a narrower reading of
+what their text actually touches.
 
 A card with **no rules text at all** is not in the table: its impact is exactly
 0, not `none × persistence × stakes`. That is not a rounding convenience, it is
 what makes §18.6 work — the vanilla creatures are the measuring stick, and a
 measuring stick with a nonzero reading at zero cannot calibrate anything.
+
+**Reminder text is not rules text**, and 361 cards score 0 rather than 339.
+A basic Forest's whole printed text is `({T}: Add {G}.)`, a parenthetical
+restating what the type line already grants. §18.10 item 6 established that
+reminder text is stripped before anything is matched; the emptiness test was
+asked before the strip rather than after, so every basic, every original dual,
+Icehide Golem and Dryad Arbor took the `none` floor of 0.425 instead. See
+§18.13.
 
 ### Why the curve is superlinear, and why 6.0
 
@@ -158,16 +177,26 @@ class of error this model would otherwise make.
 
 | tier | value | cards |
 | --- | ---: | ---: |
-| `player` | 1.4 | 4,389 |
-| `opposing` | 1.2 | 8,534 |
-| `own` | 1.0 | 4,495 |
-| `self` | 0.85 | 14,364 |
+| `player` | 1.4 | 4,148 |
+| `opposing` | 1.2 | 7,432 |
+| `own` | 1.0 | 5,343 |
+| `self` | 0.85 | 14,859 |
+
+Re-measured 2026-09-01. 1,102 cards left `opposing` — nearly all of them cards
+whose effect is pointed at the caster's own board and was read as an attack on
+somebody else's. See §18.13.
 
 An **unrestricted** `target creature` is read as `opposing`, not as its own
 middle tier. The target is chosen by the caster and the caster chooses the
 opponent's; scoring an unrestricted removal spell *below* one that may only hit
 an opponent's creatures would say Swords to Plowshares is weaker than a
 strictly worse card.
+
+**Unrestricted is the operative word, and it was not being honoured.** The
+pattern matched the bare `target creature` inside `target creature you
+control`, and returned before the `you control` branch was reached — so 1,070
+cards were reported as hitting an opponent's board while blinking, untapping or
+pumping the caster's own creature (§18.13).
 
 `any target` is `player`, because it can go to the face. That is why Lightning
 Bolt (1.4) outscores Swords to Plowshares (1.2) — a genuine, if small,
@@ -177,9 +206,9 @@ it.
 
 ### Symmetry: recorded, and priced with a number already in the table
 
-`each opponent` (a one-sided mass effect, 4,954 cards including the
+`each opponent` (a one-sided mass effect, 4,469 cards including the
 `you control` pump effects and every wrath restricted to one player's board)
-and `all creatures` (a symmetric one, 831 cards)
+and `all creatures` (a symmetric one, 935 cards)
 are not the same card and must not score the same. The user's decision rules out
 resolving that against the deck's own board — so it is resolved against the
 caster instead, which needs no deck at all: **a symmetric mass effect also hits
@@ -196,7 +225,7 @@ quietly contains the answer.
 
 ### `scales`: a marker, not a number
 
-2,136 commander-legal cards have an impact that is a function of a resource
+2,137 commander-legal cards have an impact that is a function of a resource
 rather than a constant — `for each`, `{X}` in the cost, `X target`. Torment of
 Hailfire is the type case: its impact is not 8.4, it is 8.4 *times whatever X
 was*, and X is not knowable when the column is drawn.
@@ -311,6 +340,39 @@ check it rather than trust it.
 The generator imports `cardImpact` from the domain package rather than
 reimplementing the classifier — `r` is defined against *this* impact model, and
 two copies of it would drift the day either changed.
+
+### The coupling, stated: impact is an INPUT to efficiency
+
+This is the sharpest edge in the whole document and it is easy to miss. `r` is
+fitted against the **mean impact of all creatures at each mana value**, so any
+change to `cardImpact` changes `r`, and `impact.score` is a term in every
+efficiency score besides. A pass over the impact model therefore moves every
+efficiency number in the product twice: once because the card's impact changed,
+and again because the rate it is converted at did.
+
+The two halves of `baseline.data.json` are affected very differently, and the
+difference is worth knowing before anyone panics:
+
+| what | depends on impact? | after §18.13 |
+| --- | --- | --- |
+| `vanillaStatlineByManaValue` | **no** — power, toughness, oracle text only | byte-identical |
+| `vanillaStatlineFit` | **no** | byte-identical: slope 1.6993, intercept 0.5414, n 319 |
+| `exchangeRateByManaValue.gap` | **no** | identical |
+| `exchangeRateByManaValue.meanImpact` | **yes** | falls 1.5–4.9% at every mana value |
+| `statPointsPerImpactPoint` (`r`) | **yes** | **0.4484 → 0.4644**, +3.6% |
+
+The measured baseline — the thing §18.6 is mostly about, and the thing that
+contradicts the folk rule — does not move at all, because impact is not one of
+its inputs. Only `r` does, and it moves *up*: the same measured gap is now
+divided by a smaller mean impact, because the reach false positives that were
+inflating mean impact are gone. Cards get slightly more credit per impact point
+than before, which is the arithmetic working, not a thumb on the scale.
+
+`r` in the shipped `baseline.data.json` is therefore **stale by 3.6%** until the
+generator is re-run. It is stale in a benign direction — every efficiency score
+is uniformly a little low, so the ordering between cards is essentially
+untouched — but it is stale, and the file says `generatedAt` so a reader can
+tell.
 
 ## 18.7 Columns become deck state
 
@@ -574,12 +636,16 @@ corpus (31,782 commander-legal cards, 2026-08-31):
 | Sol Ring | 0.68 | `ramp` | the **median** ramp card |
 | Arcane Signet | 0.68 | `ramp` | the median ramp card |
 | Command Tower | 0.68 | `land` | the median land |
-| Forest | 0.425 | `land` | bottom quarter of lands |
+| Forest | 0 | `land` | no rules text at all — see §18.3 |
 | Cultivate | 0.425 | `ramp` | bottom quarter of ramp |
 | Swords to Plowshares | 1.2 | `spot-removal` | the median removal spell |
 | Wrath of God | 6.12 | `board-wipe` | the **bottom of the middle half** |
 | Craterhoof Behemoth | 6.0 | `evasion` | top quarter |
 | Cyclonic Rift | 7.2 | `synergy` | top quarter |
+
+Forest was 0.425 here and is now 0 (§18.3). It is the one row in this table
+§18.13 moved, and it moved to the value this document already said a card with
+no rules text should have.
 
 Wrath of God and Craterhoof are the pair that make the point. Both are around 6,
 both are enormous cards, and one of them is an *ordinary* member of its role
@@ -614,6 +680,17 @@ spreadsheet's `PERCENTILE` mean.
 | `wincon` | 116 | 0.7 | 0.935 | 1.454 | 82 |
 
 The whole corpus, for comparison: q1 0.68, median 0.95, q3 2.24.
+
+> **These bands are the pre-§18.13 measurement and are stale.** They are the
+> contents of the shipped `impact/by-role.data.json`, which is generated and was
+> deliberately not regenerated in the same change as the model — see §18.13's
+> last section for the command and for what moves. The short version: the bands
+> move very little. `q1` is unchanged for **every one of the eighteen roles**;
+> the largest move anywhere is `board-wipe`'s median, 7.2 → 6.12, because the
+> wipes that were wrongly reported as sparing the caster now take the symmetry
+> discount. Whole corpus: q1 0.68 → 0.5, median 0.95 unchanged, q3 2.24 → 1.92.
+> Wrath of God is still exactly the `board-wipe` q1, so the worked example below
+> still reads true.
 
 **A board wipe's worst quartile is above a ramp card's best.** `board-wipe`'s q1
 is 6.12 and `ramp`'s q3 is 1.4 — the two roles do not overlap at all in the
@@ -735,3 +812,277 @@ New optional fields and new exports only, which is the line AGENTS.md R2 draws:
 `roleImpactBand` / `impactRolePlacement` / `roleImpactIsMostlyUnreadable` /
 `isRole` in `@roundtable/domain`. Nothing on the wire changed — the client looks
 the band up locally from `primaryRole`, which card detail has always sent.
+
+---
+
+## 18.13 The reach-and-stakes audit
+
+**Status: built, 2026-09-01.** Two cards were reported wrong by the product
+owner. Reading them turned up five rule classes rather than two bugs, and this
+section records what was measured, what changed, and what was deliberately left.
+
+### The two specimens
+
+> "reach for Agatha's Soul Cauldron is not everything at once, it's just
+> creatures you control and all graveyards"
+
+> "Nevinyrral's Disk does affect your side of the board, the 'Falls On' is wrong"
+
+| card | before | after |
+| --- | --- | --- |
+| Agatha's Soul Cauldron | 9.792 · unbounded / activated / **opposing** / **symmetric** | 9.6 · unbounded / activated / **own** / **one-sided** |
+| Nevinyrral's Disk | 11.52 · unbounded / activated / opposing / **one-sided** | 9.792 · unbounded / activated / opposing / **symmetric** |
+
+Both readings were wrong in the way the reports said, and neither was a
+one-card mistake.
+
+Agatha's is worth stating carefully, because the obvious fix is the wrong one.
+Its reach really is `unbounded` — "creatures you control" is a set that grows
+with the board, which is precisely the reading §18.10 item 3 introduced for
+Craterhoof Behemoth, and narrowing it would break every anthem and every lord.
+What was wrong was **whose** those creatures are. The tier is right; the two
+things that read off it were not.
+
+### The method: disagreement populations, not inspection
+
+"Do another pass over all impact scores" is unbounded work, so it was made
+finite. The whole 31,782-card commander-legal corpus was scored, and predicates
+were written for the shapes a wrong tier would take — a card scored `opposing`
+whose text only ever says "you control", an `unbounded` card whose mass phrase
+sits inside a counting clause, a card scoring the `none` floor whose text is
+entirely parenthetical. Counts before and after, against the same corpus
+snapshot:
+
+| population | before | after |
+| --- | ---: | ---: |
+| text is entirely reminder text, yet scores above zero | 22 | **0** |
+| `target … you control` scored `opposing` | 1,070 | 330 |
+| …and the text never names an opponent at all | 730 | **26** |
+| `unbounded` + `opposing` where the only scope named is yours | 935 | 364 |
+| a symmetric list-wipe reported as one-sided | 120 | 46 |
+| `unbounded` taken from a counting clause | 160 | 75 |
+
+The residues are largely the predicates being looser than the rules — they were
+written to over-catch on purpose — and are accounted for at the end of this
+section rather than assumed away.
+
+**Then the whole corpus was diffed, card by card, before against after.** That
+is not ceremony: it is the standing precedent from the trample-reminder-text
+rule that made Colossal Dreadmaw a burn payoff, where 176 false positives were
+caught only by diffing everything. It earned its keep twice here — see below.
+2,369 of 31,782 cards moved; 211 up, 2,158 down.
+
+### The five rule classes, and the counter-example each is bounded by
+
+1. **Reminder text is not rules text.** The emptiness check ran on the raw
+   string and the reminder strip ran after it, so a basic Forest — whose entire
+   printed text is `({T}: Add {G}.)` — missed the zero path and took the `none`
+   floor. 22 cards: every basic, every original dual, Icehide Golem, Dryad
+   Arbor. *Bounded by:* the cheap raw check is kept in front of it, so the 339
+   genuinely textless creatures still short-circuit without normalising.
+
+2. **`target X you control` is not an attack on an opponent.** The `opposing`
+   pattern matched the bare `target creature` inside `target creature you
+   control` and returned before the `you control` branch was consulted. A
+   bounded negative lookahead that stops at clause punctuation fixes it.
+   *Bounded by:* Swords to Plowshares. An unrestricted `target creature` is
+   still `opposing`, which is the decision §18.5 makes on purpose; only the
+   restricted phrasing is excluded, and a card that hits one of each still
+   matches on the unrestricted half.
+
+3. **A mass effect scoped entirely to your own side is `own`.** `breadth ===
+   'unbounded'` short-circuited to `opposing` before `you control` was reached,
+   and the `yoursOnly` escape hatch only fired when the plural carried *no*
+   quantifier — so Agatha's, which says "creatures you control" three times and
+   names an opponent nowhere, missed it on the word `all`. *Bounded by:* Wrath
+   of God. An unrestricted mass effect overrides the scope test rather than
+   losing to it, because a wrath may mention "you control" in a rider and still
+   destroy everything.
+
+4. **A wipe that names a LIST of types is still a wipe.** The symmetric signal
+   looked for `all creatures` only, so `Destroy all artifacts, creatures, and
+   enchantments` — where `all` is followed by `artifacts` — never matched, and
+   Nevinyrral's Disk, Jokulhaups, Akroma's Vengeance and 117 others were
+   reported one-sided. *Bounded twice:* by `all land cards from your graveyard`,
+   which is a **zone** and not a board — excluding `card`/`cards` is what keeps
+   every graveyard recursion spell out of the wrath population — and by
+   `destroy all artifacts, creatures, and enchantments you don't control`, where
+   the restriction sits after the *last* noun. That second one needs the list
+   consumed atomically; a greedy list simply backtracks to a shorter one, finds
+   a comma instead of a controller, and matches anyway.
+
+5. **A clause that COUNTS a group is not an effect on it.** Regal Bunnicorn's
+   whole text is *"power and toughness are each equal to the number of nonland
+   permanents you control"*. It affects nothing, and it scored 6.0 — the same
+   reach as Craterhoof Behemoth, off a two-mana creature. Zanam Djinn's *"the
+   most common color among all permanents"* is a condition on its own stats and
+   scored 7.2, above Wrath of God. 160 cards. *Bounded by:* Craterhoof, whose
+   text carries **both** shapes — "creatures you control gain trample … where X
+   is the number of creatures you control" — so stripping the count must leave
+   the effect standing; and by "divided as you choose among X targets", which is
+   a targeting clause wearing the same preposition. The rule is therefore a
+   short explicit list of measuring *heads*, never a bare `among`.
+
+### What the whole-corpus diff caught that no assertion did
+
+Two regressions, both invisible to every test that existed and to every test
+written for the classes above.
+
+**The measured span ate the effect after the count.** Running a measuring clause
+to the end of its clause also swallowed whatever followed, which on a damage
+card is the entire effect: Hallar, the Firefletcher's *"deals damage equal to
+the number of +1/+1 counters on it **to each opponent**"* lost its "each
+opponent" and fell 15.96 → 0.808. Armageddon Clock and Dáin of the Ancient Halls
+failed the same way. Fixed by stopping the span at the noun being counted.
+
+**A possessive board was read as the people who own it.** `opponents` meant
+"this reaches players", which is true of "each opponent loses 3 life" and false
+of "creatures your opponents control get -1/-1", where the possessive only names
+whose board. This defect **predates the audit** and was hidden by the broken
+scope test in class 3 — those cards used to be claimed as `own`, also wrong, and
+never reached it. With class 3 fixed they fell through to `player`, and Doomwake
+Giant went 11.4 → 15.96, Bolg to 18.48 — *the exact ceiling of the model* — for
+shrinking the opposing team by one. 48 cards. Both now have regression tests.
+
+### Regression anchors
+
+The four cards this document and the ADRs quote, before and after:
+
+| card | before | after |
+| --- | ---: | ---: |
+| Wrath of God | 6.12 | **6.12** |
+| Craterhoof Behemoth | 6.0 | **6.0** |
+| Sol Ring | 0.68 | **0.68** |
+| a basic Forest | 0.425 | **0** (intended — §18.3) |
+
+Also unmoved: Cyclonic Rift 7.2, Torment of Hailfire 8.4, Swords to Plowshares
+1.2, Lightning Bolt 1.4, Rhystic Study 0.808, Command Tower 0.68, Arcane Signet
+0.68, Cultivate 0.425, Grizzly Bears 0.
+
+**`IMPACT_MAX` did not move.** No tier VALUE was touched — every change is to
+which tier a card lands in — so it is still `6.0 × 2.2 × 1.4 = 18.48`, still
+derived from the three tables rather than written down, and every rendered
+"N of 18.48" is unchanged.
+
+### What has to be regenerated, and what does not
+
+Neither generator was run as part of this change; both are the reader's to run
+against a corpus database.
+
+```
+pnpm --filter @roundtable/ingest baseline        # r: 0.4484 -> 0.4644
+pnpm --filter @roundtable/ingest impact-roles    # the per-role quartiles
+```
+
+- **`efficiency/baseline.data.json` — yes, for `r` only.** §18.6's coupling
+  table has the detail: the measured per-mana-value baseline and the fitted line
+  are byte-identical because impact is not one of their inputs, and only
+  `statPointsPerImpactPoint` and the published `meanImpact` column move.
+- **`impact/by-role.data.json` — yes, and for two separate reasons.** How stale
+  the existing bands are, measured: `q1` is unchanged for every one of the
+  eighteen roles the shipped file holds; the largest single move is
+  `board-wipe`'s median, 7.2 → 6.12. `land` q3 0.99 → 0.95, `ramp` q3 1.4 →
+  1.36, `synergy` median 1.2 → 1.0. The blind-spot counts drift by a few cards
+  per role and no role crosses the "mostly unreadable" half-way line in either
+  direction, so no card's caveat changes.
+
+  The second reason arrived from a different task and is the more pressing one:
+  **ADR-0037 added `counterspell` and `bounce`**, and the shipped file has no
+  band for either. `roleImpactBand` returns `null` for a role the corpus never
+  measured and the pane simply omits the comparison line, so this degrades
+  correctly rather than breaking — but a counterspell currently gets no
+  placement at all, and that is exactly what §18.12 exists to give it.
+
+Regenerating both is safe in either order — `impact-roles` does not read the
+baseline, and `baseline` does not read the role bands.
+
+### What was found and deliberately NOT done
+
+- **One tier per card is the model's real limit, and it shows on hybrid cards.**
+  Diregraf Captain is a Zombie lord *and* a drain; it takes `unbounded` breadth
+  from the anthem clause and `player` stakes from the drain clause, and
+  multiplying one clause's reach by another clause's stakes gives 15.96 for a
+  three-mana lord. This is structural, it predates the audit, and fixing it
+  means scoring clauses rather than cards — a different model, not a tuning
+  change.
+- **`TARGET` does not match the plural `targets`.** Rolling Thunder's real
+  oracle text is "divided as you choose among any number of targets" and it
+  reads `none`, scoring 0.425. Cheap to fix and deliberately not fixed here: it
+  moves cards from `none` to `one`, the opposite direction from everything else
+  in this pass, and it deserves its own measurement.
+- **A count reached through a preposition still creates reach.** Bribe Taker's
+  "for each kind of counter **on** permanents you control" strips the head and
+  leaves the plural. 75 cards remain in that population. The measuring-head list
+  is explicit and extending it is additive.
+- **Cards in a zone are still `unbounded`.** "all creature cards in all
+  graveyards" reads as a mass effect, which is defensible — it is unbounded and
+  it grows — but it shares a tier with a board wipe. Left alone because the
+  right answer is a zone axis, not a regex.
+
+## 18.14 How the numbers are worked out, on request
+
+> "under the help text, you also need to explain the algorithm used to deduce
+> efficiency and impact"
+
+A `?` beside the **Impact** and **Efficiency** labels, opening the app's `Hint`
+popover. Seven lines for impact, seven for efficiency.
+
+**Behind a disclosure, and §18.12 argued the opposite** — so the difference has
+to be said rather than assumed. The two fail differently. A reader who is not
+told Sol Ring is the median ramp card concludes the app is wrong and *never
+asks*, so help they must request cannot reach them; that line is printed, and
+stays printed. A reader who wants to know how the number is derived knows they
+want it and goes looking. And the answer is seven lines, which in a 21rem column
+and a bottom sheet on a phone would bury the three tier rows it exists to
+explain. Nothing that was printed before is now hidden.
+
+**Not the formula.** `0.5 × 1.6 × 0.85 = 0.68` restates Sol Ring's number in a
+second notation and leaves the reader exactly as puzzled. What answers them is
+that only effects are read, that Sol Ring names nothing to affect, and that this
+is a stated limit rather than a verdict — so the copy explains the *method* and
+its blind spot, and the arithmetic appears only as its shape: three readings,
+multiplied. It uses the same three labels the tier rows above already use, in
+the pane's own register.
+
+**No constant is quoted.** The tier values live in `impact.ts` and `r` lives in
+a generated data file; copy repeating either goes stale the first time one moves
+with nothing to catch it, because a UI string is not covered by the model's
+tests. Every number a reader needs is already on screen. There is a test that
+fails if a constant appears in the copy.
+
+### A slot, not an import
+
+`Hint` lives in `apps/web` and `@roundtable/ui` does not import from an app, so
+`CardMetrics` takes an optional `explain` renderer and decides only *where* the
+trigger sits and *what* it says. That also satisfies AGENTS.md R4 once rather
+than twice: `Hint` is already a real `<button>` with a focus ring, an accessible
+name, a touch target and an escape key, and nothing interactive is added to
+`@roundtable/ui`. The L3 `Detail` primitive passes no renderer and draws exactly
+what it drew before.
+
+### Reach now says whose, when the model knows whose
+
+The other half of the Agatha's report, and it needs no new field — `symmetry`
+and `stakes` are already on the wire and already decide the "Falls on" row
+directly below.
+
+| card | before | after |
+| --- | --- | --- |
+| Wrath of God, Nevinyrral's Disk | everything at once | everything at once |
+| Agatha's Soul Cauldron, Craterhoof Behemoth | everything at once | **your whole side at once** |
+| Cyclonic Rift (overloaded) | everything at once | **an opponent's whole side at once** |
+
+A `symmetric` effect keeps the unqualified words because it genuinely is
+everything — that is what the 0.85 discount is charged for. `player` stakes keep
+them too, deliberately: `unbounded` + `player` is both "each opponent loses 3
+life" and "all permanents target player controls", the payload cannot tell those
+apart, and a phrase true of both beats a guess wrong for one.
+
+### No contract change
+
+New optional prop and new exports only: `CardMetricsProps.explain`,
+`MetricExplainer`, `impactAlgorithm`, `efficiencyAlgorithm`,
+`IMPACT_ALGORITHM_LABEL` and `EFFICIENCY_ALGORITHM_LABEL`. Nothing on the wire
+changed, and `impact.ts` gained no exported type. AGENTS.md R2 is satisfied
+without an ADR; ADR-0025's rule that the filter and the cell read one number is
+untouched, because no rounding moved and `metricValue` still rounds nowhere.
