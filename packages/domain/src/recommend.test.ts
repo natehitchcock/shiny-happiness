@@ -108,7 +108,7 @@ describe('eligibility (doc 05 §5.2)', () => {
         pool: [pooled('green', { card: card('green', { colorIdentity: ['G'] }) }), pooled('red')],
       }),
     )
-    expect(idsIn(result, 'staple')).toEqual([oracleId('red')])
+    expect(idsIn(result, 'other')).toEqual([oracleId('red')])
   })
 
   it('excludes banned and non-legal cards', () => {
@@ -120,7 +120,7 @@ describe('eligibility (doc 05 §5.2)', () => {
         ],
       }),
     )
-    expect(idsIn(result, 'staple')).toEqual([oracleId('ok')])
+    expect(idsIn(result, 'other')).toEqual([oracleId('ok')])
   })
 
   it('excludes cards already accepted', () => {
@@ -130,7 +130,7 @@ describe('eligibility (doc 05 §5.2)', () => {
         accepted: new Set([oracleId('Krenko'), oracleId('have')]),
       }),
     )
-    expect(idsIn(result, 'staple')).toEqual([oracleId('want')])
+    expect(idsIn(result, 'other')).toEqual([oracleId('want')])
   })
 
   it('never re-suggests an excluded card (pillar P6)', () => {
@@ -140,7 +140,7 @@ describe('eligibility (doc 05 §5.2)', () => {
         excluded: new Set([oracleId('rejected')]),
       }),
     )
-    expect(idsIn(result, 'staple')).toEqual([oracleId('fine')])
+    expect(idsIn(result, 'other')).toEqual([oracleId('fine')])
   })
 
   it('excludes basic lands entirely', () => {
@@ -390,7 +390,7 @@ describe('determinism and ordering', () => {
   })
 
   it('breaks ties by the Scryfall edhrecRank, then by name', () => {
-    const ids = idsIn(recommend(input), 'staple')
+    const ids = idsIn(recommend(input), 'other')
     expect(ids).toEqual([oracleId('c'), oracleId('a'), oracleId('b')])
   })
 })
@@ -562,7 +562,7 @@ describe('scoring weights', () => {
     const clean = recommend(
       baseInput({ pool: [pooled('clean'), pooled('flagged', { bracketFlags: ['game-changer'] })] }),
     )
-    const ids = idsIn(clean, 'staple')
+    const ids = idsIn(clean, 'other')
     expect(ids).toHaveLength(2)
     expect(ids[0]).toBe(oracleId('clean')) // ranked lower, still present
   })
@@ -576,7 +576,7 @@ describe('limitPerGroup', () => {
         limitPerGroup: 5,
       }),
     )
-    const group = result.groups.find((g) => g.key === 'staple')!
+    const group = result.groups.find((g) => g.key === 'other')!
     expect(group.items).toHaveLength(5)
     expect(group.total).toBe(20)
   })
@@ -854,8 +854,8 @@ describe('the focus guarantee', () => {
       }),
     )
 
-  const staple = (r: ReturnType<typeof recommend>) => r.groups.find((g) => g.key === 'staple')!
-  const ids = (r: ReturnType<typeof recommend>) => staple(r).items.map((i) => i.oracleId)
+  const rest = (r: ReturnType<typeof recommend>) => r.groups.find((g) => g.key === 'other')!
+  const ids = (r: ReturnType<typeof recommend>) => rest(r).items.map((i) => i.oracleId)
 
   it('cuts the supporters off the list when nothing is emphasised', () => {
     // The defect, pinned. Without this the rest of the block proves nothing: if
@@ -891,8 +891,8 @@ describe('the focus guarantee', () => {
   })
 
   it('leaves the reported total alone — the guarantee shows more, it counts nothing new', () => {
-    expect(staple(overflowing({ emphasis: ['untap'] })).total).toBe(21)
-    expect(staple(overflowing()).total).toBe(21)
+    expect(rest(overflowing({ emphasis: ['untap'] })).total).toBe(21)
+    expect(rest(overflowing()).total).toBe(21)
   })
 
   it('changes nothing at all when no focus is set', () => {
@@ -980,7 +980,7 @@ describe('the focus guarantee', () => {
     })
     expect(ids(result)).toHaveLength(CUT)
     expect(ids(result)).not.toContain(oracleId('sup-a'))
-    expect(staple(result).withheldByFilter).toBe(3)
+    expect(rest(result).withheldByFilter).toBe(3)
   })
 
   it('never puts a card in a group it does not already belong to (pillar P5)', () => {
@@ -995,7 +995,7 @@ describe('the focus guarantee', () => {
   })
 
   it('says the card is on the page because of the focus (pillar P4)', () => {
-    const item = staple(overflowing({ emphasis: ['untap'] })).items.find(
+    const item = rest(overflowing({ emphasis: ['untap'] })).items.find(
       (i) => i.oracleId === oracleId('sup-a'),
     )!
     expect(item.reasons).toContainEqual({
@@ -1019,12 +1019,192 @@ describe('the focus guarantee', () => {
         ],
       }),
     )
-    const item = staple(result).items.find((i) => i.oracleId === oracleId('top-a'))!
+    const item = rest(result).items.find((i) => i.oracleId === oracleId('top-a'))!
     expect(item.reasons.find((r) => r.kind === 'keyword-synergy')).not.toHaveProperty('guaranteed')
   })
 
   it('emits no duplicate rows', () => {
     const focused = ids(overflowing({ emphasis: ['untap'] }))
     expect(new Set(focused).size).toBe(focused.length)
+  })
+})
+
+/**
+ * The curated staples groups (ADR-0044).
+ *
+ * The user asked for `staples → staple lands → combos → everything else`.
+ * These pin the four parts of that sentence and the four ways it can go wrong:
+ * the phase leading, the split being real, the combo groups keeping their rows,
+ * and the catch-all no longer wearing the name "Staples".
+ */
+describe('staples lead, then staple lands, then combos, then the rest', () => {
+  // Real names out of the curated file, so a rename in the data breaks this too.
+  const solRing = () =>
+    pooled('Sol Ring', {
+      card: card('Sol Ring', { colorIdentity: [], types: ['artifact'], typeLine: 'Artifact' }),
+      roles: ['ramp'],
+    })
+  const commandTower = () =>
+    pooled('Command Tower', {
+      card: card('Command Tower', { colorIdentity: [], types: ['land'], typeLine: 'Land' }),
+      roles: ['land'],
+    })
+
+  it('puts a curated staple in `staple` and a curated staple land in `staple-land`', () => {
+    const result = recommend(baseInput({ pool: [solRing(), commandTower(), pooled('plain')] }))
+    expect(idsIn(result, 'staple')).toEqual([oracleId('Sol Ring')])
+    expect(idsIn(result, 'staple-land')).toEqual([oracleId('Command Tower')])
+  })
+
+  it('emits them in the order the user asked for', () => {
+    const result = recommend(baseInput({ pool: [solRing(), commandTower(), pooled('plain')] }))
+    expect(groupKeys(result)).toEqual(['staple', 'staple-land', 'other'])
+  })
+
+  it('puts the staples groups above the combo groups', () => {
+    const result = recommend(
+      baseInput({
+        pool: [solRing(), commandTower(), pooled('piece')],
+        comboIndex: buildComboIndex([combo('c1', ['Krenko', 'piece'])]),
+      }),
+    )
+    expect(groupKeys(result).slice(0, 3)).toEqual(['staple', 'staple-land', 'combo-1'])
+  })
+
+  it('leaves a staple that finishes a combo in the combo group, not the staples one', () => {
+    /*
+     * Membership is decided BELOW the combo groups even though the staples
+     * groups are emitted ABOVE them. "Adding this finishes a combo you already
+     * hold" is a claim about THIS deck; "every deck wants this" is true of the
+     * card everywhere. P4 asks the more specific true claim to be the one the
+     * card is filed under, and doc 05 calls the combo groups the headline
+     * feature — taking their best rows away to fill a new heading would be
+     * paying for the staples phase with the feature the product leads on.
+     */
+    const result = recommend(
+      baseInput({
+        pool: [solRing()],
+        comboIndex: buildComboIndex([combo('c1', ['Krenko', 'Sol Ring'])]),
+      }),
+    )
+    expect(idsIn(result, 'combo-1')).toEqual([oracleId('Sol Ring')])
+    expect(idsIn(result, 'staple')).toEqual([])
+  })
+
+  it('files a staple above its `fills-<role>` group, or the phase is empty on an empty deck', () => {
+    // An empty deck is short in every role, so every staple would land in a
+    // `fills-` group and the opening phase would never hold a single card. That
+    // is exactly the case the phase exists for.
+    const result = recommend(baseInput({ pool: [solRing()] }))
+    expect(idsIn(result, 'staple')).toEqual([oracleId('Sol Ring')])
+    expect(idsIn(result, 'fills-ramp')).toEqual([])
+  })
+
+  it('calls the catch-all what it is rather than calling it "Staples"', () => {
+    /*
+     * `stats` is null in production (ADR-0008), so the old `staple` group held
+     * every eligible card that had nothing else to say — the whole colour
+     * identity — under the heading "Staples" and the rationale "Widely played
+     * and legal in your colours". Neither half was true of it, and P4 says a
+     * reason has to be.
+     */
+    const result = recommend(baseInput({ pool: [pooled('plain')] }))
+    const rest = result.groups.find((g) => g.key === 'other')!
+    expect(rest.label).toBe('Everything else')
+    expect(rest.rationale).not.toContain('Widely played')
+    expect(idsIn(result, 'staple')).toEqual([])
+  })
+
+  it('never offers a staple outside the deck colour identity', () => {
+    const offColour = pooled('Counterspell', {
+      card: card('Counterspell', { colorIdentity: ['U'], types: ['instant'] }),
+    })
+    const result = recommend(baseInput({ pool: [offColour, solRing()] }))
+    expect(idsIn(result, 'staple')).toEqual([oracleId('Sol Ring')])
+    expect(result.groups.flatMap((g) => g.items.map((i) => i.oracleId))).not.toContain(
+      oracleId('Counterspell'),
+    )
+  })
+
+  it('never re-offers a rejected staple (pillar P6)', () => {
+    const result = recommend(
+      baseInput({ pool: [solRing(), commandTower()], excluded: new Set([oracleId('Sol Ring')]) }),
+    )
+    expect(idsIn(result, 'staple')).toEqual([])
+    expect(idsIn(result, 'staple-land')).toEqual([oracleId('Command Tower')])
+  })
+
+  it('drops a staple the deck already holds, so the phase can run out', () => {
+    const result = recommend(
+      baseInput({
+        pool: [solRing(), commandTower()],
+        accepted: new Set([oracleId('Krenko'), oracleId('Sol Ring')]),
+      }),
+    )
+    expect(idsIn(result, 'staple')).toEqual([])
+  })
+})
+
+describe('the staples phase honours the budget cap and the bracket', () => {
+  const dear = () =>
+    pooled('Sol Ring', {
+      card: card('Sol Ring', { colorIdentity: [], types: ['artifact'] }),
+      roles: ['ramp'],
+      priceUsd: 40,
+    })
+  const changer = () =>
+    pooled('Rhystic Study', {
+      card: card('Rhystic Study', { colorIdentity: [], types: ['enchantment'] }),
+      roles: ['draw'],
+      bracketFlags: ['game-changer'],
+    })
+
+  it('keeps a staple over the per-card budget out of the opening phase', () => {
+    /*
+     * Elsewhere the budget is a SCORE penalty, and that is right for a feed the
+     * builder is browsing. It is wrong for a phase whose whole proposition is
+     * "these are the picks you do not have to think about": a $40 card is a
+     * decision, and leading a $50 deck with one is the bug.
+     *
+     * It falls through rather than disappearing — still offered, still carrying
+     * its price and its penalty, just not presented as an obvious pick.
+     */
+    const result = recommend(baseInput({ pool: [dear()], maxBudgetUsd: 5 }))
+    expect(idsIn(result, 'staple')).toEqual([])
+    expect(idsIn(result, 'fills-ramp')).toEqual([oracleId('Sol Ring')])
+  })
+
+  it('keeps it in when the deck has no budget, and when the price is under the cap', () => {
+    expect(idsIn(recommend(baseInput({ pool: [dear()] })), 'staple')).toEqual([oracleId('Sol Ring')])
+    expect(idsIn(recommend(baseInput({ pool: [dear()], maxBudgetUsd: 50 })), 'staple')).toEqual([
+      oracleId('Sol Ring'),
+    ])
+  })
+
+  it('will not lead with a Game Changer when the bracket has no room left for one', () => {
+    const result = recommend(baseInput({ pool: [changer()], gameChangerBudget: 0 }))
+    expect(idsIn(result, 'staple')).toEqual([])
+    expect(idsIn(result, 'fills-draw')).toEqual([oracleId('Rhystic Study')])
+  })
+
+  it('leads with it when the bracket still allows one', () => {
+    const result = recommend(baseInput({ pool: [changer()], gameChangerBudget: 1 }))
+    expect(idsIn(result, 'staple')).toEqual([oracleId('Rhystic Study')])
+  })
+
+  it('leads with it at a bracket that allows unlimited Game Changers', () => {
+    const result = recommend(baseInput({ pool: [changer()], gameChangerBudget: 'unlimited' }))
+    expect(idsIn(result, 'staple')).toEqual([oracleId('Rhystic Study')])
+  })
+
+  it('spends no allowance a caller did not hand it', () => {
+    /*
+     * Absent means ZERO, not unlimited. Every other optional input here defaults
+     * to "no effect" (AGENTS.md R2), but the no-effect default for a bracket
+     * allowance would be to spend one the caller never said the deck had, and a
+     * staples phase that pushes a deck past its own bracket is the bug this
+     * check exists to prevent. Default-deny is the only safe direction.
+     */
+    expect(idsIn(recommend(baseInput({ pool: [changer()] })), 'staple')).toEqual([])
   })
 })

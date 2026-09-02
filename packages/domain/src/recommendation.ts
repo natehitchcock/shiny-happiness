@@ -9,8 +9,24 @@ import type { Role } from './role.js'
 /**
  * Candidate groups, in the fixed order of doc 05 §5.3. A card appears in exactly
  * one — the first it qualifies for — so counts sum to the pool size.
+ *
+ * `staple` AND `staple-land` ARE THE CURATED LIST (ADR-0044), not a threshold
+ * over a statistic. `staple` used to be the catch-all: with `stats: null` in
+ * production every eligible card with nothing else to say landed in it, under
+ * the heading "Staples", at the BOTTOM of the page. The catch-all is now called
+ * `other`, which is what it always was, and the name `staple` means what it
+ * says for the first time.
+ *
+ * That rename is the one contract change here. It is a rename rather than a
+ * third key because two groups both rendering as "Staples", one curated at the
+ * top and one holding the whole colour identity at the bottom, is worse for the
+ * builder than either arrangement alone. The API validates no group key
+ * (`schemas.ts` takes an array of plain strings), so a client asking for the
+ * old key gets an empty selection rather than an error — see doc 10.
  */
 export type CandidateGroupKey =
+  | 'staple'
+  | 'staple-land'
   | 'combo-3plus'
   | 'combo-2'
   | 'combo-1'
@@ -18,7 +34,7 @@ export type CandidateGroupKey =
   | `fills-${string}`
   | `top-${string}`
   | 'high-synergy'
-  | 'staple'
+  | 'other'
 
 /**
  * Why a card was suggested (pillar P4). Rendered verbatim at zoom L3.

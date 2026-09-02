@@ -35,6 +35,7 @@ import type { QueryNode } from './query/ast.js'
 import type { CandidateGroupKey, Reason, Recommendation } from './recommendation.js'
 import { primaryRole, type Role } from './role.js'
 import { DEFAULT_EMPHASIS_WEIGHT, type ScoringWeights } from './scoring.js'
+import { stapleGroupFor, type StapleGroup } from './staples.js'
 
 /**
  * Candidate generation (doc 05, DOM-05).
@@ -81,6 +82,33 @@ export interface RecommendInput {
   readonly stats: ReadonlyMap<OracleId, CardStats> | null
   readonly limitPerGroup?: number
   readonly maxBudgetUsd?: number | null
+  /**
+   * How many MORE Game Changers this deck can accept before it exceeds the
+   * bracket the builder chose (ADR-0044). `'unlimited'` at brackets 4 and 5.
+   *
+   * Read only by the curated staples groups, and only to keep a Game Changer
+   * out of them. Everywhere else bracket flags are SURFACED, never used to
+   * filter (doc 03 §3.2) — the builder picked the bracket and may knowingly
+   * cross their own line — and that is unchanged: a Game Changer excluded here
+   * still appears in whatever group it would otherwise have had, with its
+   * `bracket-warning` reason attached. The distinction is that the staples
+   * phase is the product asserting "you do not have to think about this one",
+   * and it must not assert that about a card that breaks the deck's own
+   * bracket.
+   *
+   * ABSENT MEANS ZERO, and this is the one optional input here that does not
+   * default to "no effect" (AGENTS.md R2). The no-effect default would be to
+   * spend an allowance the caller never said the deck had. Default-deny is the
+   * only direction in which forgetting to pass it is safe.
+   *
+   * It is a REMAINING count rather than the bracket, because `recommend` is
+   * pure and has no way to load the Game Changers list — that lives in the
+   * corpus (`bracket-rules.ts`), so the caller that already loaded it is the
+   * only one that can do this arithmetic. Several staples may qualify against
+   * a budget of one; that is deliberate, because the group is an offer and not
+   * a commitment, and the number is recomputed after every accept.
+   */
+  readonly gameChangerBudget?: number | 'unlimited'
   /** From the deck's archetype. Defaults to midrange when absent. */
   readonly curveTarget?: CurveTarget
   /**
@@ -142,7 +170,16 @@ export interface RecommendResult {
 
 const MECHANICAL_SYNERGY_THRESHOLD = 0.45
 const SYNERGY_THRESHOLD = 0.15
-const STAPLE_INCLUSION = 0.25
+/**
+ * The old `staple` threshold, now feeding the CATCH-ALL group.
+ *
+ * It used to name the group `staple`, and `staple` now means the curated list
+ * (`staples.ts`, ADR-0044). A statistic cannot add members to a curated list
+ * without the list stopping being curated, so the destination moved and the
+ * threshold did not: with statistics present the long tail below it is still
+ * dropped from the response entirely, exactly as before.
+ */
+const HIGH_INCLUSION = 0.25
 const TOP_BY_TYPE_LIMIT = 10
 
 /**
@@ -248,6 +285,53 @@ const dimensionLabel = (dimension: CompositionDimension): string =>
  * has to agree with the meters.
  */
 const countedRole = (pooled: PoolCard): Role => primaryRole(pooled.roles)
+
+/**
+ * Which staples group this card may LEAD with, if any (ADR-0044).
+ *
+ * The curated list decides membership (`staples.ts`); this decides whether the
+ * product is willing to put the card at the very top of the page and call it a
+ * pick the builder does not have to think about. Two things can withdraw that,
+ * and both are settings the builder made about their own deck:
+ *
+ * OVER THE PER-CARD BUDGET. Everywhere else the budget is a score PENALTY —
+ * `w.budget * budgetOverrun` — and that is right for a feed somebody is
+ * browsing, where an expensive card should sink rather than vanish. It is wrong
+ * for this phase specifically: leading a deck capped at $5 a card with a $40
+ * staple is not a suggestion, it is the app ignoring the number the builder
+ * typed. The card is not removed — it falls through to whichever group it would
+ * have had, keeps its price and keeps the penalty.
+ *
+ * A GAME CHANGER WITH NO BRACKET ROOM LEFT. Same shape, same fall-through.
+ * Bracket flags are surfaced and never used to filter (doc 03 §3.2), and they
+ * still are not: the card is offered, with its `bracket-warning` reason. What
+ * is withheld is the product's endorsement of it as an obvious pick, which is
+ * the one thing this phase means. See `gameChangerBudget`.
+ *
+ * REJECTED: applying either check to every group. That would be filtering on a
+ * bracket flag, which doc 03 forbids outright, and it would quietly hide cards
+ * the builder is entitled to consider and knowingly take.
+ *
+ * REJECTED: dropping the staple from the response when it fails either check.
+ * The user asked for staples first, not for staples only; a Sol Ring the deck
+ * cannot afford is still the best ramp in the pool and still belongs in
+ * `fills-ramp`.
+ */
+const offerableStaple = (pooled: PoolCard, input: RecommendInput): StapleGroup | null => {
+  const group = stapleGroupFor(pooled.card)
+  if (group === null) return null
+
+  const cap = input.maxBudgetUsd
+  if (cap !== null && cap !== undefined && pooled.priceUsd !== null && pooled.priceUsd > cap) {
+    return null
+  }
+
+  if (pooled.bracketFlags.includes('game-changer')) {
+    const room = input.gameChangerBudget ?? 0
+    if (room !== 'unlimited' && room <= 0) return null
+  }
+  return group
+}
 
 /**
  * The deck's target curve, from its archetype (ADR-0011).
@@ -398,10 +482,12 @@ export const recommend = (input: RecommendInput): RecommendResult => {
   for (const s of scratch) {
     const id = s.pooled.card.oracleId
     const primary = countedRole(s.pooled)
+    const staple = offerableStaple(s.pooled, input)
     if (s.degree >= 3) s.group = 'combo-3plus'
     else if (s.degree === 2) s.group = 'combo-2'
     else if (s.degree === 1) s.group = 'combo-1'
     else if (s.nearAt1 >= 2) s.group = 'near-combo'
+    else if (staple !== null) s.group = staple
     else if (s.deficit !== null) s.group = `fills-${primary}`
     else if (statsAvailable && topByType.get(s.pooled.card.types[0] ?? '')?.has(id) === true) {
       s.group = `top-${s.pooled.card.types[0] ?? 'card'}`
@@ -411,8 +497,8 @@ export const recommend = (input: RecommendInput): RecommendResult => {
     // Mechanical synergy refills it, and says WHY rather than just that.
     else if (s.synergy.length > 0 && synergyScore(s.synergy) >= MECHANICAL_SYNERGY_THRESHOLD)
       s.group = 'high-synergy'
-    else if (statsAvailable && (s.stats?.inclusion ?? 0) >= STAPLE_INCLUSION) s.group = 'staple'
-    else if (!statsAvailable) s.group = 'staple'
+    else if (statsAvailable && (s.stats?.inclusion ?? 0) >= HIGH_INCLUSION) s.group = 'other'
+    else if (!statsAvailable) s.group = 'other'
   }
 
   // ---- score and reasons ----
@@ -554,15 +640,33 @@ export const recommend = (input: RecommendInput): RecommendResult => {
     else bucket.push(s)
   }
 
+  /*
+   * The fixed group order (doc 05 §5.3), with the two curated staples groups
+   * added at the head (ADR-0044): staples, staple lands, combos, then the rest.
+   *
+   * EMISSION ORDER IS NOT MEMBERSHIP ORDER, and only for these two groups. The
+   * membership chain above still asks the combo questions first, so a staple
+   * that finishes a combo you already hold is filed under `combo-1` and appears
+   * in the combo section — the more specific claim, about THIS deck, wins the
+   * card (P4), and doc 05's headline feature keeps its best rows. These two
+   * groups lead the PAGE because that is what the builder asked to see first,
+   * and they hold the staples that had nothing more specific to say.
+   *
+   * Everything below is untouched, deliberately: P5 says grouping is the
+   * product's opinion, and nothing here moves a card between two groups that
+   * already existed.
+   */
   const order = (key: CandidateGroupKey): number => {
-    if (key === 'combo-3plus') return 0
-    if (key === 'combo-2') return 1
-    if (key === 'combo-1') return 2
-    if (key === 'near-combo') return 3
-    if (key.startsWith('fills-')) return 4
-    if (key.startsWith('top-')) return 5
-    if (key === 'high-synergy') return 6
-    return 7
+    if (key === 'staple') return 0
+    if (key === 'staple-land') return 1
+    if (key === 'combo-3plus') return 2
+    if (key === 'combo-2') return 3
+    if (key === 'combo-1') return 4
+    if (key === 'near-combo') return 5
+    if (key.startsWith('fills-')) return 6
+    if (key.startsWith('top-')) return 7
+    if (key === 'high-synergy') return 8
+    return 9
   }
 
   const groups: CandidateGroup[] = []
@@ -664,7 +768,10 @@ const toRecommendation = (s: Scratch, guaranteed: boolean): Recommendation => {
   }
   return {
     oracleId: s.pooled.card.oracleId,
-    group: s.group ?? 'staple',
+    // Unreachable — a scratch with no group is never emitted. `other` rather
+    // than `staple`, so a bug here cannot make a card claim to be on a curated
+    // list it is not on.
+    group: s.group ?? 'other',
     score: s.score,
     comboDegree: s.degree,
     nearCombosAt1: s.nearAt1,
@@ -701,6 +808,10 @@ const labelFor = (key: CandidateGroupKey, deficits: readonly Deficit[]): string 
       return 'High synergy'
     case 'staple':
       return 'Staples'
+    case 'staple-land':
+      return 'Staple lands'
+    case 'other':
+      return 'Everything else'
     default: {
       if (key.startsWith('fills-')) {
         const role = key.slice('fills-'.length)
@@ -713,7 +824,22 @@ const labelFor = (key: CandidateGroupKey, deficits: readonly Deficit[]): string 
   }
 }
 
+/**
+ * The one-line explanation under each heading (P4).
+ *
+ * The two staples lines SAY THEY ARE AN OPINION, in the heading, rather than
+ * leaving the builder to assume a number is behind them. There is no number:
+ * ADR-0008 forbids querying EDHREC and `stats` is null in production, so the
+ * inclusion term is zero for every card. A heading reading "widely played"
+ * over a hand-written list would be a measurement claim the product cannot
+ * support — which is exactly what the OLD `staple` group did, over a list that
+ * was in fact every eligible card in the deck's colours.
+ */
 const rationaleFor = (key: CandidateGroupKey): string => {
+  if (key === 'staple')
+    return 'Our curated list: cards essentially every Commander deck in your colours wants. An opinion, not a statistic — edit staples.data.json.'
+  if (key === 'staple-land')
+    return 'The same list, filtered to lands: fixing that works in any deck, whatever your colours.'
   if (key === 'combo-3plus')
     return 'Adding one of these finishes three or more combos using only cards already in your deck.'
   if (key === 'combo-2')
@@ -724,7 +850,11 @@ const rationaleFor = (key: CandidateGroupKey): string => {
   if (key.startsWith('fills-')) return 'Directly closes a gap against your composition targets.'
   if (key.startsWith('top-')) return 'Most played for this commander, by card type.'
   if (key === 'high-synergy') return 'Played far more in this commander than in decks generally.'
-  return 'Widely played and legal in your colours.'
+  // `other`, the catch-all. It used to say "Widely played and legal in your
+  // colours" under the heading "Staples", which with `stats: null` was every
+  // eligible card in the deck's identity — a claim about popularity made over a
+  // list that was not sorted by any (P4).
+  return 'Legal in your colours, with nothing more specific to say about your deck.'
 }
 
 export const dimensionKeyOf = dimensionKey
