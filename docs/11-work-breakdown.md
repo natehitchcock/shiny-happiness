@@ -297,16 +297,19 @@ pairs was *admitted* on the criterion that it reads true both ways, so direction
 is not information that table lost.
 
 The offer is ranked by `RecommendResult.tagSupport`, a new field carrying the
-`supporting` count for all 21 tags rather than the emphasised few — the offer is
+`supporting` count for every tag rather than the emphasised few — the offer is
 by definition unemphasised, so the existing report cannot reach it. A tag with
 zero support is still offered and says so; it just does not lead.
 
 **The expansion saturates, which is why "show all" is a real control and not a
-maybe.** The interaction graph is one connected component of all 21 tags, first
-offer is a median of 2 neighbours (mean 2.9), and two hops off `creature-death`
-already reaches 18 of 21. Measured in the browser on a mono-black Tergrid deck:
+maybe.** The interaction graph is one connected component of all 22 tags, first
+offer is a median and mean of 3 neighbours, and two hops off `creature-death`
+already reaches 18 of 22. Measured in the browser on a mono-black Tergrid deck:
 three picks along the hubs (`opponent-sacrifice` → `creature-death` → `token`)
-left 7 chips on offer and 6 in "show all". The full table is in the ADR.
+left 7 chips on offer and the rest of the vocabulary behind one button. The full
+table is in the ADR, and the script that produced it reads `interactsWith` out
+of the built package rather than a copied literal — the first version of that
+measurement was hand-copied and went stale the moment `land-creature` landed.
 
 **Every card now says how big it is and what it costs you.**
 [Doc 18](18-card-impact-and-efficiency.md) is built: two CARD-INTRINSIC metrics,

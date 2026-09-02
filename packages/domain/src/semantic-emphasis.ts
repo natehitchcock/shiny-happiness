@@ -238,9 +238,9 @@ export const relatedSemantics = (
  * hatch, and the only way to reach a tag no chosen focus is a neighbour of.
  *
  * The expansion cannot replace this, and measuring says so twice over. The
- * interaction graph is ONE connected component of all 21 tags, so a walk can in
- * principle reach anything — but the first offer is a median of 2 and a mean of
- * 2.9 neighbours, and reaching `landfall` from `player-damage` takes five hops
+ * interaction graph is ONE connected component of all 22 tags, so a walk can in
+ * principle reach anything — but the first offer is a median and mean of 3
+ * neighbours, and reaching `landfall` from `player-damage` takes five hops
  * through tags the builder never wanted. Someone who knows they want landfall
  * should not have to walk there, and someone who has emphasised nothing at all
  * gets no expansion by definition.

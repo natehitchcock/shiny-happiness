@@ -918,9 +918,9 @@ describe('the semantics offered next to a chosen focus', () => {
  * "Maybe even have a 'show all semantics' button."
  *
  * Not decoration, and the measurement is why. The interaction graph is one
- * connected component of all 21 tags, so a chain can in principle walk
- * anywhere — but the first offer is a median of 2 neighbours and a mean of 2.9,
- * and reaching `landfall` from `player-damage` takes five hops through tags the
+ * connected component of all 22 tags, so a chain can in principle walk
+ * anywhere — but the first offer is a median and mean of 3 neighbours, and
+ * reaching `landfall` from `player-damage` takes five hops through tags the
  * builder never wanted. It is also the only control that exists before a focus
  * does.
  */
@@ -939,7 +939,7 @@ describe('showing every semantic', () => {
     expect(within(focusPanel()).getByLabelText('Emphasise lands entering')).toBeDefined()
   })
 
-  it('is collapsed until asked for, so the panel is not a wall of 21 toggles', async () => {
+  it('is collapsed until asked for, so the panel is not a wall of every toggle', async () => {
     await mount()
     expect(within(focusPanel()).queryByLabelText('Emphasise lands entering')).toBeNull()
   })

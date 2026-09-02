@@ -247,7 +247,8 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
          * ordered by nothing, and would lead with whichever tag sorts first
          * even when the deck's colours contain no card that supports it.
          *
-         * 21 entries, computed in the pass that already produced `emphasis`.
+         * One entry per `SYNERGY_TAGS` member, computed in the pass that
+         * already produced `emphasis`.
          */
         tagSupport: result.tagSupport,
         query: {

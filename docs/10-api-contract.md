@@ -252,7 +252,7 @@ POST /api/v1/decks/:id/recommendations
     unavailable: Array<{ key: CandidateGroupKey, reason: string }>,
     // The deck's emphasis and how far it reaches. `[]` when there is none.
     emphasis: Array<{ tag: SynergyTag, supporting: number }>,
-    // The same count for EVERY tag, in SYNERGY_TAGS order. Always 21 entries.
+    // The same count for EVERY tag, in SYNERGY_TAGS order. One entry per tag.
     tagSupport: Array<{ tag: SynergyTag, supporting: number }>,
     query?: {
       matched: number,              // pool size after the filter

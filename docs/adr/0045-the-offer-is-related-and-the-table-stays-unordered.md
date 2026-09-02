@@ -53,18 +53,20 @@ that failed:
   `sacrifice-fodder` ↔ `opponent-sacrifice`, `graveyard-creature` ↔
   `opponent-discard` — all refused, each with a reason on the row.
 
-Every one of the 30 surviving rows was therefore *selected for* bidirectional
+Every one of the 33 surviving rows was therefore *selected for* bidirectional
 truth. Asking "which direction is `token` ↔ `sacrifice-fodder`?" has the answer
 "both", because that is why it is in the table. Assigning directions to those
 rows would not recover something the unordered form discarded; it would invent
-something the admission criterion deliberately excludes, thirty times, on a
-judgement per row that this project's own standard says must be measured or
-argued rather than guessed.
+something the admission criterion deliberately excludes, once per row, on a
+judgement that this project's own standard says must be measured or argued
+rather than guessed.
 
 Two or three rows (`creature-death` ↔ `graveyard-creature`, `damage` ↔
 `creature-death`) are one-way in the *mechanics* and were admitted anyway
 because they read true in English. Directing the whole table to serve those and
-fabricating directions for the other twenty-seven is a bad trade.
+fabricating directions for the other thirty is a bad trade — and the table is
+still growing: `land-creature` added three more rows to it while this was being
+written, each argued on the same both-ways criterion.
 
 ### Why the words matter more than usual here
 
@@ -94,41 +96,52 @@ not match `/\bcauses?\b/` or `/\bbenefits? from\b/`, and must match
 
 The debt ADR-0023 and ADR-0029 recorded is **not paid, and is now argued rather
 than merely deferred.** A future agent who needs direction should read this
-first: the cost is not "add a field", it is re-adjudicating thirty rows whose
+first: the cost is not "add a field", it is re-adjudicating every row whose
 selection criterion was symmetry. The case that would justify it is a feature
 that must distinguish "what causes X" from "what X causes" *across* tags — this
 one does not, because the user asked for both at once.
 
 ### The expansion saturates, so "show all" is not decoration
 
-Measured over the 21 tags and 30 pairs:
+Measured over the 22 tags and 33 pairs, by a script that reads `SYNERGY_TAGS`
+and `interactsWith` **out of the built package**. The first version of this
+measurement copied the table into a literal and went stale within the hour, when
+`land-creature` ([ADR-0047](0047-a-land-that-is-also-a-creature.md)) landed on
+main and made it 22 tags and 33 pairs. A measurement of a table that does not
+read the table is a measurement of the past.
 
 | | value |
 | --- | --- |
 | Connected components | **1** — every tag reaches every other |
-| Mean degree (first offer) | **2.9**, median 2 |
-| Largest degree | `token` 8, `creature-death` 6; 14 of 21 tags have ≤ 3 |
-| Mean reach at 2 hops | **9.3 of 21**; worst case `creature-death` **18 of 21** |
+| Mean degree (first offer) | **3.0**, median 3 |
+| Largest degree | `token` 8, `creature-death` 6; 16 of 22 tags have ≤ 3 |
+| Mean reach at 2 hops | **9.4 of 22**; worst case `creature-death` **18 of 22** |
 | Offer size after 3 greedy hub picks | up to **12** chips |
 
 So the offer is small and meaningful for the first pick or two, and degenerates
 toward a slower "show all" if the builder walks the two hubs. Confirmed in the
 browser on a mono-black Tergrid deck: three picks
 (`opponent-sacrifice` → `creature-death` → `token`) left 7 chips on offer and
-only 6 in "show all".
+the remainder of the vocabulary behind one button.
+
+Adding a tag does not change the shape of this. `land-creature` arrived with
+degree 3 and did not disturb the two hubs, which is the general case: the
+distribution is a long tail of 1–3 with `token` and `creature-death` carrying
+the graph, so a new event joins the tail.
 
 That is why **"Show all semantics" is a first-class control, not a maybe**: it is
 the only route to a tag no chosen focus neighbours, the only control that exists
 before a focus does, and the way to skip a five-hop walk (`landfall` is five hops
 from `player-damage`) for a builder who already knows what they want. It stays
-collapsed so the panel is not a wall of 21 toggles.
+collapsed so the panel is not a wall of every toggle at once.
 
 ### The offer is ranked, which needed a new field
 
 `RecommendResult.emphasis` reports support counts for the *emphasised* tags only,
 and the offer is by definition unemphasised. `tagSupport` adds the same count for
-all 21 tags — computed in the pass that already produced `emphasis`, so it costs
-nothing. Without it the offer would be ordered by nothing and would lead with
+every tag — computed in the pass that already produced `emphasis`, so it costs
+nothing, and it is built from `SYNERGY_TAGS` so a new tag joins it for free.
+Without it the offer would be ordered by nothing and would lead with
 whichever tag sorts first, including one no card in the deck's colours supports.
 
 A tag with zero support is **still offered**, and says so, because emphasis

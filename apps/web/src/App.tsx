@@ -1790,10 +1790,10 @@ const SemanticOffer = ({
  *
  * "Show all semantics" IS behind one, and stays the honest primary route to any
  * tag the chain does not reach. The interaction graph is a single connected
- * component of all 21 tags, so a walk can in principle reach anything — but the
- * first offer is a median of 2 neighbours (mean 2.9), and `landfall` is five
- * hops from `player-damage` through tags the builder never wanted. It is also
- * the only control that exists at all before a focus does.
+ * component of all 22 tags, so a walk can in principle reach anything — but the
+ * first offer is a median and mean of 3 neighbours, and `landfall` is five hops
+ * from `player-damage` through tags the builder never wanted. It is also the
+ * only control that exists at all before a focus does.
  */
 const FocusExpansion = ({
   base,
@@ -6099,7 +6099,7 @@ export const Workspace = ({
        * An empty Map would behave identically today, and that is a property of
        * `bySupport` rather than a coincidence: it treats no counts and zero
        * counts as the same thing, because a server that answered would answer
-       * about all 21 tags, so an empty set can only mean nobody answered. This
+       * about every tag, so an empty set can only mean nobody answered. This
        * is written as `undefined` anyway because that is what is meant, and a
        * reader should not have to know that guard exists to see it is safe.
        */
