@@ -58,15 +58,24 @@
   "cards": [
     { "name": "Sol Ring", "why": "Two mana on turn one for one mana. No deck declines it." },
     { "name": "Arcane Signet", "why": "Two-mana rock that taps for any colour your commander is." },
-    { "name": "Lightning Greaves", "why": "Every deck has a commander, and every commander gets killed." },
+    {
+      "name": "Lightning Greaves",
+      "why": "Every deck has a commander, and every commander gets killed."
+    },
 
     { "name": "Command Tower", "why": "Taps for your whole identity, costs nothing, in any deck." },
     { "name": "Exotic Orchard", "why": "Free fixing off the table in any multicolour game." },
     { "name": "Evolving Wilds", "why": "Fixing for a colour you are missing, at no colour cost." },
     { "name": "Terramorphic Expanse", "why": "The second copy of Evolving Wilds; decks run both." },
-    { "name": "Myriad Landscape", "why": "A land that ramps, playable in every colour combination." },
+    {
+      "name": "Myriad Landscape",
+      "why": "A land that ramps, playable in every colour combination."
+    },
 
-    { "name": "Swords to Plowshares", "why": "White's cheapest unconditional answer to a creature." },
+    {
+      "name": "Swords to Plowshares",
+      "why": "White's cheapest unconditional answer to a creature."
+    },
     { "name": "Path to Exile", "why": "The second copy of Swords; white decks want both." },
     { "name": "Generous Gift", "why": "White's answer to anything at all, not only creatures." },
     { "name": "Wrath of God", "why": "The board wipe every white deck is expected to hold." },
@@ -81,12 +90,21 @@
     { "name": "Feed the Swarm", "why": "Black's only cheap answer to an enchantment." },
 
     { "name": "Chaos Warp", "why": "Red's only answer to a permanent it otherwise cannot touch." },
-    { "name": "Blasphemous Act", "why": "Red's board wipe; costs one mana in the games that need it." },
-    { "name": "Vandalblast", "why": "Red's answer to the artifacts every other deck is ramping on." },
+    {
+      "name": "Blasphemous Act",
+      "why": "Red's board wipe; costs one mana in the games that need it."
+    },
+    {
+      "name": "Vandalblast",
+      "why": "Red's answer to the artifacts every other deck is ramping on."
+    },
 
     { "name": "Cultivate", "why": "Green's baseline ramp: a land in play and a land in hand." },
     { "name": "Kodama's Reach", "why": "The second copy of Cultivate; green decks run both." },
-    { "name": "Beast Within", "why": "Green's answer to any permanent, which green otherwise lacks." },
+    {
+      "name": "Beast Within",
+      "why": "Green's answer to any permanent, which green otherwise lacks."
+    },
     { "name": "Nature's Claim", "why": "Green's one-mana answer to an artifact or enchantment." },
     { "name": "Sylvan Library", "why": "Green's default draw, and it fixes green's flood problem." }
   ]

@@ -157,18 +157,26 @@ const BAR_AFTER_MS = 150
  * A ROLE gap has a group named for it, so the request names that group and the
  * answer is the group's own top three — exactly the ordering already on screen.
  *
+ * A STAPLES gap IS a group and nothing else — `staple` or `staple-land`, which
+ * is why its key is the group key (ADR-0044). The curated list, the colour
+ * identity, the accepted set, the exclusions, the budget cap and the bracket
+ * allowance were all applied server-side; there is no filter left for the panel
+ * to add and no query that could express "is on the curated list".
+ *
  * A TYPE gap (`type:creature`) and a CURVE gap have no group at all: type
  * deficits are never grouped, and the curve is not a grouping dimension
  * anywhere in the product. `null` therefore means "every group", and the panel
  * takes the first three in the order the server emitted them — which is the
- * product's own priority (combo, then near-combo, then the gap groups, then
- * staples). Ranking them against each other by score would be a global ranking,
- * which this product does not have (P5) and which Quickbuild must not invent.
+ * product's own priority (staples, staple lands, combos, then the gap groups,
+ * then the rest). Ranking them against each other by score would be a global
+ * ranking, which this product does not have (P5) and must not invent.
  */
-const groupsFor = (gap: QuickbuildGap): readonly string[] | null =>
-  gap.kind === 'composition' && gap.dimension?.kind === 'role'
+const groupsFor = (gap: QuickbuildGap): readonly string[] | null => {
+  if (gap.kind === 'staples') return [gap.key]
+  return gap.kind === 'composition' && gap.dimension?.kind === 'role'
     ? [`fills-${gap.dimension.role}`]
     : null
+}
 
 /**
  * The gap's filter, with the builder's own filter still in force (Q3).
@@ -184,13 +192,26 @@ const groupsFor = (gap: QuickbuildGap): readonly string[] | null =>
 export const combinedQuery = (filter: string, gap: QuickbuildGap): string => {
   const own = gapQuery(gap)
   const user = filter.trim()
+  // A staples gap contributes no clause at all, so the builder's filter must
+  // travel alone rather than with a trailing space glued to it.
+  if (own === '') return user
   return user === '' ? own : `${user} ${own}`
 }
 
+/**
+ * The heading over the trio.
+ *
+ * A staples gap says what is ON OFFER, not what is owed. "5 more staples" would
+ * be a claim that the deck is five staples short of something, and there is no
+ * such target anywhere in the product — the list is an opinion with an owner
+ * (ADR-0044), not a band the deck is measured against.
+ */
 const gapHeading = (gap: QuickbuildGap): string =>
-  gap.kind === 'curve'
-    ? `${gap.short} more at ${gap.label}`
-    : `${gap.short} more ${gap.label}${gap.short === 1 ? '' : ''}`
+  gap.kind === 'staples'
+    ? `${gap.short} ${gap.label} you don’t have yet`
+    : gap.kind === 'curve'
+      ? `${gap.short} more at ${gap.label}`
+      : `${gap.short} more ${gap.label}`
 
 /**
  * What the panel says when it runs out of gaps — the report's second half.
@@ -645,9 +666,20 @@ export const Quickbuild = ({
           <div className="quickbuild-gap">
             <h3>{gapHeading(gap)}</h3>
             <p className="quickbuild-why">
-              {plan.ordering === 'build-order'
-                ? 'Working your archetype’s build order, because the deck is still too empty for the largest gap to mean much.'
-                : 'Working the largest gap first.'}
+              {/*
+               * The staples phase says whose opinion it is, because it is one
+               * (ADR-0044). Nothing measured this list — ADR-0008 dropped
+               * EDHREC and the inclusion statistic is inert — so a sentence
+               * implying a percentage behind it would be a claim the product
+               * cannot support (P4). `ordering` describes the derived order
+               * underneath and is not printed while this phase is running,
+               * because it is not the rule that put this gap here.
+               */}
+              {gap.kind === 'staples'
+                ? 'Starting with our curated staples — cards essentially every deck in your colours wants. Our opinion, not a statistic.'
+                : plan.ordering === 'build-order'
+                  ? 'Working your archetype’s build order, because the deck is still too empty for the largest gap to mean much.'
+                  : 'Working the largest gap first.'}
             </p>
             <button className="act" onClick={nextGap} disabled={plan.gaps.length < 2}>
               Different gap

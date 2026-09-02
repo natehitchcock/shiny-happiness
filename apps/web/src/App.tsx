@@ -6373,8 +6373,33 @@ export const Workspace = ({
       })),
       bracket: (deck.targetBracket ?? 3) as never,
       reach: quickbuildReach,
+      /*
+       * The opening phase's two counts, read off the feed's own groups
+       * (ADR-0044).
+       *
+       * Taken from the response rather than recomputed from the curated list,
+       * for the same reason the targets above are taken from `analysis`: the
+       * feed is on screen beside the panel, and a second count computed here
+       * could disagree with the heading the builder is looking at. The server
+       * has already applied the colour identity, the accepted set, the
+       * exclusions, the budget cap and the bracket allowance; none of those are
+       * available here, and guessing at them is how the wizard and the feed
+       * start telling one builder two different things.
+       *
+       * `total` is the group's size AFTER the builder's filter, which is the
+       * number the panel can actually offer — Quickbuild ANDs the same filter
+       * into its own request (doc 19 Q3), so a filter that empties the group
+       * empties the phase, and the two agree.
+       *
+       * Zero before the feed lands, which is the honest answer: the phase opens
+       * a moment later rather than opening on a number nobody has yet.
+       */
+      staples: {
+        spells: groups.find((g) => g.key === 'staple')?.total ?? 0,
+        lands: groups.find((g) => g.key === 'staple-land')?.total ?? 0,
+      },
     })
-  }, [analysis, deck.targetBracket, quickbuildReach])
+  }, [analysis, deck.targetBracket, quickbuildReach, groups])
 
   /**
    * Ask the ordinary recommendations endpoint the gap's narrower question.

@@ -76,9 +76,7 @@ describeDb('the curated staples list resolves against the corpus', () => {
       `select name, legality_commander from cards where name = any($1::text[])`,
       [names],
     )
-    const legal = new Set(
-      rows.filter((r) => r.legality_commander === 'legal').map((r) => r.name),
-    )
+    const legal = new Set(rows.filter((r) => r.legality_commander === 'legal').map((r) => r.name))
     const unresolved = names.filter((n) => !legal.has(n))
     expect(
       unresolved,
