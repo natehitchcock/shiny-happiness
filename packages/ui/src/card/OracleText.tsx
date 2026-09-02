@@ -38,6 +38,11 @@ import { ManaSymbolMark } from './ManaCost.js'
  * is a border, which assistive technology never reads.
  */
 
+/** One run of an ability: either prose, or a card name that can be opened. */
+export type OracleSegment =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'name'; readonly text: string }
+
 export interface OracleTextProps {
   readonly text: string
   /**
@@ -47,6 +52,24 @@ export interface OracleTextProps {
   readonly faces?: readonly string[] | undefined
   /** Shown when the card has no rules text at all, rather than an empty box. */
   readonly empty?: string
+  /**
+   * Cuts one ability into prose and card-name runs, so the names can be linked.
+   *
+   * A FUNCTION rather than a list of names to look for, for two reasons. The
+   * boundary one: `@roundtable/ui` does not depend on `@roundtable/domain` (see
+   * `types.ts`), and deciding which spans in rules text are really card
+   * references is domain logic over the whole card table — measured, a naive
+   * name match lights up 46.8% of the corpus wrongly. The correctness one: a
+   * list of names would force this component to match by substring, and "Sol
+   * Ring" also occurs inside the token name "Sol Ring Replica". Only the caller
+   * knows WHERE the reference is, so the caller does the cutting.
+   *
+   * Absent — the default, and the case for every existing call site — the text
+   * renders exactly as it did before.
+   */
+  readonly splitNames?: ((ability: string) => readonly OracleSegment[]) | undefined
+  /** Called with the card name a reader chose. Required for names to be links. */
+  readonly onOpenName?: ((name: string) => void) | undefined
 }
 
 /** Split on `{...}` while KEEPING the delimiters — the symbols are the point. */
@@ -71,10 +94,47 @@ const withSymbols = (ability: string): ReactNode[] =>
     )
   })
 
+/**
+ * One ability, with its card names drawn as controls and the prose between them
+ * still carrying its mana symbols.
+ *
+ * The name runs are excluded from `withSymbols` rather than passed through it: a
+ * card name contains no `{...}` token, and running the splitter over it would
+ * only risk cutting a name in half.
+ */
+const withNames = (
+  ability: string,
+  split: (ability: string) => readonly OracleSegment[],
+  onOpen: (name: string) => void,
+): ReactNode[] =>
+  split(ability).map((segment, index) => {
+    if (segment.kind === 'text') return <Fragment key={index}>{withSymbols(segment.text)}</Fragment>
+    return (
+      <button
+        className="rt-oracle-ref"
+        key={index}
+        onClick={() => {
+          onOpen(segment.text)
+        }}
+        /*
+         * The accessible name says what the control DOES. "Sol Ring" alone
+         * announces a card name with no hint that choosing it changes the panel
+         * being read, which is the R4 failure this text exists to avoid.
+         */
+        aria-label={`Open ${segment.text}`}
+        type="button"
+      >
+        {segment.text}
+      </button>
+    )
+  })
+
 export const OracleText = ({
   text,
   faces,
   empty = 'No rules text.',
+  splitNames,
+  onOpenName,
 }: OracleTextProps): JSX.Element => {
   /*
    * Faces, each as its list of abilities.
@@ -100,7 +160,9 @@ export const OracleText = ({
           )}
           {abilities.map((ability, index) => (
             <span className="rt-oracle-ability" key={index}>
-              {withSymbols(ability)}
+              {splitNames === undefined || onOpenName === undefined
+                ? withSymbols(ability)
+                : withNames(ability, splitNames, onOpenName)}
             </span>
           ))}
         </Fragment>

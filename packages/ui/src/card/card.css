@@ -496,6 +496,47 @@
   border-top: 1px solid var(--rule);
 }
 
+/*
+ * A card named inside rules text, as a control that opens it.
+ *
+ * `inline` and inheriting the font so it sits in the sentence: this is a word in
+ * a paragraph, and a button that reflows the line around it would be worse than
+ * no link. The reset is the same one `.as-link` performs in the app stylesheet,
+ * repeated here because this package cannot see that file.
+ *
+ * Underlined AND coloured. Colour alone fails anyone who cannot separate brass
+ * from parchment, so the dotted underline is the part that carries the meaning
+ * and the colour is reinforcement (R4). Dotted rather than solid to tell it
+ * apart from an ordinary hyperlink — this navigates a panel, not the document.
+ */
+.rt-oracle-ref {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--brass);
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.rt-oracle-ref:hover {
+  text-decoration-style: solid;
+}
+
+/*
+ * A visible focus ring, not the colour change alone (R4). `outline` rather than
+ * a border so the ring does not move the text it surrounds, and `offset` so it
+ * clears the underline instead of merging with it.
+ */
+.rt-oracle-ref:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
 /* ------------------------------------------------- the flip control (L2/L3) */
 
 /*
