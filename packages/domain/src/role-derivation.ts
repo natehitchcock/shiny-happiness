@@ -43,33 +43,169 @@ const HEURISTICS: readonly Heuristic[] = [
     role: 'ramp',
     test: /search your library for (a|up to \w+) basic land card[^.]*onto the battlefield/i,
   },
+  /*
+   * A land tutor is ramp (report 4). The rule above only caught a land put ONTO
+   * THE BATTLEFIELD, so Sylvan Scrying and Expedition Map were tutors while
+   * Traveler's Amulet and Renegade Map — the same card, one turn slower — were
+   * neither, and fell to `synergy`. Both are fixing the same problem a Rampant
+   * Growth fixes, one turn later.
+   *
+   * `\bland card` so "nonland card" is not a land search. This deliberately
+   * overlaps the rule above for Cultivate, which puts one land on the
+   * battlefield and one in hand; both derive `ramp`, and a Set dedupes them.
+   */
+  {
+    role: 'ramp',
+    test: /search your library for [^.]{0,60}\bland card[^.]{0,100}?into your hand/i,
+  },
   { role: 'ramp', test: /\bTreasure token/ },
 
   // Card advantage.
   { role: 'draw', test: /\bdraws? (a|two|three|four|X|that many) cards?\b/i },
   { role: 'draw', test: /\bdraw a card\b/i },
 
+  /*
+   * A tutor finds a THREAT, not a land. The product owner's ruling: "land tutors
+   * are the worst kind of tutors. Usually people want tutors that enforce their
+   * combos or wincons... land tutors are really ramp cards, not tutors."
+   *
+   * The lookahead rejects any search whose object is a land card, where the old
+   * `(?!basic land)` only rejected the word "basic". `\bland card` rather than
+   * `land card` so "nonland card" (Night Dealings) is still a tutor.
+   */
   {
     role: 'tutor',
-    test: /search your library for (a|any) (?!basic land)[^.]*(card|creature|artifact|enchantment|instant|sorcery)[^.]*(your hand|the top of your library)/i,
+    test: /search your library for (a|any) (?![^.]{0,60}\bland card)[^.]*(card|creature|artifact|enchantment|instant|sorcery)[^.]*(your hand|the top of your library)/i,
   },
 
-  { role: 'board-wipe', test: /destroy all\b/i },
-  { role: 'board-wipe', test: /exile all\b/i },
-  { role: 'board-wipe', test: /all creatures get -\d+\/-\d+/i },
-  { role: 'board-wipe', test: /each (player|opponent) sacrifices (all|\w+) creatures?/i },
+  /*
+   * BOARD WIPES (report 1). "Board wipes are cards that destroy all creatures
+   * typically... Also, doing a lot of damage to all creatures could also be
+   * considered a board wipe. Ending the turn is not a board wipe."
+   *
+   * The zone guard is the whole fix for the false positives. `destroy all` and
+   * `exile all` were bare, and "all" is a quantifier over whatever noun follows
+   * — which in 83 of the 134 `exile all` matches was a card in a NON-battlefield
+   * zone: a hand, a library, a graveyard, or the stack. All eight cards in the
+   * corpus that end the turn were classified board-wipe, and board-wipe was
+   * their only role, because "Exile all spells and abilities" is the REMINDER
+   * text of "end the turn". That is the Colossal-Dreadmaw failure again: a rule
+   * matched flavour rather than effect.
+   *
+   * Scoped to the sentence (`[^.\n]`) rather than the card, so Settle the
+   * Wreckage — which exiles a board and then talks about a library — still wipes.
+   * Rejected: a whitelist of permanent nouns, which dropped "Destroy all
+   * Goblins" and "Destroy all Islands", both real wipes.
+   */
+  {
+    role: 'board-wipe',
+    test: /\b(destroy|exile) all\b(?![^.\n]{0,60}\b(graveyards?|hands?|library|libraries|stack|spells?|abilities|revealed)\b)/i,
+  },
+  /*
+   * Mass damage — report 1's false negative. There was no rule at all, so
+   * Blasphemous Act and Fiery Cannonade both derived to `synergy`.
+   *
+   * THE THRESHOLD IS 2, AND IT IS MEASURED, NOT CHOSEN. Over the corpus's 19,232
+   * creature printings with a printed toughness: 1 damage kills 21.1% of them,
+   * 2 kills 45.9%, 3 kills 68.5%. The 1→2 step is the largest single jump in
+   * that table (+24.8 points), which is the natural place to cut, and it is
+   * where the product owner's own example of a mass-damage wipe sits — Fiery
+   * Cannonade deals exactly 2. Below it, a 1-damage ping clears a fifth of the
+   * format's creatures and is a token-sweeper, not a reset. X is included
+   * because it has no cap.
+   *
+   * `(?!target)` in the adjective run keeps "each of up to two target creatures"
+   * out; the run is bounded at three words so it cannot wander into the next
+   * clause. The trailing lookahead keeps combat tricks out — Trailblazer's Torch
+   * deals 2 damage to "each creature blocking it", which is a blocker punisher
+   * and not a sweeper. Both were found by diffing the corpus, not by inspection.
+   */
+  {
+    role: 'board-wipe',
+    test: /deals? (X|[2-9]|\d{2,}) damage to each (?:(?!target)[a-z-]+ ){0,3}creature\b(?! (blocking|blocked|that blocked))/i,
+  },
+  /*
+   * The same line, for the same reason: a mass -X/-X is a number against
+   * toughness exactly as damage is, so it cannot have a different threshold. The
+   * old `-\d+` also matched `-0` — five cards that reduce power only and kill
+   * nothing at all.
+   */
+  { role: 'board-wipe', test: /all creatures get -\d+\/-([2-9]|\d{2,})/i },
+  /*
+   * "Making each opponent sac one creature is not a board wipe." The old rule
+   * was `sacrifices (all|\w+) creatures?` and `\w+` matched "a", so 70 of its 86
+   * matches were single-target edicts. Only effects with no fixed cap remain:
+   * "all", or an X the card scales. A fixed count is a tax the board pays and
+   * chooses — the creature that matters survives — rather than a reset.
+   *
+   * Knowingly excluded: Blasphemous Edict ("thirteen creatures"), which is a
+   * wipe in practice. A hard-coded number for one card belongs in
+   * CURATED_OVERRIDES, which exists for exactly this, not in the regex.
+   */
+  { role: 'board-wipe', test: /each (player|opponent) sacrifices (all|X) creatures?/i },
+
+  /*
+   * COUNTERING IS NOT REMOVAL (report 2). `counter target` used to live here,
+   * and it was 459 cards — 429 of them counted as spot-removal, which told a
+   * control deck it was full of removal when it was full of counterspells.
+   */
+  { role: 'counterspell', test: /counter target\b/i },
+
+  /*
+   * BOUNCE (report 3). See ADR-0037 for why this is a leaf role and not an
+   * "interaction" umbrella.
+   *
+   * "you control" is excluded because self-bounce is a blink/value effect, not
+   * an answer. The lookahead is safe against "you don't control", which does not
+   * contain "you control" as a substring — Cyclonic Rift depends on that.
+   */
+  {
+    role: 'bounce',
+    test: /return target (?![^.\n]{0,60}you control\b)[^.\n]{0,60}?to (its|their) owner's hand/i,
+  },
+  { role: 'bounce', test: /return all [^.\n]{0,60}?to (its|their) owners'? hands?/i },
 
   { role: 'spot-removal', test: /destroy target\b/i },
-  { role: 'spot-removal', test: /exile target\b/i },
-  { role: 'spot-removal', test: /counter target\b/i },
+  /*
+   * The graveyard guard is report 5: `exile target` matched "exile target
+   * player's graveyard" and "exile target card from a graveyard", which is how
+   * spot-removal came to own 71 of the 107 graveyard-hate cards.
+   */
+  { role: 'spot-removal', test: /exile target\b(?![^.\n]{0,50}\bgraveyard\b)/i },
   { role: 'spot-removal', test: /deals? \d+ damage to (target|any target)/i },
   { role: 'spot-removal', test: /target (player|opponent) sacrifices a creature/i },
 
+  /*
+   * GRAVEYARD REMOVAL IS ITS OWN SEMANTIC (report 5). The role already existed
+   * and already meant this; what was missing was that anything could ever be
+   * counted as it. Two additions here, both measured: "exile all graveyards" and
+   * "exiles a card from their graveyard" were caught by no rule, and the second
+   * rule below matched ZERO cards in the corpus as written — the effect is
+   * worded as a replacement on the card being put into the graveyard, not on the
+   * graveyard.
+   */
+  /*
+   * `all cards from` was bare, so "exile all cards from your hand" and "...from
+   * your library" were graveyard hate — latent while the role had no primaries
+   * and visible the moment it got them. It now has to reach a graveyard.
+   */
   {
     role: 'graveyard-hate',
-    test: /exile (all cards from|target player's graveyard|target card from a graveyard)/i,
+    test: /exiles? (all cards from [^.]{0,40}graveyard|all graveyards|target player's graveyard|target card from a graveyard|a card from (their|target player's) graveyard)/i,
   },
-  { role: 'graveyard-hate', test: /graveyards? .{0,30}exiled instead/i },
+  /*
+   * Rest in Peace / Leyline of the Void. "a card ... from anywhere" is the whole
+   * rule and not decoration: without both halves this also matched the flashback
+   * and disturb rider — "If THAT SPELL would be put into a graveyard, exile it
+   * instead" — which is a card exiling ITSELF after being cast from the
+   * graveyard, the opposite of hating on one. That misread 60-odd cards
+   * (Wrexial, Toshiro Umezawa, every Disturb creature) and was invisible in the
+   * unit tests, which had the right phrasing in them.
+   */
+  {
+    role: 'graveyard-hate',
+    test: /if a card would be put into (a|an opponent's|their|your) graveyard from anywhere, exile it instead/i,
+  },
 
   { role: 'protection', test: /\b(hexproof|shroud|indestructible|protection from)\b/i },
   { role: 'protection', test: /gains? (hexproof|indestructible|protection)/i },

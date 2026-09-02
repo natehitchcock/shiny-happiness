@@ -63,7 +63,7 @@ describe('heuristics', () => {
     ['draw', 'Instant', 'Draw a card.'],
     ['draw', 'Enchantment', 'Whenever a creature dies, you draw two cards.'],
     ['spot-removal', 'Instant', 'Destroy target creature.'],
-    ['spot-removal', 'Instant', 'Counter target spell.'],
+    ['counterspell', 'Instant', 'Counter target spell.'],
     ['spot-removal', 'Sorcery', 'This spell deals 3 damage to any target.'],
     ['board-wipe', 'Sorcery', 'Destroy all creatures.'],
     ['board-wipe', 'Sorcery', 'All creatures get -5/-5 until end of turn.'],
@@ -134,5 +134,284 @@ describe('primaryRole', () => {
 
   it('lists every role exactly once, so precedence is total', () => {
     expect(new Set(ROLE_PRECEDENCE).size).toBe(ROLE_PRECEDENCE.length)
+  })
+
+  it('lists every member of the Role union, so no role is uncountable', () => {
+    // `ROLE_PRECEDENCE`'s own docblock claims it is exhaustive over `Role`, and
+    // until now nothing checked it. A role missing from the list is invisible
+    // rather than broken: `primaryRole` can never return it, so it is never
+    // counted, never gets a `fills-` group and never gets a meter, and `isRole`
+    // rejects it at the client boundary — all without a compile error, because
+    // the list is typed `readonly Role[]` and a subset satisfies that.
+    //
+    // Written as a literal rather than derived from the union (which TypeScript
+    // cannot enumerate at runtime): the point is that adding a union member
+    // fails HERE, loudly, in the one place that lists the consequences.
+    const everyRole: readonly Role[] = [
+      'land',
+      'ramp',
+      'draw',
+      'tutor',
+      'spot-removal',
+      'counterspell',
+      'bounce',
+      'board-wipe',
+      'graveyard-hate',
+      'protection',
+      'recursion',
+      'wincon',
+      'synergy',
+      'stax',
+      'sac-outlet',
+      'token-maker',
+      'anthem',
+      'equipment',
+      'aura',
+      'evasion',
+    ]
+    expect([...ROLE_PRECEDENCE].sort()).toEqual([...everyRole].sort())
+  })
+
+  it('counts graveyard removal as graveyard hate rather than as spot removal', () => {
+    // Report 5. Both roles are derived for Tormod's Crypt; precedence decides
+    // which one the composition meters see, and it used to be spot-removal —
+    // which is why `graveyard-hate` had 107 members in the corpus and zero
+    // primaries, i.e. it was a role no deck could ever be shown as holding.
+    expect(primaryRole(['spot-removal', 'graveyard-hate'])).toBe('graveyard-hate')
+  })
+
+  it('counts a counterspell as a counterspell, not as removal', () => {
+    expect(primaryRole(['spot-removal', 'counterspell'])).toBe('counterspell')
+  })
+
+  it('prefers the permanent answer when a card both bounces and removes', () => {
+    // Bounce is the weaker answer — the permanent comes back — so a card that
+    // does both is better described by the one that does not.
+    expect(primaryRole(['bounce', 'spot-removal'])).toBe('spot-removal')
+    expect(primaryRole(['bounce', 'draw'])).toBe('bounce')
+  })
+})
+
+/**
+ * The five taxonomy corrections from the product owner, each pinned to real
+ * oracle text taken from the corpus rather than recalled.
+ *
+ * Every card named here was checked against the 34,493-card corpus before and
+ * after the change; the counts quoted in the comments are that measurement.
+ */
+describe('taxonomy corrections', () => {
+  describe('report 1 — a board wipe destroys the board', () => {
+    it.each([
+      ['Wrath of God', "Destroy all creatures. They can't be regenerated."],
+      ['Damnation-style exile', 'Exile all creatures.'],
+      ['Jokulhaups-style', 'Destroy all nonland permanents.'],
+      // Mass damage — report 1's false negative. Neither of these was caught by
+      // ANY rule before; both derived to `synergy`, the "we could not classify
+      // this" bucket.
+      ['Blasphemous Act', 'Blasphemous Act deals 13 damage to each creature.'],
+      ['Fiery Cannonade', 'Fiery Cannonade deals 2 damage to each non-Pirate creature.'],
+      ['Pyroclasm', 'Pyroclasm deals 2 damage to each creature.'],
+      ['Fault Line', 'Fault Line deals X damage to each creature without flying and each player.'],
+    ])('%s is a board wipe', (_name, text) => {
+      expect(rolesOf('Sorcery', text)).toContain('board-wipe')
+    })
+
+    it.each([
+      // "Making each opponent sac one creature is not a board wipe." The old
+      // rule read `sacrifices (all|\w+) creatures?`, and `\w+` matched "a".
+      // 70 of the 86 cards that rule caught were edicts like this one.
+      ['Agent of the Fates', 'Each opponent sacrifices a creature of their choice.'],
+      ['Barter in Blood', 'Each player sacrifices two creatures of their choice.'],
+      // "Ending the turn is not a board wipe." All eight cards in the corpus
+      // that end the turn were board wipes, and board-wipe was their ONLY role.
+      // The reminder text — not the effect — matched `exile all`.
+      [
+        'Time Stop',
+        'End the turn. (Exile all spells and abilities, including this spell. The player ' +
+          'whose turn it is discards down to their maximum hand size.)',
+      ],
+      // A 1-damage ping clears 21% of the corpus's creatures. See the threshold
+      // note on the mass-damage heuristic.
+      ['Shrivel-as-damage', 'This spell deals 1 damage to each creature.'],
+      // `exile all` against a zone that is not the battlefield.
+      ['Paradigm Shift', 'Exile all cards from your library. Then shuffle your graveyard.'],
+      ['Bottled Cloister', 'Exile all cards from your hand face down.'],
+      ['Relic of Progenitus', 'Exile all graveyards.'],
+    ])('%s is not a board wipe', (_name, text) => {
+      expect(rolesOf('Sorcery', text)).not.toContain('board-wipe')
+    })
+
+    it('still wipes when a later sentence mentions a zone', () => {
+      // The zone guard is scoped to the sentence, not the card. Settle the
+      // Wreckage exiles a board and then talks about a library.
+      expect(
+        rolesOf(
+          'Instant',
+          'Exile all attacking creatures target player controls. That player may search ' +
+            'their library for that many basic land cards.',
+        ),
+      ).toContain('board-wipe')
+    })
+
+    it('does not read a blocker punisher as a sweeper', () => {
+      // Trailblazer's Torch. Caught only by diffing the corpus — it reads as a
+      // textbook match and is a combat trick.
+      expect(
+        rolesOf(
+          'Artifact — Equipment',
+          'Whenever equipped creature becomes blocked, it deals 2 damage to each creature ' +
+            'blocking it.',
+        ),
+      ).not.toContain('board-wipe')
+    })
+
+    it('reads a mass -X/-X the same way it reads mass damage', () => {
+      // Same mechanic, same line: a number against toughness. -1/-1 kills what
+      // 1 damage kills, and `-\d+` used to match `-0`, which kills nothing.
+      expect(rolesOf('Sorcery', 'All creatures get -2/-2 until end of turn.')).toContain(
+        'board-wipe',
+      )
+      expect(rolesOf('Sorcery', 'All creatures get -1/-1 until end of turn.')).not.toContain(
+        'board-wipe',
+      )
+      expect(rolesOf('Sorcery', 'All creatures get -3/-0 until end of turn.')).not.toContain(
+        'board-wipe',
+      )
+    })
+  })
+
+  describe('report 2 — countering is not spot removal', () => {
+    it('gives Counterspell its own role', () => {
+      const roles = rolesOf('Instant', 'Counter target spell.')
+      expect(roles).toContain('counterspell')
+      expect(roles).not.toContain('spot-removal')
+    })
+
+    it('still calls destroying a creature spot removal', () => {
+      expect(rolesOf('Instant', 'Exile target creature. Its controller gains life.')).toContain(
+        'spot-removal',
+      )
+    })
+
+    it('leaves the protection reading of a targeted counter alone', () => {
+      // A counter that only answers what targets you is protection as well —
+      // that rule predates this change and is not a duplicate count, because
+      // precedence still picks one.
+      expect(rolesOf('Instant', 'Counter target spell that targets you.')).toContain('protection')
+    })
+  })
+
+  describe('report 3 — interaction is counterspells and bounce, not an umbrella', () => {
+    it('derives bounce for a card that answers a permanent by returning it', () => {
+      expect(
+        rolesOf(
+          'Instant',
+          "Return target nonland permanent you don't control to its owner's hand.",
+        ),
+      ).toContain('bounce')
+    })
+
+    it('derives bounce for mass return-to-hand', () => {
+      expect(rolesOf('Instant', "Return all creatures to their owners' hands.")).toContain(
+        'bounce',
+      )
+    })
+
+    it('does not call returning your own permanent interaction', () => {
+      // Self-bounce is a blink/value effect, not an answer.
+      expect(
+        rolesOf('Creature — Spirit', "Return target Spirit you control to its owner's hand."),
+      ).not.toContain('bounce')
+    })
+
+    it('reads "you don\'t control" as the opposite of "you control"', () => {
+      expect(
+        rolesOf('Instant', "Return target creature you don't control to its owner's hand."),
+      ).toContain('bounce')
+    })
+  })
+
+  describe('report 4 — a land tutor is ramp', () => {
+    it.each([
+      ['Sylvan Scrying', 'Search your library for a land card, reveal it, put it into your hand.'],
+      [
+        "Traveler's Amulet",
+        'Search your library for a basic land card, reveal it, put it into your hand, then shuffle.',
+      ],
+    ])('%s is ramp and not a tutor', (_name, text) => {
+      const roles = rolesOf('Sorcery', text)
+      expect(roles).toContain('ramp')
+      expect(roles).not.toContain('tutor')
+    })
+
+    it('still calls a real tutor a tutor', () => {
+      const roles = rolesOf(
+        'Sorcery',
+        'Search your library for a card, put that card into your hand, then shuffle.',
+      )
+      expect(roles).toContain('tutor')
+    })
+
+    it('does not read "nonland card" as a land search', () => {
+      expect(
+        rolesOf(
+          'Enchantment',
+          'Search your library for a nonland card with mana value X, reveal it, put it into ' +
+            'your hand, then shuffle.',
+        ),
+      ).toContain('tutor')
+    })
+  })
+
+  describe('report 5 — graveyard removal is its own semantic', () => {
+    it.each([
+      ["Tormod's Crypt", "Exile target player's graveyard."],
+      ['Purify the Grave', 'Exile target card from a graveyard.'],
+      ['Relic of Progenitus', 'Exile all graveyards.'],
+    ])('%s is graveyard hate and not spot removal', (_name, text) => {
+      const roles = rolesOf('Artifact', text)
+      expect(roles).toContain('graveyard-hate')
+      expect(roles).not.toContain('spot-removal')
+    })
+
+    it('does not call emptying a hand or a library graveyard hate', () => {
+      // `all cards from` used to be bare. Latent while the role had no
+      // primaries; a visible mislabel the moment precedence gave it some.
+      expect(
+        rolesOf('Creature — Nightmare', 'When this creature enters, exile all cards from your hand.'),
+      ).not.toContain('graveyard-hate')
+      expect(rolesOf('Sorcery', 'Exile all cards from your library.')).not.toContain(
+        'graveyard-hate',
+      )
+    })
+
+    it('catches the replacement-effect phrasing the old rule missed', () => {
+      // The old second rule, /graveyards? .{0,30}exiled instead/, matched zero
+      // cards in the corpus. This is how the effect is actually worded.
+      expect(
+        rolesOf(
+          'Enchantment',
+          'If a card would be put into a graveyard from anywhere, exile it instead.',
+        ),
+      ).toContain('graveyard-hate')
+      expect(
+        rolesOf(
+          'Enchantment',
+          "If a card would be put into an opponent's graveyard from anywhere, exile it instead.",
+        ),
+      ).toContain('graveyard-hate')
+    })
+
+    it('does not read the flashback self-exile rider as graveyard hate', () => {
+      // Toshiro Umezawa. A card exiling ITSELF after being cast from a graveyard
+      // is the opposite of hating on one, and it shares most of its wording.
+      expect(
+        rolesOf(
+          'Legendary Creature — Human Samurai',
+          'Whenever a creature an opponent controls dies, you may cast target instant card ' +
+            'from your graveyard. If that spell would be put into a graveyard, exile it instead.',
+        ),
+      ).not.toContain('graveyard-hate')
+    })
   })
 })
