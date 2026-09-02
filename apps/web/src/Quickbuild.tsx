@@ -52,16 +52,89 @@ export interface QuickbuildProps {
   readonly fetchCandidates: (
     query: string,
     groups: readonly string[] | null,
+    limitPerGroup: number,
   ) => Promise<readonly QuickbuildCandidate[]>
   readonly onAdd: (oracleId: string) => void
   readonly onReject: (oracleId: string) => void
   readonly onClose: () => void
   /** How many cards the cut indicator currently names, for the Q5 message. */
   readonly cutCount: number
+  /**
+   * Every card the deck has already decided on — accepted or excluded, from the
+   * workspace's OPTIMISTIC deck, so it includes the click that has not reached
+   * the server yet.
+   *
+   * Two jobs, and the second is the whole reason the panel feels instant.
+   *
+   * P6: a card excluded anywhere — here, or in the feed behind the panel —
+   * must never be offered again, and the queue was fetched before that
+   * happened. Filtering on every render rather than refetching means an
+   * exclusion made elsewhere cannot survive even one frame.
+   *
+   * And it is how a pick advances the trio with NO request at all: the card
+   * the builder just took joins this set immediately, drops out of the queue,
+   * and the next candidate slides into its place. The four outcomes of a trio
+   * — take the first, the second, the third, or skip — differ only in which
+   * element leaves the queue, never in which query produced it.
+   */
+  readonly retiredIds: ReadonlySet<string>
 }
 
 /** How many are offered at once. D1: three for ONE gap, not one each for three. */
 const OPTIONS = 3
+
+/**
+ * The first fetch for a gap, and the deeper one that follows it.
+ *
+ * FIRST is what the feed asks for, and what makes the panel's first paint as
+ * fast as the feed's. DEEP is fetched in the background while the builder reads
+ * that first trio, and it is what makes every later pick free: eight candidates
+ * is two and two-thirds trios, twenty-four is eight of them.
+ *
+ * Measured against the live API on a real deck: `limitPerGroup: 8` costs 43 ms
+ * at the median and `limitPerGroup: 30` costs 46 ms, so the depth is nearly
+ * free on the wire. What it is not free in is HYDRATION — the client fetches a
+ * card, a price and an image for every row it is handed — which is why the
+ * first page stays small and the deep one arrives a moment later, off the path
+ * the builder is waiting on.
+ *
+ * NEITHER IS THREE (ADR-0026). A three-row request would let the focus
+ * guarantee append past a three-row list, and taking three from the front of
+ * that would discard exactly the rows the guarantee promised — the same defect
+ * it exists to fix, one layer up. Asking for MORE is always safe: the guarantee
+ * appends at the tail and the panel reads from the head.
+ */
+const FIRST_PAGE = 8
+const DEEP_PAGE = 24
+
+/**
+ * Top up once the queue can serve fewer than this many more trios.
+ *
+ * Two rather than one: refilling at one trio left means the request is racing
+ * the builder's next click, which is the thing this whole change exists to
+ * stop. A gap whose first page already holds more than this — every type and
+ * curve gap, which are asked of all thirteen groups and come back with about
+ * sixty-seven rows — never triggers a top-up at all.
+ */
+const TOPUP_BELOW_TRIOS = 2
+
+/**
+ * How long a fetch may run before the panel admits it is waiting.
+ *
+ * DERIVED FROM TWO NUMBERS, not picked. The lower bound is perceptual: about
+ * 100 ms is the limit under which a delay is not experienced as a wait, so a
+ * bar shown and hidden inside that window is pure flicker — it reports a wait
+ * the builder did not have. The upper bound is the measurement: the gap fetch
+ * runs at a 43 ms median and a 60 ms p90 against the live API, so 150 ms sits
+ * above the common case with headroom for hydration and render, and a normal
+ * fetch never reaches it.
+ *
+ * It stays far below the one-second mark where an interface stops feeling
+ * continuous, so a genuinely slow fetch — a cold server, a large multi-group
+ * gap — still gets its bar promptly. A silent wait is worse than a visible one;
+ * this delays the bar, it does not suppress it.
+ */
+const BAR_AFTER_MS = 150
 
 /**
  * Which group keys can answer this gap.
@@ -112,12 +185,30 @@ export const Quickbuild = ({
   onReject,
   onClose,
   cutCount,
+  retiredIds,
 }: QuickbuildProps): JSX.Element => {
   const [gapAt, setGapAt] = useState(0)
   /** How many candidates have been passed over for this gap. D5: a PASS. */
   const [passed, setPassed] = useState(0)
-  const [candidates, setCandidates] = useState<readonly QuickbuildCandidate[]>([])
-  const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading')
+  /**
+   * The candidates held for one gap, and which gap they answer.
+   *
+   * Keyed by the gap and the filter so a queue can be recognised as stale
+   * rather than trusted. A queue for a gap the deck no longer has is DISCARDED,
+   * never shown — a stale trio under a live heading is worse than the wait this
+   * queue exists to remove.
+   */
+  const [queue, setQueue] = useState<{
+    readonly gapKey: string
+    readonly filter: string
+    readonly candidates: readonly QuickbuildCandidate[]
+    /** The deep page has landed; there is nothing further to top up. */
+    readonly deep: boolean
+  } | null>(null)
+  const [fetching, setFetching] = useState(true)
+  const [failed, setFailed] = useState(false)
+  /** Whether the wait has lasted long enough to be worth admitting to. */
+  const [waiting, setWaiting] = useState(false)
   /** Which of the three is showing, for the narrow layout (Q4). */
   const [focused, setFocused] = useState(0)
   const [announcement, setAnnouncement] = useState('')
@@ -173,25 +264,119 @@ export const Quickbuild = ({
     }
   }
 
-  const load = useCallback(async () => {
-    if (gap === undefined) return
-    setState('loading')
-    try {
-      const found = await fetchCandidates(combinedQuery(filter, gap), groupsFor(gap))
-      setCandidates(found)
-      setState('ready')
-    } catch {
-      // Named, never disguised (doc 05 §5.3). "No candidates" and "the request
-      // failed" are different answers and must not render the same.
-      setState('failed')
-    }
-  }, [fetchCandidates, filter, gap])
+  /**
+   * Which fetch the panel is still interested in.
+   *
+   * The same device, and for the same reason, as `generation` in
+   * `pipeline.ts`: nothing can cancel an HTTP request that is already away, so
+   * a superseded answer has to be recognised and dropped on arrival rather than
+   * prevented. Without it, a slow first-page fetch for the gap the builder has
+   * just navigated away from lands after the new gap's fetch and overwrites it,
+   * and the panel shows three cards for a gap whose heading is no longer on
+   * screen. That is the failure the queue must not introduce: a stale trio
+   * under a live heading is worse than the wait it replaces.
+   */
+  const generation = useRef(0)
 
+  const load = useCallback(
+    async (
+      forGap: QuickbuildGap,
+      forFilter: string,
+      limit: number,
+      { background }: { background: boolean },
+    ): Promise<void> => {
+      const mine = ++generation.current
+      // A background top-up must not put the panel into a waiting state: there
+      // are cards on screen and the builder is reading them.
+      if (!background) {
+        setFetching(true)
+        setFailed(false)
+      }
+      try {
+        const found = await fetchCandidates(
+          combinedQuery(forFilter, forGap),
+          groupsFor(forGap),
+          limit,
+        )
+        if (generation.current !== mine) return
+        setQueue({
+          gapKey: forGap.key,
+          filter: forFilter,
+          candidates: found,
+          deep: limit >= DEEP_PAGE,
+        })
+        setFetching(false)
+      } catch {
+        if (generation.current !== mine) return
+        // Named, never disguised (doc 05 §5.3). "No candidates" and "the
+        // request failed" are different answers and must not render the same.
+        // A failed TOP-UP is silent on purpose — there are cards on screen and
+        // nothing is broken from where the builder is sitting; the queue simply
+        // stays as deep as it already was.
+        if (!background) {
+          setFailed(true)
+          setFetching(false)
+        }
+      }
+    },
+    [fetchCandidates],
+  )
+
+  /*
+   * Fetch when, and only when, the queue cannot answer the question being
+   * asked. A queue for a different gap or a different filter is discarded here
+   * rather than filtered — it is an answer to a question nobody asked.
+   */
+  const stale =
+    queue === null || gap === undefined || queue.gapKey !== gap.key || queue.filter !== filter
   useEffect(() => {
-    void load()
-  }, [load])
+    if (gap === undefined) return
+    if (!stale) return
+    void load(gap, filter, FIRST_PAGE, { background: false })
+  }, [stale, gap, filter, load])
 
-  const showing = useMemo(() => candidates.slice(passed, passed + OPTIONS), [candidates, passed])
+  /**
+   * What the queue can still offer.
+   *
+   * `retiredIds` is applied on every render rather than at fetch time, so a
+   * card accepted or excluded since the fetch — by this panel or by the feed
+   * behind it — leaves the queue immediately (P6). This is also what makes a
+   * pick instant: the taken card drops out and the next one slides up, with no
+   * request at all.
+   */
+  const live = useMemo(
+    () => (stale ? [] : (queue?.candidates ?? [])).filter((c) => !retiredIds.has(c.oracleId)),
+    [queue, retiredIds, stale],
+  )
+
+  const showing = useMemo(() => live.slice(passed, passed + OPTIONS), [live, passed])
+
+  /*
+   * THE PREFETCH. Deepen the queue while the builder is reading, so the next
+   * trio is already in hand whichever of the four things they do with this one.
+   *
+   * `background: true` — no waiting state, no announcement, no bar. If it never
+   * lands, the panel is exactly as good as it was before this existed.
+   */
+  useEffect(() => {
+    if (gap === undefined || stale || queue === null || queue.deep || fetching) return
+    if (live.length - passed > TOPUP_BELOW_TRIOS * OPTIONS) return
+    void load(gap, filter, DEEP_PAGE, { background: true })
+  }, [gap, stale, queue, fetching, live.length, passed, filter, load])
+
+  /*
+   * The bar waits `BAR_AFTER_MS` before admitting to a wait, and only when
+   * there is genuinely nothing to show. A background top-up never reaches here,
+   * because `showing` is non-empty while one runs.
+   */
+  useEffect(() => {
+    if (showing.length > 0 || !fetching) {
+      setWaiting(false)
+      return undefined
+    }
+    const timer = setTimeout(() => setWaiting(true), BAR_AFTER_MS)
+    return () => clearTimeout(timer)
+  }, [showing.length, fetching])
 
   /*
    * Every recompute is announced (§19.5). Without this the panel's contents
@@ -199,9 +384,14 @@ export const Quickbuild = ({
    * user presses Add and has no way to learn what replaced it.
    */
   useEffect(() => {
-    if (state === 'loading' || gap === undefined) return
+    if (gap === undefined) return
+    // Silence while a first fetch is still running: `pipeline.ts`'s `describe`
+    // learned this the hard way — a live region that narrates work rather than
+    // results announces "Preparing…" over and over and is worse than none. The
+    // bar is what reports a wait; this region reports what arrived.
+    if (fetching && showing.length === 0 && !failed) return
     setAnnouncement(
-      state === 'failed'
+      failed
         ? 'Could not load candidates for this gap.'
         : showing.length === 0
           ? `No candidates for ${gap.label}.`
@@ -209,7 +399,7 @@ export const Quickbuild = ({
               .map((c) => c.view.name)
               .join(', ')}.`,
     )
-  }, [state, showing, gap])
+  }, [failed, fetching, showing, gap])
 
   const nextGap = (): void => {
     setGapAt((at) => (at + 1) % Math.max(1, plan.gaps.length))
@@ -233,7 +423,7 @@ export const Quickbuild = ({
     setFocused(0)
   }
 
-  const exhausted = state === 'ready' && showing.length === 0 && passed > 0
+  const exhausted = !fetching && !failed && showing.length === 0 && passed > 0
 
   return (
     <div
@@ -291,9 +481,17 @@ export const Quickbuild = ({
             </p>
           )}
 
-          {state === 'loading' ? (
-            <p className="quickbuild-state">Finding candidates…</p>
-          ) : state === 'failed' ? (
+          {/*
+           * The bar appears only when the queue cannot answer AND the wait has
+           * outlasted `BAR_AFTER_MS`. While a trio is in hand — which, once the
+           * deep page has landed, is every pick and every skip — there is no
+           * wait to report and nothing is drawn here at all.
+           */}
+          {waiting ? (
+            <p className="quickbuild-state" role="progressbar" aria-label="Finding candidates">
+              Finding candidates…
+            </p>
+          ) : fetching && showing.length === 0 ? null : failed ? (
             <p className="quickbuild-state quickbuild-failed">
               Could not load candidates for this gap. The rest of the workspace is unaffected.
             </p>

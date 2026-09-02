@@ -397,3 +397,161 @@ browser rather than asserted:
 - Multi-card "packages" (a combo's missing two pieces as one pick).
 - Any automatic build — Quickbuild always asks; it never fills a deck by itself.
 - Persisting Quickbuild state across sessions.
+
+---
+
+## 19.7 The queue — why the next trio is already in hand
+
+The loop in §19.2 recomputed and refetched after every pick, so each one cost a
+round trip through the workspace's own pipeline — the 600 ms click buffer, the
+recompute, the 1.5 s settle — before the panel even asked for new candidates.
+
+Measured in a browser on a real deck, from the click to the next trio being on
+screen, with the same deck state on both sides:
+
+| | before | after |
+|---|---|---|
+| time to the next trio | **5,447 ms, 5,998 ms** | **33, 39, 40, 42 ms** |
+| recommendations requests per pick | 2 | **0** |
+| picks that showed a loading state | all | none |
+
+About **150x**, and the requests on the path go to zero. The remaining ~35 ms is
+one React render: the click retires the card optimistically, the queue filters
+it out, and the next candidate slides up.
+
+(The "after" numbers are read from a `MutationObserver` on the option list. An
+earlier poll loop reported ~1,000 ms for the same picks, which was the browser
+clamping its own nested timers rather than anything the panel did — worth
+recording, because the first version of this measurement would have understated
+the change by a factor of twenty-five.)
+
+### What is prefetched, and why there is only one thing to prefetch
+
+A trio has four outcomes — take the first, the second, the third, or skip all
+three — and they look like four different next states. They are not.
+
+**Measured on four real decks, 48 consecutive picks:**
+
+| question | answer |
+|---|---|
+| Is the leading gap the same after a pick? | **48 / 48 (100%)** |
+| Is the fresh top three exactly the held list minus the taken card? | 26 / 48 (54%) |
+| How many of the three are the same? | **120 / 144 cards (83%)** |
+| How often do all three differ? | **0 / 48** |
+
+The gap survives a pick essentially always, because the gaps that lead are large
+— a deck 27 lands short does not stop being short because one land went in. And
+because the gap survives, **all four outcomes consume from one list**: they
+differ only in which card leaves it, never in which query produced it. So there
+is nothing to fan out. One fetch answers every branch, and the "four requests,
+one per outcome" version of this feature does not need to exist.
+
+What the queue holds is therefore simply *this gap's candidates*, and a pick is
+a filter over them rather than a request.
+
+### What is discarded
+
+The queue is keyed by **gap and filter**. When either changes it is dropped on
+the spot — not filtered, not shown while a replacement loads. A stale trio under
+a live heading is worse than the wait this removes, so the empty moment is the
+correct behaviour and there is a test that asserts the old gap's cards are gone
+*before* the new answer arrives.
+
+A superseded fetch cannot be cancelled, only recognised on arrival, so the panel
+carries a `generation` counter — the same device, for the same reason, as the
+one in `pipeline.ts`. A late answer whose gap and filter both happen to match
+the current question again is still dropped, because it was computed three
+questions ago.
+
+### The ranking inside a gap is fixed when the gap opens
+
+This is the honest cost, stated rather than hidden. The 54% figure above is the
+whole of it: after a pick the pool genuinely reorders a little, because the
+accepted card joins the deck's synergy profile and every candidate's score moves
+with it. The queue does not follow that drift until it is refilled.
+
+It is accepted for three reasons. The drift is small and bounded — 83% of cards
+in common, and never a case in 48 where all three changed. It is confined to the
+third slot, a card the builder has not looked at yet. And the product already
+takes this position deliberately elsewhere: `pipeline.ts`'s settle exists so
+that "the list does not reshuffle under a user who is mid-click".
+
+The drift is bounded in time as well as size: the background top-up re-asks with
+the current deck state, so the ranking refreshes as the builder works through a
+gap rather than never.
+
+### The two page sizes
+
+`limitPerGroup: 8` for the first fetch — what the feed asks for, so the panel's
+first paint is as fast as the feed's — and **24 in the background while the
+builder reads that first trio**. That is literally the "queue up the next query
+while they are picking" the change was asked for.
+
+Depth is nearly free on the wire (43 ms at limit 8, 46 ms at limit 30, measured
+against the live API) but not free in hydration, which fetches a card, a price
+and an image per row. Hence small first, deep second, off the path anyone waits
+on. A gap asked of every group — every type and curve gap — already comes back
+with about 67 rows and never triggers a top-up at all.
+
+**Neither page is three (ADR-0026).** A three-row request lets the focus
+guarantee append past a three-row list, and taking three from the front of that
+discards exactly the rows it promised. Asking for *more* is always safe: the
+guarantee appends at the tail and the panel reads from the head.
+
+A background top-up is silent in every direction — no waiting state, no
+announcement, no bar, and a failure is swallowed. There are three cards in front
+of the builder and nothing about their situation has changed.
+
+### The loading bar
+
+It appears only when the queue cannot answer **and** the wait has outlasted
+**150 ms**.
+
+That number is derived from two ends. Below it, about 100 ms is the limit under
+which a delay is not experienced as a wait at all, so a bar shown and hidden
+inside that window reports a wait the builder did not have. Above it, the gap
+fetch runs at a 43 ms median and a 60 ms p90 against the live API, so 150 ms
+sits above the common case with headroom for hydration and render and a normal
+fetch never reaches it. It stays far below the one-second mark where an
+interface stops feeling continuous, so a genuinely slow fetch still gets its bar
+promptly — this delays the bar, it does not suppress it. A silent wait is worse
+than a visible one.
+
+Verified in a browser by delaying only the recommendations call and sampling the
+panel every 50 ms. Reading `0` for an empty panel, `B` for the bar and `3` for a
+trio, one gap change produced:
+
+```
+0 B B B 3 3 3
+```
+
+Nothing at ~50 ms — the queue has been discarded but the wait has not yet earned
+a bar. The bar from about 100 ms to 200 ms, while there is genuinely nothing to
+show. Gone the moment the trio lands. Across the six measured picks that were
+served from the queue, it never appeared at all.
+
+### What did not change
+
+Skip is still a pass (D5): it advances a cursor and sends nothing, and the
+six-skip test still shows zero commands and an unchanged excluded count. Each
+pick is still an ordinary accept through the command log (D4). The filter is
+still respected and still said out loud (Q3). P6 is now enforced *harder* than
+before: the queue is filtered against the deck's accepted and excluded ids on
+every render, so a card excluded in the feed behind the panel leaves the queue
+the same frame, without a refetch.
+
+### Why not `usePipeline`
+
+`pipeline.ts` is the deck's **write** pipeline: it buffers clicks, sends
+commands, and deliberately delays applying the answer so the list does not move
+under someone mid-click. Quickbuild's queue is a **read-ahead cache**. It sends
+no commands, has nothing to batch, and must not delay anything — its whole
+purpose is to remove a delay.
+
+Mounting a second `usePipeline` would give the panel a second progress bar
+animating on a fabricated schedule (`ASSUMED_QUERY_MS`) toward a fabricated
+midpoint, to answer a question that is binary: is a trio in hand or not. What is
+reused is the part that transfers — the `generation` counter, and the lesson
+behind `describe` returning `string | undefined`, which is why the live region
+stays silent while a first fetch runs instead of narrating "Preparing…" at a
+screen reader.

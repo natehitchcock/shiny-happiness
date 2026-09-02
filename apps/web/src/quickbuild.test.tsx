@@ -5,6 +5,10 @@ import type { CardView } from '@roundtable/ui'
 import type { QuickbuildGap, QuickbuildPlan } from '@roundtable/domain'
 import { Quickbuild, combinedQuery, type QuickbuildCandidate } from './Quickbuild'
 
+/** Mirrors the panel's own constants, so a drift between them is visible here. */
+const BAR_DELAY = 150
+const OPTIONS_SHOWN = 3
+
 afterEach(cleanup)
 
 /**
@@ -84,6 +88,7 @@ const setup = (
       onReject={onReject}
       onClose={onClose}
       cutCount={0}
+      retiredIds={new Set<string>()}
       {...over}
     />,
   )
@@ -94,7 +99,7 @@ describe('the gap becomes an ordinary query (D2, Q1 option c)', () => {
   it('asks the role gap’s own group for the role gap', async () => {
     const { fetchCandidates } = setup()
     await waitFor(() => expect(fetchCandidates).toHaveBeenCalled())
-    expect(fetchCandidates).toHaveBeenCalledWith('role:ramp', ['fills-ramp'])
+    expect(fetchCandidates).toHaveBeenCalledWith('role:ramp', ['fills-ramp'], 8)
   })
 
   /*
@@ -105,7 +110,7 @@ describe('the gap becomes an ordinary query (D2, Q1 option c)', () => {
   it('asks every group for a curve gap, which has no group of its own', async () => {
     const { fetchCandidates } = setup({ plan: plan({ gaps: [curveGap] }) })
     await waitFor(() => expect(fetchCandidates).toHaveBeenCalled())
-    expect(fetchCandidates).toHaveBeenCalledWith('mv=2', null)
+    expect(fetchCandidates).toHaveBeenCalledWith('mv=2', null, 8)
   })
 })
 
@@ -117,7 +122,7 @@ describe('an active filter (Q3)', () => {
   it('sends both to the server', async () => {
     const { fetchCandidates } = setup({ filter: 't:artifact' })
     await waitFor(() => expect(fetchCandidates).toHaveBeenCalled())
-    expect(fetchCandidates).toHaveBeenCalledWith('t:artifact role:ramp', ['fills-ramp'])
+    expect(fetchCandidates).toHaveBeenCalledWith('t:artifact role:ramp', ['fills-ramp'], 8)
   })
 
   /*
@@ -241,6 +246,7 @@ describe('accessibility (§19.5) — driven with real keys', () => {
         onReject={vi.fn()}
         onClose={vi.fn()}
         cutCount={0}
+        retiredIds={new Set<string>()}
       />,
     )
     await screen.findByRole('dialog')
@@ -326,6 +332,7 @@ describe('accessibility (§19.5) — driven with real keys', () => {
         onReject={vi.fn()}
         onClose={vi.fn()}
         cutCount={0}
+        retiredIds={new Set<string>()}
       />,
     )
     expect(screen.getByRole('status')).toBeTruthy()
@@ -371,6 +378,7 @@ describe('accessibility (§19.5) — driven with real keys', () => {
         onReject={vi.fn()}
         onClose={vi.fn()}
         cutCount={0}
+        retiredIds={new Set<string>()}
       />,
     )
     await screen.findByText(/Could not load candidates/i)
@@ -388,5 +396,438 @@ describe('nothing to do', () => {
   it('says the deck is inside every band rather than showing an empty panel', async () => {
     setup({ plan: plan({ gaps: [] }) })
     await screen.findByText(/inside its band/i)
+  })
+})
+
+/**
+ * The queue.
+ *
+ * Every test here distinguishes "served from the queue" from "fetched again and
+ * happened to match" by counting `fetchCandidates` calls, not by comparing card
+ * names. A test that only checked names would pass against the refetching
+ * implementation this replaces, and would therefore be vacuous.
+ */
+describe('the queue serves the next trio without a request', () => {
+  const six = ['Ai', 'Bo', 'Cy', 'Di', 'Ed', 'Fi']
+
+  /**
+   * Render, then re-render with a growing retired set, as the workspace does.
+   *
+   * The fixture is padded to a DEEP queue on purpose. A shallow one owes a
+   * background top-up, and that top-up is a second `fetchCandidates` call — so
+   * a test asserting "no further request" would be measuring the top-up rather
+   * than the thing it means to measure, and would fail or pass by timing. The
+   * top-up has its own tests; these isolate the queue.
+   */
+  const mounted = (named: readonly QuickbuildCandidate[]) => {
+    const found = [...named, ...Array.from({ length: 30 }, (_, i) => candidate(`pad${i}`))]
+    const fetchCandidates = vi.fn().mockResolvedValue(found)
+    const props = {
+      plan: plan(),
+      filter: '',
+      fetchCandidates,
+      onAdd: vi.fn(),
+      onReject: vi.fn(),
+      onClose: vi.fn(),
+      cutCount: 0,
+    }
+    const view = render(<Quickbuild {...props} retiredIds={new Set<string>()} />)
+    const retire = async (ids: readonly string[]): Promise<void> => {
+      await act(async () => {
+        view.rerender(<Quickbuild {...props} retiredIds={new Set(ids)} />)
+      })
+    }
+    return { retire, fetchCandidates }
+  }
+
+  it('advances past an added card with no further request', async () => {
+    const { retire, fetchCandidates } = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Ai')
+    const calls = fetchCandidates.mock.calls.length
+    await retire(['Ai'])
+    await screen.findByText('Di')
+    expect(options().map((o) => o.getAttribute('aria-label')?.split(': ')[1])).toEqual([
+      'Bo',
+      'Cy',
+      'Di',
+    ])
+    expect(fetchCandidates.mock.calls.length).toBe(calls)
+  })
+
+  it('advances past three adds in a row, still with no further request', async () => {
+    const { retire, fetchCandidates } = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Ai')
+    const calls = fetchCandidates.mock.calls.length
+    await retire(['Ai'])
+    await retire(['Ai', 'Bo'])
+    await retire(['Ai', 'Bo', 'Cy'])
+    await screen.findByText('Fi')
+    expect(fetchCandidates.mock.calls.length).toBe(calls)
+  })
+
+  /*
+   * P6, and why `retiredIds` is applied on every render rather than at fetch
+   * time: a card excluded in the FEED behind the panel must leave the queue
+   * without the queue being refetched.
+   */
+  it('drops a card excluded elsewhere, without refetching', async () => {
+    const { retire, fetchCandidates } = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Bo')
+    const calls = fetchCandidates.mock.calls.length
+    await retire(['Bo'])
+    await waitFor(() => expect(screen.queryByText('Bo')).toBeNull())
+    expect(fetchCandidates.mock.calls.length).toBe(calls)
+  })
+
+  it('skips to the next trio with no request (D5 stays a pass)', async () => {
+    const { fetchCandidates } = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Ai')
+    const calls = fetchCandidates.mock.calls.length
+    await press(screen.getByRole('button', { name: /Skip these three/i }))
+    await screen.findByText('Di')
+    expect(fetchCandidates.mock.calls.length).toBe(calls)
+  })
+})
+
+describe('the deep page is fetched in the background (the prefetch)', () => {
+  it('tops up a shallow queue without ever showing a wait', async () => {
+    // Four is fewer than two trios, so a top-up is owed.
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce(['Ai', 'Bo', 'Cy', 'Di'].map((n) => candidate(n)))
+      .mockResolvedValue(
+        ['Ai', 'Bo', 'Cy', 'Di', 'Ed', 'Fi', 'Gi', 'Ha', 'Iz'].map((n) => candidate(n)),
+      )
+    setup({ fetchCandidates })
+    await screen.findByText('Ai')
+    await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(2))
+    // It asks for the DEEP page, and it is a background fetch, so the panel
+    // never says it is waiting and the trio on screen never blanks.
+    expect(fetchCandidates.mock.calls[1]![2]).toBe(24)
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(screen.getByText('Ai')).toBeTruthy()
+  })
+
+  it('does not top up a queue that is already deep', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => candidate(`c${i}`))
+    const fetchCandidates = vi.fn().mockResolvedValue(many)
+    setup({ fetchCandidates })
+    await screen.findByText('c0')
+    // Give a top-up every chance to fire.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60))
+    })
+    expect(fetchCandidates.mock.calls.length).toBe(1)
+  })
+
+  /*
+   * ADR-0026, one layer up. Neither page may be three: the focus guarantee
+   * appends past `limitPerGroup`, so a three-row request followed by taking
+   * three from the front discards exactly the rows it promised.
+   */
+  it('never asks for three per group', async () => {
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce(['Ai', 'Bo', 'Cy', 'Di'].map((n) => candidate(n)))
+      .mockResolvedValue(Array.from({ length: 20 }, (_, i) => candidate(`c${i}`)))
+    setup({ fetchCandidates })
+    await screen.findByText('Ai')
+    await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(2))
+    for (const call of fetchCandidates.mock.calls) {
+      expect(call[2]).toBeGreaterThan(OPTIONS_SHOWN)
+    }
+  })
+})
+
+describe('a stale queue is discarded, never shown', () => {
+  /*
+   * The failure this whole change risks introducing: three cards for a gap
+   * whose heading is no longer on screen.
+   */
+  it('does not show the old gap’s cards under a new gap', async () => {
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce([candidate('RampOne'), candidate('RampTwo')])
+      .mockResolvedValue([candidate('CurveOne'), candidate('CurveTwo')])
+    setup({ fetchCandidates })
+    await screen.findByText('RampOne')
+    await press(screen.getByRole('button', { name: /Different gap/i }))
+    await screen.findByText('CurveOne')
+    expect(screen.queryByText('RampOne')).toBeNull()
+  })
+
+  it('refetches on a filter change and shows nothing from before it', async () => {
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce([candidate('Unfiltered')])
+      .mockResolvedValue([candidate('Filtered')])
+    const props = {
+      plan: plan(),
+      fetchCandidates,
+      onAdd: vi.fn(),
+      onReject: vi.fn(),
+      onClose: vi.fn(),
+      cutCount: 0,
+      retiredIds: new Set<string>(),
+    }
+    const view = render(<Quickbuild {...props} filter="" />)
+    await screen.findByText('Unfiltered')
+    await act(async () => {
+      view.rerender(<Quickbuild {...props} filter="t:artifact" />)
+    })
+    await screen.findByText('Filtered')
+    expect(screen.queryByText('Unfiltered')).toBeNull()
+  })
+
+  /*
+   * A superseded fetch cannot be cancelled, only recognised on arrival — the
+   * `generation` device from `pipeline.ts`. The first gap's slow answer must
+   * not overwrite the second gap's fast one.
+   */
+  it('drops a slow answer that arrives after the gap moved on', async () => {
+    let releaseFirst: (v: readonly QuickbuildCandidate[]) => void = () => {}
+    const fetchCandidates = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<readonly QuickbuildCandidate[]>((resolve) => {
+            releaseFirst = resolve
+          }),
+      )
+      .mockResolvedValue([candidate('Second')])
+    setup({ fetchCandidates })
+    await press(screen.getByRole('button', { name: /Different gap/i }))
+    await screen.findByText('Second')
+    await act(async () => {
+      releaseFirst([candidate('FirstAndStale')])
+      await Promise.resolve()
+    })
+    expect(screen.queryByText('FirstAndStale')).toBeNull()
+    expect(screen.getByText('Second')).toBeTruthy()
+  })
+})
+
+describe('the loading bar appears only for a real wait', () => {
+  it('is not shown while a trio is in hand', async () => {
+    setup()
+    await screen.findByText('Ai')
+    expect(screen.queryByRole('progressbar')).toBeNull()
+  })
+
+  /*
+   * Below the threshold nothing is drawn, so a fetch that lands quickly never
+   * flashes a bar reporting a wait the builder did not have.
+   */
+  it('stays hidden for a fetch that lands inside the threshold', async () => {
+    vi.useFakeTimers()
+    try {
+      let release: (v: readonly QuickbuildCandidate[]) => void = () => {}
+      const fetchCandidates = vi.fn().mockImplementation(
+        () =>
+          new Promise<readonly QuickbuildCandidate[]>((resolve) => {
+            release = resolve
+          }),
+      )
+      setup({ fetchCandidates })
+      await act(async () => {
+        vi.advanceTimersByTime(BAR_DELAY - 20)
+      })
+      expect(screen.queryByRole('progressbar')).toBeNull()
+      await act(async () => {
+        release([candidate('Ai')])
+      })
+      expect(screen.queryByRole('progressbar')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /* A silent wait is worse than a visible one. */
+  it('appears once the wait outlasts the threshold', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchCandidates = vi.fn().mockImplementation(() => new Promise(() => {}))
+      setup({ fetchCandidates })
+      await act(async () => {
+        vi.advanceTimersByTime(BAR_DELAY + 40)
+      })
+      expect(screen.getByRole('progressbar')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+/**
+ * The four tests below exist because the mutation check found the first
+ * versions of the ones above passing for the wrong reasons.
+ *
+ * "Does not show the old gap's cards under a new gap" passed even with the
+ * staleness check deleted, because the SHALLOW fixture triggered a top-up that
+ * happened to fetch the new gap's cards and paper over it. "Drops a slow
+ * answer" passed with the generation guard deleted, because the staleness check
+ * masked it — the late answer carried the old gap's key and was filtered out
+ * for a different reason than the one under test.
+ *
+ * Each of these isolates one mechanism so that removing it, and nothing else,
+ * makes the test fail.
+ */
+describe('the queue is discarded on the instant the question changes', () => {
+  /*
+   * A DEEP first queue, so no top-up can fire and rescue the assertion, and a
+   * SUSPENDED second fetch, so the only thing that can be on screen between the
+   * gap changing and the new answer landing is the old gap's cards.
+   *
+   * That window is the whole bug: a stale trio under a live heading.
+   */
+  it('empties immediately when the gap changes, before any new answer lands', async () => {
+    let releaseSecond: (v: readonly QuickbuildCandidate[]) => void = () => {}
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce(Array.from({ length: 30 }, (_, i) => candidate(`Ramp${i}`)))
+      .mockImplementation(
+        () =>
+          new Promise<readonly QuickbuildCandidate[]>((resolve) => {
+            releaseSecond = resolve
+          }),
+      )
+    setup({ fetchCandidates })
+    await screen.findByText('Ramp0')
+
+    await press(screen.getByRole('button', { name: /Different gap/i }))
+    // The new gap's answer has NOT arrived. Nothing from the old gap may show.
+    expect(screen.queryByText('Ramp0')).toBeNull()
+    expect(screen.queryByText('Ramp1')).toBeNull()
+
+    await act(async () => {
+      releaseSecond([candidate('Curve0')])
+    })
+    await screen.findByText('Curve0')
+  })
+
+  /* The same, for a filter change: a deep queue and a suspended refetch. */
+  it('empties immediately when the filter changes', async () => {
+    let releaseSecond: (v: readonly QuickbuildCandidate[]) => void = () => {}
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce(Array.from({ length: 30 }, (_, i) => candidate(`Plain${i}`)))
+      .mockImplementation(
+        () =>
+          new Promise<readonly QuickbuildCandidate[]>((resolve) => {
+            releaseSecond = resolve
+          }),
+      )
+    const props = {
+      plan: plan(),
+      fetchCandidates,
+      onAdd: vi.fn(),
+      onReject: vi.fn(),
+      onClose: vi.fn(),
+      cutCount: 0,
+      retiredIds: new Set<string>(),
+    }
+    const view = render(<Quickbuild {...props} filter="" />)
+    await screen.findByText('Plain0')
+    await act(async () => {
+      view.rerender(<Quickbuild {...props} filter="t:artifact" />)
+    })
+    expect(screen.queryByText('Plain0')).toBeNull()
+    await act(async () => {
+      releaseSecond([candidate('Narrowed')])
+    })
+    await screen.findByText('Narrowed')
+  })
+
+  /*
+   * The generation guard on its own, with the staleness check unable to help.
+   *
+   * The filter goes '' → 't:artifact' → '', so by the time the FIRST fetch's
+   * slow answer arrives it carries a gap key and a filter that both match the
+   * current question exactly. Nothing but the generation counter can tell that
+   * it is three questions out of date. Without it, that answer is applied and
+   * the panel shows a list assembled before two intervening changes.
+   */
+  it('drops an answer whose question was asked and re-asked', async () => {
+    let releaseFirst: (v: readonly QuickbuildCandidate[]) => void = () => {}
+    let releaseThird: (v: readonly QuickbuildCandidate[]) => void = () => {}
+    const fetchCandidates = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<readonly QuickbuildCandidate[]>((resolve) => {
+            releaseFirst = resolve
+          }),
+      )
+      .mockResolvedValueOnce(Array.from({ length: 30 }, (_, i) => candidate(`Narrow${i}`)))
+      .mockImplementationOnce(
+        () =>
+          new Promise<readonly QuickbuildCandidate[]>((resolve) => {
+            releaseThird = resolve
+          }),
+      )
+    const props = {
+      plan: plan(),
+      fetchCandidates,
+      onAdd: vi.fn(),
+      onReject: vi.fn(),
+      onClose: vi.fn(),
+      cutCount: 0,
+      retiredIds: new Set<string>(),
+    }
+    const view = render(<Quickbuild {...props} filter="" />)
+    await act(async () => {
+      view.rerender(<Quickbuild {...props} filter="t:artifact" />)
+    })
+    await screen.findByText('Narrow0')
+    await act(async () => {
+      view.rerender(<Quickbuild {...props} filter="" />)
+    })
+
+    // The very first fetch finally answers. Its gap and its filter both match
+    // what is on screen now, so only the generation can rule it out.
+    // DEEP, so that if it were wrongly applied nothing would immediately
+    // replace it: a shallow answer owes a top-up, and that top-up would
+    // overwrite the very thing this test is looking for. The mutation check
+    // found exactly that hiding the missing guard.
+    await act(async () => {
+      releaseFirst([
+        candidate('ThreeQuestionsAgo'),
+        ...Array.from({ length: 29 }, (_, i) => candidate(`Old${i}`)),
+      ])
+    })
+    expect(screen.queryByText('ThreeQuestionsAgo')).toBeNull()
+
+    // And the answer that IS current is still accepted.
+    // Deep, so the queue owes no top-up: a fourth call would be answered by
+    // the mock's fallback and would quietly replace what is being asserted.
+    await act(async () => {
+      releaseThird([
+        candidate('Current'),
+        ...Array.from({ length: 29 }, (_, i) => candidate(`Rest${i}`)),
+      ])
+    })
+    await screen.findByText('Current')
+  })
+})
+
+describe('a background top-up never disturbs what is on screen', () => {
+  /*
+   * A top-up that fails is not the builder's problem: there are three cards in
+   * front of them and nothing about their situation has changed. Reporting it
+   * would turn a successful panel into an error panel over work they did not
+   * ask for and cannot see.
+   */
+  it('stays silent when the top-up fails, keeping the trio', async () => {
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce(['Ai', 'Bo', 'Cy', 'Di'].map((n) => candidate(n)))
+      .mockRejectedValue(new Error('top-up failed'))
+    setup({ fetchCandidates })
+    await screen.findByText('Ai')
+    await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(2))
+    // The failure is swallowed: the cards stay and no error is claimed.
+    expect(screen.getByText('Ai')).toBeTruthy()
+    expect(screen.queryByText(/Could not load candidates/i)).toBeNull()
+    expect(screen.queryByRole('progressbar')).toBeNull()
   })
 })

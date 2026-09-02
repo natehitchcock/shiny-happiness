@@ -5985,6 +5985,15 @@ export const Workspace = ({
 
   const inFlight = useMemo(() => new Set(pending.map((p) => p.oracleId)), [pending])
 
+  /**
+   * Every card the deck has decided on, accepted or excluded, optimistically.
+   *
+   * Quickbuild filters its queue against this on every render: it is both the
+   * P6 guard for a card excluded while a queue was held, and the mechanism that
+   * makes a pick advance the trio without a request.
+   */
+  const retiredIds = useMemo(() => new Set(optimistic.entries.map((e) => e.oracleId)), [optimistic])
+
   const lockedIds = useMemo(
     () =>
       new Set(
@@ -6051,12 +6060,13 @@ export const Workspace = ({
   /**
    * Ask the ordinary recommendations endpoint the gap's narrower question.
    *
-   * `limitPerGroup: 8`, NOT 3, and this is the ADR-0026 lesson applied one
-   * layer up. Asking for three would make the server's focus guarantee append
-   * three more to a list of three, and taking the first three from that would
-   * throw away exactly the rows the guarantee promised — the same defect
-   * ADR-0026 exists to fix, reintroduced by the caller. Eight is what the feed
-   * asks for, and the panel takes three from the front.
+   * The depth is the PANEL'S to choose — it asks for a small first page and a
+   * deeper one in the background — but never three. A three-row request would
+   * let the server's focus guarantee append past a three-row list, and taking
+   * the first three from that would throw away exactly the rows the guarantee
+   * promised: the same defect ADR-0026 exists to fix, reintroduced by the
+   * caller. Asking for more is always safe, because the guarantee appends at
+   * the tail and the panel reads from the head.
    *
    * Candidates are taken in the order the server EMITTED THE GROUPS, never by
    * comparing scores across a group boundary. Scores order cards within a group
@@ -6068,9 +6078,10 @@ export const Workspace = ({
     async (
       gapQueryText: string,
       groups: readonly string[] | null,
+      limitPerGroup: number,
     ): Promise<readonly QuickbuildCandidate[]> => {
       const recs = await api.getRecommendations(deck.id, {
-        limitPerGroup: 8,
+        limitPerGroup,
         query: gapQueryText,
         ...(groups === null ? {} : { groups }),
       })
@@ -7000,6 +7011,14 @@ export const Workspace = ({
                 onReject={(oracleId) => decide(oracleId, 'exclude')}
                 onClose={() => setQuickbuilding(false)}
                 cutCount={cutBy.size}
+                /*
+                 * From the OPTIMISTIC deck, so a card joins it on the click
+                 * rather than when the server agrees. That is what lets the
+                 * panel advance to the next trio with no request at all, and it
+                 * is the same overlay the feed uses to hide a row the moment it
+                 * is acted on.
+                 */
+                retiredIds={retiredIds}
               />
             </Boundary>
           ) : null}
