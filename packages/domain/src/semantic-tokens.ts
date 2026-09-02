@@ -310,11 +310,19 @@ const SELF_REFERENCE = /\b(?:[Tt]his|[Tt]hat) [A-Z][a-z]+\b/g
 /**
  * Capitalised words, which is how the subtype rules read the text at all.
  *
- * Extracting the words and looking each one up beats testing 278 patterns
+ * Extracting the words and looking each one up beats testing 241 patterns
  * against every face: it is one pass over the text instead of one pass per
  * vocabulary entry, and the vocabulary can grow without the ingest slowing
  * down. Apostrophes and hyphens are inside the word so that `Urza's` and
  * `Assembly-Worker` survive.
+ *
+ * The capital at the START is not the precision — the lookup table is keyed on
+ * Scryfall's own casing, so "trap counter" could not resolve to Trap either way.
+ * What it buys is the opposite: it stops a LOWERCASE PREFIX from swallowing the
+ * word after a hyphen. "sacrifices a non-Elf creature" is an Elf deck's card,
+ * and a pattern that may begin lowercase consumes `non-Elf` whole and finds
+ * nothing. Measured rather than argued: 165 commander-legal cards change answer
+ * between the two, all of them in that shape.
  */
 const CAPITALISED = /\b[A-Z][A-Za-z'’-]*/g
 

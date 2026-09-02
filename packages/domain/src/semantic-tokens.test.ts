@@ -38,7 +38,21 @@ const named = (
 // meaning when the generated one is regenerated. The committed vocabulary has
 // its own tests, further down.
 const VOCAB: SemanticVocabulary = {
-  subtypes: ['Elf', 'Druid', 'Forest', 'Soldier', 'Vehicle', 'Ape', 'Saga', 'Equipment', 'Wolf'],
+  subtypes: [
+    'Elf',
+    'Druid',
+    'Forest',
+    'Soldier',
+    'Vehicle',
+    'Ape',
+    'Saga',
+    'Equipment',
+    'Wolf',
+    'Swamp',
+    'Trap',
+    'Dragon',
+    'Spider',
+  ],
   abilities: ['Flying', 'First strike', 'Trample'],
 }
 
@@ -221,6 +235,46 @@ describe('deriveSemanticTokens — the subtype a card WANTS', () => {
     expect(deriveSemanticTokens(mech, VOCAB).wants).toContain('subtype:vehicle')
   })
 
+  it('ignores a subtype that only appears in reminder text', () => {
+    // Marsh Threader, verbatim. Swampwalk's reminder names a Swamp the DEFENDING
+    // PLAYER controls, which is the opposite of a card wanting Swamps in its own
+    // deck. Every landwalk creature reads this way.
+    const threader = named(
+      'Marsh Threader',
+      'Creature — Human Scout',
+      "Swampwalk (This creature can't be blocked as long as defending player controls a Swamp.)",
+      ['Swampwalk'],
+    )
+
+    expect(deriveSemanticTokens(threader, VOCAB).wants).not.toContain('subtype:swamp')
+  })
+
+  it('reads a hyphenated negation as naming the subtype', () => {
+    // Ruthless Winnower, verbatim. "non-Elf" is an Elf deck's card — it eats
+    // everything that is not yours — and the capital letter after the hyphen is
+    // the only thing that finds it. 165 cards in the corpus turn on this.
+    const winnower = named(
+      'Ruthless Winnower',
+      'Creature — Elf Warrior',
+      "At the beginning of each player's upkeep, that player sacrifices a non-Elf creature of their choice.",
+    )
+
+    expect(deriveSemanticTokens(winnower, VOCAB).wants).toContain('subtype:elf')
+  })
+
+  it('does not read a lowercase counter name as a subtype', () => {
+    // Trap Digger, verbatim. Magic capitalises a subtype whenever it names one,
+    // and a "trap counter" is not a Trap. Mine Layer and Helix Pinnacle's tower
+    // counters are the same shape.
+    const digger = named(
+      'Trap Digger',
+      'Creature — Human Soldier',
+      '{2}{W}, {T}: Put a trap counter on target land you control.',
+    )
+
+    expect(deriveSemanticTokens(digger, VOCAB).wants).not.toContain('subtype:trap')
+  })
+
   it('ignores reminder text, which is about the rules and not about this deck', () => {
     // Reach prints "(This creature can block creatures with flying.)" — 417
     // cards, every one of which read as a flying payoff before this.
@@ -283,6 +337,35 @@ describe('deriveSemanticTokens — keywords', () => {
     )
 
     expect(wants).toContain('ability:trample')
+  })
+
+  it('reads a trigger that pays off in something other than a pump', () => {
+    // Quartzwood Crasher, verbatim. The anthem template asks for "get" or
+    // "have" and this card gives neither, so only the `whenever … with X`
+    // template can reach it — which is why that template is not redundant.
+    const crasher = named(
+      'Quartzwood Crasher',
+      'Creature — Dinosaur Beast',
+      'Whenever one or more creatures you control with trample deal combat damage to a player, create an X/X green Dinosaur Beast creature token.',
+    )
+
+    expect(deriveSemanticTokens(crasher, VOCAB).wants).toContain('ability:trample')
+  })
+
+  it('does not let a token and the sentence around it add up to a payoff', () => {
+    // Dragon Egg, verbatim. The token clause carries both "with flying" and a
+    // "gets +1/+0" in its own granted ability, so on the untrimmed text the
+    // anthem template matches end to end and the Egg reads as a flying payoff.
+    const egg = named(
+      'Dragon Egg',
+      'Creature — Dragon',
+      'Defender\nWhen this creature dies, create a 2/2 red Dragon creature token with flying and "{R}: This token gets +1/+0 until end of turn."',
+      ['Defender'],
+    )
+    const { produces, wants } = deriveSemanticTokens(egg, VOCAB)
+
+    expect(produces).toContain('subtype:dragon')
+    expect(wants).not.toContain('ability:flying')
   })
 
   it('reads GRANTING a keyword as producing it, never as wanting it', () => {
