@@ -454,3 +454,90 @@ describe('taxonomy corrections', () => {
     })
   })
 })
+
+describe('a sacrifice outlet that names a creature TYPE (ADR-0047)', () => {
+  /*
+   * The same defect ADR-0038 fixed in `synergy.ts`, one file over and found by
+   * the same report. Both `sac-outlet` heuristics demanded the literal word
+   * "creature", so Ambush Commander and Skirk Prospector fell through to the
+   * `synergy` catch-all — and a role is louder than a tag, because roles feed
+   * the composition meters and Quickbuild's gap selection.
+   */
+  it('reads the reported card', () => {
+    expect(
+      rolesOf(
+        'Creature — Elf',
+        'Forests you control are 1/1 green Elf creatures that are still lands.\n{1}{G}, Sacrifice an Elf: Target creature gets +3/+3 until end of turn.',
+      ),
+    ).toContain('sac-outlet')
+  })
+
+  it('reads the archetypal tribal outlet', () => {
+    expect(rolesOf('Creature — Goblin', 'Sacrifice a Goblin: Add {R}.')).toContain('sac-outlet')
+  })
+
+  it('reads a count and a second type', () => {
+    expect(
+      rolesOf('Creature — Human Soldier', 'Sacrifice two Humans: Destroy target creature.'),
+    ).toContain('sac-outlet')
+    expect(
+      rolesOf('Legendary Creature — Vampire', 'Sacrifice another Vampire or Zombie: Draw a card.'),
+    ).toContain('sac-outlet')
+  })
+
+  it('requires the sacrifice to be a COST, not an effect', () => {
+    /*
+     * This is where the role rule and the synergy rule part company, and it is
+     * deliberate. `creature-death` asks only whether a creature dies, so
+     * ADR-0038's rule reads Goblin Grenade's "as an additional cost to cast
+     * this spell, sacrifice a Goblin". A sac OUTLET is a repeatable engine you
+     * feed on demand, which is what the colon says — so the one-shot spell is a
+     * creature death and is not an outlet.
+     */
+    expect(
+      rolesOf(
+        'Sorcery',
+        'As an additional cost to cast this spell, sacrifice a Goblin.\nGoblin Grenade deals 5 damage to any target.',
+      ),
+    ).not.toContain('sac-outlet')
+  })
+
+  it('does not read sacrificing a Food, a Clue or a land as an outlet', () => {
+    // The same deny list as `synergy.ts`, and the same measured trap: 45 cards
+    // sacrifice a Food and none of them is a sacrifice outlet for creatures.
+    expect(
+      rolesOf('Creature — Plant Druid', 'Sacrifice a Food: You gain 3 life.'),
+    ).not.toContain('sac-outlet')
+    expect(
+      rolesOf('Artifact', 'Sacrifice a Clue: Draw a card.'),
+    ).not.toContain('sac-outlet')
+    expect(
+      rolesOf('Creature — Human', 'Sacrifice a Mountain: This creature gets +2/+0.'),
+    ).not.toContain('sac-outlet')
+  })
+
+  it('leaves the lowercase nouns to the rule that already owns them', () => {
+    /*
+     * The capital marks a TYPE. Read case-insensitively the tribal rule matches
+     * "Sacrifice an artifact:", which is the first heuristic's job.
+     *
+     * This assertion was written expecting Krark-Clan Ironworks to be a
+     * `sac-outlet` already and it FAILED, which is how the second defect in
+     * this file was found: the first heuristic listed `(a|another)` and not
+     * `an`, and "artifact" is the one noun it takes. 81 cards — Arcbound
+     * Ravager, Atog, Bosh — were catch-all `synergy` on one missing article.
+     */
+    expect(rolesOf('Artifact', 'Sacrifice an artifact: Add {C}{C}.')).toContain('sac-outlet')
+    expect(rolesOf('Creature — Human', 'Sacrifice another creature: Draw a card.')).toContain(
+      'sac-outlet',
+    )
+  })
+
+  it('still lets a land be a land', () => {
+    // `deriveRoles` short-circuits every land to `['land']`, so the three lands
+    // that match this rule — Seaside Haven, Springjack Pasture, Starlit
+    // Sanctum — keep the role the deck counts them under. Measured: the rule
+    // reaches 95 cards and moves 92.
+    expect(rolesOf('Land', '{T}, Sacrifice a Bird: Draw a card.')).toEqual(['land'])
+  })
+})

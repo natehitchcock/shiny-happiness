@@ -61,6 +61,7 @@ export type SynergyTag =
   | 'opponent-sacrifice'
   | 'player-damage'
   | 'damage'
+  | 'land-creature'
 
 export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'creature-death',
@@ -84,6 +85,7 @@ export const SYNERGY_TAGS: readonly SynergyTag[] = [
   'opponent-sacrifice',
   'player-damage',
   'damage',
+  'land-creature',
 ]
 
 /**
@@ -263,6 +265,42 @@ const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
    */
   ['damage', 'creature-death'],
   ['damage', 'spell-cast'],
+
+  /*
+   * A land that is also a creature (ADR-0047).
+   *
+   * `landfall` because the two are the same deck read from either end: the
+   * lands are the bodies, so a card that puts more lands onto the battlefield
+   * is a card that puts more attackers there, and a deck built to animate its
+   * mana base is a deck that wants a lot of mana base. True in both directions,
+   * which is the bar this table sets.
+   *
+   * `attack-trigger` because it is what the payoffs are FOR. Every one of the
+   * twelve — Sylvan Advocate, Embodiment of Fury, Halimar Tidecaller, Tatyova,
+   * Toph — grants vigilance, trample, flying or double strike, and nobody
+   * prints those on a permanent that stays home. An extra combat is worth more
+   * when the mana base swings.
+   *
+   * `plus1-counter` because the animation and the counters arrive in the same
+   * sentence and neither works without the other: earthbend N and awaken N BOTH
+   * turn the land into a 0/0 AND put N +1/+1 counters on it, so the counters
+   * are the only reason the land survives the transformation. That is two
+   * effects needing each other, not the trigger-condition-and-effect confusion
+   * ADR-0023 refused — the counters do not merely accompany the animation, they
+   * are what makes it a creature worth having.
+   *
+   * `token` and `sacrifice-fodder` are REFUSED, and the refusal is the reason
+   * this tag exists rather than reusing them. An animated land is a body, so the
+   * resemblance is real and it is exactly what makes the mistake tempting. But
+   * the bodies are the player's MANA BASE: pairing them with `sacrifice-fodder`
+   * would offer Ashnod's Altar to a Sylvan Advocate deck and call its lands
+   * expendable, which is the opposite of how that deck is played. `token` is
+   * refused one step behind it, for the same reason — a token is made to be
+   * spent and a land is not.
+   */
+  ['land-creature', 'landfall'],
+  ['land-creature', 'attack-trigger'],
+  ['land-creature', 'plus1-counter'],
 ]
 
 const INTERACTIONS = ((): ReadonlyMap<SynergyTag, readonly SynergyTag[]> => {
@@ -327,6 +365,55 @@ const PRODUCES: readonly Rule[] = [
    * `creature-etb` rule, for a measured reason.
    */
   { tag: 'creature-death', test: /\bsacrifices? this creature\b/i },
+  /*
+   * The outlet that names a creature TYPE instead of the word "creature"
+   * (ADR-0038).
+   *
+   * Reported as "ambush commander has no semantic tags. why is that?" — because
+   * every rule above asks for the literal word, and Ambush Commander says
+   * "Sacrifice an Elf". So did Skirk Prospector, Cabal Archon, Blood-Chin
+   * Fanatic, Marrow-Gnawer and every other tribal outlet: 105 cards.
+   *
+   * A DENY LIST, not an allow list, and the choice was measured rather than
+   * guessed. Both directions were tried:
+   *
+   *   - ALLOW (match against the creature subtypes the corpus's own type lines
+   *     carry) FAILS TWICE. It admits what it should refuse — "Food" is a
+   *     creature subtype because Gingerbrute is an Artifact Creature — Food, and
+   *     so are Clue, Treasure, Equipment and Forest (Dryad Arbor) — which is 82
+   *     card-mentions of false positives. And it refuses what it should admit:
+   *     Servo, Pentavite, Prism, Balloon, Caribou and Goat are creature types no
+   *     CARD carries, only tokens, so they are invisible to a list built from
+   *     card type lines.
+   *   - CORROBORATION (require the type to appear on this card's own type line
+   *     or in a token it makes) reads Ambush Commander and Skirk Prospector, and
+   *     misses Airdrop Condor — a Bird that sacrifices Goblins and makes none.
+   *
+   * So the rule admits any capitalised noun except the ones measured to be
+   * something other than a creature. Every deny entry earns its place: Food 45,
+   * Forest 20, Clue 20, Mountain 19, Island 13, Swamp 13, Treasure 13, Desert 8,
+   * Blood 7, Aura 3, Plains 2, Powerstone 1, Junk 1, Equipment 1, Room 1.
+   * `Map|Gold|Incubator` block nothing today and are kept for one reason: they
+   * are already this file's vocabulary for an artifact token, in the
+   * `artifact-etb` rule above, and two lists of the same nouns that disagree is
+   * how the next one goes wrong. Fourteen further speculative types (Vehicle,
+   * Saga, Shrine, Cave, Gate, Locus…) were written and DROPPED — they blocked
+   * nothing, and a deny entry no card exercises is machinery.
+   *
+   * NO `i` FLAG, and it carries the whole distinction: the capital is what marks
+   * a type. Read case-insensitively this matches "sacrifice a creature" and
+   * "sacrifice an artifact", which the rules above already own and mean something
+   * different. `[Ss]` covers the two ways Scryfall starts the clause.
+   *
+   * `creature-death` only, never `sacrifice-fodder`. An outlet WANTS fodder
+   * because you feed it your board, and a generic token maker does not make
+   * Clerics — the fodder here has to be of a named type, and no tag in this file
+   * can say which. Same ruling the self-sacrifice rule above gets.
+   */
+  {
+    tag: 'creature-death',
+    test: /\b[Ss]acrifices? (?:a|an|another|two|three|X|\d+) (?!(?:Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment|Plains|Island|Swamp|Mountain|Forest|Desert|Aura|Room)s?\b)[A-Z][A-Za-z'-]*/,
+  },
 
   /*
    * An edict is not a sacrifice outlet (ADR-0022).
@@ -698,6 +785,85 @@ const PRODUCES: readonly Rule[] = [
   // Casting an instant or sorcery IS the event a prowess or magecraft trigger
   // waits for, and the type line says so without any reading of the rules text.
   { tag: 'spell-cast', test: /^[^\n]*\b(Instant|Sorcery)\b/ },
+
+  /*
+   * A land becoming a creature (ADR-0047).
+   *
+   * Reported as the other half of "ambush commander has no semantic tags":
+   * "Forests you control are 1/1 green Elf creatures that are still lands"
+   * makes bodies, and no tag in this file could say so.
+   *
+   * NOT `token` and NOT `sacrifice-fodder`, which is the whole reason this is a
+   * new event rather than a widening of an old one. Those bodies are the
+   * player's mana base — see the pairs table above.
+   *
+   * 185 producers against 12 payoffs, which is the count that decided it.
+   * ADR-0029 §6 refused a `mill` tag because nothing paid it off, and the same
+   * test was run here expecting the same answer: "land creatures you control
+   * get +1/+1" is Blossoming Tortoise, Sylvan Advocate, Embodiment of Fury and
+   * Insight, Halimar Tidecaller, Jolrael, Tatyova, Jyoti and Toph, spread over a
+   * decade rather than one set. Twelve is small and it is the same order as
+   * `lifeloss` (19) and `opponent-sacrifice` (15), both of which already exist.
+   *
+   * Five rules, because each reaches cards no other one does. The counts are
+   * cards reached ONLY by that rule, measured over the commander-legal corpus.
+   */
+  // 43 cards. "It's still a land" is the sentence Magic templates an animation
+  // with, and it is the highest-precision signal there is: Awakener Druid, every
+  // Zendikon, Crawling Barrens, Awakening of Vitu-Ghazi.
+  //
+  // "still a CAVE land" is deliberately not reachable here — an optional
+  // adjective was measured and moved exactly one card, Cavernous Maw, which the
+  // fourth rule below already reads.
+  {
+    tag: 'land-creature',
+    test: /\b(?:it's|that's|is) still an? land\b|\bare still lands\b/i,
+  },
+  // 5 cards, and the reported one. The whole mana base at once: "Forests you
+  // control are 1/1 green Elf creatures", "lands you control become 1/1
+  // Elemental creatures" (Kamahl's Will, Sylvan Awakening, Natural Emergence).
+  {
+    tag: 'land-creature',
+    test: /\b(?:lands?|Forests?|Islands?|Swamps?|Mountains?|Plains)\b[^.\n]{0,25}\byou control (?:are|become)\b[^.\n]{0,50}\bcreatures?\b/i,
+  },
+  /*
+   * 3 cards, and the shape needs the POWER AND TOUGHNESS to be safe.
+   *
+   * A bare "land … becomes a … creature" was written first and measured at
+   * three false positives in ten: Graceful Antelope reads "have target land
+   * become a Plains UNTIL THIS CREATURE leaves the battlefield", where a land
+   * changing its TYPE sits within reach of the word "creature", and Hidden Herd
+   * reads "when an opponent plays a nonbasic land, … IT becomes a 3/3 Beast
+   * creature", where the thing animated is the enchantment. Naming the subject
+   * (`this|target|that|each`) and requiring a P/T refuses both.
+   *
+   * The subject accepts a basic land TYPE as well as the word "land", because
+   * `target land` alone lost four real cards to their own precision: "Target
+   * Island you control becomes a 4/4" (Avalanche Caller, Vengeant Earth) and
+   * "Target snow land becomes a 2/2" (Balduvian Conjurer, Balduvian Frostwaker).
+   * All four survive today only because the "still a land" rule happens to catch
+   * them, which is not a thing to rely on.
+   *
+   * Which part refuses which was established by mutation rather than by
+   * reading, and the answer was not the obvious one. The P/T alone refuses
+   * Graceful Antelope, and it dies on its own. Hidden Herd is refused by the
+   * NAMED SUBJECT and the 25-character gap TOGETHER — "plays a nonbasic land, if
+   * this permanent is an enchantment, it becomes a 3/3" fails the subject on "a"
+   * and fails the gap on 41 characters, so loosening either one alone changes
+   * nothing and neither is separately killable. The battery mutates the pair.
+   */
+  {
+    tag: 'land-creature',
+    test: /\b(?:this|target|that|each) [^.\n]{0,15}?(?:land|Island|Forest|Swamp|Mountain|Plains)\b[^.\n]{0,25}\bbecomes? an? [\dX]+\/[\dX]+\b/i,
+  },
+  // 3 cards. Making one outright rather than transforming a land you have:
+  // Awaken the Woods, Jyoti and Staff of Titania all print "land creature
+  // token", which no other rule here reads.
+  { tag: 'land-creature', test: /\bcreate\b[^.\n]{0,60}\bland creature token/i },
+  // 3 cards. Both keywords print reminder text that the rules above catch, and
+  // three cards carry the keyword with none — Bumi, Unleashed, Earthbender
+  // Ascension and Earthshape.
+  { tag: 'land-creature', test: /\bearthbend \d+\b|\bawaken \d+\b/i },
 ]
 
 const WANTS: readonly Rule[] = [
@@ -1103,6 +1269,21 @@ const WANTS: readonly Rule[] = [
    * 37 cards, read one by one, all token decks.
    */
   { tag: 'token', test: /\btokens you control (?:get|gain|have)\b/i },
+  /*
+   * The payoffs for a land being a creature (ADR-0047), and the reason the tag
+   * is not inert. 12 cards, read one by one.
+   *
+   * "YOU CONTROL" is load-bearing rather than decorative: Consuming Sinkhole
+   * reads "exile target land creature", which is the opposite card, and the
+   * possessive is what refuses it. The second form is the same claim written as
+   * a condition — Earth Rumble Wrestlers checks "as long as you control a land
+   * creature".
+   */
+  { tag: 'land-creature', test: /\bland creatures? you control\b/i },
+  {
+    tag: 'land-creature',
+    test: /\byou control an? land creature\b|\bcontrols? an? land creature\b/i,
+  },
 ]
 
 export interface SynergyProfile {

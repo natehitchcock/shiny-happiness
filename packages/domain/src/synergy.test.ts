@@ -1383,9 +1383,12 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
   )
 
   describe('the tag', () => {
-    it('is in the vocabulary, and is the twenty-first', () => {
+    it('is in the vocabulary, and was the twenty-first', () => {
+      // The length moved to 22 when ADR-0047 added `land-creature`. Kept as a
+      // count rather than softened to `toContain`: a vocabulary that grows
+      // without anyone noticing is how two tags come to mean the same event.
       expect(SYNERGY_TAGS).toContain('damage')
-      expect(SYNERGY_TAGS).toHaveLength(21)
+      expect(SYNERGY_TAGS).toHaveLength(22)
     })
 
     it('is spelled as an event, not as an archetype', () => {
@@ -2099,6 +2102,370 @@ describe('deriveSynergy — one semantic per clause (ADR-0038)', () => {
       // permanent, so the tag would be inert in exactly the way ADR-0029 §6
       // refused a mill tag for being.
       expect(MORITTE.wants).toEqual([])
+    })
+  })
+})
+
+describe('deriveSynergy — a sacrifice outlet that names a creature TYPE (ADR-0038)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), typeLine, oracleText })
+
+  it('reads the reported card', () => {
+    // "ambush commander has no semantic tags. why is that?" — because every
+    // `creature-death` producer wanted the literal word "creature", and this
+    // card names an Elf.
+    const ambush = derive(
+      'Ambush Commander',
+      'Creature — Elf',
+      'Forests you control are 1/1 green Elf creatures that are still lands.\n{1}{G}, Sacrifice an Elf: Target creature gets +3/+3 until end of turn.',
+    )
+
+    expect(ambush.produces).toContain('creature-death')
+  })
+
+  it('reads the archetypal tribal outlet', () => {
+    const prospector = derive('Skirk Prospector', 'Creature — Goblin', 'Sacrifice a Goblin: Add {R}.')
+
+    expect(prospector.produces).toContain('creature-death')
+  })
+
+  it('reads the verb mid-sentence as well as at the start of a clause', () => {
+    // 10 of the 105 cards spell it lowercase, because the sacrifice is an
+    // additional COST rather than an activated ability: Goblin Grenade, Sorin,
+    // Wilhelt, Sacred Mesa, Writhing Chrysalis. Found by a mutation surviving —
+    // `[Ss]` reduced to `S` broke nothing until this test existed.
+    const grenade = derive(
+      'Goblin Grenade',
+      'Sorcery',
+      'As an additional cost to cast this spell, sacrifice a Goblin.\nGoblin Grenade deals 5 damage to any target.',
+    )
+
+    expect(grenade.produces).toContain('creature-death')
+  })
+
+  it('reads a type that only ever exists as a token', () => {
+    // Servo, Pentavite, Balloon, Prism, Caribou and Goat are creature types no
+    // CARD carries, so a rule built from the corpus's own type lines could not
+    // see them. That is the measurement that chose a deny list over an
+    // allow list.
+    const foundry = derive(
+      'Retrofitter Foundry',
+      'Artifact',
+      '{2}, {T}: Create a 1/1 colorless Servo artifact creature token.\n{1}, {T}, Sacrifice a Servo: Create a 1/1 colorless Thopter artifact creature token with flying.',
+    )
+
+    expect(foundry.produces).toContain('creature-death')
+  })
+
+  it('does not read sacrificing a Food as a creature dying', () => {
+    // The trap, and the biggest single class in it: 45 cards sacrifice a Food.
+    // A Food is an artifact, and a deck built on "whenever a creature dies"
+    // gets nothing from eating one.
+    const farmer = derive(
+      'Bristlebud Farmer',
+      'Creature — Plant Druid',
+      'Trample\nWhenever this creature attacks, you may sacrifice a Food. If you do, mill three cards.',
+    )
+
+    expect(farmer.produces).not.toContain('creature-death')
+  })
+
+  it('does not read sacrificing a Clue or a Treasure as a creature dying', () => {
+    const cadaver = derive(
+      'Curious Cadaver',
+      'Creature — Zombie Detective',
+      'Flying\nWhen you sacrifice a Clue, return this card from your graveyard to your hand.',
+    )
+
+    expect(cadaver.produces).not.toContain('creature-death')
+  })
+
+  it('does not read a land sacrifice as a creature dying', () => {
+    // 75 card-mentions, and the reason the basic land types are in the deny
+    // list even though Dryad Arbor makes "Forest" a creature subtype.
+    const crash = derive(
+      'Crash',
+      'Instant',
+      "You may sacrifice a Mountain rather than pay this spell's mana cost.\nDestroy target artifact.",
+    )
+
+    expect(crash.produces).not.toContain('creature-death')
+  })
+
+  it('does not read sacrificing an Equipment or a Room as a creature dying', () => {
+    const soulrager = derive(
+      'Intruding Soulrager',
+      'Creature — Spirit',
+      'Vigilance\n{T}, Sacrifice a Room: This creature deals 2 damage to each opponent. Draw a card.',
+    )
+    const ronin = derive(
+      'Ronin, Shadow Stalker',
+      'Legendary Creature — Human Rogue Hero',
+      '{T}, Sacrifice an Equipment attached to Ronin: Target creature gets -4/-4 until end of turn.',
+    )
+
+    expect(soulrager.produces).not.toContain('creature-death')
+    expect(ronin.produces).not.toContain('creature-death')
+  })
+
+  it('does not fire on a lowercase noun', () => {
+    /*
+     * The capital is the entire distinction, and this is what pays for the
+     * missing `i` flag.
+     *
+     * Read case-insensitively, "Sacrifice an artifact" matches — the deny list
+     * has no `artifact` in it and never should, because the rules above already
+     * own "sacrifice a creature" and mean something else by it. Krark-Clan
+     * Ironworks would become a sacrifice outlet for creatures it cannot eat.
+     */
+    const ironworks = derive('Krark-Clan Ironworks', 'Artifact', 'Sacrifice an artifact: Add {C}{C}.')
+
+    expect(ironworks.produces).not.toContain('creature-death')
+    expect(ironworks.produces).toContain('artifact-etb')
+  })
+
+  it('does not claim a tribal outlet wants generic fodder', () => {
+    // `sacrifice-fodder` is produced by "create … creature token", and a
+    // generic token maker does not make Clerics. The outlet produces the death
+    // and asks for nothing, which is the same ruling the self-sacrifice rule
+    // above gets.
+    const archon = derive(
+      'Cabal Archon',
+      'Creature — Human Cleric',
+      '{B}, Sacrifice a Cleric: Target player loses 2 life and you gain 2 life.',
+    )
+
+    expect(archon.produces).toContain('creature-death')
+    expect(archon.wants).not.toContain('sacrifice-fodder')
+  })
+
+  it('reads BOTH of the reported card’s clauses, and neither as fodder', () => {
+    // This test used to end `toEqual(['creature-death'])` and say the land
+    // clause was deferred, which was true when ADR-0038 shipped: a
+    // `land-creature` tag was warranted on the numbers but is a new
+    // `SynergyTag`, and R2 makes that ADR-first. ADR-0047 is that ADR.
+    //
+    // What has NOT changed is the refusal underneath it. Those bodies are the
+    // player's mana base, so `token` and `sacrifice-fodder` would recommend a
+    // sacrifice outlet to somebody whose fodder is their lands.
+    const ambush = derive(
+      'Ambush Commander',
+      'Creature — Elf',
+      'Forests you control are 1/1 green Elf creatures that are still lands.\n{1}{G}, Sacrifice an Elf: Target creature gets +3/+3 until end of turn.',
+    )
+
+    expect(ambush.produces).not.toContain('token')
+    expect(ambush.produces).not.toContain('sacrifice-fodder')
+    expect([...ambush.produces].sort()).toEqual(['creature-death', 'land-creature'])
+  })
+})
+
+describe('deriveSynergy — a land that is also a creature (ADR-0047)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), typeLine, oracleText })
+
+  describe('the tag', () => {
+    it('is in the vocabulary, and is the twenty-second', () => {
+      expect(SYNERGY_TAGS).toContain('land-creature')
+      expect(SYNERGY_TAGS).toHaveLength(22)
+    })
+
+    it('is spelled as an event rather than as the deck that plays it', () => {
+      // "Manland" is what a player calls the deck; the tag names slot after
+      // "causes" in the UI, so this one names what happens to the permanent.
+      expect(SYNERGY_TAGS).not.toContain('manland')
+    })
+  })
+
+  describe('what animates a land', () => {
+    it('reads the reported card', () => {
+      // Ambush Commander's second clause is now a sacrifice outlet (ADR-0038).
+      // This is its first, which said nothing at all.
+      const ambush = derive(
+        'Ambush Commander',
+        'Creature — Elf',
+        'Forests you control are 1/1 green Elf creatures that are still lands.\n{1}{G}, Sacrifice an Elf: Target creature gets +3/+3 until end of turn.',
+      )
+
+      expect(ambush.produces).toContain('land-creature')
+      expect(ambush.produces).toContain('creature-death')
+    })
+
+    it('reads the templating Magic actually uses', () => {
+      /*
+       * "It's still a land" is the sentence that marks an animation, and it is
+       * the single biggest contributor: 37 cards reach the tag on it ALONE.
+       *
+       * Crawling Barrens rather than Awakener Druid, and the swap was forced by
+       * a surviving mutation. The Druid reads "target Forest becomes a 4/5 …
+       * It's still a land", so the rule below catches it too and deleting this
+       * one broke nothing. A test that cannot fail for the reason it names is
+       * not testing that reason.
+       */
+      const barrens = derive(
+        'Crawling Barrens',
+        'Land',
+        "{4}: Put two +1/+1 counters on this land. Then you may have it become a 0/0 Elemental creature until end of turn. It's still a land.",
+      )
+
+      expect(barrens.produces).toContain('land-creature')
+    })
+
+    it('reads the whole-mana-base form', () => {
+      const kamahl = derive(
+        "Kamahl's Will",
+        'Instant',
+        '• Until end of turn, any number of target lands you control become 1/1 Elemental creatures with vigilance, indestructible, and haste. They’re still lands.',
+      )
+
+      expect(kamahl.produces).toContain('land-creature')
+    })
+
+    it('reads a land that animates itself', () => {
+      // "It's still a CAVE land" is why this needs its own rule: the phrase
+      // above wants "a land" with nothing in between.
+      const maw = derive(
+        'Cavernous Maw',
+        'Land — Cave',
+        "{T}: Add {C}.\n{2}: This land becomes a 3/3 Elemental creature until end of turn. It's still a Cave land.",
+      )
+
+      expect(maw.produces).toContain('land-creature')
+    })
+
+    it('reads a land named by its TYPE rather than by the word "land"', () => {
+      // "Target Island you control becomes a 4/4" and "Target snow land becomes
+      // a 2/2" are four cards that a `target land` anchor lost, and that only
+      // survived because the "still a land" rule happened to also catch them.
+      // Elvish Branchbender is reached by this rule and NO other, which is what
+      // makes the assertion mean something: it says "Forest", never "land", and
+      // never "still a land".
+      const branchbender = derive(
+        'Elvish Branchbender',
+        'Creature — Elf Druid',
+        '{T}: Until end of turn, target Forest becomes an X/X Treefolk creature in addition to its other types, where X is the number of Elves you control.',
+      )
+
+      expect(branchbender.produces).toContain('land-creature')
+    })
+
+    it('reads making a land creature outright', () => {
+      const woods = derive(
+        'Awaken the Woods',
+        'Sorcery',
+        'Create X 1/1 green Forest Dryad land creature tokens. (They’re affected by summoning sickness.)',
+      )
+
+      expect(woods.produces).toContain('land-creature')
+    })
+
+    it('reads the keyword by name', () => {
+      // Earthbend and awaken both print reminder text, but three cards carry
+      // the keyword with none.
+      const ascension = derive(
+        'Earthbender Ascension',
+        'Enchantment',
+        'At the beginning of combat on your turn, earthbend 2.',
+      )
+
+      expect(ascension.produces).toContain('land-creature')
+    })
+
+    it('does not read a land changing its TYPE as a land becoming a creature', () => {
+      // The measured false positive. "Have target land become a Plains UNTIL
+      // THIS CREATURE leaves the battlefield" puts the word "creature" within
+      // reach of "becomes a", and a land that turns into a Plains is still not
+      // a creature.
+      const antelope = derive(
+        'Graceful Antelope',
+        'Creature — Antelope',
+        'Whenever this creature deals combat damage to a player, you may have target land become a Plains until this creature leaves the battlefield.',
+      )
+
+      expect(antelope.produces).not.toContain('land-creature')
+    })
+
+    it('does not read an enchantment animating ITSELF as land animation', () => {
+      // The other measured false positive: the word "land" is in the trigger
+      // condition and the thing that becomes a creature is the enchantment.
+      const herd = derive(
+        'Hidden Herd',
+        'Enchantment',
+        'When an opponent plays a nonbasic land, if this permanent is an enchantment, it becomes a 3/3 Beast creature.',
+      )
+
+      expect(herd.produces).not.toContain('land-creature')
+    })
+
+    it('does not read the tag off a joined type line', () => {
+      /*
+       * A `^[^\n]*\bLand\b[^\n]*\bCreature\b` rule was written and REJECTED.
+       *
+       * It reaches three cards and is wrong about two: Scryfall gives one
+       * JOINED type line per card, so "Land // Artifact Creature — Horror
+       * Construct" (Hostile Hostel) and "Land // Legendary Creature — Demon"
+       * (Westvale Abbey) read as land creatures when they are transforming
+       * lands whose two halves never share a game state. Dryad Arbor is the
+       * only true one, and one card is not worth two wrong ones — the module
+       * comment on `deriveSynergy` says why the decomposition is not available.
+       */
+      const arbor = derive(
+        'Dryad Arbor',
+        'Land Creature — Forest Dryad',
+        "(This land isn't a spell, it's affected by summoning sickness, and it has \"{T}: Add {G}.\")",
+      )
+
+      expect(arbor.produces).not.toContain('land-creature')
+    })
+  })
+
+  describe('what pays a land creature off', () => {
+    it('reads the anthem that only reaches lands', () => {
+      const advocate = derive(
+        'Sylvan Advocate',
+        'Creature — Elf Druid Ally',
+        'Vigilance\nAs long as you control six or more lands, this creature and land creatures you control get +2/+2.',
+      )
+
+      expect(advocate.wants).toContain('land-creature')
+    })
+
+    it('reads a condition that checks for one', () => {
+      const wrestlers = derive(
+        'Earth Rumble Wrestlers',
+        'Creature — Human Warrior Performer',
+        'Reach\nThis creature gets +1/+0 and has trample as long as you control a land creature or a land entered the battlefield under your control this turn.',
+      )
+
+      expect(wrestlers.wants).toContain('land-creature')
+    })
+
+    it('does not read removal aimed at land creatures as wanting them', () => {
+      // "Exile target land creature" is the opposite card. The payoff rules ask
+      // for "land creatures YOU CONTROL", which is what keeps it out.
+      const sinkhole = derive(
+        'Consuming Sinkhole',
+        'Instant',
+        'Choose one —\n• Exile target land creature.\n• Consuming Sinkhole deals 4 damage to target player or planeswalker.',
+      )
+
+      expect(sinkhole.wants).not.toContain('land-creature')
+    })
+  })
+
+  describe('what it feeds, and is fed by', () => {
+    it('pairs with landfall, attacking and +1/+1 counters', () => {
+      expect(interactsWith('land-creature')).toEqual(
+        expect.arrayContaining(['landfall', 'attack-trigger', 'plus1-counter']),
+      )
+    })
+
+    it('does not pair with making tokens or with expendable bodies', () => {
+      // The refusal this tag exists to make. An animated land is a body, and
+      // calling it fodder would offer a sacrifice outlet to a player whose
+      // fodder is their mana base.
+      expect(interactsWith('land-creature')).not.toContain('token')
+      expect(interactsWith('land-creature')).not.toContain('sacrifice-fodder')
     })
   })
 })

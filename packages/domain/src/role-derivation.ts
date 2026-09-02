@@ -226,8 +226,47 @@ const HEURISTICS: readonly Heuristic[] = [
 
   { role: 'recursion', test: /return .{0,40}from your graveyard to (your hand|the battlefield)/i },
 
-  { role: 'sac-outlet', test: /sacrifice (a|another) (creature|permanent|artifact)[^.]*:/i },
+  /*
+   * `an` was missing from the article list, and "artifact" is the one noun here
+   * that takes it (ADR-0047). 81 cards, every one a real outlet: Arcbound
+   * Ravager, Atog, Bosh, Krark-Clan Ironworks, Defiant Salvager. Found by a
+   * test assertion that turned out to be wrong about the code rather than the
+   * other way round — the same closed-list defect as the tribal rule below,
+   * one article wide instead of one noun wide.
+   */
+  { role: 'sac-outlet', test: /sacrifice (a|an|another) (creature|permanent|artifact)[^.]*:/i },
   { role: 'sac-outlet', test: /\bSacrifice a creature:/i },
+  /*
+   * The outlet that names a creature TYPE (ADR-0047).
+   *
+   * Both rules above demand the literal word "creature", so every tribal outlet
+   * in the format fell through to the `synergy` catch-all: Ambush Commander
+   * ("Sacrifice an Elf:"), Skirk Prospector, Cabal Archon, Marrow-Gnawer,
+   * Siege-Gang Commander. This is ADR-0038's `creature-death` gap one file over,
+   * found by the same report, and it matters more here — a role feeds the
+   * composition meters and Quickbuild's gap selection, so a deck full of
+   * sacrifice outlets was being told it had none.
+   *
+   * 95 cards match and 92 change role; the three that do not are lands, which
+   * the short-circuit below keeps as `land` so the land count stays honest.
+   * Every one of the 95 was read by hand and every one is a real outlet.
+   *
+   * The COLON is what separates this from ADR-0038's tag, and the difference is
+   * deliberate. `creature-death` asks only whether a creature dies, so it reads
+   * Goblin Grenade's "as an additional cost to cast this spell, sacrifice a
+   * Goblin". A sac OUTLET is a repeatable engine you can feed on demand, and the
+   * colon is what says the sacrifice is a cost of an activated ability.
+   *
+   * The deny list and the missing `i` flag are ADR-0038's, for its reasons: an
+   * allow list of creature subtypes admits Food (Gingerbrute is an Artifact
+   * Creature — Food) and refuses Servo and Pentavite (creature types no card
+   * carries, only tokens), and read case-insensitively this rule would match
+   * "Sacrifice an artifact:" — which the first heuristic above already owns.
+   */
+  {
+    role: 'sac-outlet',
+    test: /\b[Ss]acrifices? (?:a|an|another|two|three|X|\d+) (?!(?:Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment|Plains|Island|Swamp|Mountain|Forest|Desert|Aura|Room)s?\b)[A-Z][A-Za-z'-]*[^.\n]{0,40}:/,
+  },
 
   {
     role: 'token-maker',

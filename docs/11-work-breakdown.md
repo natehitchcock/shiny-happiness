@@ -491,9 +491,17 @@ about 4.5% of their number on the next ingest** —
 [ADR-0038](adr/0038-a-semantic-for-every-clause.md). Splitting every
 commander-legal card's oracle text into ability lines and asking which lines any
 rule fires on put a number on "each clause should have a semantic": 46.0% of
-60,216 clauses, now 47.9%, across eight new rules and no new tag. 1,714 tag
-assignments gained, none lost, and 5,018 untagged cards down to 4,568. The card
-ingest has been run and this half is live.
+60,216 clauses, now 48.0%, across nine new rules and no new tag. 1,819 tag
+assignments gained, none lost, and 5,018 untagged cards down to 4,542. The
+newest rules read the tribal sacrifice outlet — "Sacrifice an Elf" — and, in
+[ADR-0047](adr/0047-a-land-that-is-also-a-creature.md), the OTHER half of the
+same report: `land-creature` is the twenty-second tag, 187 producers against 13
+payoffs, for the lands a deck animates. It is deliberately NOT `token` or
+`sacrifice-fodder` — those bodies are the mana base. ADR-0047 also ports the
+same defect out of `role-derivation.ts`, where both `sac-outlet` heuristics
+wanted the literal word "creature": 170 cards gain the role, 56 of them leaving
+the `synergy` catch-all, and 81 of those were lost to a single missing article
+(`an artifact`). Roles are a stored column too, so one card ingest does both.
 
 Separately, the Spellbook adapter was dropping `requires[]` — the pieces
 Spellbook describes as a card CLASS rather than naming — so 4,813 stored combos
