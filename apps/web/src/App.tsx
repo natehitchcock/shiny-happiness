@@ -463,6 +463,41 @@ export const rejectionNotice = (
 }
 
 /**
+ * A decision that never reached the server at all, in words.
+ *
+ * Distinct from `rejectionNotice`, and the difference is who said no. A
+ * refusal is the server's judgement and the reason is worth printing; this is
+ * the client giving up after rebasing the same batch onto a deck that kept
+ * moving underneath it. There is no reason to print, only a fact: the card is
+ * NOT in the state the user asked for, and only a second click can put it
+ * there.
+ *
+ * It exists because the alternative was silence. A batch that could not be
+ * placed used to escape as a rejected promise, and a superseded run's rejection
+ * is discarded — so three quick rejections could leave one of them nowhere at
+ * all, with the optimistic overlay still showing it done until the next
+ * recompute quietly took it back.
+ *
+ * `null` for an empty list, matching `rejectionNotice`, so the caller has one
+ * shape to handle rather than two.
+ */
+export const unsavedNotice = (
+  // `oracleId` is optional because a core-package command names a bracket
+  // instead — the same tolerance `rejectionText` has, and for the same reason:
+  // a batch that could not be placed must still produce a sentence.
+  lost: readonly { readonly type: string; readonly oracleId?: string }[],
+  cards: ReadonlyMap<string, api.Card>,
+): string | null => {
+  const first = lost[0]
+  if (first === undefined) return null
+  const subject =
+    (first.oracleId === undefined ? undefined : cards.get(first.oracleId)?.name) ?? 'That card'
+  // Only the first, plus a count, for the reason `rejectionNotice` gives.
+  const more = lost.length === 1 ? '' : ` (${plural(lost.length - 1, 'other card')} too.)`
+  return `${subject} was not saved — the deck kept changing while your click was on its way.${more} Try it again.`
+}
+
+/**
  * What a name-match row can actually do about this card.
  *
  * The "Cards named like…" list is the ONE place in the app that deliberately
@@ -3495,21 +3530,14 @@ interface QueryResult {
    * run, arriving by a different route.
    */
   readonly extra: ReadonlyMap<string, readonly api.Recommendation[]>
-  /**
-   * Commands the server refused, carried back so the UI can say so.
+  /*
+   * Refusals are deliberately NOT here — see `refusalsRef`.
    *
-   * `sendCommands` has always returned these and the client has always dropped
-   * them. Dropping them is what made an illegal add SILENT: the optimistic
-   * overlay showed the card in the deck, the server said no, and the overlay
-   * was swept away by the response with nothing to explain the disappearance.
-   *
-   * Optional, because the WIRE is not the type — the same reason `images` is
-   * optional on `hydrate`. A run with no commands in it has nothing to report,
-   * and a server that omits the field must leave the client saying nothing
-   * rather than throwing inside the apply. `rejectionNotice` is the one place
-   * that reads it, and it is the one place that has to tolerate the absence.
+   * They used to be, and a run that is superseded before it applies threw them
+   * away with the rest of its answer. A refusal is a fact about a write, not
+   * about this run's read of the suggestions, so it outlives the run that
+   * learned it and is banked in a ref instead.
    */
-  readonly rejected?: readonly api.CommandResult['rejected'][number][] | undefined
 }
 
 /**
@@ -4946,6 +4974,34 @@ export const Workspace = ({
    * cause a render.
    */
   const nearbyRef = useRef<ReadonlyMap<string, api.Card>>(new Map())
+  /**
+   * Every card on screen, by id, readable from inside a run.
+   *
+   * `load` has to be able to NAME a card when it reports that a decision could
+   * not be saved, and it runs long after the click that queued it. A rejection
+   * that says "36 characters of uuid was not saved" is not a sentence anyone
+   * can act on — the same reason `rejectionText` takes a card map.
+   *
+   * A ref for the reason `deckRef` and `queryRef` are: `load` is created once
+   * and must see the current value, not the one from the render that made it.
+   */
+  const cardsRef = useRef<ReadonlyMap<string, api.Card>>(new Map())
+  /**
+   * Refusals the server has reported and the user has not been shown yet.
+   *
+   * Carried in a ref rather than out through the run's result, because a run
+   * that is superseded never applies its result — and it is exactly the runs
+   * that get superseded, the ones a user's next quick click interrupts, whose
+   * refusals matter most. Returned in `QueryResult` they were dropped on the
+   * floor; accumulated here, whichever run does apply says what every run
+   * before it was told.
+   *
+   * Drained by the apply, deliberately, so the sentence appears at the same
+   * moment `setPending([])` sweeps away the overlay that showed the card
+   * landing. Said earlier it would explain a disappearance that has not
+   * happened yet.
+   */
+  const refusalsRef = useRef<readonly api.CommandResult['rejected'][number][]>([])
   /** The suggestions region, so the column legend can find the columns in it. */
   const suggestionsRef = useRef<HTMLElement>(null)
   /** The filter box — the last resort for focus when the feed empties out. */
@@ -4999,6 +5055,7 @@ export const Workspace = ({
   // the UI, the request never carried them, and every cell rendered the "no"
   // dot. Kept beside the other two so the set reads as one block.
   columnsRef.current = columns
+  cardsRef.current = cards
 
   const load = useCallback(async (commands: readonly PendingCommand[]): Promise<QueryResult> => {
     /*
@@ -5013,7 +5070,12 @@ export const Workspace = ({
      * the settle was introduced.
      */
     let current = serverDeckRef.current ?? deckRef.current
-    /** What the server refused this round, so the UI can say what happened. */
+    /**
+     * What the server refused this round.
+     *
+     * Pushed into `refusalsRef` rather than returned, because this run may be
+     * superseded before it ever applies — and the refusal is still true.
+     */
     let rejected: readonly api.CommandResult['rejected'][number][] | undefined
 
     /*
@@ -5042,57 +5104,105 @@ export const Workspace = ({
     // Commands first, as ONE batch — four accepts are one round trip, and one
     // atomic unit the server can reject or apply as a whole (doc 10 §10.3).
     if (commands.length > 0) {
-      const body = commands.map(wire)
-      try {
-        const result = await sendWithRetry(current.id, body, current.version)
-        current = result.deck
-        rejected = result.rejected
-      } catch (error) {
-        // A 409 means only that our version is behind — the clicks are still
-        // valid. Re-read the deck and send them again, rather than dropping
-        // work the user did and making them click it a second time.
-        if (!(error instanceof api.ApiError) || error.status !== 409) throw error
-        const conflict = error.body as api.CommandConflict | null
-        const fresh = await api.getDeck(current.id)
-
-        /*
-         * Rebase rather than re-send blindly (API-06, doc 12 §12.7).
-         *
-         * `since` is what the server accepted while we were behind. Without it
-         * this could only re-send the same batch and hope: a card another
-         * client had just excluded came back with no record, and a card it had
-         * just added came back as a spurious `not-singleton` the user never
-         * caused. `rebaseCommands` drops only the commands whose intent is
-         * ALREADY TRUE — which is not discarding a user action, because the
-         * state they asked for exists — and replays everything else, conflicts
-         * included, since our intent is the more recent one.
-         *
-         * `sinceComplete === false` means the log does not cover the gap, so
-         * `since` is a partial account of it. Rebasing against a partial
-         * account is worse than not rebasing at all: it would drop a command
-         * on the strength of history it cannot see. In that case fall back to
-         * the old behaviour and re-send everything — the server still judges
-         * each command, so the outcome is no worse than it was before API-06.
-         */
-        const rebased =
-          conflict?.sinceComplete === true
-            ? rebaseCommands(body, conflict.since)
-            : { replay: body, superseded: [], overrides: [] }
-
-        if (rebased.replay.length === 0) {
-          // Everything we queued had already happened. Sending an empty batch
-          // would be a round trip that can only answer "nothing to do".
-          current = fresh
-        } else {
-          const result = await sendWithRetry(fresh.id, rebased.replay, fresh.version)
+      /*
+       * A conflict is a LOOP, not a one-shot, and treating it as one lost the
+       * user's clicks.
+       *
+       * The pipeline restarts on every decision made after its buffer has
+       * closed, and the run it interrupts stays in flight — nothing can cancel
+       * a request that is already away, and its writes are wanted anyway. Three
+       * decisions in series therefore put up to three runs on the wire at once,
+       * each having read `serverDeckRef` before the others moved it.
+       *
+       * The recovery below used to re-read the deck, rebase, and re-send ONCE.
+       * A third run's batch commits in the window between that re-read and that
+       * re-send, so the recovery itself earned a 409 — and `sendWithRetry` does
+       * not retry a 409 (correctly: it needs a new version, not patience), so
+       * the second conflict escaped `load` entirely. `usePipeline` then dropped
+       * it, because the run had been superseded. Measured in a browser at 900 ms
+       * of command latency: of three rejections, the middle one never reached
+       * `deck_entries` and nothing anywhere said so.
+       *
+       * Looping is the fix because each round is strictly closer to done: the
+       * rebase drops commands whose intent is already true and re-sends the
+       * rest at a version that is strictly newer. The rejected alternative was
+       * to serialise the sends behind a promise chain so no two batches are
+       * ever in flight — that removes the conflict, and with it the whole point
+       * of superseding a run, because the newest decision would then have to
+       * wait behind every slow recompute ahead of it.
+       *
+       * Bounded, because an unbounded loop against a deck another client is
+       * writing to is a spin. Five rounds is far more than the three runs this
+       * client can have in flight; past that the honest answer is to say the
+       * decision was not saved (below) rather than to keep trying in silence.
+       */
+      const CONFLICT_ROUNDS = 5
+      let replay: readonly DeckCommand[] = commands.map(wire)
+      for (let round = 0; ; round += 1) {
+        try {
+          const result = await sendWithRetry(current.id, replay, current.version)
           current = result.deck
           // The rebase path rejects for exactly the same reasons the first
           // attempt does, and a user whose card was refused after a conflict
           // is owed the same sentence as one whose card was refused outright.
           rejected = result.rejected
+          break
+        } catch (error) {
+          // A 409 means only that our version is behind — the clicks are still
+          // valid. Re-read the deck and send them again, rather than dropping
+          // work the user did and making them click it a second time.
+          if (!(error instanceof api.ApiError) || error.status !== 409) throw error
+          const conflict = error.body as api.CommandConflict | null
+          const fresh = await api.getDeck(current.id)
+          current = fresh
+
+          /*
+           * Rebase rather than re-send blindly (API-06, doc 12 §12.7).
+           *
+           * `since` is what the server accepted while we were behind. Without
+           * it this could only re-send the same batch and hope: a card another
+           * client had just excluded came back with no record, and a card it
+           * had just added came back as a spurious `not-singleton` the user
+           * never caused. `rebaseCommands` drops only the commands whose intent
+           * is ALREADY TRUE — which is not discarding a user action, because
+           * the state they asked for exists — and replays everything else,
+           * conflicts included, since our intent is the more recent one.
+           *
+           * `sinceComplete === false` means the log does not cover the gap, so
+           * `since` is a partial account of it. Rebasing against a partial
+           * account is worse than not rebasing at all: it would drop a command
+           * on the strength of history it cannot see. In that case fall back to
+           * the old behaviour and re-send everything — the server still judges
+           * each command, so the outcome is no worse than it was before API-06.
+           */
+          const rebased =
+            conflict?.sinceComplete === true
+              ? rebaseCommands(replay, conflict.since)
+              : { replay, superseded: [], overrides: [] }
+
+          if (rebased.replay.length === 0) {
+            // Everything we queued had already happened. Sending an empty batch
+            // would be a round trip that can only answer "nothing to do".
+            break
+          }
+          replay = rebased.replay
+
+          if (round >= CONFLICT_ROUNDS) {
+            // The one outcome that must never be silent. Everything above this
+            // line exists to avoid reaching here; reaching it means the user's
+            // decision is not in the deck and only they can decide what to do
+            // about it, so they are told which card and why.
+            const text = unsavedNotice(replay, cardsRef.current)
+            if (text !== null) setNotice(text)
+            break
+          }
         }
       }
       serverDeckRef.current = current
+      // Banked, not returned. See `refusalsRef`.
+      if (rejected !== undefined && rejected.length > 0) {
+        refusalsRef.current = [...refusalsRef.current, ...rejected]
+      }
     }
 
     const [recs, ana] = await Promise.all([
@@ -5145,7 +5255,7 @@ export const Workspace = ({
       ],
       recs.datasetSnapshotId,
     )
-    return { deck: current, recs, analysis: ana, hydrated, extra, rejected }
+    return { deck: current, recs, analysis: ana, hydrated, extra }
   }, [])
 
   const pipeline = usePipeline<PendingCommand>({
@@ -5256,7 +5366,16 @@ export const Workspace = ({
        * result is a snapshot of a search that may be several queries old.
        */
       const named = new Map<string, api.Card>([...nearbyRef.current, ...r.hydrated.cards])
-      const refused = rejectionNotice(r.rejected, named)
+      /*
+       * Every refusal banked since the last apply, not just this run's.
+       *
+       * Read from the ref and cleared in the same breath: a sentence shown
+       * twice reads as a second refusal, and a refusal left in the bank would
+       * be re-announced at every recompute for the rest of the session.
+       */
+      const banked = refusalsRef.current
+      refusalsRef.current = []
+      const refused = rejectionNotice(banked, named)
       if (refused !== null) setNotice(refused)
     },
   })
