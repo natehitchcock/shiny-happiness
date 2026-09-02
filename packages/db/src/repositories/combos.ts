@@ -106,6 +106,53 @@ export const deleteCombos = async (pool: Pool, ids: readonly ComboId[]): Promise
   return rowCount ?? 0
 }
 
+/**
+ * Remove every row whose id carries a template segment, and say how many went
+ * (ADR-0049).
+ *
+ * The rows `deleteCombos` above cannot reach. It removes ids the run READ AND
+ * POSITIVELY REJECTED, which by definition excludes a variant Spellbook has
+ * withdrawn from the feed altogether — nobody reads it, so nobody rejects it,
+ * so its row survives every run forever. 41 such rows were left after ADR-0038,
+ * all of them three or four pieces, 30 of them one Veinwitch Coven + Phyrexian
+ * Altar family, and 5 of the 12 combos a real Kess deck claimed to have
+ * assembled were among them.
+ *
+ * ADR-0038 recorded this as unreachable without "delete everything this run did
+ * not write", and refused that sweep because a truncated download or a
+ * `--limit` run makes it empty the table. This is a third way and is neither.
+ *
+ * WHY IT IS EXACT, rather than a guess that happens to be right today:
+ *
+ *   - `--` in a Spellbook variant id is an EMPTY CARD SEGMENT, which is how the
+ *     source writes a piece that is a card CLASS rather than a card
+ *     (`2105-3337--140` is two cards and template 140). A card segment is a
+ *     non-empty run of digits, so `--` cannot arise any other way. Checked
+ *     against the live corpus: all 104,616 stored ids match
+ *     `^[0-9]+(-[0-9]+)*(--[0-9]+)*$`, and the 41 with a `--` all carry it as a
+ *     trailing `--<digits>` whose card-segment count equals their stored piece
+ *     count.
+ *   - `insertCombos` is the only write this table has, its only non-test caller
+ *     is the combo ingest, and `variantSkipReason` refuses a template variant
+ *     before a `Combo` is ever built — on `requires[]` AND on the id. So a `--`
+ *     id in this table could only have been written by a build that predates
+ *     that refusal. That invariant is pinned in
+ *     `packages/clients/src/spellbook.test.ts`; if it fails, this function is
+ *     unsafe and must change with it.
+ *
+ * And it cannot truncate. It reads no feed and counts no variants, so a run
+ * that downloaded one variant, or none, removes exactly the rows a complete run
+ * would — which is precisely what the refused sweep could not promise.
+ *
+ * ONE hyphen would match every id in the table. `LIKE '%--%'` is the rule and
+ * the doubling is all of it; `-` is not a LIKE wildcard, so nothing here needs
+ * escaping.
+ */
+export const pruneTemplateVariantCombos = async (pool: Pool): Promise<number> => {
+  const { rowCount } = await pool.query("DELETE FROM combos WHERE combo_id LIKE '%--%'")
+  return rowCount ?? 0
+}
+
 /** Every combo containing any of `cards`. Backed by `combos_pieces_idx`. */
 export const combosContaining = async (
   pool: Pool,

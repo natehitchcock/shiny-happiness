@@ -31,6 +31,7 @@ import {
   combosInIdentity,
   combosWithin,
   deleteCombos,
+  pruneTemplateVariantCombos,
   insertCombos,
 } from './repositories/combos.js'
 import {
@@ -1077,6 +1078,70 @@ describeDb('packages/db against real PostgreSQL', () => {
         expect(await combosContaining(db.pool, [kiki, unrelated, doomed])).toHaveLength(
           before.length,
         )
+      })
+    })
+
+    /*
+     * The rows the id-by-id prune could never reach (ADR-0049).
+     *
+     * ADR-0038's prune removes ids the run READ AND POSITIVELY REJECTED, which
+     * cannot touch the 41 rows left over from variants Spellbook has withdrawn
+     * from the feed entirely: a variant nobody reads is a variant nobody
+     * rejects. Reaching those by id needs "delete everything this run did not
+     * write", which empties the table on a truncated download.
+     *
+     * This is the third way, and it is neither. `--` in a `combo_id` is
+     * Spellbook's mark for a template piece — a piece that is a card CLASS —
+     * and `variantSkipReason` refuses to let one be written at all, on the
+     * `requires[]` array AND on the id. So a `--` row is stale by construction,
+     * no feed comparison is involved, and a run that read one variant or none
+     * removes exactly the same rows as a run that read all of them.
+     */
+    describe('pruning rows for template variants', () => {
+      const templated = uuid()
+
+      it('removes every row whose id carries a template segment', async () => {
+        await insertCombos(db.pool, [
+          combo('1957-4050-6273--129', [templated]),
+          combo('1680-2395-4508-7863--165', [templated]),
+          combo('2034-3388-3607', [templated]),
+        ])
+
+        const removed = await pruneTemplateVariantCombos(db.pool)
+
+        expect(removed).toBe(2)
+        expect((await combosContaining(db.pool, [templated])).map((c) => c.id)).toEqual([
+          '2034-3388-3607',
+        ])
+      })
+
+      it('leaves ordinary hyphenated ids alone — one hyphen is not two', async () => {
+        /*
+         * The mutation that would empty the table, pinned.
+         *
+         * Every variant id in the feed is hyphen-separated card ids, so
+         * `LIKE '%-%'` matches all 104,616 rows and `LIKE '%--%'` matches 41.
+         * That single character is the entire difference between a cleanup and
+         * a truncation, and nothing else in this suite would notice it.
+         */
+        const total = async (): Promise<number> => {
+          const { rows } = await db.pool.query<{ n: string }>('SELECT count(*) AS n FROM combos')
+          return Number(rows[0]?.n ?? 0)
+        }
+        const before = await total()
+        expect(before).toBeGreaterThan(0)
+
+        // Every remaining id in this table is hyphen-separated, `2034-3388-3607`
+        // among them, so a one-hyphen predicate takes all of them.
+        expect(await pruneTemplateVariantCombos(db.pool)).toBe(0)
+        expect(await total()).toBe(before)
+      })
+
+      it('reports zero on a corpus that has none, rather than failing', async () => {
+        // The steady state after the first prune. "removed 0" has to be
+        // readable as "there were none", which is why it is a count and not a
+        // boolean.
+        expect(await pruneTemplateVariantCombos(db.pool)).toBe(0)
       })
     })
 

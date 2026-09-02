@@ -88,6 +88,24 @@ export const parseIdentity = (identity: string | undefined): readonly Color[] =>
 
 export type VariantSkipReason = 'not-ok-status' | 'no-pieces' | 'template-piece'
 
+/**
+ * A template piece, as Spellbook writes one into a VARIANT ID.
+ *
+ * The id is `<card ids>--<template ids>`: `2105-3337--140` is two cards and
+ * template 140, and the doubled hyphen is an EMPTY card segment — the source's
+ * own statement that one piece of this combo is a card class rather than a
+ * card. A card segment is a non-empty run of digits, so `--` cannot arise any
+ * other way, and no variant id means anything else by it.
+ *
+ * Read as well as `requires[]` because the two are the same fact stated twice
+ * and this repository has to be exact about the population even when the feed
+ * is not (ADR-0049). See the id-shape case in `variantSkipReason` below.
+ *
+ * ONE `-` would match every ordinary variant id in the feed. The doubling is
+ * the whole rule.
+ */
+export const TEMPLATE_SEGMENT = /--/
+
 /** The card CLASSES a variant needs, by Spellbook's name for each. */
 export const templatesOf = (variant: SpellbookVariant): readonly string[] =>
   (variant.requires ?? []).map((r) => r.template?.name ?? 'unnamed template')
@@ -131,6 +149,24 @@ export const variantSkipReason = (variant: SpellbookVariant): VariantSkipReason 
   // After `no-pieces`, so a variant with neither cards nor a mappable template
   // still reports the stronger fact about itself.
   if ((variant.requires ?? []).length > 0) return 'template-piece'
+  /*
+   * The id says there is a template even if `requires[]` does not (ADR-0049).
+   *
+   * Same reason, second reading, and it is what makes the `--` prune exact
+   * rather than lucky. The prune deletes every stored row whose id holds a
+   * `--`, on the strength of this function never letting one be written — and
+   * with only the `requires[]` check above, "never" rested on the FEED always
+   * populating `requires[]` for a `--` id. That is a promise nothing here can
+   * hold Spellbook to, and the cost of it breaking is a real combo silently
+   * deleted on every run. Reading the id closes it: the population this refuses
+   * and the population the prune removes are now the same set by construction.
+   *
+   * It is also the better answer on its own. An id that names a template and a
+   * body that does not is a variant we cannot represent either way, and the
+   * ruling above already covers it — skip and report, rather than store short,
+   * because that is the one of the two that is wrong in the safe direction.
+   */
+  if (TEMPLATE_SEGMENT.test(variant.id)) return 'template-piece'
   return null
 }
 

@@ -126,6 +126,75 @@ describe('variantSkipReason', () => {
       variantSkipReason({ id: 'y', status: 'OK', uses: [], requires: [{ template: {} }] }),
     ).toBe('no-pieces')
   })
+
+  /*
+   * THE GUARD ON THE `--` PRUNE (ADR-0049).
+   *
+   * `pruneTemplateVariantCombos` deletes every row whose `combo_id` holds a
+   * `--`, with no reference to the feed at all, and it is exact for exactly one
+   * reason: this function refuses to let such an id be written. The moment that
+   * stops being true the prune stops being a cleanup and becomes silent data
+   * loss on every ingest, so the two are pinned together here.
+   *
+   * If you are here because one of these three failed, the prune in
+   * `apps/ingest/src/spellbook-ingest.ts` is now unsafe and must be changed in
+   * the same commit. Do not "fix" the test.
+   */
+  describe('the invariant the `--` prune depends on', () => {
+    it('refuses every variant that names a card class', () => {
+      expect(variantSkipReason(NEEDS_TEMPLATE)).toBe('template-piece')
+      expect(
+        variantSkipReason({
+          id: '1-2',
+          status: 'OK',
+          uses: CARDS_ONLY.uses ?? [],
+          requires: [{ template: { name: 'Creature with Persist' } }],
+        }),
+      ).toBe('template-piece')
+    })
+
+    it('refuses a variant whose ID carries a template segment, even with an empty requires[]', () => {
+      /*
+       * The residual the `requires[]` check alone cannot close.
+       *
+       * Spellbook writes a template piece into the id as an EMPTY card segment
+       * — `2105-3337--140` is two cards and template 140 — so the `--` is the
+       * source's own statement that a piece is a card class. Refusing on
+       * `requires[]` alone left the prune resting on a promise about the FEED:
+       * that Spellbook never publishes a `--` id with the `requires[]` array
+       * missing or empty. Nothing in this repository can hold the feed to that.
+       *
+       * Refusing on the id as well makes the two populations identical by
+       * construction: what the prune deletes is exactly what this refuses. It
+       * is also the safer reading on its own merits — an id that says there is
+       * a template and a body that does not is a variant we cannot represent
+       * either way, and ADR-0038 already ruled that such a variant is skipped
+       * rather than stored short.
+       */
+      expect(
+        variantSkipReason({
+          id: '2105-3337--140',
+          status: 'OK',
+          uses: CARDS_ONLY.uses ?? [],
+          requires: [],
+        }),
+      ).toBe('template-piece')
+      expect(
+        variantSkipReason({ id: '2105-3337--140', status: 'OK', uses: CARDS_ONLY.uses ?? [] }),
+      ).toBe('template-piece')
+    })
+
+    it('does not read a single hyphen as a template segment', () => {
+      // Every ordinary variant id is hyphen-separated card ids, and `104,616`
+      // of them are in the table. Matching `-` rather than `--` here would
+      // refuse the whole feed, and the prune that mirrors it would empty the
+      // table — the exact failure ADR-0038 refused a bare sweep over.
+      expect(variantSkipReason(CARDS_ONLY)).toBeNull()
+      expect(
+        variantSkipReason({ id: '2034-3388-3607', status: 'OK', uses: CARDS_ONLY.uses ?? [] }),
+      ).toBeNull()
+    })
+  })
 })
 
 describe('toCombo', () => {

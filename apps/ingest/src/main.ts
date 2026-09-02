@@ -96,6 +96,17 @@ const runCombos = async (pool: Pool, limit: number | undefined): Promise<void> =
   if (report.templateRequired.length > 0 || report.skippedNotOk > 0) {
     console.log(`  removed ${report.removed} rows an earlier run had written for those variants`)
   }
+  /*
+   * Rows for template variants Spellbook has since withdrawn from the feed
+   * (ADR-0049). Printed only when it moved: unlike the line above this is a
+   * one-off cleanup, and a permanent `pruned 0` on every run afterwards would
+   * be noise rather than the signal that line is.
+   */
+  if (report.removedTemplateVariants > 0) {
+    console.log(
+      `  pruned ${report.removedTemplateVariants} rows for template variants no longer in the feed`,
+    )
+  }
   // Unmapped pieces are reported loudly, never dropped quietly (doc 04 §4.2).
   if (report.unmapped.length > 0) {
     console.error(`  ${report.unmapped.length} combos name cards not in the corpus:`)
