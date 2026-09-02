@@ -78,6 +78,17 @@ const runCombos = async (pool: Pool, limit: number | undefined): Promise<void> =
       `  skipped ${report.skippedNotOk} not-OK status, ${report.skippedNoPieces} with no pieces`,
     )
   }
+  // A piece Spellbook describes as a card class rather than naming. Loud for
+  // the same reason as the unmapped list below, and larger (ADR-0038).
+  if (report.templateRequired.length > 0) {
+    console.error(
+      `  ${report.templateRequired.length} combos need a card CLASS we cannot name, and are not stored:`,
+    )
+    for (const t of report.templateRequired.slice(0, 10)) {
+      console.error(`    ${t.comboId} needs ${t.templates.join(', ')}`)
+    }
+    console.error('    (storing them short would claim a combo the deck has not assembled)')
+  }
   // Unmapped pieces are reported loudly, never dropped quietly (doc 04 §4.2).
   if (report.unmapped.length > 0) {
     console.error(`  ${report.unmapped.length} combos name cards not in the corpus:`)

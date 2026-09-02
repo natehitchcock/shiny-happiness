@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   parseIdentity,
   piecesOf,
+  templatesOf,
   toCombo,
   toComboResult,
   variantSkipReason,
@@ -78,25 +79,59 @@ describe('parseIdentity', () => {
   })
 })
 
+/** The fixture's one variant that needs no card class. */
+const CARDS_ONLY = variants.find((v) => (v.requires ?? []).length === 0)!
+/** `2105-3337--140` — two named cards plus template 140, "Mana Dork or Mana Dork Creator". */
+const NEEDS_TEMPLATE = variants.find((v) => (v.requires ?? []).length > 0)!
+
 describe('variantSkipReason', () => {
-  it('accepts an OK variant with pieces', () => {
-    expect(variantSkipReason(variants[0]!)).toBeNull()
+  it('accepts an OK variant whose every piece is a named card', () => {
+    expect(variantSkipReason(CARDS_ONLY)).toBeNull()
   })
 
   it('skips a variant their own editors have not accepted', () => {
     // Publishing a draft as fact would put combos in front of users that
     // Spellbook itself has not signed off.
-    expect(variantSkipReason({ ...variants[0]!, status: 'D' })).toBe('not-ok-status')
+    expect(variantSkipReason({ ...CARDS_ONLY, status: 'D' })).toBe('not-ok-status')
   })
 
   it('skips a variant with no card pieces', () => {
     expect(variantSkipReason({ id: 'x', status: 'OK', uses: [] })).toBe('no-pieces')
   })
+
+  it('skips a variant one of whose pieces is a card CLASS (ADR-0038)', () => {
+    // The reported bug. This assertion used to read `toBeNull()` on the same
+    // fixture variant, which is why the defect shipped: the fixture always
+    // carried the case and the test asserted the wrong answer about it.
+    //
+    // `2105-3337--140` is Combat Celebrant + Fable of the Mirror-Breaker + "a
+    // mana dork". Stored from `uses[]` alone it is a TWO-CARD infinite, which
+    // is the shape brackets 1-3 restrict — so a deck holding those two cards
+    // was told it had assembled a combo it cannot execute.
+    expect(NEEDS_TEMPLATE.id).toBe('2105-3337--140')
+    expect(variantSkipReason(NEEDS_TEMPLATE)).toBe('template-piece')
+  })
+
+  it('reports the missing class by name rather than as a count', () => {
+    // The operator has to be able to tell a persist creature from a mana dork;
+    // "4,813 combos dropped" on its own is not something anyone can act on.
+    expect(templatesOf(NEEDS_TEMPLATE)).toEqual(['Mana Dork or Mana Dork Creator'])
+    expect(templatesOf(CARDS_ONLY)).toEqual([])
+  })
+
+  it('still says "no pieces" when there are neither cards nor a usable class', () => {
+    // The stronger fact about the variant wins. A template alone is not a combo
+    // this app could ever store, with or without the new reason.
+    expect(
+      variantSkipReason({ id: 'y', status: 'OK', uses: [], requires: [{ template: {} }] }),
+    ).toBe('no-pieces')
+  })
 })
 
 describe('toCombo', () => {
-  it('maps every fixture variant', () => {
+  it('maps every fixture variant whose pieces are all named cards', () => {
     for (const variant of variants) {
+      if (variantSkipReason(variant) !== null) continue
       const combo = toCombo(variant)
       expect(combo).not.toBeNull()
       // The DB CHECK refuses a combo with no pieces; so does the domain.
@@ -105,8 +140,15 @@ describe('toCombo', () => {
     }
   })
 
+  it('refuses to map a combo one of whose pieces is a card class (ADR-0038)', () => {
+    // A shorter combo is not a smaller truth, it is a different and false one:
+    // `pieces.length === 2` is what `isTwoCardInfinite` reads for the bracket
+    // check, and what `annotateCombos` reads to say "adding this completes it".
+    expect(toCombo(NEEDS_TEMPLATE)).toBeNull()
+  })
+
   it('maps pieces on oracle id, with no name matching anywhere', () => {
-    const variant = variants[0]!
+    const variant = CARDS_ONLY
     const combo = toCombo(variant)!
 
     for (const piece of combo.pieces) {
