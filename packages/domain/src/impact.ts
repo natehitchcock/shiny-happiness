@@ -510,9 +510,32 @@ const TARGET_PLAYER = /target (player|opponent)/
  * "Exile target creature. You control the game" would still be `opposing`, and
  * a card that hits one of each — "target creature you control fights target
  * creature an opponent controls" — still matches on the unrestricted half.
+ *
+ * A QUALIFIER MAY SIT BETWEEN `target` AND ITS NOUN, and requiring them
+ * adjacent was a defect worth 1,472 commander-legal cards: "destroy target
+ * non-Demon creature", "target attacking creature", "target nonland permanent",
+ * "target legendary creature", "counter target noncreature spell". All of them
+ * fell through to `self` and were priced at 0.85 instead of 1.2.
+ *
+ * It surfaced as a BREADTH bug, which is why the run is worth describing. The
+ * control assertion in `impact-roles.test.ts` — `spot-removal` must never
+ * report a card with nothing to count — caught Shadowborn Demon. Its removal
+ * clause was read correctly at `breadth: 'one'`; it just scored 0.85 and lost
+ * the card to its own upkeep drawback at 0.935, which brought `none` with it
+ * under the winning-clause rule. Repairing the stakes reading let the removal
+ * clause win its own card again. `TARGET` never had this problem: it is a bare
+ * `\btarget\b` and sees past any qualifier.
+ *
+ * THE EXCLUDED WORDS ARE THE WHOLE SAFETY OF THE RUN. `of` keeps "becomes the
+ * target of a spell" — a trigger condition, 69 cards — from reading as a thing
+ * being targeted. `you`, `an` and `your` stop the run before a controller
+ * phrase so it cannot swallow one and reach a later noun. `each` and `all`
+ * begin a mass quantifier, which is a different tier entirely. The trailing
+ * `you control` lookahead is unchanged and still does the real work: 162 cards
+ * in the widened population say "target <qualifier> <noun> you control".
  */
 const OPPOSING =
-  /you don't control|an opponent controls|target (?:creature|permanent|artifact|enchantment|land|planeswalker|spell)s?\b(?![^.,;:\n]{0,24} you control)/
+  /you don't control|an opponent controls|target (?:(?!of |you |an |your |each |all )[a-z0-9'-]+ ){0,3}?(?:creature|permanent|artifact|enchantment|land|planeswalker|spell)s?\b(?![^.,;:\n]{0,24} you control)/
 const YOU_CONTROL = /you control/
 
 /** One ability line's complete reading. The four tiers travel together. */
