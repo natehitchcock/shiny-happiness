@@ -986,7 +986,25 @@ const rationaleFor = (key: CandidateGroupKey): string => {
     return 'One card away from a combo, more than once — these are pairs worth adding together.'
   if (key.startsWith('fills-')) return 'Directly closes a gap against your composition targets.'
   if (key.startsWith('top-')) return 'Most played for this commander, by card type.'
-  if (key === 'high-synergy') return 'Played far more in this commander than in decks generally.'
+  /*
+   * The same mistake the `other` branch below already carries a note about,
+   * one line up, and it survived the fix that was made there (ADR-0054).
+   *
+   * "Played far more in this commander than in decks generally" is a claim
+   * about how often OTHER PEOPLE play a card. ADR-0008 removed the only source
+   * this product had for that, `stats` is null in production, and the group is
+   * therefore filled entirely by `MECHANICAL_SYNERGY_THRESHOLD` — the
+   * membership chain's statistical branch above it can never fire. The
+   * playtest saw the consequence directly: "High synergy 398", full of lands
+   * whose own reasons read "benefits from your untap". Every row already said
+   * what it was doing there; the heading over them said something else.
+   *
+   * The replacement says what the group IS rather than only avoiding what it
+   * is not — a heading that dodges is the same P4 failure one step quieter —
+   * and it points at the per-row reasons, which are the evidence.
+   */
+  if (key === 'high-synergy')
+    return 'Mechanically matched to what your deck already does or wants — each row names the event. Not a measure of how often anyone plays them.'
   // `other`, the catch-all. It used to say "Widely played and legal in your
   // colours" under the heading "Staples", which with `stats: null` was every
   // eligible card in the deck's identity — a claim about popularity made over a

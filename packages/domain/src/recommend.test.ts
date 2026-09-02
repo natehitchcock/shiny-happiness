@@ -1294,6 +1294,35 @@ describe('staples lead, then staple lands, then combos, then the rest', () => {
     expect(idsIn(result, 'staple')).toEqual([])
   })
 
+  it('does not claim a popularity statistic over the high-synergy group either', () => {
+    /*
+     * The identical mistake, one line up from the `other` branch that already
+     * carries the note about it (ADR-0054). "Played far more in this commander
+     * than in decks generally" is a claim about how often other people play a
+     * card, and ADR-0008 removed the only source this product had for that —
+     * `stats` is null in production, so the group is filled entirely by
+     * `MECHANICAL_SYNERGY_THRESHOLD`. The playtest saw "High synergy 398" full
+     * of lands whose reasons read "benefits from your untap": mechanically
+     * matched, and nothing whatever to do with popularity.
+     */
+    const wants: DeckSynergy = {
+      produces: new Map([['untap', COMMANDER_WEIGHT]]),
+      wants: new Map(),
+      has: new Map(),
+    }
+    const result = recommend(
+      baseInput({
+        pool: [pooled('payoff', { card: card('payoff', { synergyWants: ['untap'] }) })],
+        deckSynergy: wants,
+      }),
+    )
+    const group = result.groups.find((g) => g.key === 'high-synergy')!
+    expect(group.rationale).not.toMatch(/played|popular|more often|generally/i)
+    // And it says what the group IS, rather than merely not saying what it is
+    // not — a heading with nothing under it is the same P4 failure.
+    expect(group.rationale).toMatch(/mechanic/i)
+  })
+
   it('never offers a staple outside the deck colour identity', () => {
     const offColour = pooled('Counterspell', {
       card: card('Counterspell', { colorIdentity: ['U'], types: ['instant'] }),
