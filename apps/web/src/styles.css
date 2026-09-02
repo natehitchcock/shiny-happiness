@@ -2555,6 +2555,42 @@ select {
   font-size: 0.68rem;
 }
 
+/*
+ * A combo piece as a control that opens it.
+ *
+ * The three `.partner` colours above still say what the piece IS — owned,
+ * missing, locked — so this must not repaint it. It adds the affordance
+ * instead: a dotted underline, which is also what makes the control
+ * distinguishable without relying on colour, since all three states are already
+ * colours meaning something else.
+ *
+ * `.partner.as-link` and not `.as-link`, because `.partner` is later in this
+ * file and would otherwise win the colour back on hover.
+ */
+.partner.as-link {
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 0.15em;
+}
+.partner.as-link:hover {
+  text-decoration-style: solid;
+}
+
+/*
+ * The pieces of an assembled combo in the analysis rail, same rule.
+ *
+ * `.note` is body text, so these ARE inline links in a sentence and need the
+ * underline for the same reason the ones in rules text do.
+ */
+.note .as-link {
+  color: var(--parchment);
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 0.15em;
+}
+.note .as-link:hover {
+  color: var(--brass);
+  text-decoration-style: solid;
+}
+
 /* -------------------------------------------------- hints and semantics */
 
 /* The trigger keeps the look of whatever it wraps — it is a button so that the

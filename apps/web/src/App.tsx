@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
 import { cardDetail, hydrateCards } from './cardcache'
 import { usePipeline, type Phase } from './pipeline'
@@ -39,6 +39,10 @@ import {
   // hands it the numbers the composition meters are already drawing from.
   quickbuildPlan,
   type QuickbuildReach,
+  // Where a card name sits inside one ability of rules text. The SAME function
+  // the server ran to decide which names are references at all (doc 09 §9.4), so
+  // the panel cannot link a span the server did not resolve.
+  splitOracleText,
 } from '@roundtable/domain'
 // Aliased: `oracleId` is a parameter name a dozen times in this file, and a
 // brander shadowed by a local of the same name reads as a bug even when it is
@@ -64,7 +68,7 @@ import {
   levelSpec,
   metricValue,
 } from '@roundtable/ui'
-import type { CardView, Color, ImpactRoleView, MetricExplainer } from '@roundtable/ui'
+import type { CardView, Color, ImpactRoleView, MetricExplainer, OracleSegment } from '@roundtable/ui'
 import type {
   CardImpact,
   ColumnMetric,
@@ -785,11 +789,14 @@ const ComboList = ({
   cards,
   lockedIds,
   self,
+  onOpen,
 }: {
   combos: readonly api.Recommendation['combos'][number][]
   cards: ReadonlyMap<string, api.Card>
   lockedIds: ReadonlySet<string>
   self: string
+  /** Opens a combo piece in the preview. Absent where there is no panel to open. */
+  onOpen?: ((oracleId: string) => void) | undefined
 }): React.JSX.Element => {
   if (combos.length === 0) return <span className="hint-line">No combo detail available.</span>
   return (
@@ -799,11 +806,38 @@ const ComboList = ({
           <span className="combo-pieces">
             {c.pieces
               .filter((piece) => piece !== self)
-              .map((piece) => (
-                <span className="partner" data-locked={lockedIds.has(piece)} key={piece}>
-                  {cards.get(piece)?.name ?? 'a card in your deck'}
-                </span>
-              ))}
+              .map((piece) => {
+                const name = cards.get(piece)?.name
+                /*
+                 * A piece with no name is not a link.
+                 *
+                 * "a card in your deck" is a placeholder for a card this client
+                 * has not hydrated, and a control labelled with a placeholder
+                 * cannot say what it opens — which is the R4 failure. The text
+                 * still appears; it simply is not a control.
+                 */
+                if (onOpen === undefined || name === undefined) {
+                  return (
+                    <span className="partner" data-locked={lockedIds.has(piece)} key={piece}>
+                      {name ?? 'a card in your deck'}
+                    </span>
+                  )
+                }
+                return (
+                  <button
+                    className="partner as-link"
+                    data-locked={lockedIds.has(piece)}
+                    key={piece}
+                    onClick={() => {
+                      onOpen(piece)
+                    }}
+                    aria-label={`Preview ${name}`}
+                    type="button"
+                  >
+                    {name}
+                  </button>
+                )
+              })}
           </span>
           <span className="combo-produces">{c.produces.join(', ')}</span>
         </span>
@@ -822,6 +856,7 @@ const Degree = ({
   cards,
   lockedIds,
   self,
+  onOpen,
 }: {
   degree: number
   near: number
@@ -829,6 +864,8 @@ const Degree = ({
   cards?: ReadonlyMap<string, api.Card>
   lockedIds?: ReadonlySet<string>
   self?: string
+  /** Opens a combo piece named in the hint. */
+  onOpen?: ((oracleId: string) => void) | undefined
 }): React.JSX.Element => {
   const value = degree > 0 ? degree : near
   const label =
@@ -866,6 +903,7 @@ const Degree = ({
             cards={cards}
             lockedIds={lockedIds ?? new Set()}
             self={self ?? ''}
+            onOpen={onOpen}
           />
         </>
       }
@@ -1891,34 +1929,53 @@ interface Partner {
   readonly why?: string
 }
 
-const PartnerName = ({ p }: { p: Partner }): React.JSX.Element => (
-  <span
-    className="partner"
-    data-locked={p.locked}
-    data-missing={p.missing === true}
-    title={
-      p.missing === true
-        ? `${p.name} is not in your deck yet`
-        : p.locked
-          ? `${p.name} — locked`
-          : p.name
-    }
-  >
-    {p.name}
-    {p.why === undefined ? null : <span className="partner-why"> {p.why}</span>}
-  </span>
-)
+const PartnerName = ({
+  p,
+  onOpen,
+}: {
+  p: Partner
+  /**
+   * Opens this partner in the preview.
+   *
+   * The most useful link on the panel: a combo piece the deck does NOT have is
+   * exactly the card the reader wants to look at next, and until now its name
+   * was the one card name on screen with no way through to it.
+   */
+  onOpen: (oracleId: string) => void
+}): React.JSX.Element => {
+  const title =
+    p.missing === true ? `${p.name} is not in your deck yet` : p.locked ? `${p.name} — locked` : p.name
+  return (
+    <button
+      className="partner as-link"
+      data-locked={p.locked}
+      data-missing={p.missing === true}
+      title={title}
+      onClick={() => {
+        onOpen(p.oracleId)
+      }}
+      aria-label={`Preview ${p.name}`}
+      type="button"
+    >
+      {p.name}
+      {p.why === undefined ? null : <span className="partner-why"> {p.why}</span>}
+    </button>
+  )
+}
 
 const Works = ({
   detail,
   accepted,
   lockedIds,
   cards,
+  onOpen,
 }: {
   detail: api.CardDetail
   accepted: ReadonlySet<string>
   lockedIds: ReadonlySet<string>
   cards: ReadonlyMap<string, api.Card>
+  /** Opens a partner in the preview, on the same trail as a rules-text link. */
+  onOpen: (oracleId: string) => void
 }): React.JSX.Element | null => {
   const self = detail.oracleId
 
@@ -1996,7 +2053,7 @@ const Works = ({
         <p className="partners">
           <span className="partners-label">Combos with</span>
           {combosWith.map((p) => (
-            <PartnerName key={p.oracleId} p={p} />
+            <PartnerName key={p.oracleId} p={p} onOpen={onOpen} />
           ))}
         </p>
       ) : null}
@@ -2008,12 +2065,12 @@ const Works = ({
           </p>
           {oneAway.map((line) => (
             <p className="partners" key={line.needs.oracleId}>
-              <PartnerName p={line.needs} />
+              <PartnerName p={line.needs} onOpen={onOpen} />
               {line.with.length === 0 ? null : (
                 <>
                   <span className="partners-label">with</span>
                   {line.with.map((p) => (
-                    <PartnerName key={p.oracleId} p={p} />
+                    <PartnerName key={p.oracleId} p={p} onOpen={onOpen} />
                   ))}
                 </>
               )}
@@ -2026,7 +2083,7 @@ const Works = ({
         <p className="partners">
           <span className="partners-label">Synergises with</span>
           {synergyWith.map((p) => (
-            <PartnerName key={p.oracleId} p={p} />
+            <PartnerName key={p.oracleId} p={p} onOpen={onOpen} />
           ))}
         </p>
       ) : null}
@@ -2118,6 +2175,22 @@ const explainMetric: MetricExplainer = ({ label, lines }) => (
  * The analysis rail is a resizable column, not a fixed one, so `ResizeObserver`
  * rather than a breakpoint: dragging the divider has to move the picture too.
  */
+/**
+ * How many cards the preview's Back trail remembers.
+ *
+ * Two dozen. The instruction was "a few dozen"; the shape of the data says the
+ * low end of that is generous — the longest genuine chain of oracle-text
+ * references in the corpus is three cards (Urza, Lord Protector → The
+ * Mightstone and Weakstone, and the Kaldra equipment), so 24 is roughly eight
+ * times the deepest thing a reader can actually walk into.
+ *
+ * At the bound the OLDEST entry is dropped, not the newest: the reader walks
+ * backwards from the newest end, so the far end is the part they will never
+ * reach. Back then simply runs out and becomes disabled, which is visible in the
+ * control rather than silently inert.
+ */
+const MAX_TRAIL = 24
+
 const Preview = ({
   card,
   detail,
@@ -2131,6 +2204,10 @@ const Preview = ({
   emphasis,
   onToggleEmphasis,
   emphasisBusy,
+  onFollowReference,
+  onBack,
+  backTo,
+  backDepth,
 }: {
   /** The hydrated card, already in memory. Everything readable comes from here. */
   card: api.Card | undefined
@@ -2153,6 +2230,19 @@ const Preview = ({
   onToggleEmphasis: (tag: string) => void
   /** A focus write is in flight, so the toggles are held rather than removed. */
   emphasisBusy: boolean
+  /** Open a card named in this card's rules text, remembering where we were. */
+  onFollowReference: (oracleId: string) => void
+  onBack: () => void
+  /**
+   * The card Back returns to, or null when there is nowhere to go.
+   *
+   * The NAME and not a count, because the control has to say what it does:
+   * "Back to Sol Ring" tells a screen-reader user where they are about to land,
+   * and "Back" does not.
+   */
+  backTo: { oracleId: string; name: string } | null
+  /** How many cards are behind this one, so Back knows when it is the last step. */
+  backDepth: number
 }): React.JSX.Element | null => {
   // `detail` is the fallback, not the source: a card reached from somewhere that
   // never hydrated it still previews once its detail lands.
@@ -2165,6 +2255,32 @@ const Preview = ({
   // the bigger screen.
   const shownId = shown?.oracleId ?? null
   const ref = useRef<HTMLElement>(null)
+  /** Where focus goes when Back disables itself under the caret. */
+  const closeRef = useRef<HTMLButtonElement>(null)
+
+  /*
+   * The cards this card's rules text names, and how to draw them as links.
+   *
+   * The names come from the server, which resolved them against the card table
+   * (`CardDetail.references`); `splitOracleText` then finds WHERE each one sits
+   * in the ability being rendered. The same pure matcher ran on both sides, so
+   * the client cannot disagree with the server about what is a reference.
+   *
+   * Undefined when there is nothing to link — which is the overwhelmingly common
+   * case, measured at 99.3% of cards — so `OracleText` takes its original path.
+   */
+  // Keyed on `detail`, which each fetch replaces wholesale, rather than on
+  // `detail.references` — that array is a fresh identity on every render and
+  // would defeat the memo.
+  const referenceIds = useMemo(
+    () => new Map((detail?.references ?? []).map((r) => [r.name, r.oracleId])),
+    [detail],
+  )
+  const splitNames = useMemo(() => {
+    if (referenceIds.size === 0 || shown === null) return undefined
+    const known = new Set(referenceIds.keys())
+    return (ability: string): readonly OracleSegment[] => splitOracleText(ability, known, shown.name)
+  }, [referenceIds, shown])
 
   /*
    * Read `sheet` through a ref inside the focus effect.
@@ -2286,7 +2402,35 @@ const Preview = ({
     >
       <div className="preview-head">
         <h3>{shown.name}</h3>
-        <button className="act" onClick={onClose} aria-label="Close preview">
+        {/*
+         * Back and Close are different actions and must not be confusable.
+         *
+         * Back with nothing behind it is DISABLED, never a second Close. A Back
+         * that closes the panel is a trap: the reader asks for the previous card
+         * and loses the panel instead.
+         */}
+        <button
+          className="act"
+          onClick={() => {
+            /*
+             * Hand focus over BEFORE the control disables itself.
+             *
+             * This is the last step back, so Back is about to become disabled
+             * while it holds focus — and a disabled element drops focus to
+             * `<body>`, which on the sheet layout means the next Tab restarts
+             * from the masthead. The tour work hit this exact class of bug
+             * earlier today. Close is the right landing place: it is the
+             * neighbouring control and it still does something.
+             */
+            if (backDepth === 1 && closeRef.current !== null) closeRef.current.focus()
+            onBack()
+          }}
+          disabled={backTo === null}
+          aria-label={backTo === null ? 'Back — nothing to go back to' : `Back to ${backTo.name}`}
+        >
+          Back
+        </button>
+        <button className="act" onClick={onClose} aria-label="Close preview" ref={closeRef}>
           Close
         </button>
       </div>
@@ -2365,7 +2509,17 @@ const Preview = ({
           resized or read aloud, and this is the panel where someone is reading
           rather than scanning. */}
       <p className="oracle">
-        <OracleText text={shown.oracleText} faces={shown.oracleTextFaces} />
+        <OracleText
+          text={shown.oracleText}
+          faces={shown.oracleTextFaces}
+          splitNames={splitNames}
+          onOpenName={(name) => {
+            const id = referenceIds.get(name)
+            // A name with no id cannot happen — the names ARE the resolved keys
+            // — but silently doing nothing beats navigating to `undefined`.
+            if (id !== undefined) onFollowReference(id)
+          }}
+        />
       </p>
       {/*
        * Impact and efficiency, immediately under the text they are a reading OF
@@ -2423,7 +2577,13 @@ const Preview = ({
       {detail === null ? (
         <p className="note">Looking up combos…</p>
       ) : (
-        <Works detail={detail} accepted={accepted} lockedIds={lockedIds} cards={cards} />
+        <Works
+          detail={detail}
+          accepted={accepted}
+          lockedIds={lockedIds}
+          cards={cards}
+          onOpen={onFollowReference}
+        />
       )}
 
       <Semantics
@@ -4890,6 +5050,13 @@ export const Workspace = ({
   const [detail, setDetail] = useState<api.CardDetail | null>(null)
   /** Which card the preview is showing, known before its detail arrives. */
   const [inspect, setInspect] = useState<string | null>(null)
+  /**
+   * Cards left behind by following a card name inside the preview, oldest first.
+   *
+   * Only in-panel links push here; opening a card from any list clears it. See
+   * `followReference` for why.
+   */
+  const [trail, setTrail] = useState<readonly string[]>([])
   /** The control that opened the preview, so closing it can hand focus back. */
   const previewOpener = useRef<HTMLElement | null>(null)
   /*
@@ -6220,12 +6387,14 @@ export const Workspace = ({
    * Only printings and combos have to come from the server; they arrive second
    * and slot in. That also means a card whose fetch fails still previews.
    */
-  const open = (oracleId: string): void => {
-    // Remember what the user was on so closing can put them back. Nothing that
-    // calls `open` lives inside the preview, so this is always a row in the
-    // deck, the suggestions or a name-match list, never the panel itself.
-    const active = document.activeElement
-    previewOpener.current = active instanceof HTMLElement ? active : null
+  /**
+   * Put a card in the preview and fetch its detail.
+   *
+   * Separate from `open` because three things navigate the panel now — opening
+   * it from a list, following a card name inside it, and stepping back — and
+   * only the first of them should reset the trail or claim the focus return.
+   */
+  const show = (oracleId: string): void => {
     setInspect(oracleId)
     setDetail(null)
     // Through the cache: printings and combos are corpus data like everything
@@ -6245,6 +6414,51 @@ export const Workspace = ({
       .catch(() => undefined)
   }
 
+  const open = (oracleId: string): void => {
+    // Remember what the user was on so closing can put them back. Nothing that
+    // calls `open` lives inside the preview, so this is always a row in the
+    // deck, the suggestions or a name-match list, never the panel itself.
+    const active = document.activeElement
+    previewOpener.current = active instanceof HTMLElement ? active : null
+    /*
+     * A fresh start, so the trail is dropped.
+     *
+     * Only a link INSIDE the panel pushes (see `followReference`). The
+     * alternative — every card opened from the feed pushing too — was rejected:
+     * it makes Back a general browsing history, fills the bound in a minute of
+     * ordinary clicking, and answers a question nobody asked, because the list
+     * that opened the card is still on screen and is already the way back to it.
+     * Back should mean one thing: return to the card whose text sent me here.
+     */
+    setTrail([])
+    show(oracleId)
+  }
+
+  /**
+   * Follow a card name from inside the preview, remembering where we were.
+   *
+   * Pushing the CURRENT card, not the new one: Back has to reach what the reader
+   * was reading. A link to the card already on screen pushes nothing — the
+   * matcher never emits a self-reference, but a trail with the same card twice
+   * in a row would make Back look broken the once it happened.
+   */
+  const followReference = (oracleId: string): void => {
+    if (inspect !== null && inspect !== oracleId) {
+      // Evict the OLDEST. The reader walks backwards from the newest end, so the
+      // far end is the part they will never reach.
+      setTrail((previous) => [...previous, inspect].slice(-MAX_TRAIL))
+    }
+    show(oracleId)
+  }
+
+  /** Step back to the card whose text sent the reader to this one. */
+  const backToPrevious = (): void => {
+    const previous = trail[trail.length - 1]
+    if (previous === undefined) return
+    setTrail((current) => current.slice(0, -1))
+    show(previous)
+  }
+
   /*
    * Closing puts focus back on the card that opened the panel.
    *
@@ -6256,6 +6470,10 @@ export const Workspace = ({
   const closePreview = useCallback((): void => {
     setInspect(null)
     setDetail(null)
+    // The trail belongs to the panel. Leaving it behind would put a live Back
+    // button on the NEXT card someone opens, pointing at a card they were
+    // reading before they closed the last panel.
+    setTrail([])
     const opener = previewOpener.current
     previewOpener.current = null
     // A card removed from the deck while its preview was open leaves a detached
@@ -6943,6 +7161,17 @@ export const Workspace = ({
    */
   const previewCard = inspect === null ? undefined : cards.get(inspect)
   const detailOpen = (previewCard ?? detail ?? null) !== null
+  /*
+   * The card Back returns to, named.
+   *
+   * A card followed from a link is usually NOT in the deck, so it is usually not
+   * in `cards` either — the trail holds ids and the name has to be recovered. It
+   * is in `cards` whenever the reader started from a card they own, which is the
+   * common case; the fallback keeps the control honest and operable when it is
+   * not, rather than hiding a step of history because a name is missing.
+   */
+  const backId = trail.length === 0 ? null : trail[trail.length - 1]!
+  const backTo = backId === null ? null : { oracleId: backId, name: cards.get(backId)?.name ?? 'the previous card' }
 
   return (
     <>
@@ -7798,6 +8027,7 @@ export const Workspace = ({
                           cards={cards}
                           lockedIds={lockedIds}
                           self={item.oracleId}
+                          onOpen={open}
                         />
                         {/* The reasons sit BESIDE the name button, not inside it.
                       One of them opens a panel of its own, and a button nested
@@ -7845,6 +8075,7 @@ export const Workspace = ({
                                         cards={cards}
                                         lockedIds={lockedIds}
                                         self={item.oracleId}
+                                        onOpen={open}
                                       />
                                     </>
                                   }
@@ -7975,6 +8206,10 @@ export const Workspace = ({
             emphasis={emphasis}
             onToggleEmphasis={toggleEmphasis}
             emphasisBusy={emphasisSaving}
+            onFollowReference={followReference}
+            onBack={backToPrevious}
+            backTo={backTo}
+            backDepth={trail.length}
           />
           <div className="analysis-scroll">
             <h2 style={{ marginTop: '1.25rem' }}>
@@ -8140,8 +8375,35 @@ export const Workspace = ({
                     <div className="combo-list">
                       {analysis.deckCombos.map((c) => (
                         <p className="note" key={c.comboId}>
-                          {c.pieces.map((p) => cards.get(p)?.name ?? p.slice(0, 6)).join(' + ')} →{' '}
-                          {c.produces.join(', ')}
+                          {/*
+                           * Each piece is its own control rather than one joined
+                           * string, so every card in an assembled combo can be
+                           * opened. The " + " between them stays plain text: it
+                           * is punctuation, and putting it inside either
+                           * neighbouring control would make the accessible name
+                           * read "Preview Basalt Monolith +".
+                           */}
+                          {c.pieces.map((piece, at) => {
+                            const name = cards.get(piece)?.name
+                            return (
+                              <Fragment key={piece}>
+                                {at === 0 ? null : ' + '}
+                                {name === undefined ? (
+                                  piece.slice(0, 6)
+                                ) : (
+                                  <button
+                                    className="as-link"
+                                    onClick={() => open(piece)}
+                                    aria-label={`Preview ${name}`}
+                                    type="button"
+                                  >
+                                    {name}
+                                  </button>
+                                )}
+                              </Fragment>
+                            )
+                          })}{' '}
+                          → {c.produces.join(', ')}
                         </p>
                       ))}
                     </div>
