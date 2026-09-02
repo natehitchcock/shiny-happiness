@@ -55,17 +55,47 @@ groups, read off the recommendations response the workspace already holds. They
 are **not** recomputed from the curated list and the deck: `recommend` has
 already applied the colour identity, the accepted set, the exclusions (P6), the
 per-card budget cap and the deck's remaining bracket allowance, and none of
-those inputs reach `quickbuildPlan`. The feed is on screen beside the panel, so
-a second count computed here could contradict the heading the builder is looking
-at. One definition, two surfaces.
+those inputs reach `quickbuildPlan`.
 
-**The phase ends by arithmetic, not by a switch.** Every accept and every
-rejection removes a card from the group that produced the count, so the count
-falls by one and the gap disappears when the last one goes — `short > 0` is the
-same condition that opens a composition gap. There is no terminal state to stall
-in and no empty group to sit on. When both reach zero the plan is identical to
-the plan a caller that never sent the field would have got, and the derived
-order leads: creature first, land last.
+**`short` decides whether the phase OPENS. It does not decide what the heading
+prints.** These are two different jobs and this spec used to give them to one
+number, which is how a playtest saw *"5 staple lands you don't have yet"* over
+*"Nothing in your colours fills this gap"* — after all five had been added.
+
+`short` comes from the last **feed** recompute. The trio underneath comes from a
+separate, later request the panel makes for the same group, and is then filtered
+again by the optimistic deck so a card the builder took a moment ago leaves
+immediately. Those are two responses at two server states with two different
+filters applied, so they drift the instant anything is added — and they sit an
+inch apart on screen. The heading therefore counts **the panel's own list**, the
+one the body is drawing, and falls back to `short` only until the panel's first
+response lands. One list, two readings of it.
+
+**The phase does not end by one number falling to zero, and this spec used to
+say it did.** The claim was that every accept removes a card from the group that
+produced the count, so the count falls by one and the gap goes when the last one
+does. Both halves are wrong:
+
+- The count the *builder sees* is not the one that closes the gap. The gap
+  closes when the next **feed** recompute reports `total === 0`; between the
+  last add and that recompute the panel is holding a list it has emptied, and it
+  now says so — "No staple lands left to offer" over "No more candidates for
+  this gap", rather than a stale number over a sentence blaming the colour
+  identity.
+- **It does not fall by one.** `degree` and `nearAt1` are functions of the
+  accepted set and the membership chain asks the combo questions first (doc 05
+  §5.3), so accepting one staple can move any number of the *remaining* staples
+  out of `staple` and into `combo-1`, `combo-2`, `combo-3plus` or `near-combo`
+  in the same recompute. The group can go from N to nothing on a single accept.
+  That is correct behaviour — "adding this finishes a combo you hold" is the
+  more specific true claim and P4 gives it the card — but it is not arithmetic
+  the panel can predict, which is the second reason the heading reads the list
+  in front of it rather than a number computed elsewhere.
+
+There is still no terminal state to stall in and no empty group to sit on. When
+both counts reach zero the plan is identical to the plan a caller that never
+sent the field would have got, and the derived order leads: creature first, land
+last.
 
 A staples gap adds **no query clause**. Its key *is* the group key, so the panel
 asks for that group and nothing else; there is no expressible filter for "is on

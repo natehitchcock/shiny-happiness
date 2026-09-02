@@ -93,6 +93,24 @@ group footers any cards the query withheld (`+3 more complete 3+ combos but don'
 match your filter · show`). Filtering narrows the pool; it never flattens the
 groups and never silently hides a high-degree card.
 
+**The footer is the general rule, not a rule about filters.** A heading that is
+not drawing a row it holds says so and offers it, whatever the reason it is
+holding back. The other reason is density: the workspace merges the three
+`combo-N` groups into one "Completes combos" heading and halves its rows so the
+merge does not swamp the feed (ADR-0026 §8), and that halving used to *discard*
+the other half — with the full count still printed above it, nothing on the page
+saying a card had been withheld, and no way to reach them, because `combo` is a
+key the client invents and the server does not know. A playtest lost Mana Vault
+and Mox Opal that way, from a deck where Mana Vault finished a two-card combo
+with a card already accepted. The rows are footered as
+`+2 more complete combos · show` and revealed in place; they are already in the
+client's hands, so the reveal costs no request. The reader's question is the
+same one the filter footer answers — "the heading says 131, I can see twelve,
+where are the rest" — so it gets the same answer rather than a second one.
+
+A count and the rows under it must be reconcilable **on the page**. Either they
+match, or the difference is named where the reader is looking.
+
 Group headers show a count and a one-line explanation. Empty groups are hidden,
 except a deficit group with zero candidates, which is itself a finding worth
 showing ("Ramp −3, no eligible candidates under your budget filter").
