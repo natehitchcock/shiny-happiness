@@ -3,6 +3,11 @@
  * "fills a gap" candidate group.
  *
  * The last six were added for archetype targets — see doc 14 and ADR-0005.
+ *
+ * `counterspell` and `bounce` were added by ADR-0037. Both were previously
+ * swallowed: a counterspell was counted as spot-removal (459 cards), and bounce
+ * had no rule at all, so 164 of the 290 cards that answer a permanent by
+ * returning it fell to the `synergy` catch-all.
  */
 export type Role =
   | 'land'
@@ -10,6 +15,8 @@ export type Role =
   | 'draw'
   | 'tutor'
   | 'spot-removal'
+  | 'counterspell'
+  | 'bounce'
   | 'board-wipe'
   | 'graveyard-hate'
   | 'protection'
@@ -34,6 +41,21 @@ export type Role =
  * Ordered most- to least-specific: a card that sacrifices creatures is better
  * described as a sac outlet than as "synergy", and `land` wins outright because
  * the land count is the number people check first.
+ *
+ * The answer block — board-wipe, graveyard-hate, counterspell, spot-removal,
+ * bounce — is ordered by how completely the card answers something, and three of
+ * those five positions were argued in ADR-0037:
+ *
+ *   - `graveyard-hate` moved ABOVE `spot-removal`. It was below, and every one
+ *     of the 107 cards holding it also held spot-removal (because "exile target
+ *     player's graveyard" matched `exile target`), so it had zero primaries: a
+ *     role no deck could ever be shown as holding.
+ *   - `counterspell` sits above `spot-removal` because a card that does both is
+ *     bought for the counter (Mystic Confluence), and below `board-wipe` and
+ *     `graveyard-hate` because those are the rarer, more specific jobs.
+ *   - `bounce` sits BELOW `spot-removal`: bounce is the weaker answer, since the
+ *     permanent comes back, so a card that does both is better described by the
+ *     one that does not.
  */
 export const ROLE_PRECEDENCE: readonly Role[] = [
   'land',
@@ -42,8 +64,10 @@ export const ROLE_PRECEDENCE: readonly Role[] = [
   'token-maker',
   'tutor',
   'board-wipe',
-  'spot-removal',
   'graveyard-hate',
+  'counterspell',
+  'spot-removal',
+  'bounce',
   'stax',
   'recursion',
   'protection',
@@ -57,7 +81,7 @@ export const ROLE_PRECEDENCE: readonly Role[] = [
 ]
 
 /**
- * Is this string one of the eighteen roles?
+ * Is this string one of the twenty roles?
  *
  * For the client boundary. `api.Card.primaryRole` is a bare `string` on the
  * wire — it has to be, since a server one version ahead may send a role this

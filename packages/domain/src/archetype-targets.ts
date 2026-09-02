@@ -57,6 +57,24 @@ import { DEFAULT_ROLE_TOLERANCE, type TargetOverrides } from './target-overrides
  * archetypes sit between 43 and 48, and where a row leaves that range it should
  * be because the archetype trades one for the other, not because both were
  * raised.
+ *
+ * ---------------------------------------------------------------------------
+ * ADR-0037 SPLIT THE ANSWER COLUMN. `counterspell` and `graveyard-hate` are
+ * CARVED OUT of each row's existing `spot-removal` number rather than added on
+ * top, because the cards physically left that pool: 426 counterspells and 96
+ * graveyard-removal cards used to be counted as spot removal, so a row that kept
+ * its old removal count AND gained the new ones would be asking for cards that
+ * no longer exist under that name. Constraint 1 above is the whole reason —
+ * `Σ roles` is a budget, and double-booking it is what broke voltron.
+ *
+ * `bounce` is the exception and IS additive: it is new coverage, not a move.
+ * 254 cards hold it, 171 of which were previously in the `synergy` catch-all, so
+ * nothing gave those slots up.
+ *
+ * EVERY ROW STATES A DECISION ON ALL THREE. A row that omits one is asserting
+ * the archetype wants none of that role, and says why in its docblock — an
+ * omitted key is a real answer here, not an unfinished line, because the meter
+ * only renders dimensions the row names.
  */
 
 type Ideals = Partial<Record<Role, number>> & { readonly creature?: number }
@@ -73,12 +91,19 @@ const IDEALS: Record<ArchetypeKey, Ideals> = {
    *
    * Land 35 rather than 34: this is the neutral-curve number, and the aggro
    * curve takes it to 34.
+   *
+   * NO counterspells and NO bounce. Both ask you to hold mana open on a turn
+   * you wanted to attack, which is the one thing this deck cannot afford; aggro
+   * answers a problem by killing it or by racing past it. 1 graveyard-hate
+   * carved from removal, because the card that beats aggro most often is a mass
+   * reanimation, and one Relic is the cheapest insurance against it.
    */
   aggro: {
     land: 35,
     ramp: 9,
     draw: 8,
-    'spot-removal': 7,
+    'spot-removal': 6,
+    'graveyard-hate': 1,
     'board-wipe': 1,
     tutor: 2,
     protection: 4,
@@ -92,11 +117,21 @@ const IDEALS: Record<ArchetypeKey, Ideals> = {
    * reference every other row is stated relative to, and moving the reference
    * moves nine rows at once.
    */
+  /*
+   * The answer column is now 6 + 1 + 1 rather than 8 — the same eight cards,
+   * described accurately. `bounce` 1 is the only addition and takes the row to
+   * 75: one flexible answer that gets around indestructible and hexproof is
+   * what a midrange deck holds, and 1 is the median of the new column because
+   * five rows want none.
+   */
   midrange: {
     land: 36,
     ramp: 11,
     draw: 9,
-    'spot-removal': 8,
+    'spot-removal': 6,
+    counterspell: 1,
+    'graveyard-hate': 1,
+    bounce: 1,
     'board-wipe': 3,
     tutor: 3,
     protection: 4,
@@ -113,11 +148,28 @@ const IDEALS: Record<ArchetypeKey, Ideals> = {
    * takes it to 37. It was previously settling at 38, which with 11 ramp is more
    * mana than a deck holding 15 non-role cards can use.
    */
+  /*
+   * The row this change is really for. Twelve "removal" spells was never twelve
+   * removal spells: control is the archetype that answers on the stack, and
+   * counting its counterspells as spot removal told a builder they were full of
+   * removal when they were full of permission. 12 splits into 6 removal, 5
+   * counterspells and 1 graveyard hate — permission is the LARGEST single answer
+   * type here and nowhere else, which is what makes this row distinguishable
+   * from midrange at all.
+   *
+   * `bounce` 2 is the additive part, taking the row from 84 to 86. Bounce is
+   * how a control deck answers a permanent it cannot destroy and how it buys a
+   * turn against a commander, and 2 is the highest number in the table for the
+   * same reason 12 draw is.
+   */
   control: {
     land: 36,
     ramp: 11,
     draw: 12,
-    'spot-removal': 12,
+    'spot-removal': 6,
+    counterspell: 5,
+    'graveyard-hate': 1,
+    bounce: 2,
     'board-wipe': 5,
     tutor: 3,
     protection: 5,
@@ -132,11 +184,25 @@ const IDEALS: Record<ArchetypeKey, Ideals> = {
    * then losing to one removal spell is the failure mode, so the protection
    * count tracks the tutor count rather than the threat count.
    */
+  /*
+   * 6 removal splits into 3 + 2 counterspells + 1 graveyard hate. A combo deck's
+   * counterspells are not the same card as its `protection` — protection keeps
+   * the piece on the battlefield, permission stops the answer before it
+   * resolves, and a deck that assembles a two-card win needs both. That they
+   * were one number before is why the 7 protection here looked implausibly high.
+   *
+   * `bounce` 1 (additive, 79 -> 80): the cheapest way to un-stick a stax piece
+   * that is turning the combo off, and it is an instant, which a Naturalize is
+   * usually not.
+   */
   combo: {
     land: 34,
     ramp: 13,
     draw: 10,
-    'spot-removal': 6,
+    'spot-removal': 3,
+    counterspell: 2,
+    'graveyard-hate': 1,
+    bounce: 1,
     'board-wipe': 1,
     tutor: 8,
     protection: 7,
@@ -150,11 +216,19 @@ const IDEALS: Record<ArchetypeKey, Ideals> = {
    * deck that ramps into nothing has not built a ramp deck. 52 sources still
    * leads the table comfortably.
    */
+  /*
+   * NO counterspells and NO bounce, for the opposite reason to aggro's: this
+   * deck is always tapped out, by construction. Holding up permission is
+   * incompatible with spending every mana every turn, and a ramp deck that
+   * wanted interaction would be a control deck with a big top end. 6 removal
+   * splits 5 + 1 graveyard hate.
+   */
   ramp: {
     land: 37,
     ramp: 15,
     draw: 9,
-    'spot-removal': 6,
+    'spot-removal': 5,
+    'graveyard-hate': 1,
     'board-wipe': 3,
     tutor: 3,
     protection: 4,
@@ -169,6 +243,17 @@ const IDEALS: Record<ArchetypeKey, Ideals> = {
    * symmetric wipe is asymmetric in an aristocrats deck's favour, because its
    * creatures dying is the payoff rather than the cost. It is the one archetype
    * for which that is true, so it is the one row that should say so.
+   */
+  /*
+   * The ONE row with NO graveyard hate, and it is a considered zero rather than
+   * a gap. Graveyard hate in Commander is overwhelmingly symmetric — Rest in
+   * Peace, Relic, Leyline of the Void all switch off every graveyard — and this
+   * row runs the highest `recursion` in the table at 7. A card that turns off
+   * your own engine is not insurance, it is a second failure mode. The 7 removal
+   * therefore stays whole.
+   *
+   * NO counterspells and NO bounce either: the deck's answer to a threat is to
+   * out-grind it, and both roles cost a turn it would rather spend looping.
    */
   aristocrats: {
     land: 35,
@@ -199,11 +284,21 @@ const IDEALS: Record<ArchetypeKey, Ideals> = {
    * deck plays; 18 was the same cards counted twice. 5 tutors stays — a voltron
    * deck tutors for a specific sword, which is closer to combo than to midrange.
    */
+  /*
+   * NO counterspells and NO bounce: this row has 10 slots of headroom and is
+   * the tightest in the table, so anything additive has to displace something,
+   * and neither earns a slot over the seventh piece of protection — a voltron
+   * deck loses to its commander being answered, and the answer to that is a
+   * shroud effect in play, not permission held up. 8 removal splits 7 + 1
+   * graveyard hate: the mass reanimation that steals a fully-equipped commander
+   * is one of this deck's worst outcomes.
+   */
   voltron: {
     land: 36,
     ramp: 10,
     draw: 8,
-    'spot-removal': 8,
+    'spot-removal': 7,
+    'graveyard-hate': 1,
     'board-wipe': 2,
     tutor: 5,
     protection: 7,
@@ -222,11 +317,18 @@ const IDEALS: Record<ArchetypeKey, Ideals> = {
    * token is a card the opponent has to answer — so it sits with aggro and
    * voltron on that axis rather than with midrange.
    */
+  /*
+   * NO counterspells and NO bounce. The 14 token-makers are already the fullest
+   * specialist column in the table and there is no room to add; and a go-wide
+   * deck's answer to a threat is to have a wider board than it, which is what
+   * the 5 anthems are for. 7 removal splits 6 + 1 graveyard hate.
+   */
   tokens: {
     land: 35,
     ramp: 10,
     draw: 8,
-    'spot-removal': 7,
+    'spot-removal': 6,
+    'graveyard-hate': 1,
     'board-wipe': 2,
     tutor: 3,
     protection: 4,
@@ -251,11 +353,26 @@ const IDEALS: Record<ArchetypeKey, Ideals> = {
    * between them, so the seed value stands rather than being moved on a coin
    * flip.
    */
+  /*
+   * 8 removal splits into 5 + 2 counterspells + 1 graveyard hate. A counterspell
+   * is a stax piece that only has to work once: the deck's whole plan is to stop
+   * things from happening, and the cheapest way to stop the card that breaks the
+   * lock is to not let it resolve. 2 rather than control's 5 because a stax deck
+   * spends its early turns deploying the lock and is not holding mana up.
+   *
+   * NO bounce, and this is the one row where that is a stax-specific argument
+   * rather than a budget one: returning a permanent to hand gives the owner the
+   * card back to recast, which under a tax effect is often WORSE for them than
+   * leaving it in play — but the deck cannot rely on that, and a prison deck
+   * that lets a threat come back has not answered it.
+   */
   stax: {
     land: 35,
     ramp: 12,
     draw: 8,
-    'spot-removal': 8,
+    'spot-removal': 5,
+    counterspell: 2,
+    'graveyard-hate': 1,
     'board-wipe': 3,
     tutor: 5,
     protection: 5,
@@ -403,6 +520,12 @@ export const compositionTargets = (
   }
 
   // ---- Bracket modifier (doc 05 §5.4) ----
+  // Still `spot-removal` only, not the whole answer column. Doc 05 specifies a
+  // modifier worth at most 4 cards, and constraint 2 on IDEALS above is stated
+  // against that number; bumping counterspell and graveyard-hate alongside it
+  // would make it 8 and over-subscribe every row it touches. A bracket-5 deck
+  // wanting more permission rather than more removal is what the per-deck
+  // override sheet is for.
   const bump = (key: string, delta: number) => {
     const current = targets.get(key)
     if (current !== undefined) targets.set(key, Math.max(0, current + delta))

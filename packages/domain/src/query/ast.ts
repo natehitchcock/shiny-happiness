@@ -1,4 +1,4 @@
-import type { Role } from '../role.js'
+import { ROLE_PRECEDENCE, type Role } from '../role.js'
 import { SYNERGY_TAGS } from '../synergy.js'
 
 /**
@@ -232,23 +232,14 @@ export const normaliseTag = (value: string): string => {
 
 export const SYNERGY_TAG_VALUES: ReadonlySet<string> = new Set(SYNERGY_TAGS)
 
-export const ROLE_VALUES: ReadonlySet<string> = new Set<Role>([
-  'land',
-  'ramp',
-  'draw',
-  'tutor',
-  'spot-removal',
-  'board-wipe',
-  'graveyard-hate',
-  'protection',
-  'recursion',
-  'wincon',
-  'synergy',
-  'stax',
-  'sac-outlet',
-  'token-maker',
-  'anthem',
-  'equipment',
-  'aura',
-  'evasion',
-])
+/**
+ * The roles `role:` will accept, derived rather than re-typed.
+ *
+ * This was a second hand-written copy of the vocabulary, and `new Set<Role>`
+ * accepts a subset without complaint — so a role added to the union and
+ * forgotten here became a parse error the user sees as `unknown role "x"`, on a
+ * query Quickbuild itself generates for that role's gap. `ROLE_PRECEDENCE` is
+ * already the list that must be exhaustive over `Role` (see `role.ts`), so
+ * there is no reason for a second one to exist and drift.
+ */
+export const ROLE_VALUES: ReadonlySet<string> = new Set<Role>(ROLE_PRECEDENCE)
