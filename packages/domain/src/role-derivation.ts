@@ -103,10 +103,31 @@ const HEURISTICS: readonly Heuristic[] = [
    * corpus that "abilities" did not already exclude, and that card — Celestial
    * Kirin, "destroy all permanents with that spell's mana value" — is a real
    * wipe. The token bought nothing and cost a card.
+   *
+   * THE SECOND GUARD is a card cleaning up after ITSELF (ADR-0054). Saproling
+   * Burst "destroys all tokens created with this enchantment"; Sengir Autocrat
+   * exiles all Serf tokens, which are the three Serfs it just made; Tombstone
+   * Stairwell, Drudge Spell, Dual Nature, Faerie Artisans, Arcane Artisan,
+   * Abyssal Harvester and Shaun all say the same thing about their own. 9
+   * cards, and every one of them is a token MAKER whose own tokens leaving is
+   * the price of the engine, not a reset of the board.
+   *
+   * This was latent rather than new: `token-maker` used to outrank
+   * `board-wipe`, so all nine were counted as token makers anyway and nothing
+   * could see the wrong role underneath. Moving the answer block above the
+   * engine roles is what made it visible, which is why it is fixed here rather
+   * than left for later — the precedence change would otherwise have shipped
+   * nine cards counted as board wipes.
+   *
+   * QUALIFIED tokens only. Aether Snap's bare "exile all tokens" is a genuine
+   * sweep — it takes everyone's — and it is the one card the guard is written
+   * to keep. So the refusal asks for a token clause that names a TYPE (the
+   * capital marks one, as the tribal rule below already relies on) or names
+   * this card as the tokens' source.
    */
   {
     role: 'board-wipe',
-    test: /\b(destroy|exile) all\b(?![^.\n]{0,60}\b(graveyards?|hands?|library|libraries|stack|abilities|revealed)\b)/i,
+    test: /\b(destroy|exile) all\b(?![^.\n]{0,60}\b(graveyards?|hands?|library|libraries|stack|abilities|revealed)\b)(?! (?:other )?(?:[A-Z][A-Za-z'-]* tokens?\b|tokens? (?:created with|with the same name|you control)\b))/i,
   },
   /*
    * Mass damage — report 1's false negative. There was no rule at all, so
