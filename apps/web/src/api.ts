@@ -700,6 +700,58 @@ export interface BracketRules {
   tutorDensity: string | null
 }
 
+/**
+ * One of the barometers Wizards names but does not quantify, COUNTED OVER THIS
+ * DECK by us (ADR-0018, ADR-0049).
+ *
+ * The distinction from `BracketViolation` is the whole reason this is a
+ * separate field on the wire and a separate type here. A violation is Wizards'
+ * published rule broken, with an allowance to point at. A finding is our own
+ * count of what the deck holds, and no bracket permits or forbids it — which is
+ * what `BracketBarometers.basis` says, and why the two must never be merged
+ * into one list.
+ *
+ * `barometer` and `severity` are plain strings rather than the domain's unions,
+ * for the reason `LegalityProblem` below already gives: a client-side union
+ * REJECTS a value a newer server has added, and the panel would fail to compile
+ * against a shape it could have rendered honestly. An unrecognised `barometer`
+ * falls through to the humanising fallback; an unrecognised `severity` is
+ * painted as the milder of the two, which is the safe direction for a word the
+ * reader is going to see either way.
+ */
+export interface BracketFinding {
+  /** Which barometer, in the server's spelling: `two-card-infinites`, … */
+  barometer: string
+  /** How loudly to say it. `warn` or `error`, and OUR reading, not the format's. */
+  severity: string
+  count: number
+  /** The deck's cards behind the count, so the claim opens into names (P4). */
+  cards: string[]
+  /**
+   * The assembled combos, for the two-card-infinite barometer.
+   *
+   * Carried because it is on the wire, and NOT drawn: a Spellbook variant id
+   * (`1039-4702`) is not a thing a builder can read, and the combo count is
+   * already in `message`. `cards` is the openable half, and it holds the
+   * pieces of exactly these combos.
+   */
+  combos: string[]
+  message: string
+}
+
+/**
+ * The findings and the sentence that stops them reading as a bracket verdict.
+ *
+ * `basis` is sent whether or not there are any findings — a deck that trips
+ * none of them still has to be able to say what was LOOKED FOR, because silence
+ * in this panel reads as "not checked", which is the defect this type exists to
+ * fix.
+ */
+export interface BracketBarometers {
+  basis: string
+  findings: BracketFinding[]
+}
+
 export interface BracketReport {
   /** The bracket the builder is aiming at. Their choice, never enforced. */
   target: number
@@ -724,6 +776,13 @@ export interface BracketReport {
   violations?: BracketViolation[]
   /** The deck's cards on Wizards' Game Changers list, as oracle ids. */
   gameChangers?: string[]
+  /**
+   * What WE counted, as against what the format publishes. Optional for the
+   * same reason as the two above — and its absence is a real state, not a
+   * default: "the server sent no findings" and "the server counted none" are
+   * different claims and the panel draws them differently.
+   */
+  barometers?: BracketBarometers
   rules: {
     sourceUrl: string
     retrievedAt: string

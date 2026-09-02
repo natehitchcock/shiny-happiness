@@ -395,10 +395,22 @@ export const bracketFindings = (input: BracketFindingInput): readonly BracketFin
       count: landDenial.length,
       cards: landDenial.map((card) => card.oracleId),
       combos: [],
+      /*
+       * All FOUR verbs agree with the subject, not only the first.
+       *
+       * It used to read "2 cards in this deck destroy, exiles, forces the
+       * sacrifice of, or overwrites the type of a land" — `plural` was applied
+       * to `destroys` and the other three were frozen singular, so the sentence
+       * was right at a count of one and broken at every other count. Nothing
+       * rendered it until ADR-0049 wired the findings into the panel, which is
+       * why it survived: a message no surface draws is a message nobody reads.
+       */
       message:
         `${landDenial.length} ${plural(landDenial.length, 'card', 'cards')} in this deck ` +
-        `${plural(landDenial.length, 'destroys', 'destroy')}, exiles, forces the sacrifice ` +
-        'of, or overwrites the type of a land.',
+        `${plural(landDenial.length, 'destroys', 'destroy')}, ` +
+        `${plural(landDenial.length, 'exiles', 'exile')}, ` +
+        `${plural(landDenial.length, 'forces', 'force')} the sacrifice of, or ` +
+        `${plural(landDenial.length, 'overwrites', 'overwrite')} the type of a land.`,
     })
   }
 

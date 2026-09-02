@@ -3600,11 +3600,17 @@ select {
 }
 
 /*
- * The four barometers with no rule to check against.
+ * The barometers with no rule to check against, and what we counted for each.
  *
  * Given real rows rather than a clause in a paragraph: they are four fifths of
  * the bracket system, and a reader who skims prose would come away believing
  * the Game Changers count was the whole check.
+ *
+ * A row is a COLUMN, not the two-cell line it used to be, because it now says
+ * two different things (ADR-0049): the name and the format's rule state on one
+ * line, and underneath it — only when there is one — what this deck holds. The
+ * finding is indented under its own name so a skim reads down the labels and a
+ * read follows one across.
  */
 .bracket-barometers {
   list-style: none;
@@ -3616,10 +3622,19 @@ select {
 
 .bracket-barometers li {
   display: flex;
-  justify-content: space-between;
-  gap: var(--step);
+  flex-direction: column;
   padding: 2px 0;
   border-bottom: 1px solid var(--rule);
+}
+
+/* The name and the rule state, on one line. `wrap` because at 360 px
+   "Two-card infinites" and "no published rule" together are wider than the
+   rail, and a nowrap pair pushes a horizontal scrollbar onto the document. */
+.bracket-barometer-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--step);
 }
 
 .bracket-barometer {
@@ -3630,6 +3645,64 @@ select {
   color: var(--parchment-dim);
   font-style: italic;
   text-align: right;
+}
+
+/*
+ * One finding: what this deck holds for that barometer.
+ *
+ * Parchment rather than the dim used by the row above it, because this is the
+ * only line in the block that is a fact about the DECK — everything else is
+ * about the format — and it must not read as more small print.
+ */
+.bracket-finding {
+  padding: 2px 0 4px calc(var(--step) * 1.5);
+  border-left: 1px solid var(--rule);
+  margin: 2px 0 2px calc(var(--step) * 0.5);
+}
+
+.bracket-finding-said {
+  margin: 0;
+  color: var(--parchment);
+  line-height: 1.45;
+}
+
+/*
+ * How loudly, as a WORD.
+ *
+ * Colour is the second signal here and never the first: rust and sage sit at
+ * ΔE 4.5 under deuteranopia (`packages/ui/src/tokens.ts`), so "Warning" and
+ * "Error" are spelled out and a screen reader reads them in the sentence. The
+ * colour only sorts them faster for a reader who can see it.
+ */
+.bracket-severity {
+  display: inline-block;
+  margin-right: calc(var(--step) * 0.25);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+}
+
+.bracket-severity[data-severity='error'] {
+  color: var(--rust);
+}
+
+/* The finding's own disclosure sits inside a row, so it loses the full-width
+   padding `.bracket-toggle` carries in the panel body. */
+.bracket-finding .bracket-toggle {
+  padding: 2px 0;
+  font-size: 0.7rem;
+}
+
+.bracket-finding .bracket-changers {
+  margin-bottom: 0;
+  padding-left: var(--step);
+}
+
+/* What the counts are, in the server's own words. Not `.bracket-nil`: it
+   qualifies the findings above rather than being one more absent rule. */
+.bracket-basis strong {
+  color: var(--parchment);
 }
 
 .bracket-why strong {

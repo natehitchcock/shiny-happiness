@@ -414,6 +414,30 @@ GET /api/v1/decks/:id/analysis
                                     // until every barometer has a rule (ADR-0018)
         violations: BracketViolation[],
         gameChangers: OracleId[],   // the deck's cards on Wizards' list
+        // OUR count of the three barometers Wizards names and never quantifies
+        // (ADR-0018), over this deck's own cards and assembled combos. A
+        // separate key from `violations` and never merged with it: a violation
+        // is Wizards' published rule broken, a finding is what this deck holds
+        // and no bracket permits or forbids it.
+        //
+        // `basis` is the sentence that says exactly that, and it travels with
+        // the findings rather than living in a client constant — a client that
+        // forgot it would turn our count into Wizards' ruling. Sent whether or
+        // not there are findings, so a deck with none can still say what was
+        // looked for. `severity` is `'warn' | 'error'` and is our reading, not
+        // the format's. Reported identically at every target bracket: gating
+        // them would re-create the per-bracket table the 2025-10-21 update
+        // retired.
+        barometers: {
+          basis: string,
+          findings: Array<{ barometer: 'two-card-infinites' | 'extra-turns'
+                                     | 'mass-land-denial',
+                            severity: 'warn' | 'error',
+                            count: number,
+                            cards: OracleId[],   // the deck's cards behind it
+                            combos: ComboId[],   // two-card infinites only
+                            message: string }>
+        },
         rules: { sourceUrl: string, retrievedAt: string,
                  // The TARGET bracket's published entry, whole. `violations`
                  // names the allowance only when the deck breaks it, and the
