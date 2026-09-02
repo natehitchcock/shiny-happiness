@@ -119,10 +119,24 @@ in the vocabulary and already paired. **This is not a contract change (R2).**
 | 6 | `produces:landfall` | 75 | fetchlands, which never say "land" |
 | 7 | `wants:plus1-counter` | 42 | "each creature … with **a** +1/+1 counter on it" |
 | 8 | `wants:token` | 37 | "creature **tokens** you control get +1/+1" |
+| 9 | `produces:creature-death` | 105 | "Sacrifice an **Elf**" — the tribal outlet |
 
-**1,714 tag assignments gained across the corpus and ZERO lost**, checked card by
-card rather than inferred from totals. Clause coverage **46.0% → 47.9%**; cards
-with no tag at all **5,018 → 4,568**.
+Rule 9 arrived on a later report ("ambush commander has no semantic tags") and is
+the same shape as rule 2: the producers all wanted the literal word "creature",
+and a tribal outlet names a TYPE. Skirk Prospector, Cabal Archon, Blood-Chin
+Fanatic, Marrow-Gnawer, Goblin Grenade — 105 cards.
+
+Its deny-list-versus-allow-list decision is measured in the code comment and is
+the interesting part: an allow list built from the corpus's own creature subtypes
+fails in **both** directions. It admits Food (Gingerbrute is an Artifact Creature
+— Food), Clue, Treasure, Equipment and Forest (Dryad Arbor) — 82 card-mentions of
+false positives, the Colossal Dreadmaw mistake again — and it refuses Servo,
+Pentavite, Prism, Balloon, Caribou and Goat, which are creature types no CARD
+carries, only tokens.
+
+**1,819 tag assignments gained across the corpus and ZERO lost**, checked card by
+card rather than inferred from totals — 1,714 from rules 1–8 and 105 from rule 9.
+Clause coverage **46.0% → 48.0%**; cards with no tag at all **5,018 → 4,542**.
 
 The move is small in percentage terms and that is expected — the denominator is
 dominated by clauses that should stay uncovered. What it is not small in is
@@ -292,6 +306,36 @@ correct for what it could see; it was being handed a lie.
 
 ## Found, and deliberately not done
 
+- **A `land-creature` tag is WARRANTED and is not in this ADR.** Reported as
+  "ambush commander has no semantic tags" — clause 2 of that card is fixed above,
+  but clause 1, "Forests you control are 1/1 green Elf creatures that are still
+  lands", still says nothing. It is emphatically NOT `token` or
+  `sacrifice-fodder`: those bodies are the player's mana base, and calling them
+  fodder would recommend sacrifice outlets to somebody whose fodder is their
+  lands.
+
+  ADR-0029 §6's test was applied and, unusually, it PASSES — which is why this is
+  recorded rather than refused. **102 producers** ("target land becomes a
+  creature", "lands you control are creatures", `earthbend N`, `awaken N`), of
+  which 73 are not the Avatar set's earthbend keyword, against **12 payoffs**
+  whose text is unambiguous — "land creatures you control get +1/+1" is
+  Blossoming Tortoise, Sylvan Advocate, Embodiment of Fury, Embodiment of
+  Insight, Halimar Tidecaller, Jolrael, Tatyova, Jyoti, Toph and three more,
+  spread across a decade rather than one set. Twelve is small but it is the same
+  order as `lifeloss` (19), `opponent-sacrifice` (15) and `opponent-discard` (30),
+  all of which already exist.
+
+  Proposed pairs: `landfall` (more lands is more bodies, and the deck that has
+  the lands is the landfall deck), `attack-trigger` (every payoff above grants
+  vigilance, trample or double strike, which is only worth printing if the lands
+  attack), and `plus1-counter` (earthbend and awaken both animate a 0/0 AND put
+  counters on it — the land is dead without them).
+
+  NOT done here because it adds a `SynergyTag` member, which R2 makes an
+  ADR-FIRST change, and this agent cannot safely claim an ADR number: 0038 was
+  assigned to it, and picking the next free one is the collision that took 0027
+  twice. Needs a number allocated, then `SYNERGY_TAGS`, `INTERACTION_PAIRS` and a
+  word in `apps/web/src/tags.ts`.
 - **41 stale rows remain, from variants Spellbook has withdrawn from the feed
   entirely.** Checked rather than assumed: of the 41 rows still carrying a `--N`
   id after the prune, **0** are in the current feed and **0** are two-piece, so

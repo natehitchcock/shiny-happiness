@@ -2102,3 +2102,159 @@ describe('deriveSynergy — one semantic per clause (ADR-0038)', () => {
     })
   })
 })
+
+describe('deriveSynergy — a sacrifice outlet that names a creature TYPE (ADR-0038)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), typeLine, oracleText })
+
+  it('reads the reported card', () => {
+    // "ambush commander has no semantic tags. why is that?" — because every
+    // `creature-death` producer wanted the literal word "creature", and this
+    // card names an Elf.
+    const ambush = derive(
+      'Ambush Commander',
+      'Creature — Elf',
+      'Forests you control are 1/1 green Elf creatures that are still lands.\n{1}{G}, Sacrifice an Elf: Target creature gets +3/+3 until end of turn.',
+    )
+
+    expect(ambush.produces).toContain('creature-death')
+  })
+
+  it('reads the archetypal tribal outlet', () => {
+    const prospector = derive('Skirk Prospector', 'Creature — Goblin', 'Sacrifice a Goblin: Add {R}.')
+
+    expect(prospector.produces).toContain('creature-death')
+  })
+
+  it('reads the verb mid-sentence as well as at the start of a clause', () => {
+    // 10 of the 105 cards spell it lowercase, because the sacrifice is an
+    // additional COST rather than an activated ability: Goblin Grenade, Sorin,
+    // Wilhelt, Sacred Mesa, Writhing Chrysalis. Found by a mutation surviving —
+    // `[Ss]` reduced to `S` broke nothing until this test existed.
+    const grenade = derive(
+      'Goblin Grenade',
+      'Sorcery',
+      'As an additional cost to cast this spell, sacrifice a Goblin.\nGoblin Grenade deals 5 damage to any target.',
+    )
+
+    expect(grenade.produces).toContain('creature-death')
+  })
+
+  it('reads a type that only ever exists as a token', () => {
+    // Servo, Pentavite, Balloon, Prism, Caribou and Goat are creature types no
+    // CARD carries, so a rule built from the corpus's own type lines could not
+    // see them. That is the measurement that chose a deny list over an
+    // allow list.
+    const foundry = derive(
+      'Retrofitter Foundry',
+      'Artifact',
+      '{2}, {T}: Create a 1/1 colorless Servo artifact creature token.\n{1}, {T}, Sacrifice a Servo: Create a 1/1 colorless Thopter artifact creature token with flying.',
+    )
+
+    expect(foundry.produces).toContain('creature-death')
+  })
+
+  it('does not read sacrificing a Food as a creature dying', () => {
+    // The trap, and the biggest single class in it: 45 cards sacrifice a Food.
+    // A Food is an artifact, and a deck built on "whenever a creature dies"
+    // gets nothing from eating one.
+    const farmer = derive(
+      'Bristlebud Farmer',
+      'Creature — Plant Druid',
+      'Trample\nWhenever this creature attacks, you may sacrifice a Food. If you do, mill three cards.',
+    )
+
+    expect(farmer.produces).not.toContain('creature-death')
+  })
+
+  it('does not read sacrificing a Clue or a Treasure as a creature dying', () => {
+    const cadaver = derive(
+      'Curious Cadaver',
+      'Creature — Zombie Detective',
+      'Flying\nWhen you sacrifice a Clue, return this card from your graveyard to your hand.',
+    )
+
+    expect(cadaver.produces).not.toContain('creature-death')
+  })
+
+  it('does not read a land sacrifice as a creature dying', () => {
+    // 75 card-mentions, and the reason the basic land types are in the deny
+    // list even though Dryad Arbor makes "Forest" a creature subtype.
+    const crash = derive(
+      'Crash',
+      'Instant',
+      "You may sacrifice a Mountain rather than pay this spell's mana cost.\nDestroy target artifact.",
+    )
+
+    expect(crash.produces).not.toContain('creature-death')
+  })
+
+  it('does not read sacrificing an Equipment or a Room as a creature dying', () => {
+    const soulrager = derive(
+      'Intruding Soulrager',
+      'Creature — Spirit',
+      'Vigilance\n{T}, Sacrifice a Room: This creature deals 2 damage to each opponent. Draw a card.',
+    )
+    const ronin = derive(
+      'Ronin, Shadow Stalker',
+      'Legendary Creature — Human Rogue Hero',
+      '{T}, Sacrifice an Equipment attached to Ronin: Target creature gets -4/-4 until end of turn.',
+    )
+
+    expect(soulrager.produces).not.toContain('creature-death')
+    expect(ronin.produces).not.toContain('creature-death')
+  })
+
+  it('does not fire on a lowercase noun', () => {
+    /*
+     * The capital is the entire distinction, and this is what pays for the
+     * missing `i` flag.
+     *
+     * Read case-insensitively, "Sacrifice an artifact" matches — the deny list
+     * has no `artifact` in it and never should, because the rules above already
+     * own "sacrifice a creature" and mean something else by it. Krark-Clan
+     * Ironworks would become a sacrifice outlet for creatures it cannot eat.
+     */
+    const ironworks = derive('Krark-Clan Ironworks', 'Artifact', 'Sacrifice an artifact: Add {C}{C}.')
+
+    expect(ironworks.produces).not.toContain('creature-death')
+    expect(ironworks.produces).toContain('artifact-etb')
+  })
+
+  it('does not claim a tribal outlet wants generic fodder', () => {
+    // `sacrifice-fodder` is produced by "create … creature token", and a
+    // generic token maker does not make Clerics. The outlet produces the death
+    // and asks for nothing, which is the same ruling the self-sacrifice rule
+    // above gets.
+    const archon = derive(
+      'Cabal Archon',
+      'Creature — Human Cleric',
+      '{B}, Sacrifice a Cleric: Target player loses 2 life and you gain 2 life.',
+    )
+
+    expect(archon.produces).toContain('creature-death')
+    expect(archon.wants).not.toContain('sacrifice-fodder')
+  })
+
+  it('leaves the land-animation clause alone, and that is a decision', () => {
+    // "Forests you control are 1/1 green Elf creatures that are still lands"
+    // genuinely makes bodies, and it is NOT `token` or `sacrifice-fodder`:
+    // those bodies are the player's mana base, so calling them fodder would
+    // recommend sacrifice outlets to someone whose fodder is their lands.
+    //
+    // A `land-creature` tag IS warranted on the numbers — 102 producers against
+    // 12 payoffs ("land creatures you control get +1/+1" is Blossoming
+    // Tortoise, Sylvan Advocate, Jolrael, Tatyova, Embodiment of Fury) — but it
+    // is a new `SynergyTag`, which R2 makes an ADR-first change. Recorded in
+    // ADR-0038's found-and-not-done rather than smuggled in here.
+    const ambush = derive(
+      'Ambush Commander',
+      'Creature — Elf',
+      'Forests you control are 1/1 green Elf creatures that are still lands.\n{1}{G}, Sacrifice an Elf: Target creature gets +3/+3 until end of turn.',
+    )
+
+    expect(ambush.produces).not.toContain('token')
+    expect(ambush.produces).not.toContain('sacrifice-fodder')
+    expect(ambush.produces).toEqual(['creature-death'])
+  })
+})

@@ -317,6 +317,55 @@ const PRODUCES: readonly Rule[] = [
    * `creature-etb` rule, for a measured reason.
    */
   { tag: 'creature-death', test: /\bsacrifices? this creature\b/i },
+  /*
+   * The outlet that names a creature TYPE instead of the word "creature"
+   * (ADR-0038).
+   *
+   * Reported as "ambush commander has no semantic tags. why is that?" — because
+   * every rule above asks for the literal word, and Ambush Commander says
+   * "Sacrifice an Elf". So did Skirk Prospector, Cabal Archon, Blood-Chin
+   * Fanatic, Marrow-Gnawer and every other tribal outlet: 105 cards.
+   *
+   * A DENY LIST, not an allow list, and the choice was measured rather than
+   * guessed. Both directions were tried:
+   *
+   *   - ALLOW (match against the creature subtypes the corpus's own type lines
+   *     carry) FAILS TWICE. It admits what it should refuse — "Food" is a
+   *     creature subtype because Gingerbrute is an Artifact Creature — Food, and
+   *     so are Clue, Treasure, Equipment and Forest (Dryad Arbor) — which is 82
+   *     card-mentions of false positives. And it refuses what it should admit:
+   *     Servo, Pentavite, Prism, Balloon, Caribou and Goat are creature types no
+   *     CARD carries, only tokens, so they are invisible to a list built from
+   *     card type lines.
+   *   - CORROBORATION (require the type to appear on this card's own type line
+   *     or in a token it makes) reads Ambush Commander and Skirk Prospector, and
+   *     misses Airdrop Condor — a Bird that sacrifices Goblins and makes none.
+   *
+   * So the rule admits any capitalised noun except the ones measured to be
+   * something other than a creature. Every deny entry earns its place: Food 45,
+   * Forest 20, Clue 20, Mountain 19, Island 13, Swamp 13, Treasure 13, Desert 8,
+   * Blood 7, Aura 3, Plains 2, Powerstone 1, Junk 1, Equipment 1, Room 1.
+   * `Map|Gold|Incubator` block nothing today and are kept for one reason: they
+   * are already this file's vocabulary for an artifact token, in the
+   * `artifact-etb` rule above, and two lists of the same nouns that disagree is
+   * how the next one goes wrong. Fourteen further speculative types (Vehicle,
+   * Saga, Shrine, Cave, Gate, Locus…) were written and DROPPED — they blocked
+   * nothing, and a deny entry no card exercises is machinery.
+   *
+   * NO `i` FLAG, and it carries the whole distinction: the capital is what marks
+   * a type. Read case-insensitively this matches "sacrifice a creature" and
+   * "sacrifice an artifact", which the rules above already own and mean something
+   * different. `[Ss]` covers the two ways Scryfall starts the clause.
+   *
+   * `creature-death` only, never `sacrifice-fodder`. An outlet WANTS fodder
+   * because you feed it your board, and a generic token maker does not make
+   * Clerics — the fodder here has to be of a named type, and no tag in this file
+   * can say which. Same ruling the self-sacrifice rule above gets.
+   */
+  {
+    tag: 'creature-death',
+    test: /\b[Ss]acrifices? (?:a|an|another|two|three|X|\d+) (?!(?:Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment|Plains|Island|Swamp|Mountain|Forest|Desert|Aura|Room)s?\b)[A-Z][A-Za-z'-]*/,
+  },
 
   /*
    * An edict is not a sacrifice outlet (ADR-0022).

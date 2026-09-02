@@ -460,9 +460,10 @@ about 4.5% of their number on the next ingest** —
 [ADR-0038](adr/0038-a-semantic-for-every-clause.md). Splitting every
 commander-legal card's oracle text into ability lines and asking which lines any
 rule fires on put a number on "each clause should have a semantic": 46.0% of
-60,216 clauses, now 47.9%, across eight new rules and no new tag. 1,714 tag
-assignments gained, none lost, and 5,018 untagged cards down to 4,568. The card
-ingest has been run and this half is live.
+60,216 clauses, now 48.0%, across nine new rules and no new tag. 1,819 tag
+assignments gained, none lost, and 5,018 untagged cards down to 4,542. The
+newest rule reads the tribal sacrifice outlet — "Sacrifice an Elf" — which is
+why Ambush Commander had nothing to say for itself.
 
 Separately, the Spellbook adapter was dropping `requires[]` — the pieces
 Spellbook describes as a card CLASS rather than naming — so 4,813 stored combos
