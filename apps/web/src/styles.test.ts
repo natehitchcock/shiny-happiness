@@ -1262,3 +1262,91 @@ describe('the detail pane as a fourth column', () => {
     expect(sheet).toMatch(/@media \(min-width:\s*901px\)\s*\{\s*\.preview\s*\{[^}]*right:\s*100%/)
   })
 })
+
+/*
+ * The report: "the quickbuild detail pane borders are weirdly not filling their
+ * parent pane, and each one is different dimensions so it looks very
+ * disorganized".
+ *
+ * It was two boxes deep. `Detail` draws its own framed card — `.rt-detail`
+ * carries a border, a radius, a background and 12px of padding, because in the
+ * detail column that frame IS the panel — and Quickbuild mounts three of them
+ * inside three `<li>` boxes that carry a frame of their own. Six frames for
+ * three cards. The outer three are grid items and stretch to the tallest of the
+ * row; the inner three are ordinary blocks sized to their own text, so a card
+ * with four lines of oracle text and a vanilla creature drew two visibly
+ * different rectangles floating inside two identical ones.
+ *
+ * Nothing about Q4's responsive rule was wrong: `repeat(auto-fit, minmax(15rem,
+ * 1fr))` collapses its empty tracks, so three options always take three equal
+ * full-width columns however wide the pane is. The raggedness was entirely
+ * inside them.
+ */
+describe('the three Quickbuild options are one box each, not a box in a box', () => {
+  const trio = (): HTMLElement => {
+    document.body.innerHTML = `
+      <ul class="quickbuild-options">
+        <li class="quickbuild-option is-focused">
+          <div class="rt-detail">
+            <div class="rt-detail-head"><h3 class="rt-detail-name">Short</h3></div>
+            <div class="rt-detail-body"><p class="rt-detail-oracle">One line.</p></div>
+          </div>
+          <p class="quickbuild-group">Offered under Fills gap · ramp</p>
+        </li>
+        <li class="quickbuild-option">
+          <div class="rt-detail">
+            <div class="rt-detail-head"><h3 class="rt-detail-name">Long</h3></div>
+            <div class="rt-detail-body"><p class="rt-detail-oracle">Four lines of it.</p></div>
+          </div>
+          <p class="quickbuild-group">Offered under Fills gap · ramp</p>
+        </li>
+      </ul>`
+    return document.body.querySelector('.quickbuild-options')!
+  }
+
+  const outer = (): Element => trio().querySelector('.quickbuild-option')!
+  const inner = (): Element => trio().querySelector('.quickbuild-option > .rt-detail')!
+
+  it('gives the inner card no frame of its own', () => {
+    // `card.css` sets all four; each one has to lose to this app's sheet, and
+    // the app's rule is later AND more specific, so it does.
+    expect(winner(inner(), 'border')?.value).toBe('0')
+    expect(winner(inner(), 'background')?.value).toBe('none')
+    expect(winner(inner(), 'padding')?.value).toBe('0')
+    expect(winner(inner(), 'border-radius')?.value).toBe('0')
+  })
+
+  it('keeps the frame on the option itself, where the focus rule lives', () => {
+    // Not "delete both borders": the left rule is how the focused option is
+    // marked without relying on colour (§19.5), so the outer box must keep one.
+    expect(winner(outer(), 'border')?.value).toContain('var(--rule)')
+    expect(winner(outer(), 'border-left')?.value).toContain('var(--rule)')
+    document.body.innerHTML = `<li class="quickbuild-option is-focused"></li>`
+    const focused = document.body.querySelector('.quickbuild-option')!
+    expect(winner(focused, 'border-left-color')?.value).toBe('var(--brass)')
+  })
+
+  it('lets the inner card fill the box the grid gave the option', () => {
+    // A grid item stretches; a block inside it does not. The option has to be a
+    // flex column before anything in it can take the height.
+    expect(winner(outer(), 'display')?.value).toBe('flex')
+    expect(winner(outer(), 'flex-direction')?.value).toBe('column')
+    expect(winner(inner(), 'flex')?.value).toBe('1 1 auto')
+    /*
+     * And `min-height: 0`, or the flex item refuses to shrink below its own
+     * content and `.rt-detail-body`'s `overflow-y: auto` never engages — every
+     * box would then be as tall as the wordiest card rather than the row's
+     * height. Equal, but equal in the wrong direction.
+     */
+    expect(winner(inner(), 'min-height')?.value).toBe('0')
+  })
+
+  it('gives every option the same width and the same height', () => {
+    // `1fr` tracks are equal by construction, and `auto-fit` collapses the
+    // empty ones so three options always take the full width of the pane.
+    expect(winner(trio(), 'grid-template-columns')?.value).toBe(
+      'repeat(auto-fit, minmax(15rem, 1fr))',
+    )
+    expect(winner(trio(), 'align-items')?.value).toBe('stretch')
+  })
+})

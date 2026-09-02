@@ -64,10 +64,23 @@ const curveGap: QuickbuildGap = {
   bucket: 2,
 }
 
+const removalGap: QuickbuildGap = {
+  kind: 'composition',
+  key: 'role:spot-removal',
+  label: 'spot removal',
+  short: 3,
+  dimension: { kind: 'role', role: 'spot-removal' },
+}
+
 const plan = (over: Partial<QuickbuildPlan> = {}): QuickbuildPlan => ({
   gaps: [rampGap, curveGap],
   ordering: 'largest-first',
   overFull: [],
+  reach: 'band',
+  beyond: [],
+  // 58 of 100, which is the deck in the report.
+  unallocated: 42,
+  unroled: 25,
   ...over,
 })
 
@@ -79,6 +92,7 @@ const setup = (
   const onAdd = vi.fn()
   const onReject = vi.fn()
   const onClose = vi.fn()
+  const onReach = vi.fn()
   const utils = render(
     <Quickbuild
       plan={plan()}
@@ -87,12 +101,13 @@ const setup = (
       onAdd={onAdd}
       onReject={onReject}
       onClose={onClose}
+      onReach={onReach}
       cutCount={0}
       retiredIds={new Set<string>()}
       {...over}
     />,
   )
-  return { fetchCandidates, onAdd, onReject, onClose, ...utils }
+  return { fetchCandidates, onAdd, onReject, onClose, onReach, ...utils }
 }
 
 describe('the gap becomes an ordinary query (D2, Q1 option c)', () => {
@@ -245,6 +260,7 @@ describe('accessibility (§19.5) — driven with real keys', () => {
         onAdd={vi.fn()}
         onReject={vi.fn()}
         onClose={vi.fn()}
+        onReach={vi.fn()}
         cutCount={0}
         retiredIds={new Set<string>()}
       />,
@@ -331,6 +347,7 @@ describe('accessibility (§19.5) — driven with real keys', () => {
         onAdd={vi.fn()}
         onReject={vi.fn()}
         onClose={vi.fn()}
+        onReach={vi.fn()}
         cutCount={0}
         retiredIds={new Set<string>()}
       />,
@@ -377,6 +394,7 @@ describe('accessibility (§19.5) — driven with real keys', () => {
         onAdd={vi.fn()}
         onReject={vi.fn()}
         onClose={vi.fn()}
+        onReach={vi.fn()}
         cutCount={0}
         retiredIds={new Set<string>()}
       />,
@@ -392,10 +410,20 @@ describe('grouping stays the product’s opinion (P5)', () => {
   })
 })
 
+/**
+ * The sentence the ending prints, without the live region's copy of it.
+ *
+ * Every string the panel says at the end is also announced (§19.5), so an
+ * unscoped text query matches twice and reports an ambiguity rather than a
+ * result. The visible one is what these tests are about; the announcement has
+ * its own test.
+ */
+const ending = (): HTMLElement => screen.getByRole('group', { name: /no gaps left/i })
+
 describe('nothing to do', () => {
-  it('says the deck is inside every band rather than showing an empty panel', async () => {
+  it('says the deck is inside every band rather than showing an empty panel', () => {
     setup({ plan: plan({ gaps: [] }) })
-    await screen.findByText(/inside its band/i)
+    expect(ending().textContent).toMatch(/inside its band/i)
   })
 })
 
@@ -429,6 +457,7 @@ describe('the queue serves the next trio without a request', () => {
       onAdd: vi.fn(),
       onReject: vi.fn(),
       onClose: vi.fn(),
+      onReach: vi.fn(),
       cutCount: 0,
     }
     const view = render(<Quickbuild {...props} retiredIds={new Set<string>()} />)
@@ -567,6 +596,7 @@ describe('a stale queue is discarded, never shown', () => {
       onAdd: vi.fn(),
       onReject: vi.fn(),
       onClose: vi.fn(),
+      onReach: vi.fn(),
       cutCount: 0,
       retiredIds: new Set<string>(),
     }
@@ -723,6 +753,7 @@ describe('the queue is discarded on the instant the question changes', () => {
       onAdd: vi.fn(),
       onReject: vi.fn(),
       onClose: vi.fn(),
+      onReach: vi.fn(),
       cutCount: 0,
       retiredIds: new Set<string>(),
     }
@@ -771,6 +802,7 @@ describe('the queue is discarded on the instant the question changes', () => {
       onAdd: vi.fn(),
       onReject: vi.fn(),
       onClose: vi.fn(),
+      onReach: vi.fn(),
       cutCount: 0,
       retiredIds: new Set<string>(),
     }
@@ -829,5 +861,192 @@ describe('a background top-up never disturbs what is on screen', () => {
     expect(screen.getByText('Ai')).toBeTruthy()
     expect(screen.queryByText(/Could not load candidates/i)).toBeNull()
     expect(screen.queryByRole('progressbar')).toBeNull()
+  })
+})
+
+/*
+ * The report, in full: "quickbuild ended while I was below curve on ramp and
+ * spot removal, and also only at 58 of 100 cards."
+ *
+ * Two separate defects, and the first is the serious one — the panel really did
+ * stop with gaps still on the plan. Both are cursors that walked off the end of
+ * a list that got shorter underneath them, and neither needed the deck to be in
+ * any unusual state: the plan is recomputed on every accept and gaps close as
+ * the deck fills, so both lists shorten constantly.
+ */
+describe('a cursor must not walk off a plan that shrinks underneath it', () => {
+  const rerenderWith = (
+    view: ReturnType<typeof render>,
+    props: Parameters<typeof Quickbuild>[0],
+    next: QuickbuildPlan,
+  ) =>
+    act(async () => {
+      view.rerender(<Quickbuild {...props} plan={next} />)
+    })
+
+  const props = (over: Partial<Parameters<typeof Quickbuild>[0]> = {}) => ({
+    plan: plan(),
+    filter: '',
+    fetchCandidates: vi.fn().mockResolvedValue([candidate('Ai'), candidate('Bo'), candidate('Cy')]),
+    onAdd: vi.fn(),
+    onReject: vi.fn(),
+    onClose: vi.fn(),
+    onReach: vi.fn(),
+    cutCount: 0,
+    retiredIds: new Set<string>(),
+    ...over,
+  })
+
+  /*
+   * THE FIRST DEFECT. `gapAt` was an index into `plan.gaps` and "Different gap"
+   * advanced it with a modulo taken against the length at the time of the
+   * click. Two clicks on a three-gap plan left it at 2; the plan then shrank to
+   * one gap as cards went in, and `plan.gaps[2]` is `undefined` — which the
+   * panel rendered as "Every composition and curve goal is inside its band.
+   * Nothing to fill." That is the report's "ended while gaps remained", and the
+   * gaps it was hiding were the two the builder said were short.
+   */
+  it('keeps working the plan when it shrinks under a cursor that has moved on', async () => {
+    const base = props({ plan: plan({ gaps: [rampGap, removalGap, curveGap] }) })
+    const view = render(<Quickbuild {...base} />)
+    await screen.findByText('Ai')
+    await press(screen.getByRole('button', { name: /Different gap/i }))
+    await press(screen.getByRole('button', { name: /Different gap/i }))
+    // One gap left, and the cursor is past where it used to be able to point.
+    await rerenderWith(view, base, plan({ gaps: [removalGap] }))
+    expect(screen.queryByRole('group', { name: /no gaps left/i })).toBeNull()
+    expect(screen.getByRole('heading', { name: '3 more spot removal' })).toBeTruthy()
+  })
+
+  /*
+   * THE SECOND DEFECT. `passed` — the skip cursor — was a bare number with no
+   * memory of which gap it belonged to. Skipping twice on one gap and then
+   * having that gap close left a cursor of six pointing into the next gap's
+   * fresh page, so the panel sliced past everything it had just fetched and
+   * reported "No more candidates for this gap" about a gap it had never shown a
+   * single card for. Ramp and spot removal, never offered.
+   */
+  it('starts a new gap from the top, however far the last one was skipped', async () => {
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce([candidate('R1'), candidate('R2'), candidate('R3')])
+      .mockResolvedValue([candidate('S1'), candidate('S2'), candidate('S3')])
+    const base = props({ fetchCandidates, plan: plan({ gaps: [rampGap, curveGap] }) })
+    const view = render(<Quickbuild {...base} />)
+    await screen.findByText('R1')
+    await press(screen.getByRole('button', { name: /Skip these three/i }))
+    // The ramp gap closes; spot removal takes its place at index 0.
+    await rerenderWith(view, base, plan({ gaps: [removalGap, curveGap] }))
+    await screen.findByText('S1')
+    expect(screen.queryByText(/No more candidates/i)).toBeNull()
+    expect(options()).toHaveLength(OPTIONS_SHOWN)
+  })
+
+  /*
+   * And the skip cursor still does its own job — this is the guard that the fix
+   * above did not simply delete skipping. Six candidates, one skip, the second
+   * three.
+   */
+  it('still passes over a whole trio within one gap', async () => {
+    const six = ['A', 'B', 'C', 'D', 'E', 'F'].map((n) => candidate(n))
+    setup({ plan: plan({ gaps: [rampGap] }) }, six)
+    await screen.findByText('A')
+    await press(screen.getByRole('button', { name: /Skip these three/i }))
+    await screen.findByText('D')
+    expect(screen.queryByText('A')).toBeNull()
+  })
+})
+
+/*
+ * "Once all your curves are satisfied, it should ask you if you'd like to
+ * continue quickbuilding, or go back to the suggestion list now that your deck
+ * allotments are met and you just need to pick X more cards."
+ *
+ * The old ending was one sentence with nothing on it — "Nothing to fill." — and
+ * it read as completion to a builder 42 cards short of a legal deck. The panel
+ * states the arithmetic and offers both doors now, and closes on neither by
+ * itself.
+ */
+describe('the ending is a question, not a full stop', () => {
+  const met = (over: Partial<QuickbuildPlan> = {}) =>
+    setup({ plan: plan({ gaps: [], beyond: [rampGap, removalGap], ...over }) })
+
+  it('says how many cards are still to pick', async () => {
+    met()
+    expect(ending().textContent).toContain('58 of 100')
+    expect(ending().textContent).toContain('42 more cards to pick')
+  })
+
+  /*
+   * The part the ordering cannot answer. `wincon` and `synergy` are roles that
+   * no archetype gives an ideal, so bombs and win conditions are never gaps and
+   * Quickbuild can never lead anyone to one. Saying so is the whole mitigation
+   * — a wizard that goes quiet about its own limit looks broken instead.
+   */
+  it('names the slots it has no opinion about at all', () => {
+    met()
+    expect(ending().textContent).toContain('25 slots with no target at all')
+    expect(ending().textContent).toContain('threats and win conditions')
+  })
+
+  it('offers both doors', () => {
+    met()
+    expect(within(ending()).getByRole('button', { name: /Keep quickbuilding/i })).toBeTruthy()
+    expect(
+      within(ending()).getByRole('button', { name: /Back to the suggestion list/i }),
+    ).toBeTruthy()
+  })
+
+  it('does not close itself', () => {
+    const { onClose } = met()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('reaches for the ideals when the builder says to', async () => {
+    const { onReach } = met()
+    await press(screen.getByRole('button', { name: /Keep quickbuilding/i }))
+    expect(onReach).toHaveBeenCalledWith('ideal')
+  })
+
+  it('goes back to the suggestion list when the builder says to', async () => {
+    const { onClose } = met()
+    await press(screen.getByRole('button', { name: /Back to the suggestion list/i }))
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  /*
+   * `beyond` is the plan's own answer to "would continuing find anything", so
+   * the offer cannot appear over an empty loop. Without this the button would
+   * be a door onto the same ending.
+   */
+  it('does not offer to keep going when there is nothing past the current reach', () => {
+    setup({ plan: plan({ gaps: [], beyond: [], reach: 'ideal' }) })
+    expect(screen.queryByRole('button', { name: /Keep quickbuilding/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /Back to the suggestion list/i })).toBeTruthy()
+    expect(ending().textContent).toMatch(/at its ideal/)
+  })
+
+  it('says the deck is whole when it is', () => {
+    setup({ plan: plan({ gaps: [], beyond: [], unallocated: 0 }) })
+    expect(ending().textContent).toMatch(/holds all 100 cards/)
+  })
+
+  /*
+   * §19.5: every recompute is announced. The ending is the one moment the panel
+   * stops asking questions, and a screen-reader user who hears nothing there
+   * cannot learn that there is a choice waiting.
+   */
+  it('announces the ending to the live region', () => {
+    met()
+    expect(screen.getByRole('status').textContent).toContain('42 more cards to pick')
+  })
+
+  /* R4: both doors are ordinary buttons, so both are reachable by Tab. */
+  it('keeps both doors keyboard-reachable', () => {
+    met()
+    const panel = screen.getByRole('dialog')
+    const focusable = [...panel.querySelectorAll('button')].map((b) => b.textContent)
+    expect(focusable.some((t) => /Keep quickbuilding/.test(t ?? ''))).toBe(true)
+    expect(focusable.some((t) => /Back to the suggestion list/.test(t ?? ''))).toBe(true)
   })
 })

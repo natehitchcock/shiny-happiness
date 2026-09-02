@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ARCHETYPES } from './archetype.js'
 import { compositionTargets } from './archetype-targets.js'
 import type { Card, CardType } from './card.js'
 import { countComposition } from './composition-analysis.js'
@@ -6,8 +7,11 @@ import { dimensionKey, roleDimension, typeDimension } from './composition.js'
 import { curveDeltas, curveTarget } from './curve.js'
 import type { Deck } from './deck.js'
 import { deckId, oracleId, printingId } from './ids.js'
+import { validateDeck } from './legality.js'
 import {
   buildOrder,
+  deferredDimensions,
+  DECK_SIZE,
   gapQuery,
   handoverSize,
   quickbuildPlan,
@@ -124,17 +128,98 @@ const inputFor = (
 
 const keys = (gaps: readonly QuickbuildGap[]) => gaps.map((g) => g.key)
 
+const DEFERRED = deferredDimensions(3)
+
+describe('deferred dimensions — a target the deck’s own contents move (ADR-0040)', () => {
+  /*
+   * The derivation behind "lands last", and the reason it is a probe rather
+   * than the string `role:land`.
+   *
+   * `compositionTargets` computes most ideals from the archetype and the
+   * bracket alone, so they are known the moment the deck is named. The land
+   * ideal is not: the curve modifier moves it by one in each direction against
+   * the deck's own `averageManaValue`, and `modalLandBacks` moves it again. So
+   * the land target is a FUNCTION OF THE DECK YOU HAVE ALREADY BUILT, and a
+   * dimension whose target is not yet known cannot honestly be built first.
+   *
+   * This test asserts the probe finds land WITHOUT naming it as an input — it
+   * runs `compositionTargets` under four deck shapes and asks which ideals
+   * moved. That is the same answer the implementation reaches, reached
+   * independently here.
+   */
+  it('finds the dimensions whose ideal moves with the deck, by asking the model', () => {
+    const moved = new Set<string>()
+    for (const archetype of ARCHETYPES) {
+      const shapes = [
+        compositionTargets(archetype, null, { bracket: 3 }),
+        compositionTargets(archetype, null, { bracket: 3, averageManaValue: 2.0 }),
+        compositionTargets(archetype, null, { bracket: 3, averageManaValue: 4.0 }),
+        compositionTargets(archetype, null, {
+          bracket: 3,
+          averageManaValue: 4.0,
+          modalLandBacks: 6,
+        }),
+      ]
+      for (const target of shapes[0]!) {
+        const key = dimensionKey(target.dimension)
+        const ideals = shapes.map(
+          (shape) => shape.find((t) => dimensionKey(t.dimension) === key)?.ideal,
+        )
+        if (new Set(ideals).size > 1) moved.add(key)
+      }
+    }
+    expect([...moved].sort()).toEqual([...DEFERRED].sort())
+  })
+
+  /*
+   * Today that set is exactly `role:land` — recorded so a change in
+   * `archetype-targets.ts` that gives another dimension a deck-dependent
+   * modifier shows up here as a failing expectation rather than as a silent
+   * reordering of the build order.
+   */
+  it('is exactly the land count today', () => {
+    expect([...DEFERRED]).toEqual([dimensionKey(roleDimension('land'))])
+  })
+})
+
 describe('build order (Q2, derived from the archetype targets)', () => {
   /*
-   * The derivation, stated as a test rather than only as a comment: the order
-   * IS the targets sorted by what the archetype spends on them. Nothing here is
-   * a list someone typed.
+   * The user's report: "for quickbuilding, lands are the last things you should
+   * pick. You want to start with the big things."
+   *
+   * Land leads every archetype's targets — 34 to 37, the largest ideal in every
+   * row — so sorting by descending ideal alone put it first everywhere, which
+   * is exactly backwards. It goes last now, in all nine archetypes, and it gets
+   * there through `deferredDimensions` rather than through its name.
    */
-  it('is the archetype’s own ideals, largest commitment first', () => {
-    const order = buildOrder(targetsFor('midrange'), REFERENCE)
-    expect(order[0]).toBe(dimensionKey(roleDimension('land'))) // 36
-    expect(order[1]).toBe(dimensionKey(typeDimension('creature'))) // 26
-    expect(order[2]).toBe(dimensionKey(roleDimension('ramp'))) // 11
+  it('puts the deck-dependent target LAST in every archetype', () => {
+    for (const archetype of ARCHETYPES) {
+      const order = buildOrder(targetsFor(archetype), REFERENCE, DEFERRED)
+      expect(order[order.length - 1]).toBe(dimensionKey(roleDimension('land')))
+    }
+  })
+
+  /*
+   * The deferral is doing the work, and this is the mutation guard for it:
+   * with nothing deferred the same comparator puts land back at the front,
+   * because its ideal is still the largest number in the row. Delete the
+   * deferral term and this test and the one above cannot both pass.
+   */
+  it('would still lead with land if nothing were deferred — the deferral is what moves it', () => {
+    const order = buildOrder(targetsFor('midrange'), REFERENCE, new Set())
+    expect(order[0]).toBe(dimensionKey(roleDimension('land')))
+  })
+
+  /*
+   * The derivation, stated as a test rather than only as a comment: past the
+   * deferred dimensions the order IS the targets sorted by what the archetype
+   * spends on them. Nothing here is a list someone typed.
+   */
+  it('is the archetype’s own ideals, largest commitment first, past the deferred ones', () => {
+    const order = buildOrder(targetsFor('midrange'), REFERENCE, DEFERRED)
+    expect(order[0]).toBe(dimensionKey(typeDimension('creature'))) // 26
+    expect(order[1]).toBe(dimensionKey(roleDimension('ramp'))) // 11
+    expect(order[2]).toBe(dimensionKey(roleDimension('draw'))) // 9
   })
 
   /*
@@ -144,15 +229,38 @@ describe('build order (Q2, derived from the archetype targets)', () => {
    * stax" — the number 12 already said it.
    */
   it('floats each archetype’s identity dimension up without being told to', () => {
-    expect(buildOrder(targetsFor('tokens'), REFERENCE).slice(0, 3)).toContain(
+    expect(buildOrder(targetsFor('tokens'), REFERENCE, DEFERRED).slice(0, 2)).toContain(
       dimensionKey(roleDimension('token-maker')),
     )
-    expect(buildOrder(targetsFor('stax'), REFERENCE).slice(0, 4)).toContain(
+    expect(buildOrder(targetsFor('stax'), REFERENCE, DEFERRED).slice(0, 3)).toContain(
       dimensionKey(roleDimension('stax')),
     )
-    expect(buildOrder(targetsFor('voltron'), REFERENCE).slice(0, 6)).toContain(
+    expect(buildOrder(targetsFor('voltron'), REFERENCE, DEFERRED).slice(0, 5)).toContain(
       dimensionKey(roleDimension('equipment')),
     )
+    expect(buildOrder(targetsFor('aristocrats'), REFERENCE, DEFERRED).slice(0, 5)).toContain(
+      dimensionKey(roleDimension('recursion')),
+    )
+  })
+
+  /*
+   * The other half of the user's principle — "start with the big things like
+   * bombs, win conditions, high synergy combos".
+   *
+   * `wincon` and `synergy` are roles but NO archetype gives either an ideal, so
+   * neither is a composition dimension and neither can ever be a gap. What the
+   * table does name is `creature`, and `archetype-targets.ts` reads the unroled
+   * remainder as "the threats" — so the creature count is the closest thing the
+   * model has to a bomb count, and it leads every archetype now that land is
+   * deferred. The rest of the user's phrase is answered by the panel's ending
+   * rather than by an ordering; see `unroled` below.
+   */
+  it('leads with the threat count in every archetype', () => {
+    for (const archetype of ARCHETYPES) {
+      expect(buildOrder(targetsFor(archetype), REFERENCE, DEFERRED)[0]).toBe(
+        dimensionKey(typeDimension('creature')),
+      )
+    }
   })
 
   /*
@@ -164,33 +272,74 @@ describe('build order (Q2, derived from the archetype targets)', () => {
    * no reason anyone could defend.
    */
   it('breaks a tie toward the dimension that departs furthest from midrange', () => {
-    const order = buildOrder(targetsFor('stax'), REFERENCE)
+    const order = buildOrder(targetsFor('stax'), REFERENCE, DEFERRED)
     expect(order.indexOf(dimensionKey(roleDimension('stax')))).toBeLessThan(
       order.indexOf(dimensionKey(roleDimension('ramp'))),
     )
   })
 
   it('is total and deterministic — same input, same order, every time', () => {
-    const once = buildOrder(targetsFor('aristocrats'), REFERENCE)
-    const twice = buildOrder(targetsFor('aristocrats'), REFERENCE)
+    const once = buildOrder(targetsFor('aristocrats'), REFERENCE, DEFERRED)
+    const twice = buildOrder(targetsFor('aristocrats'), REFERENCE, DEFERRED)
     expect(once).toEqual(twice)
     expect(new Set(once).size).toBe(once.length)
     expect(once.length).toBe(targetsFor('aristocrats').length)
   })
 })
 
-describe('handover from build order to largest-gap-first (Q2)', () => {
+describe('handover from build order to largest-gap-first (Q2, re-derived)', () => {
   /*
-   * Derived, not chosen: the threshold is the archetype's own largest single
-   * target. Below it, every "largest gap" answer is dominated by that one
-   * target — a 12-card deck is 24 lands short and 20 creatures short, so
-   * worst-first says "lands" until the land count is nearly done. The
-   * archetype's plan is the only thing that distinguishes the rest.
+   * RE-DERIVED, because the old derivation stopped being true.
+   *
+   * It used to be the archetype's largest single target — the land count, 34 to
+   * 37 — and it was safe to put anywhere in that region because "the two
+   * orderings coincide on an empty deck": with nothing accepted every deficit
+   * equals its own ideal, so largest-gap and largest-commitment were the same
+   * list. Deferring the land count broke that coincidence outright (the test
+   * below now pins the DISAGREEMENT), so the threshold really does adjudicate
+   * between two rival answers and has to be derived again from what separates
+   * them.
+   *
+   * The new derivation: the smallest deck that COULD be inside every band —
+   * the sum of the role dimensions' minima. It is a genuine lower bound
+   * because role counts do not overlap (`archetype-targets.ts` constraint 1:
+   * "`land + Σ roles` is therefore a real budget against 99"), and type
+   * dimensions are excluded from the sum precisely because they do overlap
+   * roles and would be counted twice.
+   *
+   * Below it, being short somewhere is arithmetic rather than evidence: the
+   * deck does not hold enough cards to be inside every band no matter how they
+   * were spent, so worst-first is restating the archetype and the plan is the
+   * only thing that can distinguish the dimensions. At or above it, a shortfall
+   * is a fact about THIS deck and the deck's own shape wins.
+   *
+   * The same number ends the loop, which is what makes the three behaviours one
+   * idea rather than three: a deck that reaches every band has reached at least
+   * `handoverSize` cards by construction, which is why "all allotments met" and
+   * "58 of 100" arrive together.
    */
-  it('is the archetype’s largest single target', () => {
-    expect(handoverSize(targetsFor('midrange'))).toBe(36) // land
-    expect(handoverSize(targetsFor('ramp'))).toBe(37)
-    expect(handoverSize(targetsFor('combo'))).toBe(34)
+  it('is the smallest deck that could be inside every band', () => {
+    const sumOfMinima = (archetype: Parameters<typeof compositionTargets>[0]) =>
+      targetsFor(archetype)
+        .filter((t) => t.dimension.kind === 'role')
+        .reduce((sum, t) => sum + t.min, 0)
+    for (const archetype of ARCHETYPES) {
+      expect(handoverSize(targetsFor(archetype))).toBe(sumOfMinima(archetype))
+    }
+    // The numbers themselves, so a change in `archetype-targets.ts` is visible.
+    expect(handoverSize(targetsFor('midrange'))).toBe(56)
+    expect(handoverSize(targetsFor('aggro'))).toBe(49)
+    expect(handoverSize(targetsFor('stax'))).toBe(67)
+  })
+
+  /*
+   * It is no longer the largest single target, and that is the whole change.
+   * Written as an assertion so the old derivation cannot creep back.
+   */
+  it('is no longer the archetype’s largest single target', () => {
+    const largest = targetsFor('midrange').reduce((most, t) => Math.max(most, t.ideal), 0)
+    expect(largest).toBe(36)
+    expect(handoverSize(targetsFor('midrange'))).toBeGreaterThan(largest)
   })
 
   it('follows the build order while the deck is below it', () => {
@@ -213,31 +362,56 @@ describe('handover from build order to largest-gap-first (Q2)', () => {
    * suite asserting only `plan.ordering === 'build-order'`, which is a label.
    * Deleting the build order from the comparator left all 22 tests passing.
    */
-  it('puts the build order ahead of the bigger gap, below the handover', () => {
-    const plan = quickbuildPlan(inputFor(lands(30), 'midrange'))
-    const land = plan.gaps.find((g) => g.key === dimensionKey(roleDimension('land')))!
-    const creature = plan.gaps.find((g) => g.key === dimensionKey(typeDimension('creature')))!
-    expect(creature.short).toBeGreaterThan(land.short)
-    expect(keys(plan.gaps)[0]).toBe(dimensionKey(roleDimension('land')))
+  /*
+   * The build order is FOLLOWED, not merely reported.
+   *
+   * Three lands short and twenty creatures short: worst-first says "creatures"
+   * on size, and so does the build order now, so that pair no longer separates
+   * the rules. What separates them is where LAND lands — worst-first would put
+   * a land gap wherever its size puts it, and the build order puts it last
+   * whatever its size.
+   */
+  it('puts the deferred gap last below the handover, whatever its size', () => {
+    const plan = quickbuildPlan(inputFor([...lands(10), ...filler(5)], 'midrange'))
+    const composition = plan.gaps.filter((g) => g.kind === 'composition')
+    const land = composition.find((g) => g.key === dimensionKey(roleDimension('land')))!
+    expect(land.short).toBe(23)
+    // Bigger than several gaps it now sits behind — so this is the build order
+    // talking and not the size.
+    const behind = composition.filter((g) => g.short < land.short)
+    expect(behind.length).toBeGreaterThan(0)
+    expect(keys(composition)[composition.length - 1]).toBe(dimensionKey(roleDimension('land')))
+    expect(keys(composition)[0]).toBe(dimensionKey(typeDimension('creature')))
   })
 
   it('switches to worst-first once the deck reaches it', () => {
-    const plan = quickbuildPlan(inputFor(filler(40), 'midrange'))
+    const plan = quickbuildPlan(inputFor([...lands(33), ...filler(25)], 'midrange'))
     expect(plan.ordering).toBe('largest-first')
   })
 
   /*
-   * The two orderings AGREE on an empty deck, which is what makes the handover
-   * safe to make at all: with nothing accepted, every deficit equals its own
-   * ideal, so "largest gap first" and "largest commitment first" are the same
-   * list. The threshold decides when the deck's own shape has become better
-   * evidence than the archetype's plan, not which of two rivals is right.
+   * The two orderings NO LONGER agree on an empty deck, and this test records
+   * that rather than hiding it.
+   *
+   * The old handover argument was that they coincide there — every deficit
+   * equals its own ideal with nothing accepted, so largest-gap and
+   * largest-commitment are the same list — which made the threshold's exact
+   * value not matter. Deferring the land count reverses land's position
+   * outright: worst-first leads with it because 33 is the biggest number on the
+   * board, and the build order ends with it because its target is not known
+   * until the rest of the deck is. So the threshold now chooses between two
+   * genuinely different answers, which is why it was re-derived above.
    */
-  it('agrees with worst-first on a completely empty deck', () => {
+  it('DISAGREES with worst-first on a completely empty deck — the coincidence is gone', () => {
     const plan = quickbuildPlan(inputFor([], 'midrange'))
     const composition = plan.gaps.filter((g) => g.kind === 'composition')
-    const worstFirst = [...composition].sort((a, b) => b.short - a.short)
-    expect(keys(composition)).toEqual(keys(worstFirst))
+    const worstFirst = [...composition].sort(
+      (a, b) => b.short - a.short || (a.key < b.key ? -1 : 1),
+    )
+    expect(plan.ordering).toBe('build-order')
+    expect(keys(worstFirst)[0]).toBe(dimensionKey(roleDimension('land')))
+    expect(keys(composition)[composition.length - 1]).toBe(dimensionKey(roleDimension('land')))
+    expect(keys(composition)).not.toEqual(keys(worstFirst))
   })
 })
 
@@ -436,5 +610,129 @@ describe('stability (D3) — the panel must not change its mind on every accept'
         (k) => k !== dimensionKey(roleDimension('ramp')),
       )
     expect(untouched(after.gaps)).toEqual(untouched(before.gaps))
+  })
+})
+
+/*
+ * The user's report: "quickbuild ended while I was below curve on ramp and
+ * spot removal, and also only at 58 of 100 cards. Once all your curves are
+ * satisfied, it should ask you if you'd like to continue quickbuilding, or go
+ * back to the suggestion list now that your deck allotments are met and you
+ * just need to pick X more cards."
+ *
+ * The arithmetic behind that 58, which is why it is not a coincidence: the role
+ * minima sum to 56 for midrange at bracket 3, so a deck can be inside every
+ * band at 56 cards and still be 44 short of a legal deck — and every one of
+ * those 44 sits in a dimension the archetype gives no target to at all.
+ * "Below curve on ramp" and "inside the ramp band" were both true at once,
+ * because the band's floor is three cards under the ideal.
+ */
+describe('reach — the band is where Quickbuild stops having an opinion, not where the deck ends', () => {
+  /** A card counted under one role, so a deck can be built to a target. */
+  const roled = (role: Role, n: number, manaValue = 2): readonly Card[] =>
+    Array.from({ length: n }, (_, i) =>
+      card(`${role}-${i}`, { roles: [role] as readonly Role[], primaryRole: role, manaValue }),
+    )
+
+  /** Inside every composition band for midrange at bracket 3, and no further. */
+  const atEveryBand = (): readonly Card[] => [
+    ...lands(33),
+    ...roled('ramp', 8),
+    ...roled('draw', 6),
+    ...roled('spot-removal', 5),
+    ...roled('board-wipe', 1),
+    ...roled('tutor', 1),
+    ...roled('protection', 2),
+  ]
+
+  it('is 56 cards for a midrange deck at bracket 3 — the number behind the report', () => {
+    expect(atEveryBand().length).toBe(56)
+    expect(handoverSize(targetsFor('midrange'))).toBe(56)
+  })
+
+  /*
+   * The defect the report names, stated as the model sees it: at the bottom of
+   * its band a dimension is three cards under its ideal, so the composition
+   * meter reads "8 / 11" — visibly below — while Quickbuild has nothing to say
+   * about it. Both readings are honest; showing only one of them is not.
+   */
+  it('reports no BAND gap for a dimension sitting at the floor of its band', () => {
+    const plan = quickbuildPlan(inputFor(atEveryBand(), 'midrange'))
+    expect(keys(plan.gaps.filter((g) => g.kind === 'composition'))).toEqual([])
+  })
+
+  it('reports the SAME dimensions as gaps that are still short of the ideal', () => {
+    const plan = quickbuildPlan(inputFor(atEveryBand(), 'midrange'))
+    const beyond = plan.beyond.filter((g) => g.kind === 'composition')
+    expect(keys(beyond)).toContain(dimensionKey(roleDimension('ramp')))
+    expect(keys(beyond)).toContain(dimensionKey(roleDimension('spot-removal')))
+    // Ramp is at 8 against an ideal of 11, which is exactly the "below curve on
+    // ramp" the report describes.
+    expect(beyond.find((g) => g.key === dimensionKey(roleDimension('ramp')))?.short).toBe(3)
+    expect(beyond.find((g) => g.key === dimensionKey(roleDimension('spot-removal')))?.short).toBe(3)
+  })
+
+  it('measures to the ideal, not the band, once the builder asks it to', () => {
+    const plan = quickbuildPlan({ ...inputFor(atEveryBand(), 'midrange'), reach: 'ideal' })
+    expect(plan.reach).toBe('ideal')
+    const ramp = plan.gaps.find((g) => g.key === dimensionKey(roleDimension('ramp')))
+    expect(ramp?.short).toBe(3)
+  })
+
+  /*
+   * There is nothing past the ideal, so a plan already reaching for it has no
+   * further offer to make. That is what lets the panel tell the difference
+   * between "you can keep going" and "there is genuinely nothing left".
+   */
+  it('has nothing beyond the ideal', () => {
+    const plan = quickbuildPlan({ ...inputFor(atEveryBand(), 'midrange'), reach: 'ideal' })
+    expect(plan.beyond).toEqual([])
+  })
+
+  it('defaults to the band, because a deck inside its band is not wrong', () => {
+    expect(quickbuildPlan(inputFor(atEveryBand(), 'midrange')).reach).toBe('band')
+  })
+
+  /*
+   * "You just need to pick X more cards." X is deck size minus what the deck
+   * holds, and it is stated rather than left for the builder to subtract.
+   */
+  it('counts the cards still needed for a legal deck', () => {
+    expect(quickbuildPlan(inputFor(atEveryBand(), 'midrange')).unallocated).toBe(DECK_SIZE - 56)
+    expect(quickbuildPlan(inputFor([], 'midrange')).unallocated).toBe(DECK_SIZE)
+  })
+
+  /*
+   * DECK_SIZE is the same 100 `validateDeck` judges against, and this reads it
+   * out of the legality report rather than restating the literal — two places
+   * saying 100 is two places that can drift.
+   */
+  it('agrees with the legality rule about how big a deck is', () => {
+    const report = validateDeck(deckOf(filler(3)), new Map(), new Map())
+    const wrongCount = report.problems.find((p) => p.kind === 'wrong-card-count')
+    expect(wrongCount).toBeDefined()
+    expect(wrongCount && 'expected' in wrongCount ? wrongCount.expected : null).toBe(DECK_SIZE)
+  })
+
+  /*
+   * The slots the archetype names no target for at all — the "big things" the
+   * user wants to pick first and the one thing Quickbuild genuinely cannot
+   * lead them to, because `wincon` and `synergy` are roles that no archetype
+   * gives an ideal. `archetype-targets.ts` reads this remainder as "the deck's
+   * unroled threats and payoffs", and midrange spends 74 of 99 on roles, so 26
+   * are left. The panel says this number out loud instead of implying it has an
+   * opinion it does not have.
+   */
+  it('counts the slots the archetype leaves for threats and win conditions', () => {
+    const roleIdeals = targetsFor('midrange')
+      .filter((t) => t.dimension.kind === 'role')
+      .reduce((sum, t) => sum + t.ideal, 0)
+    expect(roleIdeals).toBe(74)
+    expect(quickbuildPlan(inputFor([], 'midrange')).unroled).toBe(DECK_SIZE - roleIdeals)
+  })
+
+  it('never asks for a negative number of cards on an over-full deck', () => {
+    const plan = quickbuildPlan(inputFor([...lands(60), ...filler(60)], 'midrange'))
+    expect(plan.unallocated).toBe(0)
   })
 })

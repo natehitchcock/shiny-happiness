@@ -3807,7 +3807,7 @@ select {
 .quickbuild-limit,
 .quickbuild-of,
 .quickbuild-group,
-.quickbuild-done {
+.quickbuild-done-text {
   margin: 0;
   font-size: 0.78rem;
   color: var(--parchment-dim);
@@ -3851,18 +3851,58 @@ select {
 .quickbuild-options {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  /* Stretch is the grid default, and it is written down because it is the whole
+     of "each one is different dimensions": every track is `1fr` so the widths
+     match by construction, and this is what makes the heights match too. A
+     later `align-items: start` here would silently ragged the row again. */
+  align-items: stretch;
   gap: var(--step);
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
+/* One box per option, and the box is THIS element.
+ *
+ * The reported symptom was "the borders are weirdly not filling their parent
+ * pane, and each one is different dimensions so it looks very disorganized",
+ * and it was two boxes deep rather than one. `Detail` draws its own framed card
+ * — `.rt-detail` carries a border, a radius, a background and 12px of padding,
+ * because in the detail column it IS the panel — so mounting three of them
+ * inside three `<li>` boxes drew six frames. The outer three are grid items and
+ * stretch to the tallest of the row; the inner three are ordinary blocks and
+ * are exactly as tall as their own text, so a card with four lines of oracle
+ * text and a vanilla creature produced two visibly different boxes floating
+ * inside two identical ones.
+ *
+ * The fix is to keep one frame and make the inner one fill it: the `<li>`
+ * becomes a flex column (so a child CAN stretch), and `.rt-detail` gives up its
+ * frame and takes the height. Done from this sheet rather than `card.css`
+ * because it is this mount that is unusual — the detail column and the mobile
+ * sheet both still want the framed card. */
 .quickbuild-option {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--rule);
   border-left: 3px solid var(--rule);
   border-radius: var(--radius);
   padding: var(--step);
   background: var(--ink);
+}
+
+/* `1 1 auto` rather than a height: the row's tallest option sets the height and
+   every other option grows to it, so the three boxes match whatever the text
+   inside them does. `min-height: 0` is what lets `.rt-detail-body`'s own
+   `overflow-y: auto` engage instead of pushing the box taller — without it a
+   flex item refuses to shrink below its content and the equal heights are the
+   tallest card's height everywhere. */
+.quickbuild-option > .rt-detail {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: none;
 }
 
 /* The focused option is marked by a RULE as well as a colour, and the panel
@@ -3888,6 +3928,14 @@ select {
   margin-top: calc(var(--step) * 1.5);
 }
 
+/* The ending carries two buttons now, so it is a block with the sentence above
+   them rather than a lone paragraph. `max-width` in characters because it is a
+   paragraph of prose and a full-width suggestion pane would set it at 120
+   characters a line. */
 .quickbuild-done {
   padding: calc(var(--step) * 2) 0;
+}
+
+.quickbuild-done-text {
+  max-width: 56ch;
 }

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import { Detail, type CardView } from '@roundtable/ui'
-import { gapQuery, type QuickbuildGap, type QuickbuildPlan } from '@roundtable/domain'
+import {
+  DECK_SIZE,
+  gapQuery,
+  type QuickbuildGap,
+  type QuickbuildPlan,
+  type QuickbuildReach,
+} from '@roundtable/domain'
 
 /**
  * Quickbuild — one gap, three cards, one decision (doc 19).
@@ -57,6 +63,15 @@ export interface QuickbuildProps {
   readonly onAdd: (oracleId: string) => void
   readonly onReject: (oracleId: string) => void
   readonly onClose: () => void
+  /**
+   * Reach past the band, when the builder asks for it (ADR-0040).
+   *
+   * The plan is computed by the workspace, so the choice offered at the end of
+   * the loop has to be handed back up rather than kept here. It is a callback
+   * and not a piece of local state for the same reason `plan` is a prop: two
+   * copies of "which number are we working to" is two numbers to disagree.
+   */
+  readonly onReach: (reach: QuickbuildReach) => void
   /** How many cards the cut indicator currently names, for the Q5 message. */
   readonly cutCount: number
   /**
@@ -177,6 +192,34 @@ const gapHeading = (gap: QuickbuildGap): string =>
     ? `${gap.short} more at ${gap.label}`
     : `${gap.short} more ${gap.label}${gap.short === 1 ? '' : ''}`
 
+/**
+ * What the panel says when it runs out of gaps — the report's second half.
+ *
+ * "Quickbuild ended while I was below curve on ramp and spot removal, and also
+ * only at 58 of 100 cards." Both halves of that were true at once, and the
+ * panel said neither. The band's floor sits three cards under the ideal, so a
+ * dimension can be inside its band and visibly under its meter at the same
+ * time; and the role minima sum to 56 for a midrange deck at bracket 3, so a
+ * deck reaches every band at 56 cards with 44 still to find.
+ *
+ * So the ending states the arithmetic instead of asserting completion, and
+ * NEVER closes by itself. The sentence is assembled from the plan's own numbers
+ * — nothing here computes a target.
+ */
+const endingText = (plan: QuickbuildPlan): string => {
+  const held = DECK_SIZE - plan.unallocated
+  const met =
+    plan.reach === 'band'
+      ? 'Every composition and curve allotment is inside its band.'
+      : 'Every composition and curve target is at its ideal.'
+  if (plan.unallocated === 0) return `${met} The deck holds all ${DECK_SIZE} cards.`
+  return (
+    `${met} The deck holds ${held} of ${DECK_SIZE}, so there are ${plan.unallocated} more ` +
+    `cards to pick. Your archetype leaves ${plan.unroled} slots with no target at all — the ` +
+    `threats and win conditions — and Quickbuild has no opinion about those.`
+  )
+}
+
 export const Quickbuild = ({
   plan,
   filter,
@@ -184,12 +227,39 @@ export const Quickbuild = ({
   onAdd,
   onReject,
   onClose,
+  onReach,
   cutCount,
   retiredIds,
 }: QuickbuildProps): JSX.Element => {
+  /**
+   * Which gap of the plan is showing — a MONOTONIC counter, wrapped on read.
+   *
+   * It used to be an index into `plan.gaps` that "Different gap" advanced with
+   * a modulo against the length AT THE TIME OF THE CLICK. The plan is
+   * recomputed on every accept and gaps close as the deck fills, so the list it
+   * indexed could get shorter underneath it — and `plan.gaps[3]` on a
+   * three-gap plan is `undefined`, which rendered as "Every composition and
+   * curve goal is inside its band. Nothing to fill." The panel announced it was
+   * finished while the deck was still short of ramp and spot removal, which is
+   * exactly what the report describes. Wrapping on READ cannot go out of range,
+   * whatever the plan does between renders.
+   */
   const [gapAt, setGapAt] = useState(0)
-  /** How many candidates have been passed over for this gap. D5: a PASS. */
-  const [passed, setPassed] = useState(0)
+  /**
+   * How many candidates have been passed over, and FOR WHICH GAP. D5: a PASS.
+   *
+   * The gap key rides with the count because the two must never be applied to
+   * each other's list. This was a bare number, so a builder who skipped twice
+   * on the land gap and then had that gap close under them kept a cursor of six
+   * into the next gap's fresh page of eight — the panel sliced past almost all
+   * of it and, when the new page was shorter, reported "No more candidates for
+   * this gap" about a gap it had not shown a single card for. The second half
+   * of the same report: ramp and spot removal never being offered.
+   */
+  const [cursor, setCursor] = useState<{ readonly gapKey: string; readonly passed: number }>({
+    gapKey: '',
+    passed: 0,
+  })
   /**
    * The candidates held for one gap, and which gap they answer.
    *
@@ -216,7 +286,8 @@ export const Quickbuild = ({
   const panelRef = useRef<HTMLDivElement>(null)
   const openerRef = useRef<Element | null>(null)
 
-  const gap = plan.gaps[gapAt]
+  const gap = plan.gaps.length === 0 ? undefined : plan.gaps[gapAt % plan.gaps.length]
+  const passed = gap !== undefined && cursor.gapKey === gap.key ? cursor.passed : 0
 
   /*
    * Focus moves in on open and RETURNS to whatever opened the panel on close
@@ -352,6 +423,13 @@ export const Quickbuild = ({
   const showing = useMemo(() => live.slice(passed, passed + OPTIONS), [live, passed])
 
   /*
+   * "Option 3 of 2" is not a sentence. `focused` is a cursor over a list that
+   * shortens under it — a card retiring from the queue is enough — so it is
+   * clamped on read for the same reason `gapAt` is.
+   */
+  const focus = showing.length === 0 ? 0 : Math.min(focused, showing.length - 1)
+
+  /*
    * THE PREFETCH. Deepen the queue while the builder is reading, so the next
    * trio is already in hand whichever of the four things they do with this one.
    *
@@ -384,7 +462,14 @@ export const Quickbuild = ({
    * user presses Add and has no way to learn what replaced it.
    */
   useEffect(() => {
-    if (gap === undefined) return
+    if (gap === undefined) {
+      // The ending is announced too. It is the one moment the panel stops
+      // asking questions, and a screen-reader user who hears nothing at that
+      // point has no way to learn the loop is over or that there is a choice
+      // waiting on it.
+      setAnnouncement(endingText(plan))
+      return
+    }
     // Silence while a first fetch is still running: `pipeline.ts`'s `describe`
     // learned this the hard way — a live region that narrates work rather than
     // results announces "Preparing…" over and over and is worse than none. The
@@ -399,11 +484,10 @@ export const Quickbuild = ({
               .map((c) => c.view.name)
               .join(', ')}.`,
     )
-  }, [failed, fetching, showing, gap])
+  }, [failed, fetching, showing, gap, plan])
 
   const nextGap = (): void => {
-    setGapAt((at) => (at + 1) % Math.max(1, plan.gaps.length))
-    setPassed(0)
+    setGapAt((at) => at + 1)
     setFocused(0)
   }
 
@@ -419,7 +503,8 @@ export const Quickbuild = ({
    * button that says what it does.
    */
   const skip = (): void => {
-    setPassed((n) => n + OPTIONS)
+    if (gap === undefined) return
+    setCursor({ gapKey: gap.key, passed: passed + OPTIONS })
     setFocused(0)
   }
 
@@ -452,9 +537,45 @@ export const Quickbuild = ({
       </p>
 
       {gap === undefined ? (
-        <p className="quickbuild-done">
-          Every composition and curve goal is inside its band. Nothing to fill.
-        </p>
+        /*
+         * THE ENDING IS A QUESTION, NOT A FULL STOP (ADR-0040).
+         *
+         * It used to be one sentence — "Nothing to fill." — with no action on
+         * it, which read as "you are done" to a builder who was 42 cards short
+         * of a legal deck. Both offers are here, always: keep going, or go back
+         * to the list. Neither happens on its own, and the panel never closes
+         * itself.
+         */
+        <div
+          className="quickbuild-done"
+          /*
+           * A named GROUP, not a bare div: it holds a sentence and the two
+           * controls that answer it, and a screen-reader user arriving at
+           * "Keep quickbuilding to the ideals" out of context has no way to
+           * know what it would continue. The name is what ties the buttons to
+           * the paragraph above them.
+           */
+          role="group"
+          aria-label="Quickbuild has no gaps left"
+        >
+          <p className="quickbuild-done-text">{endingText(plan)}</p>
+          <div className="quickbuild-actions">
+            {plan.beyond.length === 0 ? null : (
+              /*
+               * Offered only when there is something past the band to work.
+               * `beyond` is the plan's own answer to "would continuing find
+               * anything", so the button cannot appear over an empty loop —
+               * the failure this whole change is about, one layer along.
+               */
+              <button className="act primary" onClick={() => onReach('ideal')}>
+                Keep quickbuilding to the ideals
+              </button>
+            )}
+            <button className="act" onClick={onClose}>
+              Back to the suggestion list
+            </button>
+          </div>
+        </div>
       ) : (
         <>
           <div className="quickbuild-gap">
@@ -518,15 +639,13 @@ export const Quickbuild = ({
                * of these three".
                */}
               <p className="quickbuild-of">
-                Option {focused + 1} of {showing.length}
+                Option {focus + 1} of {showing.length}
               </p>
               <ul className="quickbuild-options" aria-label="Three candidates for this gap">
                 {showing.map((candidate, at) => (
                   <li
                     key={candidate.oracleId}
-                    className={
-                      at === focused ? 'quickbuild-option is-focused' : 'quickbuild-option'
-                    }
+                    className={at === focus ? 'quickbuild-option is-focused' : 'quickbuild-option'}
                     /*
                      * Named, because `Detail` renders its own list of reasons
                      * inside this one. Without a label the three options are
