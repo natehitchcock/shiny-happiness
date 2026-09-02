@@ -2831,3 +2831,123 @@ describe('deriveSynergy — a land that is also a creature (ADR-0047)', () => {
     })
   })
 })
+
+describe('deriveSynergy — whose tokens they are (ADR-0054)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  // The reported card. A land that hands a Spirit to somebody else.
+  const FORBIDDEN_ORCHARD = derive(
+    'Forbidden Orchard',
+    'Land',
+    '{T}: Add {C}.\n{T}: Add one mana of any color. Whenever you tap this land for mana, target opponent creates a 1/1 colorless Spirit creature token.',
+  )
+  const HUNTED_HORROR = derive(
+    'Hunted Horror',
+    'Creature — Horror',
+    'Trample\nWhen this creature enters, target opponent creates two 3/3 green Centaur creature tokens.',
+  )
+  const CHATTER_OF_THE_SQUIRREL = derive(
+    'Chatter of the Squirrel',
+    'Sorcery',
+    'Create a 1/1 green Squirrel creature token.\nFlashback {2}{G}',
+  )
+
+  it('refuses `token` when the card names an opponent as the creator', () => {
+    expect(FORBIDDEN_ORCHARD.produces).not.toContain('token')
+    expect(HUNTED_HORROR.produces).not.toContain('token')
+  })
+
+  it('refuses `sacrifice-fodder`, which is the claim that hurt most', () => {
+    // An aristocrats deck reads `sacrifice-fodder` as bodies it may eat. These
+    // bodies belong to the player across the table.
+    expect(FORBIDDEN_ORCHARD.produces).not.toContain('sacrifice-fodder')
+    expect(HUNTED_HORROR.produces).not.toContain('sacrifice-fodder')
+  })
+
+  it('still reads the imperative, which is addressed to you', () => {
+    expect(CHATTER_OF_THE_SQUIRREL.produces).toContain('token')
+    expect(CHATTER_OF_THE_SQUIRREL.produces).toContain('sacrifice-fodder')
+  })
+
+  it('keeps a symmetric clause, because you get one too', () => {
+    // ADR-0022's ruling about "each player discards", one verb over: claiming
+    // one side and not the other would be false whichever side you picked.
+    const alliance = derive(
+      'Alliance of Arms',
+      'Sorcery',
+      'Each player may pay any amount of mana. Each player creates X 1/1 white Soldier creature tokens, where X is the total amount of mana that player paid this way.',
+    )
+
+    expect(alliance.produces).toContain('token')
+  })
+
+  it('reads the clause and not the card', () => {
+    // A card that makes its own tokens AND donates one is still a token maker.
+    const both = derive(
+      'Split Decision',
+      'Sorcery',
+      'Create a 1/1 white Soldier creature token. Target opponent creates a 1/1 green Hippo creature token.',
+    )
+
+    expect(both.produces).toContain('token')
+  })
+
+  it('does not read the donated body as something the deck WANTS either', () => {
+    // The direction inversion is the worse error (ADR-0016): a card that gives
+    // Centaurs away must not be offered to a Centaur deck as a payoff.
+    expect(HUNTED_HORROR.wants).not.toContain('subtype:centaur')
+  })
+
+  it('refuses the derived families the clause used to hand over', () => {
+    // ADR-0048's subtype and keyword tags multiply the same defect: Hunted
+    // Troll made the opponent four Faeries with flying and claimed both.
+    const troll = derive(
+      'Hunted Troll',
+      'Creature — Troll',
+      'When this creature enters, target opponent creates four 1/1 blue Faerie creature tokens with flying.',
+    )
+
+    expect(troll.produces).not.toContain('subtype:faerie')
+    expect(troll.produces).not.toContain('ability:flying')
+  })
+
+  it('reads an opponent in the OBJECT position as the attack target, not the creator', () => {
+    // Found by diffing the corpus. "Whenever a player attacks one of your
+    // opponents, that attacking player creates…" — the attacker is usually
+    // you, and the Inklings are why the card is played. Three cards say this
+    // (Combat Calligrapher, Ellie, Jolene) and a bare "opponent" in the window
+    // lost all three.
+    const calligrapher = derive(
+      'Combat Calligrapher',
+      'Creature — Bird Cleric',
+      "Flying\nInklings can't attack you or planeswalkers you control.\nWhenever a player attacks one of your opponents, that attacking player creates a tapped 2/1 white and black Inkling creature token with flying that's attacking that opponent.",
+    )
+
+    // Not `token`: that rule's window is forty characters and this token's
+    // description is forty-five, which is a pre-existing gap and not this
+    // change. `sacrifice-fodder` and the subtype are the two it does reach.
+    expect(calligrapher.produces).toContain('sacrifice-fodder')
+    expect(calligrapher.produces).toContain('subtype:inkling')
+  })
+
+  it('leaves the removal shell alone, which is measured rather than assumed', () => {
+    // "Its controller creates" was tried and refused: 54 further cards, of
+    // which at least 14 hand the token to YOU — a symmetric wipe's controller
+    // is also you, and Descent of the Dragons is pointed at your own board on
+    // purpose. ADR-0022 refused "its controller sacrifices" for this reason.
+    const beastWithin = derive(
+      'Beast Within',
+      'Instant',
+      'Destroy target permanent. Its controller creates a 3/3 green Beast creature token.',
+    )
+    const marchOfSouls = derive(
+      'March of Souls',
+      'Sorcery',
+      "Destroy all creatures. They can't be regenerated. For each creature destroyed this way, its controller creates a 1/1 white Spirit creature token with flying.",
+    )
+
+    expect(beastWithin.produces).toContain('token')
+    expect(marchOfSouls.produces).toContain('token')
+  })
+})

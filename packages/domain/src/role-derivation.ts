@@ -1,6 +1,7 @@
 import type { Card } from './card.js'
 import type { OracleId } from './ids.js'
 import { primaryRole, type Role } from './role.js'
+import { CREATES_FOR_YOU } from './token-subject.js'
 
 /**
  * Role derivation (doc 02 §2.4, DOM-04).
@@ -295,11 +296,21 @@ const HEURISTICS: readonly Heuristic[] = [
     test: /\b[Ss]acrifices? (?:a|an|another|two|three|X|\d+) (?!(?:Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment|Plains|Island|Swamp|Mountain|Forest|Desert|Aura|Room)s?\b)[A-Z][A-Za-z'-]*[^.\n]{0,40}:/,
   },
 
+  /*
+   * WHOSE tokens (ADR-0054). The role feeds the composition meters, so
+   * `token-maker` is a claim about how many token makers THIS DECK holds —
+   * and "target opponent creates two 3/3 Centaurs" makes none of them. Same
+   * subject test as `synergy.ts` and `semantic-tokens.ts`, shared from
+   * `token-subject.ts` so the three cannot drift.
+   */
   {
     role: 'token-maker',
-    test: /creates? (a|an|two|three|X|that many|\w+) .{0,60}creature tokens?/i,
+    test: new RegExp(
+      `${CREATES_FOR_YOU} (a|an|two|three|X|that many|\\w+) .{0,60}creature tokens?`,
+      'i',
+    ),
   },
-  { role: 'token-maker', test: /creates? .{0,40}token that's a copy/i },
+  { role: 'token-maker', test: new RegExp(`${CREATES_FOR_YOU} .{0,40}token that's a copy`, 'i') },
 
   { role: 'anthem', test: /creatures you control get \+\d+\/\+\d+/i },
   { role: 'anthem', test: /other .{0,30}creatures you control get \+\d+\/\+\d+/i },

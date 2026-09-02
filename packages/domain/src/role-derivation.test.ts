@@ -585,3 +585,67 @@ describe('a sacrifice outlet that names a creature TYPE (ADR-0047)', () => {
     expect(rolesOf('Land', '{T}, Sacrifice a Bird: Draw a card.')).toEqual(['land'])
   })
 })
+
+describe('token-maker asks whose tokens they are (ADR-0054)', () => {
+  it('refuses a clause that names an opponent as the creator', () => {
+    // The role feeds the composition meters, so `token-maker` is a claim about
+    // how many token makers THIS deck holds. Hunted Horror makes none of them.
+    expect(
+      rolesOf(
+        'Creature — Horror',
+        'Trample\nWhen this creature enters, target opponent creates two 3/3 green Centaur creature tokens.',
+      ),
+    ).not.toContain('token-maker')
+  })
+
+  it('refuses the copy clause on the same ground', () => {
+    expect(
+      rolesOf(
+        'Creature — Elemental',
+        "When this creature enters, if it's not a token, each opponent creates a token that's a copy of it.",
+      ),
+    ).not.toContain('token-maker')
+  })
+
+  it('still reads the imperative and the symmetric clause', () => {
+    expect(rolesOf('Sorcery', 'Create a 1/1 green Squirrel creature token.')).toContain(
+      'token-maker',
+    )
+    expect(
+      rolesOf('Sorcery', 'Each player creates X 1/1 white Soldier creature tokens.'),
+    ).toContain('token-maker')
+  })
+
+  it('reads the clause and not the card', () => {
+    // Rasputin makes Knights for himself and Goblins for everyone else. He is
+    // a token maker.
+    expect(
+      rolesOf(
+        'Legendary Creature — Human Wizard',
+        'When Rasputin enters, put a dream counter on it for each opponent you have. Each opponent creates a 1/1 red Goblin creature token.\n{T}, Remove a dream counter from Rasputin: Create a 2/2 white Knight creature token with protection from red.',
+      ),
+    ).toContain('token-maker')
+  })
+
+  it('reads an opponent in the object position as the attack target', () => {
+    // "attacks one of your opponents, that attacking player creates" — the
+    // attacker is usually you, and the tokens are why the card is played.
+    expect(
+      rolesOf(
+        'Creature — Bird Cleric',
+        "Flying\nWhenever a player attacks one of your opponents, that attacking player creates a tapped 2/1 white and black Inkling creature token with flying that's attacking that opponent.",
+      ),
+    ).toContain('token-maker')
+  })
+
+  it('leaves the removal shell a token maker, which is measured not assumed', () => {
+    // "Its controller creates" was tried and refused — 54 further cards, at
+    // least 14 of which hand the token to you. See `token-subject.ts`.
+    expect(
+      rolesOf(
+        'Instant',
+        'Destroy target permanent. Its controller creates a 3/3 green Beast creature token.',
+      ),
+    ).toContain('token-maker')
+  })
+})

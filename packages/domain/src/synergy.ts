@@ -2,6 +2,7 @@ import { TAKES_EXTRA_TURN } from './bracket-barometers.js'
 import type { Card } from './card.js'
 import type { OracleId } from './ids.js'
 import { SEMANTIC_TAGS, deriveSemanticTokens, type SemanticTag } from './semantic-tokens.js'
+import { CREATES_FOR_YOU } from './token-subject.js'
 
 /**
  * Mechanical synergy (ADR-0011).
@@ -595,7 +596,16 @@ const PRODUCES: readonly Rule[] = [
   // not be read as death and can be read as damage.
   { tag: 'damage', test: /\bdamage divided\b/i },
 
-  { tag: 'token', test: /\bcreate(s)? .{0,40}\btoken/i },
+  /*
+   * WHOSE tokens (ADR-0054). `create(s)?` read the verb and not the subject, so
+   * "target opponent creates a 1/1 Spirit" was a token you could sacrifice —
+   * Forbidden Orchard, the six Hunted creatures, Clackbridge Troll, Akroan
+   * Horse. 31 commander-legal cards, every one read by hand.
+   *
+   * The subject test is `token-subject.ts`, shared with `semantic-tokens.ts`
+   * and `role-derivation.ts` because all three made this mistake separately.
+   */
+  { tag: 'token', test: new RegExp(`${CREATES_FOR_YOU} .{0,40}\\btoken`, 'i') },
   /*
    * The doublers, which never say "create" in the active voice (ADR-0048, found
    * by the commander sweep).
@@ -617,7 +627,10 @@ const PRODUCES: readonly Rule[] = [
    * makes the creature tokens is the one that should claim the bodies.
    */
   { tag: 'token', test: /\btokens? would be created\b|\bwould create one or more tokens\b/i },
-  { tag: 'sacrifice-fodder', test: /\bcreate(s)? .{0,40}\bcreature token/i },
+  // Same subject test, and this is the tag the report was written about: an
+  // aristocrats deck reads `sacrifice-fodder` as bodies it may eat, and these
+  // bodies are the opponent's.
+  { tag: 'sacrifice-fodder', test: new RegExp(`${CREATES_FOR_YOU} .{0,40}\\bcreature token`, 'i') },
 
   { tag: 'treasure', test: /\bTreasure token/i },
   // Any artifact card entering IS an artifact entering the battlefield, which is
@@ -629,9 +642,15 @@ const PRODUCES: readonly Rule[] = [
   // enchantments against ~200 payoffs — the same lopsided shape as the artifact
   // pair above, which is the precedent this follows rather than a fresh claim.
   { tag: 'enchantment-etb', test: /^[^\n]*\bEnchantment\b/ },
+  // The same subject test as the two rules above (ADR-0054). An artifact token
+  // handed to an opponent does not put an artifact onto YOUR battlefield, which
+  // is the whole of what the payoff asks for.
   {
     tag: 'artifact-etb',
-    test: /\bcreate(s)? .{0,40}\b(artifact|Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment) token/i,
+    test: new RegExp(
+      `${CREATES_FOR_YOU} .{0,40}\\b(artifact|Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment) token`,
+      'i',
+    ),
   },
 
   // The numbers were a closed list of one, so "gain 4 life" read as nothing.
