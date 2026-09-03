@@ -118,11 +118,18 @@ export interface QuickbuildProps {
    * happened. Filtering on every render rather than refetching means an
    * exclusion made elsewhere cannot survive even one frame.
    *
-   * And it is how a pick advances the trio with NO request at all: the card
-   * the builder just took joins this set immediately, drops out of the queue,
-   * and the next candidate slides into its place. The four outcomes of a trio
-   * — take the first, the second, the third, or skip — differ only in which
-   * element leaves the queue, never in which query produced it.
+   * And it is half of how a pick advances the trio with NO request at all: the
+   * card the builder just took joins this set immediately and drops out of the
+   * queue. The other half is `held` inside the panel, which passes over the two
+   * they did not take, so the whole trio changes rather than one card of it.
+   * The four outcomes of a trio — take the first, the second, the third, or
+   * skip — now consume the same three candidates from the same list and differ
+   * only in whether a card is added; none of them changes the query.
+   *
+   * The division of labour matters. A card retired HERE was decided somewhere
+   * else — the feed behind the panel, most often — and that is not a judgement
+   * about the trio, so it takes that one card out and leaves the rest of the
+   * question standing. Only the panel's own Add passes over all three.
    */
   readonly retiredIds: ReadonlySet<string>
   /**
