@@ -3,6 +3,7 @@ import type { BracketFlag } from '../bracket.js'
 import type { OracleId } from '../ids.js'
 import type { Role } from '../role.js'
 import { assertNever } from '../assert-never.js'
+import { frontOfTypeLine } from '../legality.js'
 import { normaliseTag, type ComparisonOp, type QueryNode } from './ast.js'
 
 /**
@@ -129,6 +130,16 @@ const evaluateIs = (candidate: AnnotatedCandidate, predicate: string): boolean =
       return card.canBeCommander === true
     case 'land':
       return card.types.includes('land')
+    /*
+     * THE FRONT FACE ONLY, for the reason `is:commander` reads a stored flag
+     * rather than the whole string: Westvale Abbey's type line is
+     * `Land // Legendary Creature — Demon`, and a card whose BACK is legendary
+     * is not a legendary card you can cast. `frontOfTypeLine` is the same
+     * helper `canBeCommander` uses, shared rather than copied — two splits of
+     * one string that could disagree is how the next one goes wrong.
+     */
+    case 'legendary':
+      return /\bLegendary\b/.test(frontOfTypeLine(card.typeLine))
     case 'vanilla':
       return card.oracleText.trim() === ''
     case 'reserved':

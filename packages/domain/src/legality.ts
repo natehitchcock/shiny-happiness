@@ -63,7 +63,8 @@ const isBasicLand = (card: Card): boolean => /\bBasic\b.*\bLand\b/.test(card.typ
  * offers a land as a commander. Ten `Invasion of …` battles have the same
  * shape. Taking the front is the only reading that gets both right.
  */
-const frontOfTypeLine = (typeLine: string): string => typeLine.split(' // ')[0] ?? typeLine
+export const frontOfTypeLine = (typeLine: string): string =>
+  typeLine.split(' // ')[0] ?? typeLine
 
 /**
  * A card is a creature card everywhere except the battlefield.

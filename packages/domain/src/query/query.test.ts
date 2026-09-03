@@ -169,6 +169,20 @@ describe('errors are reported, never ignored', () => {
     expect(errors[0]!.suggestion).toMatch(/permanent/)
   })
 
+  /*
+   * `is:legendary` (ADR-0057's deferral).
+   *
+   * 183 cards key off a legendary permanent and 181 of them (99%) carry no tag
+   * that mentions it, because supertypes are in no vocabulary anywhere -- Magic
+   * sets them in lower case and the subtype family's whole precision rule is
+   * `/\b[A-Z]…/`. The tag is deferred; the FILTER is not, because it is one
+   * predicate reading the front of a type line.
+   */
+  it('accepts is:legendary and rejects the words next to it', () => {
+    expect(errorsOf('is:legendary')).toEqual([])
+    expect(errorsOf('is:legendaryy')[0]!.message).toMatch(/unknown predicate/)
+  })
+
   it('rejects an unknown role', () => {
     expect(errorsOf('role:vibes')[0]!.message).toMatch(/unknown role/)
   })
@@ -361,6 +375,22 @@ describe('evaluation', () => {
     expect(matchesQuery(ast('is:vanilla'), candidate({ card: card({ oracleText: '' }) }))).toBe(
       true,
     )
+  })
+
+  /*
+   * `is:legendary` reads the FRONT of the type line, for the reason
+   * `is:commander` reads a stored flag rather than the whole string:
+   * Westvale Abbey's line is `Land // Legendary Creature — Demon`, and a card
+   * whose back face is legendary is not a legendary card you can cast.
+   */
+  it('answers is:legendary from the front of the type line', () => {
+    const krenko = candidate({ card: card({ typeLine: 'Legendary Creature — Goblin Warrior' }) })
+    const bear = candidate({ card: card({ typeLine: 'Creature — Bear' }) })
+    const abbey = candidate({ card: card({ typeLine: 'Land // Legendary Creature — Demon' }) })
+
+    expect(matchesQuery(ast('is:legendary'), krenko)).toBe(true)
+    expect(matchesQuery(ast('is:legendary'), bear)).toBe(false)
+    expect(matchesQuery(ast('is:legendary'), abbey)).toBe(false)
   })
 
   it('answers is:commander from the stored flag, not from the type line', () => {

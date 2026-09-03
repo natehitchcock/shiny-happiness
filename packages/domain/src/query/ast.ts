@@ -201,6 +201,27 @@ export const IS_PREDICATES: ReadonlySet<string> = new Set([
   'gamechanger',
   'reprint',
   'firstprint',
+  /*
+   * The supertype the tag vocabulary cannot hold (ADR-0057).
+   *
+   * 183 commander-legal cards key off a legendary permanent — "another
+   * legendary creature you control", "target legendary creature", "search your
+   * library for a legendary creature" — and 181 of them (99%) carry no tag
+   * mentioning it. Legendary is on 12.6% of the corpus, which is well inside
+   * the breadth ADR-0046 accepts, so the tag would be worth having.
+   *
+   * It cannot be had cheaply, and the reason is written out in ADR-0057: Magic
+   * SETS SUPERTYPES IN LOWER CASE in rules text, and the leading-capital match
+   * in `semantic-tokens.ts` is the entire precision mechanism of the subtype
+   * family — "target Human" is a reference, "the human cost" is not. The ingest's
+   * inertness filter would count zero wanters for `Legendary` and refuse the
+   * word even after the generator learned to read left of the em dash.
+   *
+   * So the SCORER does not get the pair and the BUILDER gets the filter, which
+   * is one predicate over a string the read already carries. That asymmetry is
+   * the whole of why this is here and the tag is not.
+   */
+  'legendary',
 ])
 
 /**
