@@ -1319,3 +1319,69 @@ describe('IMPACT_MAX after severity', () => {
     expect(at.score).toBe(IMPACT_MAX)
   })
 })
+
+/**
+ * The four claims the severity rungs make that the quartet alone cannot pin.
+ *
+ * Each of these was written because a mutation survived without it — the ladder
+ * ordering below the neutral point, the breadth gate, and both halves of the
+ * steal rule.
+ */
+describe('severity — the guards', () => {
+  const spell = (oracleText: string) => card({ manaCost: '{2}', typeLine: 'Instant', oracleText })
+
+  it('orders the gentle end of the ladder too', () => {
+    // The quartet only pins bounce < damage < destroy < exile. Without this the
+    // whole bottom of the ladder could collapse to one value unnoticed.
+    const tap = cardImpact(spell('Tap target creature.')).score
+    const flicker = cardImpact(
+      spell('Exile target creature, then return it to the battlefield under its owner’s control.'),
+    ).score
+    const bounce = cardImpact(spell("Return target creature to its owner's hand.")).score
+    expect(tap).toBeLessThan(flicker)
+    expect(flicker).toBeLessThan(bounce)
+  })
+
+  it('gives no severity to a clause that points at nothing', () => {
+    // The gate. Severity describes what happens to an object the clause
+    // AFFECTS, so a clause with `breadth: none` cannot have one — and that is
+    // also the cheapest guard against a removal verb used for something else.
+    // This card deals damage and reaches nothing it can count.
+    const combat = card({
+      name: 'Combat Damage',
+      manaCost: '{3}',
+      typeLine: 'Creature — Ogre',
+      oracleText:
+        'Whenever this creature attacks, it deals damage equal to its power to defending player.',
+    })
+    expect(cardImpact(combat).breadth).toBe('none')
+    expect(cardImpact(combat).severity).toBe('none')
+  })
+
+  it('does not call a control RESET a steal', () => {
+    // Brooding Saurian's entire text. It hands every permanent back to its
+    // owner, which is the opposite of removal, and it reached the ceiling at
+    // 22.176 before `gain` was distinguished from `gains`. Nine cards do this.
+    const saurian = card({
+      name: 'Brooding Saurian',
+      manaCost: '{3}{G}',
+      typeLine: 'Creature — Lizard',
+      oracleText:
+        'At the beginning of each end step, each player gains control of all nontoken permanents they own.',
+    })
+    expect(cardImpact(saurian).severity).toBe('none')
+  })
+
+  it('does not call a donate a steal', () => {
+    // Giving something away is not removal, and the model has no axis for a
+    // downside. The verb here is second person — `gain`, not `gains` — so only
+    // the player-noun guard stops it.
+    const donate = card({
+      name: 'Donate',
+      manaCost: '{2}{U}',
+      typeLine: 'Sorcery',
+      oracleText: 'Have target opponent gain control of target permanent you control.',
+    })
+    expect(cardImpact(donate).severity).toBe('none')
+  })
+})
