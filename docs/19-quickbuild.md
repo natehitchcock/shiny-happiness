@@ -589,8 +589,8 @@ screen, with the same deck state on both sides:
 | picks that showed a loading state | all | none |
 
 About **150x**, and the requests on the path go to zero. The remaining ~35 ms is
-one React render: the click retires the card optimistically, the queue filters
-it out, and the next candidate slides up.
+one React render: the click retires the card optimistically, the panel passes
+over the other two (§19.9), and the next three slide up.
 
 (The "after" numbers are read from a `MutationObserver` on the option list. An
 earlier poll loop reported ~1,000 ms for the same picks, which was the browser
@@ -643,11 +643,17 @@ whole of it: after a pick the pool genuinely reorders a little, because the
 accepted card joins the deck's synergy profile and every candidate's score moves
 with it. The queue does not follow that drift until it is refilled.
 
-It is accepted for three reasons. The drift is small and bounded — 83% of cards
-in common, and never a case in 48 where all three changed. It is confined to the
-third slot, a card the builder has not looked at yet. And the product already
-takes this position deliberately elsewhere: `pipeline.ts`'s settle exists so
-that "the list does not reshuffle under a user who is mid-click".
+It is accepted for two reasons. The drift is small and bounded — 83% of cards
+in common, and never a case in 48 where all three changed. And the product
+already takes this position deliberately elsewhere: `pipeline.ts`'s settle
+exists so that "the list does not reshuffle under a user who is mid-click".
+
+(A third reason used to be given — that the drift was confined to the third
+slot, a card the builder had not looked at yet. That stopped being true when a
+pick began passing over the whole trio (§19.9): the window now moves three cards
+at a time, so the next trio is drawn from further down the held list and all of
+it is unseen. The size of the drift is unchanged; the claim about where it lands
+was not, and the refill below is what bounds it.)
 
 The drift is bounded in time as well as size: the background top-up re-asks with
 the current deck state, so the ranking refreshes as the builder works through a
@@ -665,6 +671,13 @@ against the live API) but not free in hydration, which fetches a card, a price
 and an image per row. Hence small first, deep second, off the path anyone waits
 on. A gap asked of every group — every type and curve gap — already comes back
 with about 67 rows and never triggers a top-up at all.
+
+**Twenty-four is eight picks, not twenty-four.** A pick consumes the whole trio
+it was made from (§19.9), so the held page answers a third as many decisions as
+it used to and the refill below carries the rest. It was not made deeper to
+compensate: hydration is what depth costs, and eight decisions is already more
+than a builder makes between the recomputes that change the gap. What DID change
+is when the refill goes out — see the drained-queue section.
 
 **Neither page is three (ADR-0026).** A three-row request lets the focus
 guarantee append past a three-row list, and taking three from the front of that
@@ -745,12 +758,19 @@ statement about the deck, made in the sentence Q3 built specifically so that
 "nothing fills this" and "your filter excluded them" would never render the same
 — and it was a third route to the report's "ended while gaps remained".
 
-A queue drained below a trio is now refilled. It cannot loop, because the refill
-is conditioned on **the deck having changed since the fetch** and not on the
-queue being empty: the queue records `retiredIds.size` at fetch time, and asking
-again with an unchanged deck would return the identical list, so it is not
-asked. The refill shows the loading bar only when the queue is completely dry,
-which is the one case where there is genuinely nothing on screen to read.
+A queue drained to **two trios** is now refilled. It cannot loop, because the
+refill is conditioned on **the deck having changed since the fetch** and not on
+the queue being empty: the queue records `retiredIds.size` at fetch time, and
+asking again with an unchanged deck would return the identical list, so it is
+not asked. The refill shows the loading bar only when the queue is completely
+dry, which is the one case where there is genuinely nothing on screen to read.
+
+Two trios rather than one, and that threshold moved with §19.9. "Fewer than
+three left" was a trio of headroom when a pick consumed one card; it is the very
+next click when a pick consumes three, and the request would then be racing it.
+Two trios is the same reasoning `TOPUP_BELOW_TRIOS` already carries for the
+deepening, applied to the faster loop. Measured in a browser afterwards: eight
+consecutive picks on a live `creature` gap, no loading bar on any of them.
 
 ---
 
@@ -847,3 +867,99 @@ job it was re-derived for.
 
 The ending fired with every composition meter inside its band, and printed the
 deck's real count rather than a hundred.
+
+---
+
+## 19.9 A pick cycles the whole trio (ADR-0056)
+
+> "The quickbuild should cycle all three options out when you pick one. They can
+> come back later, but if only one card cycles out then your decision is
+> basically the same, and you just either pick the new card or pass. I'd rather
+> see whole new options and not have to mash pass to see more useful stuff."
+
+Taking one of three used to retire that card and nothing else. The window over
+the queue advanced by exactly one, so two thirds of the next question was the
+question just answered — and the builder had already declined those two, in the
+act of choosing something else. The second decision collapsed to "this one new
+card, yes or no", which is the shape **Q4** and **D6** both say the panel must
+never take, and the only route to a genuinely new three was pressing Skip.
+
+Measured in a browser on a live `creature` gap, eight consecutive picks, same
+deck on both sides:
+
+| | before | after |
+|---|---|---|
+| cards kept from the previous trio | **2 of 3, on 8 of 8 picks** | **0 of 3, on 8 of 8 picks** |
+| click → next trio | 33, 34, 42, 42, 46, 51, 56, 59 ms (median **46**) | 30, 41, 42, 42, 43, 46, 46, 48 ms (median **43**) |
+| loading bar | never | never |
+| requests on the click → trio path | 0 | 0 |
+
+The timing is the point of that table as much as the overlap: advancing three
+instead of one costs nothing, because at twenty-four deep the next three were
+already in hand. Nothing about §19.7's numbers regressed.
+
+### The two not taken are PASSED, never rejected
+
+This is D5, and it is the part with a live precedent for getting it wrong: the
+deck rail's Remove button was issuing `exclude` until ADR-0051. A pass sends
+nothing. Driven in a browser to 49 picks — 98 cards passed over — the deck's
+command log held **49 `accept` commands, zero `exclude`**, and its `excluded`
+zone was empty.
+
+### Where they come back
+
+**On the next FRESH ASK for the gap**: a different gap, a changed filter, a
+reopened panel, or a queue that ran out entirely. Not on a background top-up or
+a refill, which re-ask the *same* question — the cards just passed over are
+still at the top of that answer, and putting them back would restore the defect
+one request later.
+
+That is one rule, not two, because it is the same condition that discards the
+queue (§19.7 "What is discarded"). The set of passed-over ids is emptied inside
+`load` whenever the load is a foreground one, so there is no second key to keep
+in step with the queue's; the skip cursor needed such a key precisely because it
+was never released, and that is how it walked into the next gap's fresh page.
+
+Confirmed in a browser: pick on the land gap, note the two not taken, "Different
+gap" away and back, and both are on screen again.
+
+### And they can be asked for without leaving the gap
+
+A builder who works through everything the panel holds used to get "No more
+candidates for this gap", which after this change would be false — the panel is
+holding cards, it is just not offering them. So the empty state distinguishes
+three facts rather than two:
+
+| what is true | what the panel says |
+|---|---|
+| the server had no answer at all | "Nothing in your colours fills this gap" (or the filter's version, Q3) |
+| every candidate was taken or rejected | "No more candidates for this gap." |
+| candidates are being held back | "You've seen every candidate we're holding for this gap." + **Show the ones you passed** |
+
+The third row is new. Verified in a browser: eight skips walked 24 held
+candidates at 2–7 ms each, the ninth produced that sentence and the control, and
+pressing it put the first trio back with no request.
+
+### Reject is deliberately NOT this
+
+Reject names one card and is permanent. The two beside it are still the answer
+to the question on screen, so they stay and one new card slides up. "Not this
+one" is not "not any of these" — and the same goes for a card retired in the
+FEED behind the panel, which is a decision made somewhere else about a trio the
+builder may not have finished reading. Only the panel's own Add passes over
+three.
+
+### A cursor became a set of ids
+
+`passed` was a count, and a count cannot express this. The card taken leaves the
+queue a render later through `retiredIds`, so "advance by three" and "advance by
+two because one of them has already gone" are different arithmetic for one
+intent — and both are wrong the moment a refill rebuilds the list with the same
+cards at different indices. A set of ids is right under all of it, and it is
+also what lets the panel say how many cards it is holding back, which the empty
+state above needs and a cursor could not have told it.
+
+One consequence worth stating: the panel now *knows* which cards it passed over,
+where before it only knew how many positions it had skipped. That knowledge
+never leaves the panel — nothing is sent, nothing is stored, and closing the
+panel forgets it.

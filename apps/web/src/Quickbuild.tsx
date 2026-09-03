@@ -118,11 +118,18 @@ export interface QuickbuildProps {
    * happened. Filtering on every render rather than refetching means an
    * exclusion made elsewhere cannot survive even one frame.
    *
-   * And it is how a pick advances the trio with NO request at all: the card
-   * the builder just took joins this set immediately, drops out of the queue,
-   * and the next candidate slides into its place. The four outcomes of a trio
-   * — take the first, the second, the third, or skip — differ only in which
-   * element leaves the queue, never in which query produced it.
+   * And it is half of how a pick advances the trio with NO request at all: the
+   * card the builder just took joins this set immediately and drops out of the
+   * queue. The other half is `held` inside the panel, which passes over the two
+   * they did not take, so the whole trio changes rather than one card of it.
+   * The four outcomes of a trio — take the first, the second, the third, or
+   * skip — now consume the same three candidates from the same list and differ
+   * only in whether a card is added; none of them changes the query.
+   *
+   * The division of labour matters. A card retired HERE was decided somewhere
+   * else — the feed behind the panel, most often — and that is not a judgement
+   * about the trio, so it takes that one card out and leaves the rest of the
+   * question standing. Only the panel's own Add passes over all three.
    */
   readonly retiredIds: ReadonlySet<string>
   /**
@@ -192,6 +199,9 @@ const TOPUP_BELOW_TRIOS = 2
  * this delays the bar, it does not suppress it.
  */
 const BAR_AFTER_MS = 150
+
+/** Nothing passed over. Module-level so its identity is stable across renders. */
+const NO_IDS: ReadonlySet<string> = new Set<string>()
 
 /**
  * Which group keys can answer this gap.
@@ -410,20 +420,29 @@ export const Quickbuild = ({
    */
   const [chosenKey, setChosenKey] = useState<string | null>(null)
   /**
-   * How many candidates have been passed over, and FOR WHICH GAP. D5: a PASS.
+   * WHICH candidates have been passed over for the gap on screen. D5: a PASS.
    *
-   * The gap key rides with the count because the two must never be applied to
-   * each other's list. This was a bare number, so a builder who skipped twice
-   * on the land gap and then had that gap close under them kept a cursor of six
-   * into the next gap's fresh page of eight — the panel sliced past almost all
-   * of it and, when the new page was shorter, reported "No more candidates for
-   * this gap" about a gap it had not shown a single card for. The second half
-   * of the same report: ramp and spot removal never being offered.
+   * IDENTITIES RATHER THAN A COUNT, which is what lets a pick and a skip do the
+   * same thing to the window. This was `passed`, a cursor — an index into a
+   * list that moves under it. The card the builder takes leaves the queue on
+   * the next render, so "advance by three" and "advance by two because one of
+   * them has already gone" are different arithmetic for one intent, and both
+   * are wrong the moment a refill rebuilds the list underneath at different
+   * indices. A set of ids survives all of it, and the count of what is on offer
+   * is then read off the queue rather than off the cursor.
+   *
+   * IT BELONGS TO ONE GAP, and the release below is what guarantees that rather
+   * than a key carried alongside. The cursor needed the key: it was never
+   * cleared, so a builder who skipped twice on the land gap and then had that
+   * gap close under them carried a cursor of six into the next gap's fresh page
+   * of eight, sliced past almost all of it, and was told "No more candidates
+   * for this gap" about a gap that had not shown them a single card — the
+   * report's "ramp and spot removal, never offered". This set is emptied by
+   * every FRESH ASK (see `load`), and the panel makes a fresh ask on exactly
+   * the condition that discards the queue: a different gap or a different
+   * filter. One rule, one mechanism, and nothing to keep in step.
    */
-  const [cursor, setCursor] = useState<{ readonly gapKey: string; readonly passed: number }>({
-    gapKey: '',
-    passed: 0,
-  })
+  const [held, setHeld] = useState<ReadonlySet<string>>(NO_IDS)
   /**
    * The candidates held for one gap, and which gap they answer.
    *
@@ -478,7 +497,7 @@ export const Quickbuild = ({
    * the gap they were working has closed, so the most pressing one leads again.
    */
   const gap = plan.gaps.find((g) => g.key === chosenKey) ?? plan.gaps[0]
-  const passed = gap !== undefined && cursor.gapKey === gap.key ? cursor.passed : 0
+  /** What has been passed over for THE GAP ON SCREEN, and nothing else. */
 
   /*
    * Focus moves in on open and RETURNS to whatever opened the panel on close
@@ -562,6 +581,24 @@ export const Quickbuild = ({
       if (!background) {
         setFetching(true)
         setFailed(false)
+        /*
+         * A FRESH ASK RELEASES WHAT WAS PASSED OVER — this is the "they can
+         * come back later" half of the change, and this is where later is.
+         *
+         * A foreground load is the panel asking a question it has not asked:
+         * a different gap, a changed filter, the first load of a session, or a
+         * queue that ran out entirely. In every one of those the cards the
+         * builder walked past belong back on the table, ranked against the deck
+         * as it is now rather than as it was.
+         *
+         * A BACKGROUND load does not release them, and that distinction is the
+         * whole of it. The deep top-up and the refill re-ask the SAME question,
+         * and the cards just passed over are still at the top of the answer —
+         * putting them back there would restore the defect one request later,
+         * which is precisely the "you just either pick the new card or pass"
+         * the report describes.
+         */
+        setHeld(NO_IDS)
       }
       try {
         const found = await fetchCandidates(
@@ -616,12 +653,34 @@ export const Quickbuild = ({
    * pick instant: the taken card drops out and the next one slides up, with no
    * request at all.
    */
-  const live = useMemo(
+  const available = useMemo(
     () => (stale ? [] : (queue?.candidates ?? [])).filter((c) => !retiredIds.has(c.oracleId)),
     [queue, retiredIds, stale],
   )
 
-  const showing = useMemo(() => live.slice(passed, passed + OPTIONS), [live, passed])
+  /**
+   * What the panel can offer right now: everything it holds, less what has been
+   * passed over for this gap.
+   *
+   * The window over the queue is a FILTER rather than a slice, because a pick
+   * and a skip both remove three specific cards and neither of them removes a
+   * fixed number of positions — the taken card also leaves through `retiredIds`
+   * a render later, and a refill rebuilds the list underneath with the same
+   * cards at different indices. Filtering by identity is right under all of it.
+   */
+  const live = useMemo(() => available.filter((c) => !held.has(c.oracleId)), [available, held])
+
+  const showing = useMemo(() => live.slice(0, OPTIONS), [live])
+
+  /**
+   * How many of the cards the panel holds are being kept back.
+   *
+   * The difference between "this gap has nothing left" and "this gap has
+   * nothing left THAT YOU HAVE NOT ALREADY PASSED", which are different facts
+   * and must not render the same sentence — the same rule Q3 applies to the
+   * filter, one list along.
+   */
+  const heldBack = available.length - live.length
 
   /**
    * How many candidates this panel is holding for this gap — the number the
@@ -629,11 +688,15 @@ export const Quickbuild = ({
    * list rather than of two responses.
    *
    * `null` until a response for THIS gap and THIS filter has landed. The
-   * heading still has to say something before then, and `live` is `[]` while
+   * heading still has to say something before then, and the list is `[]` while
    * the queue is stale, which is not a count of anything — rendering it as one
    * would flash "0 staples you don't have yet" over every gap change.
+   *
+   * `available` and not `live`: a card passed over is still a staple the deck
+   * does not have. Counting the window rather than the offer would take three
+   * off the heading per pick and reach zero with cards still to come.
    */
-  const offering = stale || queue === null ? null : live.length
+  const offering = stale || queue === null ? null : available.length
 
   /*
    * "Option 3 of 2" is not a sentence. `focused` is a cursor over a list that
@@ -664,15 +727,27 @@ export const Quickbuild = ({
    */
   useEffect(() => {
     if (gap === undefined || stale || queue === null || fetching) return
-    const remaining = live.length - passed
+    const remaining = live.length
     const wantsDepth = !queue.deep && remaining <= TOPUP_BELOW_TRIOS * OPTIONS
-    const wantsRefill = remaining < OPTIONS && retiredIds.size > queue.retiredAt
+    /*
+     * The refill is owed at the SAME two-trio mark as the deepening, and it did
+     * not used to be — it waited until fewer than three were left.
+     *
+     * That threshold was written when a pick consumed one card: a trio still on
+     * screen was two more picks of headroom, and the request had time to land.
+     * A pick now consumes three, so "fewer than three left" is "the next click
+     * empties the panel" and the fetch would be racing it. Two trios of
+     * headroom is the same reasoning `TOPUP_BELOW_TRIOS` already carries for
+     * the deepening, applied to the faster loop.
+     */
+    const wantsRefill =
+      remaining <= TOPUP_BELOW_TRIOS * OPTIONS && retiredIds.size > queue.retiredAt
     if (!wantsDepth && !wantsRefill) return
     // Silent while there is still something on screen, and honest about the
     // wait when the queue has run out entirely — at that point there is
     // genuinely nothing to look at and a silent pause reads as a dead panel.
     void load(gap, filter, DEEP_PAGE, { background: remaining > 0 })
-  }, [gap, stale, queue, fetching, live.length, passed, filter, load, retiredIds])
+  }, [gap, stale, queue, fetching, live.length, filter, load, retiredIds])
 
   /*
    * The bar waits `BAR_AFTER_MS` before admitting to a wait, and only when
@@ -731,39 +806,82 @@ export const Quickbuild = ({
     setFocused(0)
   }
 
-  /*
-   * D5 — SKIP IS A PASS, NOT A REJECTION.
+  /**
+   * PASS OVER these cards — D5, and now the shared spine of Skip and Add.
    *
-   * It advances a window over the candidates this session and records nothing.
-   * Nothing is sent, no command is queued, and the cards it walks past are
-   * offered again the next time the panel opens. Conflating it with Reject
-   * would make the panel a minefield: P6 says an excluded card is never
-   * suggested again, so a builder clicking past a card they might want later
-   * would silently exile it. Reject is still available, as its own labelled
-   * button that says what it does.
+   * Nothing is sent, no command is queued, and no card is rejected. Conflating
+   * a pass with a rejection would make the panel a minefield: P6 says an
+   * excluded card is never suggested again, so a builder clicking past a card
+   * they might want later would silently exile it. The deck rail was issuing
+   * `exclude` from its Remove button until ADR-0051, which is how live that
+   * mistake is. Reject is still available, as its own labelled button on the
+   * card it names.
+   */
+  const pass = (ids: readonly string[]): void => {
+    if (gap === undefined) return
+    setHeld(new Set([...held, ...ids]))
+    setFocused(0)
+  }
+
+  /*
+   * SKIP PASSES OVER THE TRIO ON SCREEN — the three the builder was looking at,
+   * by name, and not "three positions".
    */
   const skip = (): void => {
-    if (gap === undefined) return
-    setCursor({ gapKey: gap.key, passed: passed + OPTIONS })
+    pass(showing.map((c) => c.oracleId))
+  }
+
+  /*
+   * AND SO DOES A PICK, which is the change (doc 19 §19.9).
+   *
+   * "If only one card cycles out then your decision is basically the same, and
+   * you just either pick the new card or pass." Taking one of three is a
+   * judgement about all three: the two not taken were declined in the act of
+   * choosing, and handing them straight back with one new card beside them asks
+   * a question the builder has already answered. It also reduces the second
+   * decision to "this one card, yes or no", which is the shape Q4 and D6 both
+   * say the panel must never take.
+   *
+   * The taken card is passed over TOO, not only accepted. It leaves anyway a
+   * render later, when the workspace's optimistic deck reaches `retiredIds` —
+   * but "a render later" is a frame in which the panel would show the card that
+   * was just added. Passing it here means the trio moves on the click itself
+   * and does not depend on when the deck update arrives.
+   *
+   * REJECT IS DELIBERATELY NOT THIS. It names one card and is permanent; the
+   * other two are still the answer to the question on screen, so they stay and
+   * one new card slides up. "Not this one" is not "not any of these".
+   */
+  const take = (oracleId: string): void => {
+    pass(showing.map((c) => c.oracleId))
+    onAdd(oracleId)
+  }
+
+  /** Put back what was passed over, without leaving the gap. */
+  const unpass = (): void => {
+    setHeld(NO_IDS)
     setFocused(0)
   }
 
   /*
    * The gap had candidates and has none left.
    *
-   * `passed > 0` alone made this mean "the builder skipped past the end", so a
-   * builder who only ever pressed Add walked the list to zero and was then told
-   * "Nothing in your colours fills this gap" — blaming their colour identity
-   * for a list they had emptied themselves. Adding and rejecting retire cards
-   * through `retiredIds` rather than through `passed`, so neither of them ever
-   * moved this flag.
+   * The skip cursor being non-zero alone made this mean "the builder skipped
+   * past the end", so a builder who only ever pressed Add walked the list to
+   * zero and was then told "Nothing in your colours fills this gap" — blaming
+   * their colour identity for a list they had emptied themselves. Adding and
+   * rejecting retire cards through `retiredIds`, so neither of them ever moved
+   * that flag.
    *
    * The distinction it exists to draw survives: a gap the server had no answer
    * for at all still has `queue.candidates` empty, and still gets the sentence
-   * about colours or about the filter.
+   * about colours or about the filter. `heldBack` and not `held.size` is
+   * what keeps that true — a refill that comes back with nothing leaves ids in
+   * the passed-over set that are no longer in any list, and those are not cards
+   * the panel is holding back from anyone.
    */
-  const spent = !stale && queue !== null && queue.candidates.length > 0 && live.length === 0
-  const exhausted = !fetching && !failed && showing.length === 0 && (passed > 0 || spent)
+  const spent = !stale && queue !== null && queue.candidates.length > 0 && available.length === 0
+  const exhausted = !fetching && !failed && showing.length === 0 && (heldBack > 0 || spent)
 
   return (
     <div
@@ -910,11 +1028,32 @@ export const Quickbuild = ({
             </p>
           ) : showing.length === 0 ? (
             <p className="quickbuild-state">
+              {/*
+               * Three different facts, three different sentences (doc 05 §5.3,
+               * and Q3's rule one list along). "The gap is empty", "your filter
+               * emptied it" and "you have passed over everything it had" are
+               * not the same answer, and the last one is new: a pick passes
+               * over three cards, so a builder reaches it eight times faster
+               * than the skip loop ever did.
+               */}
               {exhausted
-                ? 'No more candidates for this gap.'
+                ? heldBack > 0
+                  ? 'You’ve seen every candidate we’re holding for this gap.'
+                  : 'No more candidates for this gap.'
                 : filter.trim() === ''
                   ? 'Nothing in your colours fills this gap.'
                   : 'Nothing matching your filter fills this gap.'}{' '}
+              {/*
+               * "They can come back later" made into a control rather than a
+               * trick. Without it, the only ways back to a passed-over card are
+               * leaving the gap and returning, or closing the panel — both of
+               * which the builder has to guess at.
+               */}
+              {heldBack === 0 ? null : (
+                <button className="link" onClick={unpass}>
+                  Show the ones you passed
+                </button>
+              )}{' '}
               <button className="link" onClick={nextGap}>
                 Try the next gap
               </button>
@@ -961,78 +1100,80 @@ export const Quickbuild = ({
                       : null,
                   ].filter((s): s is string => s !== null)
                   return (
-                  <li
-                    key={candidate.oracleId}
-                    className={at === focus ? 'quickbuild-option is-focused' : 'quickbuild-option'}
-                    /*
-                     * Named, because `Detail` renders its own list of reasons
-                     * inside this one. Without a label the three options are
-                     * indistinguishable from the reason bullets to anything
-                     * walking the accessibility tree — a screen reader hears
-                     * nine list items and cannot tell which three are the
-                     * choice it is being asked to make.
-                     */
-                    aria-label={`Option ${at + 1} of ${showing.length}: ${candidate.view.name}`}
-                    onFocus={() => setFocused(at)}
-                  >
-                    {/*
-                     * NO `combos` PROP, deliberately, and it must stay that way.
-                     *
-                     * The panel does not know this card's combos. A
-                     * `Recommendation` carries only the COMPLETED ones — every
-                     * piece already in the deck — so an empty list from that
-                     * source says nothing about the near misses, which is
-                     * exactly the claim most of these cards are here on. Handing
-                     * `Detail` `[]` made it print "Not part of any combo we know
-                     * about" an inch under "completes 1 combo", on cards where
-                     * the denial was flatly false (Vandalblast among them).
-                     *
-                     * `Detail` now distinguishes absent from empty and says
-                     * nothing when it was never told, and the card's combo
-                     * standing is still on screen: `reasons` states it in words
-                     * and `ComboBadge` in a number.
-                     */}
-                    <Detail
-                      card={candidate.view}
-                      actions={
-                        <>
-                          {/* The name changes ONLY when there is something to
+                    <li
+                      key={candidate.oracleId}
+                      className={
+                        at === focus ? 'quickbuild-option is-focused' : 'quickbuild-option'
+                      }
+                      /*
+                       * Named, because `Detail` renders its own list of reasons
+                       * inside this one. Without a label the three options are
+                       * indistinguishable from the reason bullets to anything
+                       * walking the accessibility tree — a screen reader hears
+                       * nine list items and cannot tell which three are the
+                       * choice it is being asked to make.
+                       */
+                      aria-label={`Option ${at + 1} of ${showing.length}: ${candidate.view.name}`}
+                      onFocus={() => setFocused(at)}
+                    >
+                      {/*
+                       * NO `combos` PROP, deliberately, and it must stay that way.
+                       *
+                       * The panel does not know this card's combos. A
+                       * `Recommendation` carries only the COMPLETED ones — every
+                       * piece already in the deck — so an empty list from that
+                       * source says nothing about the near misses, which is
+                       * exactly the claim most of these cards are here on. Handing
+                       * `Detail` `[]` made it print "Not part of any combo we know
+                       * about" an inch under "completes 1 combo", on cards where
+                       * the denial was flatly false (Vandalblast among them).
+                       *
+                       * `Detail` now distinguishes absent from empty and says
+                       * nothing when it was never told, and the card's combo
+                       * standing is still on screen: `reasons` states it in words
+                       * and `ComboBadge` in a number.
+                       */}
+                      <Detail
+                        card={candidate.view}
+                        actions={
+                          <>
+                            {/* The name changes ONLY when there is something to
                               say. An unwarned Add is still called "Add" — the
                               `<li>` already names the card and the option
                               number, so renaming every button would add a
                               repetition to all three to serve the rare one. */}
-                          <button
-                            className="act primary"
-                            data-warns={spoken.length > 0}
-                            onClick={() => onAdd(candidate.oracleId)}
-                            {...(spoken.length === 0
-                              ? {}
-                              : {
-                                  'aria-label': `Add ${candidate.view.name} — ${spoken.join(', and ')}`,
-                                })}
-                          >
-                            Add
-                          </button>
-                          <button className="act" onClick={() => onReject(candidate.oracleId)}>
-                            Reject
-                          </button>
-                        </>
-                      }
-                    />
-                    {/* Under the card and over the group line, which is where
+                            <button
+                              className="act primary"
+                              data-warns={spoken.length > 0}
+                              onClick={() => take(candidate.oracleId)}
+                              {...(spoken.length === 0
+                                ? {}
+                                : {
+                                    'aria-label': `Add ${candidate.view.name} — ${spoken.join(', and ')}`,
+                                  })}
+                            >
+                              Add
+                            </button>
+                            <button className="act" onClick={() => onReject(candidate.oracleId)}>
+                              Reject
+                            </button>
+                          </>
+                        }
+                      />
+                      {/* Under the card and over the group line, which is where
                         the eye already is when it reaches the buttons. Not a
                         `role="alert"`: three of these would interrupt a screen
                         reader three times for something nobody has acted on
                         yet, and the Add control already carries it. */}
-                    {warnings.length === 0 ? null : (
-                      <p className="quickbuild-warns">
-                        {warnings.map((w) => (
-                          <span key={w}>{w}</span>
-                        ))}
-                      </p>
-                    )}
-                    <p className="quickbuild-group">Offered under {candidate.groupLabel}</p>
-                  </li>
+                      {warnings.length === 0 ? null : (
+                        <p className="quickbuild-warns">
+                          {warnings.map((w) => (
+                            <span key={w}>{w}</span>
+                          ))}
+                        </p>
+                      )}
+                      <p className="quickbuild-group">Offered under {candidate.groupLabel}</p>
+                    </li>
                   )
                 })}
               </ul>
