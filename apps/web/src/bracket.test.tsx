@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from './api'
-import { Workspace } from './App'
+import { Workspace, barometerRows } from './App'
 
 /**
  * The bracket surface (doc 03 §3.2, ADR-0018).
@@ -441,6 +441,74 @@ describe('the bracket check panel', () => {
 })
 
 /**
+ * The merge of what the format publishes with what we counted, without a DOM.
+ *
+ * `barometerRows` is exported for this. `id` is a REACT KEY and nothing else,
+ * which makes it exactly the kind of property a render test cannot see: React
+ * logs a warning for a duplicate key and renders both rows anyway, so every
+ * query in the panel tests still passes while the reconciler is being lied to.
+ * The invariant has to be asserted where it lives.
+ */
+describe('barometerRows', () => {
+  const finding = (barometer: string): api.BracketFinding => ({
+    barometer,
+    severity: 'warn',
+    count: 1,
+    cards: [TOMB],
+    combos: [],
+    message: `${barometer} message`,
+  })
+
+  const ids = (rows: readonly { id: string }[]): string[] => rows.map((r) => r.id)
+
+  it('keys every row distinctly, across both vocabularies', () => {
+    /*
+     * `tutorDensity` is the collision that can actually happen, and it is not
+     * a hypothetical: the published entry names that barometer in camelCase,
+     * `FINDING_ROW` has no finding key for it because nothing counts tutors
+     * yet, and it is therefore the one barometer with a published slot and no
+     * finding — which makes it the likeliest one for a future server to start
+     * counting. If that server spells it `tutorDensity` rather than
+     * `tutor-density`, both loops produce a row called `tutorDensity`.
+     */
+    const rows = barometerRows(published(), [finding('tutorDensity')])
+    expect(rows).toHaveLength(5)
+    expect(new Set(ids(rows)).size).toBe(rows.length)
+    // And the published Tutors row keeps its own rule state rather than being
+    // taken over by a finding that merely shares its spelling.
+    expect(rows.find((r) => r.label === 'Tutors')?.rule).toBeNull()
+    expect(rows.find((r) => r.label === 'Tutors')?.finding).toBeUndefined()
+  })
+
+  it('draws one row per barometer when the server repeats one', () => {
+    const rows = barometerRows(published(), [finding('stax'), finding('stax')])
+    expect(rows.filter((r) => r.label === 'Stax')).toHaveLength(1)
+    expect(new Set(ids(rows)).size).toBe(rows.length)
+  })
+
+  it('puts a finding on its published row rather than appending a second one', () => {
+    // The ordinary case, and the reason the spelling map exists at all: the
+    // entry says `extraTurnChaining` and the finding says `extra-turns`.
+    const rows = barometerRows(published(), [finding('extra-turns')])
+    expect(rows).toHaveLength(4)
+    expect(rows.find((r) => r.label === 'Extra turns')?.finding?.barometer).toBe('extra-turns')
+  })
+
+  it('returns findings alone when no published entry arrived, and asserts no rule', () => {
+    const rows = barometerRows(undefined, [finding('extra-turns')])
+    expect(rows).toHaveLength(1)
+    // `undefined`, not `null`: "no published rule" is a claim, and we were told
+    // nothing rather than told there is no rule.
+    expect(rows[0]?.rule).toBeUndefined()
+  })
+
+  it('returns nothing at all when there is nothing to say', () => {
+    expect(barometerRows(undefined, [])).toEqual([])
+    expect(barometerRows(null, [])).toEqual([])
+  })
+})
+
+/**
  * The barometer findings the server counts over the deck (ADR-0018, ADR-0049).
  *
  * The defect these exist for: `BracketReport` had no `barometers` field at all,
@@ -468,10 +536,12 @@ describe('the barometers the format does not quantify', () => {
     expect(screen.getAllByText('no published rule')).toHaveLength(4)
   })
 
-  it('says how loudly in words, never in colour alone (R4)', async () => {
+  it('says how loudly in words, never in colour alone', async () => {
     // `warn` and `error` are our own reading, and rust and sage are not
-    // separable under deuteranopia (`packages/ui/src/tokens.ts`). The severity
-    // is a word a screen reader can read, and the attribute is only the paint.
+    // separable under deuteranopia — the rule is `packages/ui/src/tokens.ts`'s,
+    // NOT R4, which is about a drag having a tap and a keyboard equivalent. The
+    // severity is a word a screen reader reads in the sentence, and the
+    // attribute is only what paints it.
     await show(bracket({ barometers: barometers({ findings: findings() }) }))
     const warn = screen.getByText('Warning')
     const error = screen.getByText('Error')
@@ -619,9 +689,100 @@ describe('the barometers the format does not quantify', () => {
     expect(screen.getAllByText('no published rule')).toHaveLength(4)
   })
 
+  it('draws one row per barometer even if the server repeats one', async () => {
+    /*
+     * The server sends at most one finding per barometer and this is not a
+     * request for it to send two. It is a guard on what happens if it ever
+     * does: two rows keyed the same id would give React duplicate keys, and
+     * `aria-controls` on both toggles would point at one element — a
+     * screen-reader user would be told the second button controls the first
+     * button's list. The last one sent wins, which is the same rule the
+     * lookup already applies to a barometer the published entry names.
+     */
+    const one: api.BracketFinding = {
+      barometer: 'stax-pieces',
+      severity: 'warn',
+      count: 3,
+      cards: [TOMB],
+      combos: [],
+      message: 'first message',
+    }
+    await show(
+      bracket({
+        barometers: barometers({ findings: [one, { ...one, message: 'second message' }] }),
+      }),
+    )
+    expect(screen.getAllByText('Stax pieces')).toHaveLength(1)
+    expect(panel().textContent).toContain('second message')
+    expect(panel().textContent).not.toContain('first message')
+  })
+
+  it('gives a finding its own row even when a published row shares its spelling', async () => {
+    await show(
+      bracket({
+        barometers: barometers({
+          findings: [
+            {
+              barometer: 'tutorDensity',
+              severity: 'warn',
+              count: 9,
+              cards: [TOMB],
+              combos: [],
+              message: '9 cards in this deck tutor.',
+            },
+          ],
+        }),
+      }),
+    )
+    // Four published rows plus one for the finding, and the published Tutors
+    // row keeps its rule state rather than being overwritten.
+    expect(screen.getAllByText('no published rule')).toHaveLength(4)
+    expect(panel().textContent).toContain('9 cards in this deck tutor.')
+    expect(screen.getAllByText('Tutors')).toHaveLength(1)
+    expect(screen.getByText('TutorDensity')).toBeTruthy()
+  })
+
+  it('keeps a finding’s list id a usable IDREF whatever the barometer is called', async () => {
+    /*
+     * `aria-controls` is a SPACE-SEPARATED IDREF list, so a barometer name with
+     * a space in it does not produce a bad id — it produces four ids, none of
+     * which name an element, and the disclosure silently stops being announced
+     * as one. Nothing throws and nothing looks wrong on screen, which is what
+     * makes it worth pinning: this is the humanising path the panel supports on
+     * purpose, so it has to survive a name it did not choose.
+     */
+    await show(
+      bracket({
+        barometers: barometers({
+          findings: [
+            {
+              barometer: 'stax pieces "and things"',
+              severity: 'warn',
+              count: 2,
+              cards: [TOMB],
+              combos: [],
+              message: 'a barometer with an awkward name.',
+            },
+          ],
+        }),
+      }),
+    )
+    const toggle = within(panel()).getByRole('button', { name: /behind the .* count$/ })
+    const controls = toggle.getAttribute('aria-controls') ?? ''
+    expect(controls).not.toMatch(/[\s"]/)
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(document.getElementById(controls)).not.toBeNull()
+  })
+
   it('never turns a finding into a verdict', async () => {
     await show(bracket({ barometers: barometers({ findings: findings() }) }))
     const text = panel().textContent ?? ''
+    // The positive anchor. Without it every assertion below is a NOT, and the
+    // whole test passes with the findings deleted from the panel — which is
+    // the defect, not the fix.
+    expect(text).toContain('This deck assembles 1 two-card infinite combo.')
     expect(text).not.toContain('✓')
     expect(text).not.toMatch(/\bpass(es|ed)?\b|\bmeets\b|\bviolat/i)
     expect(text).toContain('No bracket assessed')

@@ -3216,20 +3216,55 @@ export const barometerRows = (
       const name = FINDING_ROW[key]
       const finding = name === undefined ? undefined : byBarometer.get(name)
       if (finding !== undefined) placed.add(finding.barometer)
-      rows.push({ id: key, label, rule: published[key], finding })
+      rows.push({ id: `rule:${key}`, label, rule: published[key], finding })
     }
   }
 
   for (const finding of findings) {
+    // `placed` is added to here as well as above, so a server that sent two
+    // findings for one barometer gets ONE row rather than two sharing a React
+    // key and an `aria-controls` target — the second toggle would otherwise be
+    // announced as controlling the first one's list. `byBarometer` already
+    // resolves which of the two wins; this only stops the row being drawn
+    // twice.
     if (placed.has(finding.barometer)) continue
-    // No `rule`: we received no published entry for a barometer we have no row
-    // for, and "no published rule" asserted from having been told nothing is
-    // the mistake this panel exists to avoid.
+    placed.add(finding.barometer)
+    /*
+     * `found:` here and `rule:` above, because the two loops key their rows
+     * from DIFFERENT VOCABULARIES and the vocabularies overlap. A published row
+     * is keyed by the entry's camelCase name; a finding with no published row
+     * is keyed by the server's own spelling. So a server that started counting
+     * tutors and called the barometer `tutorDensity` rather than
+     * `tutor-density` would give two `<li>` one React key — and `tutorDensity`
+     * is not a hypothetical, it is the one barometer here with a published slot
+     * and no finding, which makes it the likeliest one for a future server to
+     * start counting.
+     *
+     * BOTH PREFIXES ARE KEPT AND ONLY THE PAIR IS LOAD-BEARING, which is
+     * measured rather than assumed: removing either one alone collides with
+     * nothing, because `rule:tutorDensity` and `tutorDensity` differ just as
+     * `tutorDensity` and `found:tutorDensity` do, and `barometerRows`' unit
+     * tests stay green under either single mutation. Removing BOTH collides,
+     * and is caught. They are kept as a pair for the same reason
+     * `deleteCombos`' empty-list guard is: the plausible refactor is the one
+     * that tidies away both halves at once, and a lone prefix reads like an
+     * accident somebody will delete.
+     *
+     * A duplicate React key is worth this much care precisely because it does
+     * not fail loudly: React warns and renders both rows, so every query in the
+     * panel tests still passes while the reconciler is being lied to about
+     * which row is which. That is why the invariant is asserted on
+     * `barometerRows` and not on the DOM.
+     *
+     * No `rule`: we received no published entry for a barometer we have no row
+     * for, and "no published rule" asserted from having been told nothing is
+     * the mistake this panel exists to avoid.
+     */
     rows.push({
-      id: finding.barometer,
+      id: `found:${finding.barometer}`,
       label: humanise(finding.barometer),
       rule: undefined,
-      finding,
+      finding: byBarometer.get(finding.barometer) ?? finding,
     })
   }
 
@@ -3277,12 +3312,30 @@ const FindingCards = ({
 }): React.JSX.Element | null => {
   const [open, setOpen] = useState(false)
   const toggleRef = useRef<HTMLButtonElement>(null)
-  const listId = `barometer-cards-${finding.barometer}`
+  /*
+   * `aria-controls` is a SPACE-SEPARATED IDREF LIST, so a barometer name with
+   * a space in it does not make one bad id — it makes several ids, none of
+   * which name an element, and the disclosure quietly stops being announced as
+   * one. Nothing throws and nothing looks wrong on screen, which is why it is
+   * worth defending: the humanising path exists precisely so a barometer this
+   * build has never heard of still renders, and a name it did not choose is
+   * the whole point of that path.
+   */
+  const listId = `barometer-cards-${finding.barometer.replace(/[^\w-]+/g, '-')}`
 
-  // A finding with no cards behind it is a count with nothing to open. The
-  // server does not send one today; a toggle onto an empty list would be a
-  // control that lies about having something under it.
-  if (finding.cards.length === 0) return null
+  /*
+   * `?? []` for the same reason every other wire read in this file has one: a
+   * response is an unvalidated cast, not a promise, and `.length` on an absent
+   * array threw once already here and took the whole React tree with it rather
+   * than just this row (see `BracketReport`'s own comment about
+   * `gameChangers`). The type says required; the wire says whatever it says.
+   *
+   * A finding with no cards behind it is then a count with nothing to open. The
+   * server does not send one today; a toggle onto an empty list would be a
+   * control that lies about having something under it.
+   */
+  const behind = finding.cards ?? []
+  if (behind.length === 0) return null
 
   return (
     <div
@@ -3306,7 +3359,7 @@ const FindingCards = ({
          * the visible text is disambiguated by the row heading above it and the
          * accessible name is not. Sighted readers keep the short version.
          */
-        aria-label={`${plural(finding.cards.length, 'card')} behind the ${label.toLowerCase()} count`}
+        aria-label={`${plural(behind.length, 'card')} behind the ${label.toLowerCase()} count`}
         onClick={() => {
           setOpen(!open)
         }}
@@ -3314,11 +3367,11 @@ const FindingCards = ({
         <span className="bracket-caret" aria-hidden="true">
           {open ? '▾' : '▸'}
         </span>
-        {plural(finding.cards.length, 'card')} behind this count
+        {plural(behind.length, 'card')} behind this count
       </button>
       {open ? (
         <ul className="bracket-changers" id={listId}>
-          {finding.cards.map((id) => (
+          {behind.map((id) => (
             <li key={id}>
               <button
                 className="as-link"
@@ -3377,7 +3430,7 @@ const Barometers = ({
                 )}
               </div>
               {row.finding === undefined ? null : (
-                <div className="bracket-finding" data-severity={row.finding.severity}>
+                <div className="bracket-finding">
                   <p className="bracket-finding-said">
                     <span className="bracket-severity" data-severity={row.finding.severity}>
                       {severityWord(row.finding.severity)}

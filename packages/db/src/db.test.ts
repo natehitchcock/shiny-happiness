@@ -1101,6 +1101,8 @@ describeDb('packages/db against real PostgreSQL', () => {
       const templated = uuid()
 
       it('removes every row whose id carries a template segment', async () => {
+        // Two real ids from the 41 left after ADR-0038, and a real three-card
+        // sibling that must survive them.
         await insertCombos(db.pool, [
           combo('1957-4050-6273--129', [templated]),
           combo('1680-2395-4508-7863--165', [templated]),
@@ -1128,20 +1130,44 @@ describeDb('packages/db against real PostgreSQL', () => {
           const { rows } = await db.pool.query<{ n: string }>('SELECT count(*) AS n FROM combos')
           return Number(rows[0]?.n ?? 0)
         }
+        // Its own row, so this does not depend on the case above having run.
+        const ordinary = uuid()
+        await insertCombos(db.pool, [combo('2034-3388-3607-x', [ordinary])])
         const before = await total()
         expect(before).toBeGreaterThan(0)
 
-        // Every remaining id in this table is hyphen-separated, `2034-3388-3607`
-        // among them, so a one-hyphen predicate takes all of them.
+        // Every id in this table is hyphen-separated, so a one-hyphen predicate
+        // takes all of them and this call would report `before` rather than 0.
         expect(await pruneTemplateVariantCombos(db.pool)).toBe(0)
         expect(await total()).toBe(before)
+        expect((await combosContaining(db.pool, [ordinary])).map((c) => c.id)).toEqual([
+          '2034-3388-3607-x',
+        ])
       })
 
-      it('reports zero on a corpus that has none, rather than failing', async () => {
-        // The steady state after the first prune. "removed 0" has to be
-        // readable as "there were none", which is why it is a count and not a
-        // boolean.
+      it('is idempotent: it removes them once and then reports none', async () => {
+        /*
+         * Sets up its own rows rather than leaning on the case above, and
+         * asserts the transition rather than the resting state.
+         *
+         * The first version of this asserted only `toBe(0)` on an already-clean
+         * table, which a function whose whole body was `return 0` would pass.
+         * What actually needs pinning is the shape the operator reads across
+         * two runs — a number on the first ingest after this change and 0 on
+         * every one after it, so that `removed 0` is legible as "there were
+         * none" rather than as "the prune did not run".
+         */
+        const twice = uuid()
+        await insertCombos(db.pool, [
+          combo('4444-5555--77', [twice]),
+          combo('4444-5555-6666', [twice]),
+        ])
+
+        expect(await pruneTemplateVariantCombos(db.pool)).toBe(1)
         expect(await pruneTemplateVariantCombos(db.pool)).toBe(0)
+        expect((await combosContaining(db.pool, [twice])).map((c) => c.id)).toEqual([
+          '4444-5555-6666',
+        ])
       })
     })
 

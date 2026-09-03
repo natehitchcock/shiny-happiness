@@ -165,6 +165,14 @@ export const variantSkipReason = (variant: SpellbookVariant): VariantSkipReason 
    * body that does not is a variant we cannot represent either way, and the
    * ruling above already covers it — skip and report, rather than store short,
    * because that is the one of the two that is wrong in the safe direction.
+   *
+   * WHAT THIS DOES NOT PROMISE, said plainly so nobody reads more into it. It
+   * makes the refusal and the prune agree with each other; it does not make
+   * either of them right about Spellbook. If the source ever gave `--` a second
+   * meaning, both halves would be self-consistently wrong together and no test
+   * here could tell — an id format is an external fact and the only way to
+   * check it is to look at the feed. That is a re-measurement job, not
+   * something a guard can hold, and it is recorded in ADR-0049 as such.
    */
   if (TEMPLATE_SEGMENT.test(variant.id)) return 'template-piece'
   return null

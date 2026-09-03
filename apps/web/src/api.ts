@@ -724,6 +724,20 @@ export interface BracketFinding {
   barometer: string
   /** How loudly to say it. `warn` or `error`, and OUR reading, not the format's. */
   severity: string
+  /**
+   * Carried and NOT drawn as a number of its own.
+   *
+   * `message` already opens with it — "2 cards in this deck say they give
+   * someone an extra turn" — and the disclosure below counts `cards`. Printing
+   * `count` beside either would be the same figure twice in one small row, and
+   * the panel next door already learned that lesson about the price estimate.
+   *
+   * The cost of that choice, stated rather than hidden: if the server ever sent
+   * a `count` that disagreed with `cards.length`, this panel would show the
+   * disagreement as a sentence saying one number above a list holding another,
+   * and no test here would fail. `bracketFindings` derives both from the same
+   * array, so they cannot currently differ.
+   */
   count: number
   /** The deck's cards behind the count, so the claim opens into names (P4). */
   cards: string[]

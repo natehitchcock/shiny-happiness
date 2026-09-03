@@ -230,6 +230,15 @@ Across the shared corpus the prune would remove **41 of 104,616** rows.
   needs — so the client cannot distinguish "counted zero" from "not counted"
   per barometer, only for the block as a whole. That is the right trade at this
   size and it is worth knowing it was a trade.
+- **"The same set by construction" is a claim about our two halves agreeing,
+  not about either being right.** Reading the id as well as `requires[]` makes
+  what the ingest refuses and what the prune deletes identical whatever the feed
+  does. It does not make either of them correct about Spellbook: if the source
+  ever gave `--` a second meaning, both halves would be self-consistently wrong
+  together and nothing in this repository could tell. An id format is an
+  external fact, and the only way to check it is to look at the feed — a
+  re-measurement job, not something a guard can hold. Recorded so the next
+  agent does not read the guard as covering more than it does.
 - **Template pieces are still DROPPED rather than MODELLED.** ADR-0038's
   preferred fix — carry the template count on `Combo` so these read "one piece
   away, and the piece is a card class" — still needs a column, a migration and

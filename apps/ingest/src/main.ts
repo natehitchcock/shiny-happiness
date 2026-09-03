@@ -85,7 +85,11 @@ const runCombos = async (pool: Pool, limit: number | undefined): Promise<void> =
       `  ${report.templateRequired.length} combos need a card CLASS we cannot name, and are not stored:`,
     )
     for (const t of report.templateRequired.slice(0, 10)) {
-      console.error(`    ${t.comboId} needs ${t.templates.join(', ')}`)
+      // A variant can be a template variant on its ID alone, with `requires[]`
+      // absent (ADR-0049). `needs ` with nothing after it reads as a truncated
+      // line; the id is the fact the operator can act on either way.
+      const needs = t.templates.length === 0 ? 'an unnamed card class' : t.templates.join(', ')
+      console.error(`    ${t.comboId} needs ${needs}`)
     }
     console.error('    (storing them short would claim a combo the deck has not assembled)')
   }
