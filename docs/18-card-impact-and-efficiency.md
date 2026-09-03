@@ -19,7 +19,8 @@ them are in §18.13's last section — and again, with newer numbers, in
 database, and the honest record of what they will say is a measurement, not a
 guess.
 
-**§18.15 (ADR-0043) is the most recent pass** and changes how the tiers are
+**§18.17 (ADR-0055) is the most recent pass** and adds a fifth axis,
+severity, which moves `IMPACT_MAX` from 18.48 to 22.176. §18.15 (ADR-0043) and changes how the tiers are
 chosen: clauses are scored, not cards, and the highest-scoring clause supplies
 all four tiers at once. Tier counts quoted in §18.3–§18.5 predate it.
 
@@ -1373,3 +1374,137 @@ reliably makeable from the text alone, and it would add false-positive surface
 across 2,131 cards that legitimately lose most of their text to reminders
 (Morph, Ripple, Cycling, Flashback) in exchange for zero commander-legal cards.
 Left alone, deliberately.
+
+## 18.17 Severity — how hard the clause hits (ADR-0055)
+
+> "maybe also, as part of impact calculations, we need a severity value.
+> Something to quantify that flickering something is not as severe as bouncing
+> it, which is less severe than damage, which is less severe than destroy, which
+> is less severe than exile"
+
+A fifth axis. Full reasoning and the rejected shapes are in
+[ADR-0055](adr/0055-severity-is-how-hard-not-how-many.md); this section records
+what the model does and what it measured.
+
+### The shape, which decides everything else
+
+Severity is a **multiplier**, per-clause like every other tier, and `none` is
+**not a rung** — it is the absence of the ladder, worth exactly 1.0. A clause
+that removes nothing is multiplied by one, so **25,279 of the 31,782
+commander-legal cards are bit-identical** to what they scored before the axis
+existed. That is what stops a bounce spell scoring below a cantrip.
+
+**Neutral sits at `destroy`**: it is the largest unambiguous removal class
+(1,523 cards against exile's 636, tap's 467 and bounce's 431), and Wrath of God
+is a destroy, so an anchor quoted here and in three ADRs holds at 6.12 for free.
+
+The floor is above 0.5 and that bound is load-bearing: a removal clause always
+has at least `one` breadth (1.0) where a clause affecting nothing takes `none`
+(0.5), so removal can never fall below an effect that touches nothing.
+
+| rung | value | also | cards |
+| --- | ---: | --- | ---: |
+| `none` | 1.0 | not removal | 25,279 |
+| `tap` | 0.6 | freeze | 467 |
+| `flicker` | 0.7 | blink | 52 |
+| `bounce` | 0.75 | to hand | 431 |
+| `damage` | 0.8 | −X/−X | 2,865 |
+| `destroy` | 1.0 | counter, edict | 1,955 |
+| `exile` | 1.2 | tuck, steal | 733 |
+
+The governing rule for anything the owner did not name: **severity describes
+what happens to the object, never how good it was or who chose it.** Counter and
+edict sit at `destroy` because the object ends in the graveyard; that the
+opponent chooses an edict's victim is a targeting-quality question and there is
+no axis for it. Steal sits at `exile` because you lose it *and* they gain it.
+
+### Damage, from ADR-0029's measurement
+
+ADR-0029 rejected a toughness threshold because the kill rate is a **slope** —
+1 damage kills 21.6% of the 17,514 creatures with printed toughness, 2 kills
+46.7%, 3 kills 69.6%, 4 kills 85.7%. **That is why damage gets one rung**: a
+slope forbids a boundary. It would fail anyway on the 754 cards dealing a
+non-constant amount.
+
+Where the rung sits was measured separately: printed amounts across 2,188
+clauses have a median of 2 and a mean of 2.71, landing between the 46.7% and
+69.6% rows. 0.8 is that band rounded up, because damage that fails to kill still
+shrinks a blocker — unlike a failed destroy, which does not exist.
+
+### `IMPACT_MAX` moves: 18.48 → 22.176
+
+`6.0 × 2.2 × 1.4 × 1.2`, still derived and still reachable. Every rendered
+"N of 18.48" becomes "N of 22.176" and the meter fill moves with it — Wrath of
+God draws at 27.6% where it drew at 33.1%. **The card did not move; the scale
+did.**
+
+### Measured
+
+**4,588 of 31,782 cards moved (14.4%): 643 up, 3,945 down.** Mean 2.3954 →
+2.2964.
+
+| band | before | after |
+| --- | ---: | ---: |
+| 0 | 361 | 361 |
+| 0–1 | 15,599 | 16,695 |
+| 1–3 | 10,124 | 9,057 |
+| 3–6 | 210 | 589 |
+| 6–10 | 4,019 | 3,701 |
+| 10–15 | 822 | 924 |
+| 15+ | 647 | 455 |
+
+The acceptance quartet — four spells identical on every other axis, so severity
+is the only thing that can separate them:
+
+| card | tiers | before | after |
+| --- | --- | ---: | ---: |
+| Unsummon (bounce) | one / one-shot / opposing | 1.2 | **0.9** |
+| a 3-damage bolt at a creature | one / one-shot / opposing | 1.2 | **0.96** |
+| Doom Blade (destroy) | one / one-shot / opposing | 1.2 | **1.2** |
+| Path to Exile (exile) | one / one-shot / opposing | 1.2 | **1.44** |
+
+### Anchors
+
+| card | before | after | why |
+| --- | ---: | ---: | --- |
+| Wrath of God | 6.12 | **6.12** | destroy is neutral |
+| Craterhoof Behemoth | 6.0 | **6.0** | removes nothing |
+| Sol Ring | 0.68 | **0.68** | removes nothing |
+| basic Forest | 0 | **0** | no text |
+| Cyclonic Rift | 7.2 | **5.4** | it is a bounce |
+| Swords to Plowshares | 1.2 | **1.44** | it is an exile |
+
+The last two are the evidence the axis works: identical in every tier before,
+now separated by the only thing that differs between them. Rift now scores below
+Wrath, deliberately — both are board-wide, Rift is one-sided and still credited
+for it, but it bounces where Wrath destroys and everything it answers comes
+back. Rift's remaining reputation lives in tempo and instant speed, and this
+model has never had an axis for either — the blindness §18.2 already accepts.
+
+### Overload, fixed because severity exposed it
+
+`overload {6}{U}` was read as a clause of its own. It carries no effect, yet
+took `unbounded` breadth and won its card under §18.15's winning-clause rule.
+**27 of the 28 overload cards scored an identical 7.2 with severity `none`** —
+Cyclonic Rift, Vandalblast, Mizzium Mortars and Counterflux do four different
+things and the model could not tell them apart. Overload is a cost on the card's
+own effect, so it is now card-level like `fragile`: it promotes the real
+clauses, and the bare keyword line is dropped.
+
+### Regenerate both derived files
+
+```
+pnpm --filter @roundtable/ingest baseline        # r: 0.4919 -> ~0.512 (estimated, +4.2%)
+pnpm --filter @roundtable/ingest impact-roles    # quartiles move; blind-spot counts do not
+```
+
+`noCountableEffect` is counted off `breadth`, which severity does not touch, so
+§18.16's control assertion is unaffected. The quartiles are not.
+
+### The pane
+
+A fifth row, **"Ends up"**, drawn only when the card removes something: *tapped,
+and still there / right back where it was / in its owner's hand / damaged, and
+dead only sometimes / in the graveyard / gone for good*. Printing "Ends up:
+nothing" on four cards in five would be a row that never varies, which is a row
+that stops being read.

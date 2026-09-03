@@ -51,6 +51,28 @@ export type StakesTier = 'self' | 'own' | 'opposing' | 'player'
 export type Symmetry = 'none' | 'symmetric' | 'one-sided'
 
 /**
+ * How hard the clause hits what it touches (doc 18 §18.17, ADR-0055).
+ *
+ * `none` IS NOT A RUNG. It is the absence of the ladder — the clause removes
+ * nothing — and it is worth exactly 1.0, so every card that does not remove
+ * anything is multiplied by one and left alone. That is what stops the axis
+ * turning a bounce spell into a worse card than a cantrip.
+ *
+ * The rungs group by WHAT HAPPENS TO THE OBJECT, never by how good the object
+ * was or who chose it:
+ *
+ * | rung | also | why |
+ * | --- | --- | --- |
+ * | `tap` | freeze | it is a delay; the permanent never leaves |
+ * | `flicker` | blink | it leaves and comes straight back |
+ * | `bounce` | to hand | it leaves and must be paid for again |
+ * | `damage` | −X/−X | it dies only sometimes (ADR-0029's slope) |
+ * | `destroy` | counter, edict | it ends in the graveyard |
+ * | `exile` | tuck, steal | it does not come back |
+ */
+export type SeverityTier = 'none' | 'tap' | 'flicker' | 'bounce' | 'damage' | 'destroy' | 'exile'
+
+/**
  * The breadth curve (doc 18 §18.3).
  *
  * Two shapes stacked. The counted rungs are `n^1.14` — 1.00, 2.20, 3.51 — so a
@@ -129,7 +151,48 @@ const STAKES_VALUE: Readonly<Record<StakesTier, number>> = {
 const SYMMETRY_DISCOUNT = 0.85
 
 /**
- * The highest score this model can produce: 6.0 × 2.2 × 1.4 = 18.48.
+ * The severity ladder (doc 18 §18.17).
+ *
+ * NEUTRAL SITS AT `destroy`, and that is the decision the whole axis turns on.
+ * Rejected: neutral at the top, `exile` = 1.0 with everything else a penalty,
+ * which prices every removal spell below every cantrip. Rejected: neutral at
+ * the bottom, `flicker` = 1.0 with everything else a bonus, which is a thumb on
+ * the scale for removal and inflates the largest class in the corpus. Destroy
+ * is chosen for two measured reasons: it is the biggest unambiguous removal
+ * class (1,523 commander-legal cards, against exile's 636 and bounce's 522), so
+ * anchoring there moves the fewest cards; and Wrath of God, an anchor quoted in
+ * doc 18 and three ADRs, is a destroy and therefore holds at 6.12 for free.
+ *
+ * THE FLOOR IS ABOVE 0.5, AND THAT BOUND IS LOAD-BEARING. A removal clause
+ * always has at least `one` breadth (1.0) because it points at something, while
+ * a clause that affects nothing takes `none` (0.5). So as long as the weakest
+ * rung exceeds 0.5, tapping a creature can never score below gaining three
+ * life, and the multiplier cannot invert the two populations. `tap` is 0.6.
+ *
+ * DAMAGE IS PLACED FROM ADR-0029'S MEASUREMENT, not from feel, and that ADR's
+ * ruling is respected rather than reopened: it rejected a toughness threshold
+ * because the kill rate is a SLOPE — 1 damage kills 21.6% of the 17,514
+ * creatures with printed toughness, 2 kills 46.7%, 3 kills 69.6%, 4 kills
+ * 85.7%, 10 kills 99.8%. A slope forbids a boundary, which is exactly why
+ * damage gets ONE rung rather than a family of them. Where that rung sits is
+ * then a corpus question: printed damage amounts have a median of 2 and a mean
+ * of 2.71 across 2,188 clauses, which lands between the 46.7% and 69.6% rows.
+ * 0.8 is that band rounded up, because damage that fails to kill still shrinks
+ * a blocker or goes to a face, and 754 cards deal an amount that is not a
+ * constant at all.
+ */
+const SEVERITY_VALUE: Readonly<Record<SeverityTier, number>> = {
+  none: 1.0,
+  tap: 0.6,
+  flicker: 0.7,
+  bounce: 0.75,
+  damage: 0.8,
+  destroy: 1.0,
+  exile: 1.2,
+}
+
+/**
+ * The highest score this model can produce: 6.0 × 2.2 × 1.4 × 1.2 = 22.176.
  *
  * DERIVED FROM THE THREE TABLES, never written down as a literal, because a
  * literal is a number that goes stale silently the first time a rung moves. Any
@@ -149,7 +212,8 @@ const SYMMETRY_DISCOUNT = 0.85
  * (ADR-0025). The interface and the model now quote the same number because
  * only one of them owns it.
  */
-export const IMPACT_MAX = BREADTH_VALUE.unbounded * PERSISTENCE_VALUE.upkeep * STAKES_VALUE.player
+export const IMPACT_MAX =
+  BREADTH_VALUE.unbounded * PERSISTENCE_VALUE.upkeep * STAKES_VALUE.player * SEVERITY_VALUE.exile
 
 export interface CardImpact {
   /**
@@ -165,6 +229,15 @@ export interface CardImpact {
   readonly persistence: PersistenceTier
   readonly stakes: StakesTier
   readonly symmetry: Symmetry
+  /**
+   * How hard the winning clause hits what it touches (doc 18 §18.17).
+   *
+   * `none` for a clause that removes nothing, which is most of the corpus, and
+   * it is worth 1.0 rather than 0 — the absence of the ladder, not a rung on
+   * it. Per-clause like every other tier, so a card whose removal clause loses
+   * to a drawback clause does not report the removal's severity.
+   */
+  readonly severity: SeverityTier
   /**
    * The effect is a function of a resource, not a constant (2,136 cards).
    *
@@ -195,6 +268,7 @@ const NO_IMPACT: CardImpact = Object.freeze({
   persistence: 'one-shot',
   stakes: 'self',
   symmetry: 'none',
+  severity: 'none',
   scales: false,
   fragile: false,
 })
@@ -433,8 +507,24 @@ const MASS_UNRESTRICTED =
  */
 const NAMES_OPPOSING_SIDE =
   /you don't control|an opponent controls|your opponents control|\bopponents?\b|\ball players\b|\beach player\b/
-/** Cyclonic Rift's unbounded mode lives in a keyword, not in a sentence. */
+/**
+ * Overload — a COST on the card's own effect, not an ability of its own.
+ *
+ * It is card-level for the same reason `fragile` is: the keyword changes how
+ * the card's existing sentence targets, so it belongs to the card rather than
+ * to a line. Read as a clause it was a phantom — `overload {6}{u}` carries no
+ * effect at all, yet it took `unbounded` breadth, won its card under ADR-0043's
+ * winning-clause rule, and reported a tuple describing nothing.
+ *
+ * Measured: 27 of the 28 overload cards scored an IDENTICAL 7.2 with severity
+ * `none`, because the phantom beat every real clause. Cyclonic Rift, Vandalblast,
+ * Mizzium Mortars and Counterflux do four completely different things and the
+ * model could not tell them apart. Promoting the card's real clauses to
+ * `unbounded` and dropping the bare keyword line reads the effect instead.
+ */
 const OVERLOAD = /\boverload\b/
+/** The bare keyword line, which is a cost and not an effect. */
+const OVERLOAD_LINE = /^overload\b/
 const X_TARGET = /\bx target/
 const UP_TO_SEVERAL = /up to (three|four|five) target/
 const UP_TO_TWO = /up to two target/
@@ -538,6 +628,112 @@ const OPPOSING =
   /you don't control|an opponent controls|target (?:(?!of |you |an |your |each |all )[a-z0-9'-]+ ){0,3}?(?:creature|permanent|artifact|enchantment|land|planeswalker|spell)s?\b(?![^.,;:\n]{0,24} you control)/
 const YOU_CONTROL = /you control/
 
+/**
+ * A permanent ON THE BATTLEFIELD, which is not the same noun as a card in a zone.
+ *
+ * `(?! cards?\b)` is the entire guard between removal and graveyard hate, and it
+ * was worth 50 false positives when it was missing. "Exile target creature" takes
+ * a permanent off the battlefield; "exile target creature CARD from your
+ * graveyard" is recursion denial, and Magic's own templating distinguishes them
+ * with that one word. 907 clauses in the corpus exile something out of a library,
+ * graveyard or hand rather than off the battlefield.
+ */
+const PERMANENT_NOUN = String.raw`(?:creature|permanent|artifact|enchantment|land|planeswalker|token)s?\b(?! cards?\b)`
+
+/** A verb that must reach a quantified permanent to count as removal. */
+const reaches = (verb: string, gap = 40): RegExp =>
+  new RegExp(
+    `\\b${verb}\\b[^.;:\\n]{0,${gap}}?\\b(?:target|all|each|every|another|that|those)\\b` +
+      `[^.;:\\n]{0,30}?${PERMANENT_NOUN}`,
+  )
+
+/**
+ * FLICKER IS CHECKED BEFORE EXILE AND SUPPRESSES IT, because flicker IS "exile
+ * … then return it to the battlefield". Read in the other order, the gentlest
+ * rung on the ladder would score as the harshest — Ephemerate would price as
+ * Swords to Plowshares.
+ */
+const SEV_FLICKER =
+  /\bexiles?\b[^;:\n]{0,120}?\breturns? (?:it|them|that card|those cards)\b[^;:\n]{0,60}?\bto the battlefield\b/
+const SEV_TAP = reaches('taps?', 30)
+const SEV_BOUNCE = /\breturns?\b[^.;:\n]{0,60}?to (?:its|their) owner'?s?'? hand/
+/** −X/−X is damage's twin: the same probabilistic kill, so it takes the same rung. */
+const SEV_MINUS = /\bgets? -[0-9x]+\/-[0-9x]+|\bcreatures? get -[0-9x]+\/-[0-9x]+/
+const SEV_DAMAGE = /\bdeals?\b[^.;:\n]{0,40}?\bdamage\b/
+/** An edict destroys the chosen permanent; who chose it is not a severity question. */
+const SEV_EDICT =
+  /\b(?:target player|target opponent|each player|each opponent)\b[^.;:\n]{0,40}?\bsacrifices?\b/
+/** A countered spell ends in the graveyard, exactly where a destroyed permanent ends. */
+const SEV_COUNTER = /\bcounters? (?:target|all|each|every)\b[^.;:\n]{0,30}?\bspell/
+const SEV_DESTROY = reaches('destroys?')
+/** Tuck: shuffled into a library is as unrecoverable as exile for that permanent. */
+const SEV_TUCK =
+  /\b(?:shuffles?|puts?)\b[^.;:\n]{0,60}?\binto (?:its|their|his or her) owner'?s?'? library/
+/**
+ * Steal: THEY lose it and YOU gain it, a bigger swing than destroy.
+ *
+ * `gain`, never `gains`, and that one letter is the whole rule. Third person is
+ * always somebody else doing the gaining, which is either a control RESET —
+ * "each player gains control of all permanents they own", which hands
+ * everything back — or a donate. Nine commander-legal cards are resets and all
+ * nine read as exile-grade removal before the distinction was drawn; Brooding
+ * Saurian, whose entire text returns every permanent to its owner, reached the
+ * ceiling at 22.176.
+ *
+ * `STEAL_NOT_YOURS` then removes the cases where a player noun is doing the
+ * gaining anyway — "have target opponent gain control of target permanent" is a
+ * gift, and giving something away is not removal.
+ */
+const SEV_STEAL = /\bgain control of\b[^.;:\n]{0,40}?\b(?:target|all|each|every)\b/
+const STEAL_NOT_YOURS =
+  /\b(?:opponent|player)s?\b[^.;:\n]{0,20}?\bgain control of\b|\bgain control of\b[^.;:\n]{0,40}?\byou own\b/
+const SEV_EXILE = reaches('exiles?')
+
+/**
+ * The rungs, in the order they are tested. `none` is deliberately absent — it is
+ * the fallback when nothing matches, not something that can be matched.
+ */
+const SEVERITY_RULES: ReadonlyArray<readonly [Exclude<SeverityTier, 'none'>, RegExp]> = [
+  ['tap', SEV_TAP],
+  ['flicker', SEV_FLICKER],
+  ['bounce', SEV_BOUNCE],
+  ['damage', SEV_DAMAGE],
+  ['damage', SEV_MINUS],
+  ['destroy', SEV_DESTROY],
+  ['destroy', SEV_COUNTER],
+  ['destroy', SEV_EDICT],
+  ['exile', SEV_EXILE],
+  ['exile', SEV_TUCK],
+  ['exile', SEV_STEAL],
+]
+
+/**
+ * How hard this clause hits, or `none` if it hits nothing.
+ *
+ * GATED ON BREADTH, and the gate is what keeps the axis honest. Severity
+ * describes what happens to an object the clause AFFECTS, so a clause that
+ * affects nothing — `breadth: 'none'`, which is most of the corpus — cannot
+ * have one. It is also the cheapest guard against "exile the top card of your
+ * library", which is card advantage wearing a removal verb.
+ *
+ * THE HARSHEST RUNG WINS within a clause, because "destroy target creature; if
+ * you do, exile it" does both and the worse outcome is the one that happened.
+ * The single exception is flicker, which suppresses exile rather than losing to
+ * it — see `SEV_FLICKER`.
+ */
+const severityOf = (clause: string, breadth: BreadthTier): SeverityTier => {
+  if (breadth === 'none') return 'none'
+  const flickers = SEV_FLICKER.test(clause)
+  let best: SeverityTier = 'none'
+  for (const [tier, pattern] of SEVERITY_RULES) {
+    if (tier === 'exile' && flickers && pattern === SEV_EXILE) continue
+    if (pattern === SEV_STEAL && STEAL_NOT_YOURS.test(clause)) continue
+    if (!pattern.test(clause)) continue
+    if (best === 'none' || SEVERITY_VALUE[tier] > SEVERITY_VALUE[best]) best = tier
+  }
+  return best
+}
+
 /** One ability line's complete reading. The four tiers travel together. */
 interface ClauseImpact {
   readonly score: number
@@ -545,6 +741,7 @@ interface ClauseImpact {
   readonly persistence: PersistenceTier
   readonly stakes: StakesTier
   readonly symmetry: Symmetry
+  readonly severity: SeverityTier
 }
 
 /**
@@ -556,7 +753,7 @@ interface ClauseImpact {
  * stops, so the pin is genuinely card-wide and not a property of the clause
  * that happens to spell the sacrifice).
  */
-const clauseImpact = (clause: string, oneShot: boolean): ClauseImpact => {
+const clauseImpact = (clause: string, oneShot: boolean, overloaded: boolean): ClauseImpact => {
   /*
    * The line with every COUNTING clause and every SERIAL spell class removed —
    * what the effect touches, rather than every plural the sentence mentions.
@@ -591,7 +788,7 @@ const clauseImpact = (clause: string, oneShot: boolean): ClauseImpact => {
     !NAMES_OPPOSING_SIDE.test(effect)
 
   let breadth: BreadthTier
-  if (quantified || plural || OVERLOAD.test(effect)) breadth = 'unbounded'
+  if (quantified || plural || overloaded) breadth = 'unbounded'
   else if (X_TARGET.test(effect)) breadth = 'variable'
   else if (UP_TO_SEVERAL.test(effect)) breadth = 'several'
   else if (UP_TO_TWO.test(effect)) breadth = 'few'
@@ -622,16 +819,19 @@ const clauseImpact = (clause: string, oneShot: boolean): ClauseImpact => {
         ? 'symmetric'
         : 'one-sided'
 
+  const severity = severityOf(clause, breadth)
+
   const raw =
     BREADTH_VALUE[breadth] *
     PERSISTENCE_VALUE[persistence] *
     STAKES_VALUE[stakes] *
+    SEVERITY_VALUE[severity] *
     (symmetry === 'symmetric' ? SYMMETRY_DISCOUNT : 1)
 
   // Rounded to three places so the value is stable across platforms and can be
   // compared for equality in a test. Float multiplication of four constants is
   // otherwise 7.199999999999999 on the wire.
-  return { score: Math.round(raw * 1000) / 1000, breadth, persistence, stakes, symmetry }
+  return { score: Math.round(raw * 1000) / 1000, breadth, persistence, stakes, symmetry, severity }
 }
 
 /**
@@ -688,6 +888,7 @@ export const cardImpact = (card: ImpactInput): CardImpact => {
    */
   const fragile = SACRIFICE_SELF.test(text)
   const oneShot = INSTANT_OR_SORCERY.test(types) || fragile
+  const overloaded = OVERLOAD.test(text)
 
   /*
    * DEFENSIVE, and said so rather than dressed up as tested. An empty clause
@@ -698,13 +899,20 @@ export const cardImpact = (card: ImpactInput): CardImpact => {
    * blanks whatever the arithmetic happens to say, and the emptiness guard
    * below is what keeps `reduce` total.
    */
-  const clauses = text
+  const lines = text
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line !== '')
+  /*
+   * The bare `overload {cost}` line is dropped — it is a cost, not an effect,
+   * and its breadth now rides on the card's real clauses instead. Guarded so a
+   * card that is somehow nothing but the keyword still has something to score.
+   */
+  const withoutPhantom = lines.filter((line) => !OVERLOAD_LINE.test(line))
+  const clauses = withoutPhantom.length > 0 ? withoutPhantom : lines
   if (clauses.length === 0) return NO_IMPACT
 
-  const scored = clauses.map((clause) => clauseImpact(clause, oneShot))
+  const scored = clauses.map((clause) => clauseImpact(clause, oneShot, overloaded))
 
   /*
    * The winning clause, taken WHOLE.
@@ -721,6 +929,7 @@ export const cardImpact = (card: ImpactInput): CardImpact => {
     persistence: best.persistence,
     stakes: best.stakes,
     symmetry: best.symmetry,
+    severity: best.severity,
     scales:
       scored.some((c) => c.breadth === 'variable') ||
       FOR_EACH.test(text) ||
