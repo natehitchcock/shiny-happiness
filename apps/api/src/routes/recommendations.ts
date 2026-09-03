@@ -8,6 +8,7 @@ import {
   comboDegree,
   deckGameChangers,
   deckId,
+  deckLandsFrom,
   excludedSet,
   isOk,
   loadBracketRules,
@@ -76,10 +77,33 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
       const gameChangerBudget =
         allowed === 'unlimited' ? ('unlimited' as const) : Math.max(0, allowed - held)
 
+      /*
+       * What a fetchland could actually find in THIS deck.
+       *
+       * Computed here for the same reason `gameChangerBudget` is: `recommend`
+       * is pure and cannot look, and in this case it could not look even if it
+       * were allowed to — `findEligibleCards` filters basic lands out of the
+       * candidate pool in SQL, so the deck's twelve Islands are not in
+       * `context.pool` at all. `context.cards` holds the deck's own cards,
+       * loaded already for the composition count, and is the only place the
+       * answer exists.
+       *
+       * ACCEPTED cards only. A card in `considering` is not in the library yet,
+       * and a fetch recommended on the strength of a basic the builder has not
+       * taken is exactly the dead draw this is here to prevent.
+       */
+      const accepted = acceptedSet(deck)
+      const deckLands = deckLandsFrom(
+        [...accepted].flatMap((id) => {
+          const card = context.cards.get(id)
+          return card === undefined ? [] : [card]
+        }),
+      )
+
       const result = recommend({
         pool: context.pool,
         comboIndex: context.comboIndex,
-        accepted: acceptedSet(deck),
+        accepted,
         excluded: excludedSet(deck),
         colorIdentity: deck.colorIdentity,
         targets: context.targets,
@@ -113,6 +137,11 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
         // own bracket (ADR-0044). Read by nothing else — every other group
         // surfaces bracket flags and filters on none of them (doc 03 §3.2).
         gameChangerBudget,
+        // What a fetchland can find here. Absent would mean "nothing", so this
+        // is passed unconditionally rather than spread — a deck with no basics
+        // sends an empty set and gets fetches scored at zero, which is the
+        // answer, not a missing field.
+        deckLands,
         ...(body.limitPerGroup !== undefined ? { limitPerGroup: body.limitPerGroup } : {}),
         ...(deck.budget?.maxCardUsd !== undefined ? { maxBudgetUsd: deck.budget.maxCardUsd } : {}),
       })

@@ -147,9 +147,17 @@ export interface Reason {
   dimension?: { role?: string; type?: string }
   deficit?: number
   manaValue?: number
-  /** : how many of the deck colours this land taps for, and of how many. */
+  /** : how many of the deck colours this land can reach, and of how many. */
   coloursCovered?: number
   of?: number
+  /**
+   * HOW a `mana-fixing` land reaches them, so the sentence is true of it (P4).
+   *
+   * The count alone cannot tell City of Brass from Baldur's Gate — both reach
+   * five of five — and "taps for 5 of your 5 colours" is false of the second.
+   * Absent reads as `taps`, which is what the old sentence already assumed.
+   */
+  reach?: 'none' | 'colourless' | 'taps' | 'restricted' | 'gated' | 'fetches'
   direction?: 'short' | 'over' | 'balanced' | 'enables' | 'payoff' | 'theme'
   delta?: number
   tag?: string

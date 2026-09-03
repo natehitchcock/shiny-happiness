@@ -1,6 +1,7 @@
 import type { BracketFlag } from './bracket.js'
 import type { CompositionDimension, TargetSource } from './composition.js'
 import type { CardEfficiency } from './efficiency.js'
+import type { FixingReach } from './fixing.js'
 import type { CardImpact } from './impact.js'
 import type { ComboId, OracleId } from './ids.js'
 import type { SynergyTag } from './synergy.js'
@@ -81,10 +82,25 @@ export type Reason =
    */
   | {
       readonly kind: 'mana-fixing'
-      /** How many of the deck's colours it produces. Zero means colourless only. */
+      /** How many of the deck's colours it can reach. Zero means colourless only. */
       readonly coloursCovered: number
       /** The deck's colour count, so the reason reads "2 of 3". */
       readonly of: number
+      /**
+       * HOW it reaches them, so the sentence is true of the card (P4).
+       *
+       * Every cost-gated land rendered "taps for 5 of your 5 colours" and it is
+       * false on all of them: Baldur's Gate taps for {C} and wants {2} and a
+       * board of Gates, The Grey Havens reads colours off legendary creatures
+       * in your GRAVEYARD, Mirrex works only on the turn it entered, and a
+       * fetchland taps for nothing at all. The count alone cannot distinguish
+       * them, so it cannot be trusted to phrase the claim.
+       *
+       * Optional, so a reader that predates it renders exactly what it rendered
+       * before (AGENTS.md R2); absent reads as `taps`, which is what the old
+       * sentence already assumed.
+       */
+      readonly reach?: FixingReach
     }
   | {
       readonly kind: 'curve-fit'
