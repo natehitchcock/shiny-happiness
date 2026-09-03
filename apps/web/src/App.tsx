@@ -3157,8 +3157,21 @@ const Preview = ({
  * AGENTS.md §8 rejects, and would keep saying "no published rule" for a
  * barometer Wizards had since published.
  *
+ * THAT IS NOT THE WHOLE ROW, and for a while it was (ADR-0049). The server also
+ * counts three of those barometers over the deck's own cards and sends the
+ * findings under `bracket.barometers`; `BracketReport` had no such field, so a
+ * deck the API reported three findings on rendered four bare "no published
+ * rule" rows — directly under the server's own sentence saying the findings ARE
+ * reported. A builder would read that as "the tool looked and found nothing".
+ *
+ * So a row carries BOTH, because they are two different claims about two
+ * different things: what the FORMAT publishes for that barometer (nothing, so
+ * far) and what WE counted in this deck. Neither state may erase the other, and
+ * a barometer with no finding is not a barometer with no rule.
+ *
  * Every claim opens (P4): the count expands into the card names, each of which
- * opens the card; the allowance carries the URL it was read from and the date.
+ * opens the card; the allowance carries the URL it was read from and the date;
+ * and a finding expands into the deck's cards behind its own count.
  */
 
 /**
@@ -3173,6 +3186,314 @@ const BAROMETERS = [
   { key: 'massLandDenial', label: 'Mass land denial' },
   { key: 'tutorDensity', label: 'Tutors' },
 ] as const
+
+type BarometerKey = (typeof BAROMETERS)[number]['key']
+
+/**
+ * Which finding belongs on which published row — a SPELLING map, not a table.
+ *
+ * The published entry keys a barometer `extraTurnChaining` and a finding keys
+ * the same barometer `extra-turns`, and something has to say those are the same
+ * row or the panel draws the barometer twice. That is all this asserts: it
+ * carries no allowance, no severity and no count, so it cannot become the
+ * hardcoded ruleset AGENTS.md §8 rejects, and it cannot go stale against a rule
+ * Wizards publishes — `published[key]` is still the only source of that.
+ *
+ * `tutorDensity` is absent because nothing counts tutors. The restriction was
+ * withdrawn on 2025-10-21 and `bracketFindings` does not look for them, so that
+ * row has a rule state and never a finding.
+ *
+ * A finding whose barometer is in NEITHER this map nor the published entry is
+ * still drawn, on a row of its own — see `barometerRows`. Dropping it because
+ * this file has no label for it would be the client deciding what the format's
+ * barometers are, which is the same mistake one level up.
+ */
+const FINDING_ROW: Partial<Record<BarometerKey, string>> = {
+  twoCardInfinites: 'two-card-infinites',
+  extraTurnChaining: 'extra-turns',
+  massLandDenial: 'mass-land-denial',
+}
+
+interface BarometerRow {
+  readonly id: string
+  readonly label: string
+  /**
+   * What the format publishes for this barometer, or `undefined` when no
+   * published entry arrived. `null` is "no published rule", which is a claim;
+   * `undefined` is "we were told nothing", which is not.
+   */
+  readonly rule: string | null | undefined
+  readonly finding: api.BracketFinding | undefined
+}
+
+/**
+ * The rows to draw, merging what the format publishes with what we counted.
+ *
+ * Exported and pure so the merge is testable without a DOM. The order is the
+ * published entry's, then any finding the entry has no row for — a newer server
+ * counting a barometer this build has never heard of appends rather than
+ * disappears.
+ */
+export const barometerRows = (
+  published: api.BracketRules | null | undefined,
+  findings: readonly api.BracketFinding[],
+): readonly BarometerRow[] => {
+  const byBarometer = new Map(findings.map((f) => [f.barometer, f]))
+  const rows: BarometerRow[] = []
+  const placed = new Set<string>()
+
+  if (published !== undefined && published !== null) {
+    for (const { key, label } of BAROMETERS) {
+      const name = FINDING_ROW[key]
+      const finding = name === undefined ? undefined : byBarometer.get(name)
+      if (finding !== undefined) placed.add(finding.barometer)
+      rows.push({ id: `rule:${key}`, label, rule: published[key], finding })
+    }
+  }
+
+  for (const finding of findings) {
+    // `placed` is added to here as well as above, so a server that sent two
+    // findings for one barometer gets ONE row rather than two sharing a React
+    // key and an `aria-controls` target — the second toggle would otherwise be
+    // announced as controlling the first one's list. `byBarometer` already
+    // resolves which of the two wins; this only stops the row being drawn
+    // twice.
+    if (placed.has(finding.barometer)) continue
+    placed.add(finding.barometer)
+    /*
+     * `found:` here and `rule:` above, because the two loops key their rows
+     * from DIFFERENT VOCABULARIES and the vocabularies overlap. A published row
+     * is keyed by the entry's camelCase name; a finding with no published row
+     * is keyed by the server's own spelling. So a server that started counting
+     * tutors and called the barometer `tutorDensity` rather than
+     * `tutor-density` would give two `<li>` one React key — and `tutorDensity`
+     * is not a hypothetical, it is the one barometer here with a published slot
+     * and no finding, which makes it the likeliest one for a future server to
+     * start counting.
+     *
+     * BOTH PREFIXES ARE KEPT AND ONLY THE PAIR IS LOAD-BEARING, which is
+     * measured rather than assumed: removing either one alone collides with
+     * nothing, because `rule:tutorDensity` and `tutorDensity` differ just as
+     * `tutorDensity` and `found:tutorDensity` do, and `barometerRows`' unit
+     * tests stay green under either single mutation. Removing BOTH collides,
+     * and is caught. They are kept as a pair for the same reason
+     * `deleteCombos`' empty-list guard is: the plausible refactor is the one
+     * that tidies away both halves at once, and a lone prefix reads like an
+     * accident somebody will delete.
+     *
+     * A duplicate React key is worth this much care precisely because it does
+     * not fail loudly: React warns and renders both rows, so every query in the
+     * panel tests still passes while the reconciler is being lied to about
+     * which row is which. That is why the invariant is asserted on
+     * `barometerRows` and not on the DOM.
+     *
+     * No `rule`: we received no published entry for a barometer we have no row
+     * for, and "no published rule" asserted from having been told nothing is
+     * the mistake this panel exists to avoid.
+     */
+    rows.push({
+      id: `found:${finding.barometer}`,
+      label: humanise(finding.barometer),
+      rule: undefined,
+      finding: byBarometer.get(finding.barometer) ?? finding,
+    })
+  }
+
+  return rows
+}
+
+/**
+ * How loudly a finding is put, as a WORD.
+ *
+ * Rust and sage are not separable under deuteranopia
+ * (`packages/ui/src/tokens.ts`), so severity is never carried by colour alone
+ * anywhere in this app — the chip next door pairs rust with a `!` and the
+ * numbers for the same reason. Here the word IS the signal and the attribute is
+ * only what paints it.
+ *
+ * An unrecognised severity from a newer server falls back to the milder word
+ * rather than to the raw token: the reader is going to see this either way, and
+ * calling something an error on a guess is the worse direction to be wrong in.
+ */
+const severityWord = (severity: string): string => (severity === 'error' ? 'Error' : 'Warning')
+
+/**
+ * The deck's cards behind one finding, on a disclosure of its own.
+ *
+ * Its own state rather than the panel's: the Game Changers list and each
+ * finding are separate claims and opening one must not open the others, which
+ * a single `open` boolean threaded from `Workspace` could not express.
+ *
+ * The Escape handler mirrors the panel's exactly, including the
+ * `stopPropagation` — without it the same keypress closes this list AND the
+ * Game Changers list above it, and the innermost open thing is the one that
+ * should close.
+ */
+const FindingCards = ({
+  finding,
+  label,
+  cards,
+  onInspect,
+}: {
+  finding: api.BracketFinding
+  /** The barometer's name, for the accessible label. See `aria-label` below. */
+  label: string
+  cards: ReadonlyMap<string, Card>
+  onInspect: (oracleId: string) => void
+}): React.JSX.Element | null => {
+  const [open, setOpen] = useState(false)
+  const toggleRef = useRef<HTMLButtonElement>(null)
+  /*
+   * `aria-controls` is a SPACE-SEPARATED IDREF LIST, so a barometer name with
+   * a space in it does not make one bad id — it makes several ids, none of
+   * which name an element, and the disclosure quietly stops being announced as
+   * one. Nothing throws and nothing looks wrong on screen, which is why it is
+   * worth defending: the humanising path exists precisely so a barometer this
+   * build has never heard of still renders, and a name it did not choose is
+   * the whole point of that path.
+   */
+  const listId = `barometer-cards-${finding.barometer.replace(/[^\w-]+/g, '-')}`
+
+  /*
+   * `?? []` for the same reason every other wire read in this file has one: a
+   * response is an unvalidated cast, not a promise, and `.length` on an absent
+   * array threw once already here and took the whole React tree with it rather
+   * than just this row (see `BracketReport`'s own comment about
+   * `gameChangers`). The type says required; the wire says whatever it says.
+   *
+   * A finding with no cards behind it is then a count with nothing to open. The
+   * server does not send one today; a toggle onto an empty list would be a
+   * control that lies about having something under it.
+   */
+  const behind = finding.cards ?? []
+  if (behind.length === 0) return null
+
+  return (
+    <div
+      onKeyDown={(e) => {
+        if (e.key !== 'Escape' || !open) return
+        e.stopPropagation()
+        setOpen(false)
+        toggleRef.current?.focus()
+      }}
+    >
+      <button
+        className="bracket-toggle"
+        ref={toggleRef}
+        aria-expanded={open}
+        aria-controls={listId}
+        /*
+         * Named for its barometer, because the visible words are not enough on
+         * their own. Two findings of the same size render two buttons reading
+         * "2 cards behind this count", and a screen-reader user moving between
+         * them hears the same sentence twice with nothing to tell them apart —
+         * the visible text is disambiguated by the row heading above it and the
+         * accessible name is not. Sighted readers keep the short version.
+         */
+        aria-label={`${plural(behind.length, 'card')} behind the ${label.toLowerCase()} count`}
+        onClick={() => {
+          setOpen(!open)
+        }}
+      >
+        <span className="bracket-caret" aria-hidden="true">
+          {open ? '▾' : '▸'}
+        </span>
+        {plural(behind.length, 'card')} behind this count
+      </button>
+      {open ? (
+        <ul className="bracket-changers" id={listId}>
+          {behind.map((id) => (
+            <li key={id}>
+              <button
+                className="as-link"
+                onClick={() => {
+                  onInspect(id)
+                }}
+              >
+                {cards.get(id)?.name ?? id.slice(0, 8)}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * The barometer rows, and the sentence that says what the counts are.
+ *
+ * Rendered only when the server actually sent `barometers` OR a published
+ * entry. Drawing "nothing counted" from having received nothing would be the
+ * same mistake as drawing a pass — a server that predates the field gets no
+ * block at all rather than an empty one.
+ */
+const Barometers = ({
+  published,
+  barometers,
+  cards,
+  onInspect,
+}: {
+  published: api.BracketRules | null | undefined
+  barometers: api.BracketBarometers | undefined
+  cards: ReadonlyMap<string, Card>
+  onInspect: (oracleId: string) => void
+}): React.JSX.Element | null => {
+  const findings = barometers?.findings ?? []
+  const rows = barometerRows(published, findings)
+  if (rows.length === 0 && barometers === undefined) return null
+
+  return (
+    <>
+      {rows.length === 0 ? null : (
+        <ul className="bracket-barometers">
+          {rows.map((row) => (
+            <li key={row.id}>
+              <div className="bracket-barometer-head">
+                <span className="bracket-barometer">{row.label}</span>
+                {row.rule === undefined ? null : (
+                  <span className="bracket-nil">
+                    {/* A value here would mean Wizards had published one — and
+                        this app still has no check for it, so it says so rather
+                        than letting a rule imply the deck was measured. */}
+                    {row.rule === null ? 'no published rule' : `${row.rule}, not checked here`}
+                  </span>
+                )}
+              </div>
+              {row.finding === undefined ? null : (
+                <div className="bracket-finding">
+                  <p className="bracket-finding-said">
+                    <span className="bracket-severity" data-severity={row.finding.severity}>
+                      {severityWord(row.finding.severity)}
+                    </span>{' '}
+                    {row.finding.message}
+                  </p>
+                  <FindingCards
+                    finding={row.finding}
+                    label={row.label}
+                    cards={cards}
+                    onInspect={onInspect}
+                  />
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {barometers === undefined ? null : (
+        <p className="note bracket-basis">
+          {/* The server's own sentence, not one written here. It is what stops a
+              count reading as a bracket ruling, and it travels with the findings
+              precisely so this file cannot forget to say it or say it its own
+              way. Both states use it: with findings it qualifies them, without
+              findings it says what was looked for. */}
+          <strong>{findings.length === 0 ? 'Nothing counted' : 'What these counts are'}</strong> —{' '}
+          {barometers.basis}
+        </p>
+      )}
+    </>
+  )
+}
 
 /**
  * What the target bracket allows, or `null` when we cannot say.
@@ -3370,31 +3691,22 @@ const BracketCheck = ({
       ) : null}
 
       {/*
-       * The four-fifths that is not checkable, named rather than omitted.
+       * The four-fifths that is not checkable, named rather than omitted — and
+       * beside each name, what we counted for it in this deck (ADR-0049).
        *
-       * Rendered only when the published entry actually arrived. Drawing these
-       * rows from an absent `targetBracket` would be asserting "no published
-       * rule" from having received no data, which is the same mistake as
-       * asserting a pass.
+       * The published rows are still drawn only when the published entry
+       * actually arrived: asserting "no published rule" from having received no
+       * data is the same mistake as asserting a pass. The findings do NOT wait
+       * on it, because the server sends them whether or not the rules file
+       * loaded, and hanging them off `targetBracket` would drop them exactly
+       * when this panel has least else to say.
        */}
-      {published === undefined || published === null ? null : (
-        <ul className="bracket-barometers">
-          {BAROMETERS.map(({ key, label }) => {
-            const value = published[key]
-            return (
-              <li key={key}>
-                <span className="bracket-barometer">{label}</span>
-                <span className="bracket-nil">
-                  {/* A value here would mean Wizards had published one — and
-                      this app still has no check for it, so it says so rather
-                      than letting a rule imply the deck was measured. */}
-                  {value === null ? 'no published rule' : `${value}, not checked here`}
-                </span>
-              </li>
-            )
-          })}
-        </ul>
-      )}
+      <Barometers
+        published={published}
+        barometers={bracket.barometers}
+        cards={cards}
+        onInspect={onInspect}
+      />
 
       {reason === undefined ? null : (
         <p className="note bracket-why">

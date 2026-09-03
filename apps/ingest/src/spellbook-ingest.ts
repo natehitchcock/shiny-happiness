@@ -7,7 +7,7 @@ import {
   variantSkipReason,
   type SpellbookOptions,
 } from '@roundtable/clients'
-import { deleteCombos, insertCombos } from '@roundtable/db'
+import { deleteCombos, insertCombos, pruneTemplateVariantCombos } from '@roundtable/db'
 import { comboId } from '@roundtable/domain'
 import type { Combo, ComboId } from '@roundtable/domain'
 
@@ -59,6 +59,21 @@ export interface ComboIngestReport {
    * "everything the run did not write". See `deleteCombos`.
    */
   readonly removed: number
+  /**
+   * Rows for template variants Spellbook has withdrawn from the FEED (ADR-0049).
+   *
+   * Counted apart from `removed` because it answers a different question, and
+   * the pair is what tells the operator which mechanism did the work. `removed`
+   * is "this run read a variant and rejected it"; this is "these rows are for
+   * variants no run will ever read again". ADR-0038 left 41 of the second kind
+   * and could not reach them: a variant nobody reads is a variant nobody
+   * rejects, so there is no id to pass to `deleteCombos`.
+   *
+   * Expect a number on the first run after this change and `0` on every run
+   * after that. See `pruneTemplateVariantCombos` for why deleting on the id
+   * alone is exact and cannot truncate the table.
+   */
+  readonly removedTemplateVariants: number
 }
 
 export interface ComboIngestOptions extends SpellbookOptions {
@@ -160,5 +175,37 @@ export const ingestSpellbook = async (
   // one is a wrong answer AND a lost fact.
   const removed = await deleteCombos(pool, rejectedIds)
 
-  return { read, combos, skippedNotOk, skippedNoPieces, unmapped, templateRequired, removed }
+  /*
+   * And the rows the line above cannot reach (ADR-0049).
+   *
+   * `deleteCombos` removes ids this run READ AND REJECTED, which by definition
+   * excludes a variant Spellbook has withdrawn from the feed: nobody reads it,
+   * so nobody rejects it, so its row outlives every run. ADR-0038 measured 41
+   * such rows and refused the only tool it had for them — "delete everything
+   * this run did not write" — because that empties the table on a truncated
+   * download.
+   *
+   * This deletes on the id shape alone and is neither. It compares nothing
+   * against the feed, so it is unaffected by how much of the feed arrived, and
+   * it removes exactly the population `variantSkipReason` refuses to write. The
+   * invariant those two share is pinned in
+   * `packages/clients/src/spellbook.test.ts` — if it breaks, this line becomes
+   * silent data loss and must change with it.
+   *
+   * Unconditional, and last, for the same reason `deleteCombos` is: a run that
+   * failed to write anything should still leave the table without rows it
+   * cannot stand behind.
+   */
+  const removedTemplateVariants = await pruneTemplateVariantCombos(pool)
+
+  return {
+    read,
+    combos,
+    skippedNotOk,
+    skippedNoPieces,
+    unmapped,
+    templateRequired,
+    removed,
+    removedTemplateVariants,
+  }
 }

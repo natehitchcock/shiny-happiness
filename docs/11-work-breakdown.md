@@ -168,6 +168,19 @@ INSIDE its allowance can still be told what the allowance is — `violations` na
 it only when the deck breaks it, and a table of allowances in the client is a
 rejected PR (AGENTS.md §8). New optional field, so no ADR (R2). See doc 03 §3.2.
 
+**Each of those rows now also says what THIS DECK holds** —
+[ADR-0049](adr/0049-barometer-findings-and-the-last-stale-combos.md). The server
+has been counting three of the barometers over the deck's own cards and combos
+since ADR-0018 and sending them under `bracket.barometers`; the client had no
+such field on `BracketReport` and drew a static table instead, so a playtest deck
+the API reported three findings on rendered four bare "no published rule" rows —
+under the server's own sentence saying the findings ARE reported. A row carries
+both claims now, because they are different claims: what the FORMAT publishes
+(nothing, so far) and what WE counted. The server's `basis` sentence is rendered
+in both states, severity is a word rather than a colour, and every count opens
+into the cards behind it. Doc 10 §10.5 gains the shape, which it never
+documented.
+
 > **A card re-ingest is required** before bracket checks answer. Migration `0011`
 > defaults every existing row to `game_changer = false`, and a corpus with no Game
 > Changers is refused by `loadBracketRules` rather than passing every deck
@@ -487,7 +500,6 @@ API-02 performance test seeds a 20,000-card corpus and takes ~40 s.
 | `LEGAL-01` (name clearance) | **Lotus Wizard** needs checking before it goes on a domain. Now urgent rather than cheap-and-later: the Vercel config is written. |
 | `API-06` (remainder) | The `409` half is done — `since` is real (migration `0012`, [ADR-0020](adr/0020-deck-command-log-makes-409-replayable.md)) and the client rebases onto it instead of re-sending blindly. What is left in the task's scope is the **workspace-state endpoint** of doc 12 §12.6: `PUT /decks/:id/workspace` does not exist and nothing persists `WorkspaceState`, so "return where you left" does not hold across devices. |
 | Test flake (residual) | The database suites now run in their own Vitest project one at a time, which removed most of the contention and the leaked databases it caused. Roughly one run in eight still ends `51 passed (52)` — a whole file SILENTLY SKIPPED, not failed, with the count varying by file between runs. The only skip path is `databaseUrl() === null`, i.e. `DATABASE_URL` not visible to that worker, and I could not reproduce it under a five-run loop. A suite that quietly does not run protects nothing, so this is worth root-causing before it hides a real regression. |
-| Bracket UI | The API answers `bracket.violations`, `bracket.gameChangers` and `bracket.rules`, and nothing renders them. Doc 03 §3.2 describes the warning chip and the "Bracket check" panel; the masthead still prints a bare `BRACKET 3`. |
 
 **Synergy tagging was audited against a clause-coverage probe, and combos lose
 about 4.5% of their number on the next ingest** —
@@ -516,6 +528,24 @@ remove anything (ADR-0038 §4a). Measured over a real combo ingest: 109,388 →
 **104,616** combos, two-piece 5,184 → **3,991**, and the reported Moritte +
 Ashnod's Altar pairing gone while its three genuine multi-card siblings stay.
 **A falling combo count on this run is the fix, not a failure.**
+
+**The last 41 of those rows go too** —
+[ADR-0049](adr/0049-barometer-findings-and-the-last-stale-combos.md). ADR-0038's
+prune deletes ids the run READ AND REJECTED, which cannot reach a variant
+Spellbook has withdrawn from the feed altogether: nobody reads it, so nobody
+rejects it. 41 such rows survived, 30 of them one Veinwitch Coven + Phyrexian
+Altar family, and **5 of one playtest Kess deck's 12 "assembled" combos were
+among them**. Deleting on the ID SHAPE reaches them — `--` in a Spellbook variant
+id is an empty card segment, its mark for a piece that is a card CLASS — and it
+needs no feed comparison, so unlike the "delete everything this run did not
+write" sweep ADR-0038 refused, it cannot empty the table on a truncated
+download. `variantSkipReason` now reads the id as well as `requires[]`, so what
+the prune removes and what the ingest refuses are the same set by construction
+rather than by a promise about the feed; a guard block in
+`packages/clients/src/spellbook.test.ts` fails loudly if that stops holding.
+Measured on an isolated clone: one deck 12 → **7** assembled combos, all five
+losses genuine template variants, the real siblings untouched. **Another falling
+combo count — 41 of 104,616 — and again the fix, not a failure.**
 
 **No third-party question is left open except Scryfall Q4** (image serving, which
 gates `ING-04` — and which [ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md)

@@ -85,7 +85,11 @@ const runCombos = async (pool: Pool, limit: number | undefined): Promise<void> =
       `  ${report.templateRequired.length} combos need a card CLASS we cannot name, and are not stored:`,
     )
     for (const t of report.templateRequired.slice(0, 10)) {
-      console.error(`    ${t.comboId} needs ${t.templates.join(', ')}`)
+      // A variant can be a template variant on its ID alone, with `requires[]`
+      // absent (ADR-0049). `needs ` with nothing after it reads as a truncated
+      // line; the id is the fact the operator can act on either way.
+      const needs = t.templates.length === 0 ? 'an unnamed card class' : t.templates.join(', ')
+      console.error(`    ${t.comboId} needs ${needs}`)
     }
     console.error('    (storing them short would claim a combo the deck has not assembled)')
   }
@@ -95,6 +99,17 @@ const runCombos = async (pool: Pool, limit: number | undefined): Promise<void> =
   // reached nothing already in the table.
   if (report.templateRequired.length > 0 || report.skippedNotOk > 0) {
     console.log(`  removed ${report.removed} rows an earlier run had written for those variants`)
+  }
+  /*
+   * Rows for template variants Spellbook has since withdrawn from the feed
+   * (ADR-0049). Printed only when it moved: unlike the line above this is a
+   * one-off cleanup, and a permanent `pruned 0` on every run afterwards would
+   * be noise rather than the signal that line is.
+   */
+  if (report.removedTemplateVariants > 0) {
+    console.log(
+      `  pruned ${report.removedTemplateVariants} rows for template variants no longer in the feed`,
+    )
   }
   // Unmapped pieces are reported loudly, never dropped quietly (doc 04 §4.2).
   if (report.unmapped.length > 0) {

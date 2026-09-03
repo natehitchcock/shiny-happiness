@@ -430,6 +430,39 @@ describe('bracketFindings', () => {
     expect(findings[0]?.cards).toEqual([oracleId('Armageddon'), oracleId('Blood Moon')])
   })
 
+  /*
+   * The four verbs agree with each other or the sentence is broken English.
+   *
+   * Found by rendering it (ADR-0049): the panel showed "2 cards in this deck
+   * destroy, exiles, forces the sacrifice of, or overwrites the type of a
+   * land." Only the FIRST verb was going through `plural` — the other three
+   * were frozen in the singular, so the sentence was correct at a count of one
+   * and wrong at every other count. It was invisible for as long as nothing
+   * drew it.
+   */
+  it('conjugates every verb in the land-denial sentence, not just the first', () => {
+    const one = bracketFindings({
+      cards: [card('Armageddon', 'Destroy all lands.')],
+      assembled: [],
+    })
+    expect(one[0]?.message).toBe(
+      '1 card in this deck destroys, exiles, forces the sacrifice of, or overwrites the ' +
+        'type of a land.',
+    )
+
+    const two = bracketFindings({
+      cards: [
+        card('Armageddon', 'Destroy all lands.'),
+        card('Blood Moon', 'Nonbasic lands are Mountains.'),
+      ],
+      assembled: [],
+    })
+    expect(two[0]?.message).toBe(
+      '2 cards in this deck destroy, exile, force the sacrifice of, or overwrite the ' +
+        'type of a land.',
+    )
+  })
+
   it('reports all three at once, each with its own severity', () => {
     const findings = bracketFindings({
       cards: [

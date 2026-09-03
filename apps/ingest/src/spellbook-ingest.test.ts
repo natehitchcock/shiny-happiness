@@ -89,6 +89,30 @@ const MORITTE_ALTAR_KELPIE = {
   description: "Activate Ashnod's Altar by sacrificing Moritte, adding {C}{C}.",
 }
 
+/**
+ * A template variant whose id does NOT carry the `--` segment.
+ *
+ * It re-arms the ADR-0038 regression, which ADR-0049 disarmed without meaning
+ * to. That regression is about `requires[]` — the adapter read `uses[]` and
+ * never `requires[]`, so a combo was stored two pieces short — and the fixture
+ * it is tested with, `2034-3388--5`, now trips the id check as well. Delete the
+ * `requires[]` branch from `variantSkipReason` and that test still passes,
+ * because the id branch covers for it: measured, not supposed.
+ *
+ * ADR-0038's own lesson was that the units were all correct and nothing tested
+ * the line between them, so the wiring is where this has to be pinned rather
+ * than only in the client's unit tests. A `--`-free id is what makes the two
+ * branches independently observable from here.
+ */
+const TEMPLATE_ONLY_IN_REQUIRES = {
+  id: '2034-3388-9999',
+  status: 'OK',
+  identity: 'C',
+  uses: [use(MORITTE, 'Moritte of the Frost'), use(ALTAR, "Ashnod's Altar")],
+  requires: [{ template: { name: 'Persist Creature' } }],
+  produces: [{ feature: { name: 'Infinite colorless mana' } }],
+}
+
 /** A variant Spellbook's own editors have since withdrawn. */
 const WITHDRAWN = {
   id: 'withdrawn-1',
@@ -154,6 +178,30 @@ describeDb('the combo ingest, wired end to end', () => {
     expect(await countRow('2034-3388--5')).toBe(0)
   })
 
+  it('removes a stale row for a template variant whose id does not say so', async () => {
+    /*
+     * The `requires[]` branch, pinned END TO END and independently of the id
+     * branch — which is what `2034-3388--5` above can no longer do, because
+     * ADR-0049 made its id sufficient on its own.
+     *
+     * Note the row survives the id-shape prune too, so this asserts the
+     * ADR-0038 mechanism specifically: the variant was READ and POSITIVELY
+     * REJECTED on `requires[]`, and `removed` — not
+     * `removedTemplateVariants` — is what took it out.
+     */
+    await insertCombos(db.pool, [staleRow('2034-3388-9999', [MORITTE, ALTAR])])
+    expect(await countRow('2034-3388-9999')).toBe(1)
+
+    const report = await ingestSpellbook(db.pool, {
+      fetchImpl: stubFetch([TEMPLATE_ONLY_IN_REQUIRES, MORITTE_ALTAR_KELPIE]),
+    })
+
+    expect(report.templateRequired.map((t) => t.comboId)).toEqual(['2034-3388-9999'])
+    expect(report.removed).toBe(1)
+    expect(report.removedTemplateVariants).toBe(0)
+    expect(await countRow('2034-3388-9999')).toBe(0)
+  })
+
   it('leaves the three-card sibling alone, which is a real combo', async () => {
     // The guard on over-skipping. Moritte and Ashnod's Altar DO combo with
     // River Kelpie; only the two-card claim was false, and a fix that took both
@@ -201,5 +249,90 @@ describeDb('the combo ingest, wired end to end', () => {
     expect(report.unmapped.map((u) => u.comboId)).toEqual(['names-a-missing-card'])
     expect(report.removed).toBe(0)
     expect(await countRow('names-a-missing-card')).toBe(1)
+  })
+
+  /*
+   * The rows the id-by-id prune above cannot reach (ADR-0049).
+   *
+   * ADR-0038 left 41 of them and recorded them as unreachable, correctly: they
+   * are rows for variants Spellbook has withdrawn from the FEED, so no run ever
+   * reads them and no run can positively reject them. On the playtest deck that
+   * reported this, 5 of 12 "assembled" combos were these.
+   */
+  describe('rows for variants that are no longer in the feed at all', () => {
+    it('removes a stale template row the run never saw', async () => {
+      /*
+       * The distinguishing case, and the one `report.removed` cannot cover:
+       * `1957-4050-6273--129` is NOT in the stubbed feed, so nothing reads it,
+       * nothing rejects it, and the id-by-id prune has no id to pass.
+       */
+      await insertCombos(db.pool, [staleRow('1957-4050-6273--129', [MORITTE, ALTAR])])
+      expect(await countRow('1957-4050-6273--129')).toBe(1)
+
+      const report = await ingestSpellbook(db.pool, {
+        fetchImpl: stubFetch([MORITTE_ALTAR_KELPIE]),
+      })
+
+      expect(report.removed).toBe(0)
+      expect(report.removedTemplateVariants).toBe(1)
+      expect(await countRow('1957-4050-6273--129')).toBe(0)
+      // And the real three-card combo the run DID write is untouched.
+      expect(await countRow('2034-3388-3607')).toBe(1)
+    })
+
+    it('cannot empty the table on a run that read almost nothing', async () => {
+      /*
+       * The property that makes this prune safe where the sweep ADR-0038
+       * refused is not.
+       *
+       * "Delete everything this run did not write" empties the table on a
+       * truncated download or a `--limit` run. This one reads no feed and
+       * counts no variants, so a run that saw ONE variant removes exactly the
+       * rows a complete run would — and the rows it leaves are every row that
+       * is not a template variant.
+       */
+      const total = async (): Promise<number> => {
+        const { rows } = await db.pool.query<{ n: string }>('SELECT count(*) AS n FROM combos')
+        return Number(rows[0]?.n ?? 0)
+      }
+      const before = await total()
+      expect(before).toBeGreaterThan(0)
+
+      const report = await ingestSpellbook(db.pool, {
+        fetchImpl: stubFetch([MORITTE_ALTAR_KELPIE]),
+        limit: 1,
+      })
+
+      expect(report.removedTemplateVariants).toBe(0)
+      expect(await total()).toBe(before)
+    })
+
+    it('never writes a row the prune would then delete', async () => {
+      /*
+       * The two halves held against each other.
+       *
+       * The prune deletes on the id alone with no reference to the feed, so it
+       * is only ever a cleanup while the ingest refuses to write such an id. A
+       * feed variant carrying a `--` id and an EMPTY `requires[]` is the case
+       * that would otherwise be written and then deleted every single run,
+       * losing a real combo quietly — `variantSkipReason` refuses it on the id
+       * for exactly this reason, and this is where the two meet.
+       */
+      const report = await ingestSpellbook(db.pool, {
+        fetchImpl: stubFetch([
+          {
+            id: '2105-3337--140',
+            status: 'OK',
+            uses: [use(MORITTE, 'Moritte of the Frost'), use(ALTAR, "Ashnod's Altar")],
+            requires: [],
+            produces: [{ feature: { name: 'Infinite colorless mana' } }],
+          },
+        ]),
+      })
+
+      expect(report.combos).toBe(0)
+      expect(report.templateRequired.map((t) => t.comboId)).toEqual(['2105-3337--140'])
+      expect(await countRow('2105-3337--140')).toBe(0)
+    })
   })
 })
