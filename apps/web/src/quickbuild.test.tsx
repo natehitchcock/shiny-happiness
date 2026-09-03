@@ -477,7 +477,7 @@ describe('the queue serves the next trio without a request', () => {
       if (option === undefined) throw new Error(`${name} is not on screen`)
       await press(within(option).getByRole('button', { name: 'Add' }))
     }
-    return { retire, add, fetchCandidates, ...props }
+    return { retire, add, fetchCandidates }
   }
 
   it('advances past a whole trio with no further request', async () => {
@@ -563,17 +563,27 @@ describe('the queue serves the next trio without a request', () => {
 describe('picking one card cycles all three', () => {
   const six = ['Ai', 'Bo', 'Cy', 'Di', 'Ed', 'Fi']
 
+  /*
+   * `fetchCandidates` is its own argument rather than part of the overrides so
+   * that the mock comes back out of here still typed as a mock — a test that
+   * counts the requests has to be able to read `.mock` off it.
+   */
   const mounted = (
     found: readonly QuickbuildCandidate[],
-    over: Partial<Parameters<typeof Quickbuild>[0]> = {},
+    over: Omit<
+      Partial<Parameters<typeof Quickbuild>[0]>,
+      'fetchCandidates' | 'onAdd' | 'onReject'
+    > = {},
+    fetchCandidates = vi.fn().mockResolvedValue(found),
   ) => {
-    const fetchCandidates = vi.fn().mockResolvedValue(found)
+    const onAdd = vi.fn()
+    const onReject = vi.fn()
     const props = {
       plan: plan(),
       filter: '',
       fetchCandidates,
-      onAdd: vi.fn(),
-      onReject: vi.fn(),
+      onAdd,
+      onReject,
       onClose: vi.fn(),
       onReach: vi.fn(),
       cutCount: 0,
@@ -596,7 +606,7 @@ describe('picking one card cycles all three', () => {
       if (option === undefined) throw new Error(`${name} is not on screen`)
       await press(within(option).getByRole('button', { name: 'Reject' }))
     }
-    return { view, retire, add, reject, ...props }
+    return { view, retire, add, reject, fetchCandidates, onAdd, onReject }
   }
 
   it('replaces all three when the builder takes the first', async () => {
@@ -718,7 +728,7 @@ describe('picking one card cycles all three', () => {
       .fn()
       .mockResolvedValueOnce(six.slice(0, 4).map((n) => candidate(n)))
       .mockResolvedValue(deeper)
-    const { add } = mounted([], { fetchCandidates })
+    const { add } = mounted([], {}, fetchCandidates)
     await screen.findByText('Ai')
     await add('Ai')
     await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(2))
@@ -835,7 +845,7 @@ describe('picking one card cycles all three', () => {
       .mockResolvedValueOnce(four)
       .mockResolvedValueOnce(four)
       .mockResolvedValue([])
-    const { add, retire } = mounted([], { fetchCandidates, plan: plan({ gaps: [rampGap] }) })
+    const { add, retire } = mounted([], { plan: plan({ gaps: [rampGap] }) }, fetchCandidates)
     await screen.findByText('A0')
     // The deep page lands first, so the refill below is a refill.
     await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(2))
@@ -861,7 +871,7 @@ describe('picking one card cycles all three', () => {
       .mockResolvedValueOnce(twelve.slice(0, 4))
       .mockResolvedValueOnce(twelve)
       .mockResolvedValue(Array.from({ length: 12 }, (_, i) => candidate(`B${i}`)))
-    const { add, retire } = mounted([], { fetchCandidates, plan: plan({ gaps: [rampGap] }) })
+    const { add, retire } = mounted([], { plan: plan({ gaps: [rampGap] }) }, fetchCandidates)
     await screen.findByText('A0')
     // The deep page lands, so any further request is a refill and not a deepening.
     await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(2))

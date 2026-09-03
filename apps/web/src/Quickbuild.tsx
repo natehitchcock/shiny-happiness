@@ -661,10 +661,7 @@ export const Quickbuild = ({
    * a render later, and a refill rebuilds the list underneath with the same
    * cards at different indices. Filtering by identity is right under all of it.
    */
-  const live = useMemo(
-    () => available.filter((c) => !held.has(c.oracleId)),
-    [available, held],
-  )
+  const live = useMemo(() => available.filter((c) => !held.has(c.oracleId)), [available, held])
 
   const showing = useMemo(() => live.slice(0, OPTIONS), [live])
 
