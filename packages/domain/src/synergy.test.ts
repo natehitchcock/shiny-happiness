@@ -1514,7 +1514,7 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
       // count rather than softened to `toContain`: a vocabulary that grows
       // without anyone noticing is how two tags come to mean the same event.
       expect(SYNERGY_TAGS).toContain('damage')
-      // The count is 24 since ADR-0048 added `opponent-mill` and `extra-turns`;
+      // The count is 26 since ADR-0054 added `ritual` and `creature-cast`;
       // this card was the twenty-first and still is, because the list is
       // append-only (the ORDER is a persisted contract — see `semantic-emphasis`).
       // `EVENT_TAGS` rather than `SYNERGY_TAGS` since ADR-0046, and the reason
@@ -1523,7 +1523,7 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
       // this is what keeps anyone from adding a twenty-third without saying so.
       // `SYNERGY_TAGS` is that list plus the generated families, whose length is
       // a fact about the corpus rather than a decision anyone made here.
-      expect(EVENT_TAGS).toHaveLength(24)
+      expect(EVENT_TAGS).toHaveLength(26)
     })
 
     it('is spelled as an event, not as an archetype', () => {
@@ -2629,7 +2629,7 @@ describe('deriveSynergy — a land that is also a creature (ADR-0047)', () => {
   describe('the tag', () => {
     it('is in the vocabulary, and is the twenty-second', () => {
       expect(SYNERGY_TAGS).toContain('land-creature')
-      expect(EVENT_TAGS).toHaveLength(24)
+      expect(EVENT_TAGS).toHaveLength(26)
     })
 
     it('is spelled as an event rather than as the deck that plays it', () => {
@@ -3050,5 +3050,215 @@ describe('deriveSynergy — whose tokens they are (ADR-0054)', () => {
 
     expect(beastWithin.produces).toContain('token')
     expect(marchOfSouls.produces).toContain('token')
+  })
+})
+
+describe('a ritual is not a mana rock (ADR-0054)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  /*
+   * "add mana needs to be a semantic. if I want more cards like dark ritual, I
+   * need a semantic to focus".
+   *
+   * `ramp` already exists as a ROLE, and the two vocabularies answer different
+   * questions. A role is a partition for counting — one per card — so `ramp`
+   * holds Sol Ring, Cultivate, Llanowar Elves and Dark Ritual in one bucket of
+   * 1,385, and there is no way to say "this deck is about rituals": `emphasis`
+   * reads tags, never roles. What the role also cannot say is the distinction
+   * that makes a ritual a ritual — mana you get ONCE against mana you get every
+   * turn.
+   *
+   * A broad `mana` tag was measured and refused: 2,402 commander-legal cards
+   * add mana and 1,141 of them are lands, so half of what such a tag would
+   * carry is the mana base the user explicitly did not want tagged.
+   */
+  it('reads the named case and its neighbours', () => {
+    expect(derive('Dark Ritual', 'Instant', 'Add {B}{B}{B}.').produces).toContain('ritual')
+    expect(derive('Seething Song', 'Instant', 'Add {R}{R}{R}{R}{R}.').produces).toContain('ritual')
+    expect(derive('Pyretic Ritual', 'Instant', 'Add {R}{R}{R}.').produces).toContain('ritual')
+  })
+
+  it('reads a permanent that eats itself for a lump of mana', () => {
+    expect(
+      derive(
+        'Lion Eye Diamond',
+        'Artifact',
+        '{T}, Discard your hand, Sacrifice this artifact: Add three mana of any one color.',
+      ).produces,
+    ).toContain('ritual')
+    expect(
+      derive('Basal Thrull', 'Creature — Thrull', 'Sacrifice this creature: Add {B}{B}.').produces,
+    ).toContain('ritual')
+  })
+
+  it('refuses a land, a rock and a dork — mana that comes back every turn', () => {
+    expect(derive('Forest', 'Basic Land — Forest', '({T}: Add {G}.)').produces).not.toContain(
+      'ritual',
+    )
+    expect(derive('Sol Ring', 'Artifact', '{T}: Add {C}{C}.').produces).not.toContain('ritual')
+    expect(
+      derive('Llanowar Elves', 'Creature — Elf Druid', '{T}: Add {G}.').produces,
+    ).not.toContain('ritual')
+  })
+
+  it('refuses a single mana, however it is spent', () => {
+    expect(
+      derive('Lotus Petal', 'Artifact', 'Sacrifice this artifact: Add one mana of any color.')
+        .produces,
+    ).not.toContain('ritual')
+  })
+
+  it('is paid off by the deck that casts three spells in a turn', () => {
+    const storm = derive(
+      'Grapeshot',
+      'Sorcery',
+      'Grapeshot deals 1 damage to any target.\nStorm (When you cast this spell, copy it for each spell cast before it this turn.)',
+    )
+    const second = derive(
+      'Kraum, Violent Cacophony',
+      'Legendary Creature — Zombie Horror',
+      'Flying, haste\nWhenever you cast your second spell each turn, draw a card.',
+    )
+
+    expect(storm.wants).toContain('ritual')
+    expect(second.wants).toContain('ritual')
+  })
+
+  it('feeds the spellslinger deck, and says so in the pair table', () => {
+    // A ritual is how a storm deck casts its next spell, and a deck full of
+    // spells is what makes a ritual worth a card. True read either way, which
+    // is the bar that table sets.
+    expect(interactsWith('ritual')).toContain('spell-cast')
+  })
+})
+
+describe('casting a CREATURE is not casting a spell (ADR-0054)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  /*
+   * "beast whisperer needs to have a semantic about benefiting from casting
+   * creature spells."
+   *
+   * It carried none. `spell-cast` is defined as an instant or a sorcery, so
+   * "whenever you cast a creature spell" matched nothing at all and Beast
+   * Whisperer's only tag was `card-draw`. 74 commander-legal cards read this
+   * way and 3 of them carried any cast tag.
+   *
+   * PAYOFF-ONLY, and the producer side is measured and refused. "A creature
+   * card IS a creature spell" would put the tag on 17,751 of the 31,782
+   * commander-legal cards — 55.9%, against 33.6% for the widest tag any real
+   * pool carries today — and would attach "enables your creature-cast" to
+   * every creature in the deck's colours, which is true of all of them and
+   * therefore says nothing about any of them. What that sentence would have
+   * said is already said better by the `type:creature` composition target and
+   * the `fills-creature` group.
+   *
+   * That leaves it standing exactly where `extra-turns` stands (ADR-0048):
+   * vocabulary and a label rather than a score, said out loud rather than left
+   * to be discovered.
+   */
+  it('reads the reported card', () => {
+    const whisperer = derive(
+      'Beast Whisperer',
+      'Creature — Elf Druid',
+      'Whenever you cast a creature spell, draw a card.',
+    )
+
+    expect(whisperer.wants).toContain('creature-cast')
+  })
+
+  it('reads the cost-reduction form', () => {
+    expect(
+      derive('Monument', 'Legendary Artifact', 'Creature spells you cast cost {1} less to cast.')
+        .wants,
+    ).toContain('creature-cast')
+  })
+
+  it('does not put it on every creature', () => {
+    const bear = derive('Grizzly Bears', 'Creature — Bear', '')
+    expect(bear.produces).not.toContain('creature-cast')
+    expect(bear.wants).not.toContain('creature-cast')
+    expect(bear.has ?? []).not.toContain('creature-cast')
+  })
+
+  it('does not confuse it with a creature ENTERING', () => {
+    // Young Pyromancer's tokens do not trigger Beast Whisperer, and offering
+    // one to the other as an enabler would be a false claim.
+    const pyromancer = derive(
+      'Young Pyromancer',
+      'Creature — Human Shaman',
+      'Whenever you cast an instant or sorcery spell, create a 1/1 red Elemental creature token.',
+    )
+
+    expect(pyromancer.wants).not.toContain('creature-cast')
+    expect(pyromancer.produces).not.toContain('creature-cast')
+  })
+})
+
+describe('the cast payoffs that reached no tag at all (ADR-0054)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  it('reads "whenever you cast an artifact spell" as an artifact deck', () => {
+    /*
+     * 31 cards, 2 of which carried any cast or enters tag. NOT a new tag:
+     * `artifact-etb` already exists, already means "this deck is about
+     * artifacts", and already has 3,568 producers. The enchantment twin needed
+     * nothing — 21 of its 22 cards were already covered — which is what makes
+     * this a gap in one rule rather than a missing distinction.
+     */
+    const automaton = derive(
+      'Patchwork Automaton',
+      'Artifact Creature — Construct',
+      'Whenever you cast an artifact spell, put a +1/+1 counter on this creature.',
+    )
+
+    expect(automaton.wants).toContain('artifact-etb')
+  })
+
+  it('reads "your second spell each turn" as the spellslinger payoff it is', () => {
+    // 59 cards, 3 covered. The same event `spell-cast` already means — any
+    // spell, not a type — so it belongs in that rule rather than in a new one.
+    const lotho = derive(
+      'Lotho, Corrupt Shirriff',
+      'Legendary Creature — Halfling Rogue',
+      'Whenever a player casts their second spell each turn, create a Treasure token.',
+    )
+
+    expect(lotho.wants).toContain('spell-cast')
+  })
+})
+
+describe('a ritual is not the mana base (ADR-0054)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  it('refuses a land that eats itself for two mana', () => {
+    /*
+     * "a land tapping for mana is almost certainly not what they want tagged".
+     * The sacrifice lands read exactly like rituals and are still the mana
+     * base: Ebon Stronghold, Dwarven Ruins, Lake of the Dead, Phyrexian Tower,
+     * Crystal Vein — 14 cards, found by diffing the corpus.
+     */
+    expect(
+      derive(
+        'Ebon Stronghold',
+        'Land',
+        'This land enters tapped.\n{T}: Add {B}.\n{T}, Sacrifice this land: Add {B}{B}.',
+      ).produces,
+    ).not.toContain('ritual')
+    expect(
+      derive('Phyrexian Tower', 'Land', '{T}: Add {C}.\n{T}, Sacrifice a creature: Add {B}{B}.')
+        .produces,
+    ).not.toContain('ritual')
+  })
+
+  it('still reads a non-land that eats itself', () => {
+    // The guard has to be about the type line and nothing else.
+    expect(
+      derive('Blood Vassal', 'Creature — Thrull', 'Sacrifice this creature: Add {B}{B}.').produces,
+    ).toContain('ritual')
   })
 })

@@ -56,6 +56,17 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   // extra turns" is right while "benefits from extra turns" is a sentence no
   // card in the corpus can say. See the pair table: nothing pays this off.
   'extra-turns': 'taking extra turns',
+  // ADR-0054. "A burst of mana", not "mana": the `ramp` ROLE already covers
+  // mana in general, and the whole point of this tag is the half the role
+  // cannot say — mana you get once rather than every turn. "Causes a burst of
+  // mana" is Dark Ritual and "benefits from a burst of mana" is Grapeshot,
+  // which is the pair the tag was measured on.
+  ritual: 'a burst of mana',
+  // ADR-0054, and written for the payoff sentence because that is the only one
+  // it has: nothing produces this tag, so "benefits from creature spells" is
+  // Beast Whisperer and "causes creature spells" is a sentence no card says.
+  // The producer side was measured at 55.9% of the format and refused.
+  'creature-cast': 'casting creature spells',
 }
 
 /**
