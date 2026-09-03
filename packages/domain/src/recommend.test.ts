@@ -485,6 +485,60 @@ describe('determinism and ordering', () => {
     const ids = idsIn(recommend(input), 'other')
     expect(ids).toEqual([oracleId('c'), oracleId('a'), oracleId('b')])
   })
+
+  /*
+   * Impact as a TIE-BREAK, not a score term (ADR-0054).
+   *
+   * Measured over four real commanders: 2,547 of the 2,617 emitted rows —
+   * 97.3% — sit inside a run of cards with the identical score, 147 of the 182
+   * runs hold cards whose impact differs by more than half a point, and 2,460
+   * rows reorder. `Dwynen's Elite` (impact 0.5) and `Lluwen` (impact 11.52)
+   * tied at 1.4597 and were separated by nothing the product argues for.
+   *
+   * A tie-break cannot distort the ranking, because it is only ever consulted
+   * where the ranking has already said the two cards are equal. That is why
+   * this is a tie-break and not a term in the sum: a term would move cards past
+   * cards the score genuinely separates, which is a different and much larger
+   * claim about what the product recommends.
+   */
+  it('breaks an exact score tie by impact, ahead of the Scryfall rank', () => {
+    const wipe = card('wipe', { edhrecRank: 900, oracleText: 'Destroy all creatures.' })
+    const cantrip = card('cantrip', { edhrecRank: 5, oracleText: 'Draw a card.' })
+    const result = recommend(
+      baseInput({
+        // Same roles, so neither reaches a `fills-` group by a different route
+        // and the two scores are identical.
+        pool: [pooled('cantrip', { card: cantrip }), pooled('wipe', { card: wipe })],
+      }),
+    )
+    const items = result.groups.find((g) => g.key === 'other')!.items
+    expect(items.map((i) => i.score)).toEqual([items[0]!.score, items[0]!.score])
+    expect(items[0]!.impact!.score).toBeGreaterThan(items[1]!.impact!.score)
+    expect(items.map((i) => i.oracleId)).toEqual([oracleId('wipe'), oracleId('cantrip')])
+  })
+
+  it('never lets impact beat the score itself', () => {
+    // The whole safety of a tie-break. A low-impact card the score puts first
+    // stays first.
+    const wipe = card('wipe', { oracleText: 'Destroy all creatures.' })
+    const cantrip = card('cantrip', { oracleText: 'Draw a card.' })
+    const result = recommend(
+      baseInput({
+        pool: [
+          pooled('wipe', { card: wipe, bracketFlags: ['game-changer'] }),
+          pooled('cantrip', { card: cantrip }),
+        ],
+      }),
+    )
+    const items = result.groups.find((g) => g.key === 'other')!.items
+    expect(items[0]!.score).toBeGreaterThan(items[1]!.score)
+    expect(items.map((i) => i.oracleId)).toEqual([oracleId('cantrip'), oracleId('wipe')])
+  })
+
+  it('still falls through to rank and name when impact ties too', () => {
+    const ids = idsIn(recommend(input), 'other')
+    expect(ids).toEqual([oracleId('c'), oracleId('a'), oracleId('b')])
+  })
 })
 
 describe('degradation when statistics are unavailable (doc 05 §5.3)', () => {

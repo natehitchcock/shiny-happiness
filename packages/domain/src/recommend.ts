@@ -35,7 +35,7 @@ import {
 } from './curve.js'
 import { cardEfficiency } from './efficiency.js'
 import type { OracleId } from './ids.js'
-import { cardImpact } from './impact.js'
+import { cardImpact, type CardImpact } from './impact.js'
 import { matchesQuery, type AnnotatedCandidate } from './query/evaluate.js'
 import type { QueryNode } from './query/ast.js'
 import type { CandidateGroupKey, Reason, Recommendation } from './recommendation.js'
@@ -281,7 +281,7 @@ const isEligible = (
   return card.colorIdentity.every((color) => identity.has(color))
 }
 
-const toAnnotated = (s: Scratch): AnnotatedCandidate => ({
+const toAnnotated = (s: Scratch, impactOf: (card: Card) => CardImpact): AnnotatedCandidate => ({
   card: s.pooled.card,
   comboDegree: s.degree,
   nearCombosAt1: s.nearAt1,
@@ -305,7 +305,7 @@ const toAnnotated = (s: Scratch): AnnotatedCandidate => ({
    * one extra classifier pass over the pool, and only when a query names one of
    * these fields is the filter run at all.
    */
-  impact: cardImpact(s.pooled.card).score,
+  impact: impactOf(s.pooled.card).score,
   efficiency: cardEfficiency(s.pooled.card).score,
 })
 
@@ -495,6 +495,61 @@ const focusGuaranteed = (members: readonly Scratch[], limit: number): readonly S
   return extra
 }
 
+/**
+ * Impact separates cards the score has already called equal (ADR-0054).
+ *
+ * A TIE-BREAK AND NOT A TERM, and the distinction is the whole argument. A term
+ * in the sum would move cards past cards the score genuinely separates, which
+ * is a much larger claim about what the product recommends and one nobody has
+ * made. A tie-break is only ever consulted where the ranking has already said
+ * two cards are the same, so it cannot distort an order the product argues for
+ * — and today that order is settled by `edhrecRank`, a popularity number from
+ * Scryfall that ADR-0008 already ruled this product does not reason from.
+ *
+ * The ties are not rare. Measured over four real commanders, 2,547 of the 2,617
+ * emitted rows — 97.3% — sit inside a run of identical scores; 147 of the 182
+ * runs hold cards whose impact differs by more than half a point; 2,460 rows
+ * move. `Dwynen's Elite` at impact 0.5 and `Lluwen` at 11.52 tied at 1.4597,
+ * and four Elf lords tied at 1.417 with `Ezuri, Renegade Leader` (impact 9.6)
+ * fourth of the four.
+ *
+ * IT ORDERS THE PAGE; IT DOES NOT CHOOSE THE PAGE. Only the rows inside the
+ * first `limit` are touched, so a tied card at position 500 does not climb into
+ * the window — the score, then `edhrecRank`, then name still decide WHICH rows
+ * appear, exactly as before, and impact only decides the order of the ones that
+ * do. That is the conservative reading of a tie-break and it is also the only
+ * affordable one, measured rather than assumed: `cardImpact` costs 6.3 µs a
+ * card, the eligible pool reaches 31,769 on a five-colour commander, and the
+ * biggest groups hold single equal-score runs thousands of rows long.
+ * Reordering whole runs took `recommend` from 133 ms to 320 ms against doc 11's
+ * 200 ms budget. Clamped to the window it is ~60 impacts per group.
+ *
+ * It also leaves `focusGuaranteed` alone, which reads past the cut and appends
+ * supporters in `edhrecRank` order. ADR-0026 already declines to reorder for
+ * that guarantee; this does not start.
+ *
+ * Stable within equal impact, so `edhrecRank` and then name still decide and
+ * the output stays totally ordered and deterministic.
+ */
+const breakTiesByImpact = (
+  members: Scratch[],
+  limit: number,
+  impactOf: (card: Card) => CardImpact,
+): void => {
+  const window = Math.min(members.length, limit)
+  for (let start = 0; start < window;) {
+    const score = members[start]?.score
+    let end = start
+    while (end + 1 < window && members[end + 1]?.score === score) end += 1
+    if (end > start) {
+      const run = members.slice(start, end + 1)
+      run.sort((a, b) => impactOf(b.pooled.card).score - impactOf(a.pooled.card).score)
+      members.splice(start, run.length, ...run)
+    }
+    start = end + 1
+  }
+}
+
 export const recommend = (input: RecommendInput): RecommendResult => {
   const identity = new Set(input.colorIdentity)
   const curve = input.curveTarget ?? curveTarget('midrange')
@@ -505,6 +560,26 @@ export const recommend = (input: RecommendInput): RecommendResult => {
   }
   const emphasis = input.emphasis ?? NO_EMPHASIS
   const limit = input.limitPerGroup ?? 60
+
+  /*
+   * One impact per card per call (ADR-0054).
+   *
+   * `cardImpact` is 6.3 µs and three places now want it: the query filter over
+   * the whole pool, the tie-break inside a group, and the emitted item. Before
+   * this the first and third each called it and the query path paid twice for
+   * every row it emitted. The cache is per CALL rather than module-level so it
+   * cannot grow across requests and cannot outlive a change to the corpus —
+   * `cardImpact` is pure, so the only thing memoising it can affect is speed.
+   */
+  const impacts = new Map<OracleId, CardImpact>()
+  const impactOf = (card: Card): CardImpact => {
+    const held = impacts.get(card.oracleId)
+    if (held !== undefined) return held
+    const computed = cardImpact(card)
+    impacts.set(card.oracleId, computed)
+    return computed
+  }
+
   /*
    * The gaps, worst first — which `shortfalls` already guarantees, because
    * `findDeficits` sorts by `Math.abs(delta)` descending.
@@ -567,7 +642,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
      */
     scratch.push({
       ...s,
-      matchesFilter: input.query === null || matchesQuery(input.query, toAnnotated(s)),
+      matchesFilter: input.query === null || matchesQuery(input.query, toAnnotated(s, impactOf)),
     })
   }
 
@@ -806,6 +881,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
           (b.pooled.card.edhrecRank ?? Number.MAX_SAFE_INTEGER) ||
         (a.pooled.card.name < b.pooled.card.name ? -1 : 1),
     )
+    breakTiesByImpact(members, limit, impactOf)
     /*
      * The cut, then the focus's supporters it would have dropped (ADR-0026).
      *
@@ -831,8 +907,8 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       total: members.length,
       withheldByFilter: withheld.get(key) ?? 0,
       items: [
-        ...members.slice(0, limit).map((s) => toRecommendation(s, false)),
-        ...guaranteed.map((s) => toRecommendation(s, true)),
+        ...members.slice(0, limit).map((s) => toRecommendation(s, false, impactOf)),
+        ...guaranteed.map((s) => toRecommendation(s, true, impactOf)),
       ],
     })
   }
@@ -895,7 +971,11 @@ export const recommend = (input: RecommendInput): RecommendResult => {
 const withGuarantee = (reasons: readonly Reason[]): Reason[] =>
   reasons.map((r) => (r.kind === 'keyword-synergy' ? { ...r, guaranteed: true } : r))
 
-const toRecommendation = (s: Scratch, guaranteed: boolean): Recommendation => {
+const toRecommendation = (
+  s: Scratch,
+  guaranteed: boolean,
+  impactOf: (card: Card) => CardImpact,
+): Recommendation => {
   const [first, ...rest] = guaranteed ? withGuarantee(s.reasons) : s.reasons
   if (first === undefined) {
     // Unreachable: scoring guarantees at least one reason. Kept as a throw rather
@@ -927,7 +1007,7 @@ const toRecommendation = (s: Scratch, guaranteed: boolean): Recommendation => {
      * request rather than thirty thousand.
      */
     efficiency: cardEfficiency(s.pooled.card),
-    impact: cardImpact(s.pooled.card),
+    impact: impactOf(s.pooled.card),
   }
 }
 
