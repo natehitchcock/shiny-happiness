@@ -363,6 +363,25 @@ const CHOSEN_TWO = /of (?:either of )?the circled colou?rs/i
 const ANY_COLOUR =
   /any (?:one )?colou?rs?\b|any type\b|combination of colou?rs\b|different colou?rs\b|of any of the/i
 
+/**
+ * An ability in quotation marks belongs to something else.
+ *
+ * Treasure Map's reminder text is `(They're artifacts with "{T}, Sacrifice this
+ * token: Add one mana of any color.")`, and it was read as Treasure Cove's own
+ * mana ability — so the card that led the whole ADR-0035 measurement claimed
+ * five colours from a sentence about a TOKEN. Storm the Vault, Heap Gate and
+ * Hall of Tagsin say the same thing about Treasures and Powerstones.
+ *
+ * Quotation marks rather than parentheses, which was the first thing tried and
+ * is wrong: Tundra's entire mana ability is reminder text, `({T}: Add {W} or
+ * {U}.)`, and stripping parentheses deletes the card. Nothing in the land
+ * corpus states its OWN ability in quotes — quotes are how Oracle attributes an
+ * ability to a token, a granted permanent, or a copy. Curly quotes are matched
+ * too; Oracle uses them on some printings.
+ */
+const withoutQuotedAbilities = (line: string): string =>
+  line.replace(/["“][^"”]*["”]/g, ' ')
+
 /** Everything to the left of the first colon is what you pay. */
 const splitAbility = (line: string): { readonly cost: string; readonly effect: string } => {
   const colon = line.indexOf(':')
@@ -564,7 +583,11 @@ export const deckLandsFrom = (cards: Iterable<Card>): DeckLands => {
   const types = new Set<BasicLandType>()
   let hasBasic = false
   for (const card of cards) {
-    if (!card.types.includes('land')) continue
+    // No `types.includes('land')` guard, and that is measured rather than
+    // assumed: across the whole 34,494-card corpus, ZERO cards carry a basic
+    // land type in their type line without being a land. The guard was written
+    // first, and it could not be killed by any honest test — an unkillable
+    // branch is a branch that is not doing anything.
     const basic = /\bBasic\b/.test(card.typeLine)
     for (const type of BASIC_TYPES) {
       if (!new RegExp(`\\b${type}\\b`).test(card.typeLine)) continue
@@ -627,10 +650,18 @@ const abilitySlots = (
   }
   let parsedAnyAbility = false
 
-  for (const line of lines(card)) {
+  for (const raw of lines(card)) {
+    // `parsedAnyAbility` is decided on the RAW line, before quotes are stripped.
+    // Otherwise The World Tree — whose only mana text is an ability it GRANTS to
+    // other lands — would parse nothing, fall through to the `producedMana`
+    // fallback below, and come out as an unconditional five-colour source: the
+    // exact opposite of what stripping the quote was for.
+    if (!/\badds?\b/i.test(raw)) continue
+    parsedAnyAbility = true
+
+    const line = withoutQuotedAbilities(raw)
     if (!/\badds?\b/i.test(line)) continue
     const { cost, effect } = splitAbility(line)
-    parsedAnyAbility = true
 
     const gatedWhole = ABILITY_CONDITIONS.some((pattern) => pattern.test(line))
 

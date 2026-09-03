@@ -340,6 +340,25 @@ describe('what the coverage costs', () => {
 
     expect(fixingFor(mustCast, izzet).mustBeCast).toBe(true)
     expect(fixingFor(mustCast, izzet).value).toBeLessThan(fixingFor(oneColourLand, izzet).value)
+
+    /*
+     * A card that has to be CAST and still covers both colours, which is what
+     * actually exercises the penalty.
+     *
+     * Treasure Map above no longer does: its land face taps for {C} and nothing
+     * else, so it now falls to the colourless floor and would sit below a real
+     * land whatever this penalty were. The ADR-0035 anchor was quietly vacuous
+     * until a mutation of `MUST_BE_CAST_PENALTY` survived it.
+     */
+    const spellSide = land({
+      name: "Jwari Disruption // Jwari Ruins",
+      typeLine: 'Instant // Land',
+      manaValue: 2,
+      producedMana: ['U', 'R'],
+      oracleText: 'Counter target spell unless its controller pays {2}.\n{T}: Add {U} or {R}.',
+    })
+    expect(fixingFor(spellSide, izzet).mustBeCast).toBe(true)
+    expect(fixingFor(spellSide, izzet).value).toBeLessThan(fixingFor(oneColourLand, izzet).value)
   })
 
   it('leaves every real land alone, because a land has no mana cost', () => {
@@ -433,6 +452,17 @@ describe('what an ability costs to activate', () => {
     const fixing = fixingFor(cityOfBrass, five)
     expect(fixing.value).toBe(1)
     expect(fixing.reach).toBe('taps')
+
+    // Tarnished Citadel and Grand Coliseum put the damage in the SAME clause as
+    // the mana, which is the case a life-is-a-gate rule would actually catch.
+    const citadel = land({
+      name: 'Tarnished Citadel',
+      producedMana: anyColour,
+      oracleText:
+        '{T}: Add {C}.\n{T}: Add one mana of any color. This land deals 3 damage to you.',
+    })
+    expect(fixingFor(citadel, five).value).toBe(1)
+    expect(fixingFor(citadel, five).reach).toBe('taps')
   })
 
   it('leaves Mana Confluence alone, whose life payment is in the cost itself', () => {
@@ -713,8 +743,33 @@ describe('a land that fetches one', () => {
       producedMana: ['W', 'U', 'B', 'R', 'G'],
       oracleText: '{T}, Sacrifice this land: Add one mana of any color.',
     })
-    expect(fixingFor(oneShot, five).reach).not.toBe('fetches')
-    expect(fixingFor(oneShot, five).producesMana).toBe(true)
+    // WITH a deck, or the fetch branch never runs and the assertion is vacuous
+    // — which is how a mutation of the "does it search?" guard survived.
+    const deck = { types: new Set(['Plains', 'Island'] as const), hasBasic: true }
+    expect(fixingFor(oneShot, five, deck).reach).not.toBe('fetches')
+    expect(fixingFor(oneShot, five, deck).producesMana).toBe(true)
+  })
+
+  it('scores a land that makes mana AND searches on the mana it makes', () => {
+    /*
+     * Myriad Landscape, one of the three blanks Quickbuild put in a basicless
+     * deck. It taps for {C} and can sacrifice itself for two basics that SHARE
+     * a land type — the same colour twice, which is ramp and not fixing.
+     *
+     * A land with a mana ability is scored on that ability, whatever else it
+     * can do. Reading the search instead would hand it five colours it cannot
+     * produce, and would put a fetch reason on a card whose whole point in this
+     * category is that it taps for colourless.
+     */
+    const myriad = land({
+      name: 'Myriad Landscape',
+      producedMana: ['C'],
+      oracleText:
+        'This land enters tapped.\n{T}: Add {C}.\n{2}, {T}, Sacrifice this land: Search your library for up to two basic land cards that share a land type, put them onto the battlefield tapped, then shuffle.',
+    })
+    const deck = { types: new Set(['Plains', 'Island'] as const), hasBasic: true }
+    expect(fixingFor(myriad, five, deck).reach).toBe('colourless')
+    expect(fixingFor(myriad, five, deck).coloursCovered).toBe(0)
   })
 })
 
@@ -766,5 +821,126 @@ describe('what the deck already holds for a fetch to find', () => {
     expect(duals.hasBasic).toBe(false)
 
     expect(deckLandsFrom([tower, bolt])).toEqual({ types: new Set(), hasBasic: false })
+  })
+})
+
+describe('an ability that belongs to something else', () => {
+  const five: Parameters<typeof fixingFor>[1] = ['W', 'U', 'B', 'R', 'G']
+
+  it('does not read a token’s reminder text as the card’s own mana ability', () => {
+    // Treasure Map // Treasure Cove led the whole ADR-0035 measurement, and its
+    // land face taps for {C} and nothing else. The five colours came from a
+    // sentence about the TOKENS it makes.
+    const map = land({
+      name: 'Treasure Map // Treasure Cove',
+      typeLine: 'Artifact // Land',
+      manaValue: 2,
+      producedMana: ['W', 'U', 'B', 'R', 'G', 'C'],
+      oracleText:
+        '{1}, {T}: Scry 1. Put a landmark counter on this artifact. Then if there are three or more landmark counters on it, remove those counters, transform this artifact, and create three Treasure tokens. (They’re artifacts with "{T}, Sacrifice this token: Add one mana of any color.")\n{T}: Add {C}.',
+    })
+    expect(fixingFor(map, five).coloursCovered).toBe(0)
+    expect(fixingFor(map, five).reach).toBe('colourless')
+  })
+
+  it('still reads a mana ability that is entirely reminder text', () => {
+    // Quotes, not parentheses. Tundra’s whole ability is `({T}: Add {W} or
+    // {U}.)`, and a rule that stripped parenthesised text would delete the card.
+    const tundra = land({
+      name: 'Tundra',
+      typeLine: 'Land — Plains Island',
+      producedMana: ['W', 'U'],
+      oracleText: '({T}: Add {W} or {U}.)',
+    })
+    expect(fixingFor(tundra, five).coloursCovered).toBe(2)
+    expect(fixingFor(tundra, five).reach).toBe('taps')
+  })
+
+  it('does not fall back to produced mana when the only ability is granted away', () => {
+    // The World Tree’s mana text is an ability it gives to OTHER lands. Once
+    // the quote is stripped it parses nothing — and the `producedMana` fallback
+    // would then hand it back all five colours unconditionally, which is the
+    // opposite of the truth. The fallback is keyed on the RAW line for this.
+    const tree = land({
+      name: 'The World Tree',
+      producedMana: ['W', 'U', 'B', 'R', 'G'],
+      oracleText:
+        'As long as you control six or more lands, lands you control have "{T}: Add one mana of any color."',
+    })
+    expect(fixingFor(tree, five).coloursCovered).toBe(0)
+    expect(fixingFor(tree, five).value).toBeLessThan(
+      fixingFor(land({ producedMana: ['R'], oracleText: '{T}: Add {R}.' }), five).value,
+    )
+  })
+})
+
+describe('what the reason is allowed to claim', () => {
+  const five: Parameters<typeof fixingFor>[1] = ['W', 'U', 'B', 'R', 'G']
+
+  it('reports the WORST reach among the colours claimed, not the best', () => {
+    // Vivid Crag taps for {R} freely and needs a charge counter for the other
+    // four. Reporting the free one renders "taps for 5 of your 5 colours" on a
+    // card that taps for one of them. Eleven lands are shaped like this.
+    const vivid = land({
+      name: 'Vivid Crag',
+      producedMana: ['W', 'U', 'B', 'R', 'G'],
+      oracleText:
+        'This land enters tapped with two charge counters on it.\n{T}: Add {R}.\n{T}, Remove a charge counter from this land: Add one mana of any color.',
+    })
+    expect(fixingFor(vivid, five).coloursCovered).toBe(5)
+    expect(fixingFor(vivid, five).reach).toBe('gated')
+  })
+
+  it('keeps the floor when the coloured ability costs more than it gives', () => {
+    // Baldur's Gate really does say "{T}: Add {C}" on its first line, so it is
+    // worth what a land that taps for {C} is worth and no less. The SCORE takes
+    // the floor; the REASON does not follow it, because "taps for colourless"
+    // is a different false claim from the one being fixed.
+    const baldursGate = land({
+      name: "Baldur's Gate",
+      producedMana: ['W', 'U', 'B', 'R', 'G', 'C'],
+      oracleText:
+        '{T}: Add {C}.\n{2}, {T}: Add X mana of any one color, where X is the number of other Gates you control.',
+    })
+    const wastes = land({ name: 'Wastes', producedMana: ['C'], oracleText: '{T}: Add {C}.' })
+
+    expect(fixingFor(baldursGate, five).value).toBe(fixingFor(wastes, five).value)
+    // "Add X mana of any ONE color" — the phrasing `/any colou?r/` alone misses,
+    // and missing it would report zero colours and a `colourless` reason.
+    expect(fixingFor(baldursGate, five).coloursCovered).toBe(5)
+    expect(fixingFor(baldursGate, five).reach).toBe('gated')
+  })
+
+  it('prices a mana ability that triggers once as a one-shot', () => {
+    // Crumbling Vestige has no coloured ACTIVATED ability at all: "When this
+    // land enters, add one mana of any color" happens once, and it read as an
+    // unrestricted five-colour source.
+    const vestige = land({
+      name: 'Crumbling Vestige',
+      producedMana: ['W', 'U', 'B', 'R', 'G', 'C'],
+      oracleText:
+        'This land enters tapped.\nWhen this land enters, add one mana of any color.\n{T}: Add {C}.',
+    })
+    const realFive = land({
+      name: 'City of Brass',
+      producedMana: ['W', 'U', 'B', 'R', 'G'],
+      oracleText: '{T}: Add one mana of any color.',
+    })
+    expect(fixingFor(vestige, five).reach).toBe('gated')
+    expect(fixingFor(vestige, five).value).toBeLessThan(fixingFor(realFive, five).value)
+  })
+
+  it('reads a colour chosen at activation as one colour, not none', () => {
+    // Meteor Crater says "Choose a color of a permanent you control. Add one
+    // mana of that color." Read literally that sentence names no colour at all,
+    // and reporting zero would render "taps for colourless" on a land that
+    // makes no colourless mana whatsoever.
+    const crater = land({
+      name: 'Meteor Crater',
+      producedMana: ['W', 'U', 'B', 'R', 'G'],
+      oracleText: '{T}: Choose a color of a permanent you control. Add one mana of that color.',
+    })
+    expect(fixingFor(crater, five).coloursCovered).toBe(1)
+    expect(fixingFor(crater, five).reach).toBe('gated')
   })
 })
