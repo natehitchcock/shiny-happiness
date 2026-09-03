@@ -20,6 +20,10 @@ afterEach(cleanup)
  */
 const options = (): HTMLElement[] => screen.getAllByRole('listitem', { name: /^Option \d/ })
 
+/** The names on offer right now, in the order they are offered. */
+const shown = (): (string | undefined)[] =>
+  options().map((o) => o.getAttribute('aria-label')?.split(': ')[1])
+
 /** Activate a control the way a click or Enter on it would. */
 const press = async (button: HTMLElement): Promise<void> => {
   await act(async () => {
@@ -467,31 +471,38 @@ describe('the queue serves the next trio without a request', () => {
         view.rerender(<Quickbuild {...props} retiredIds={new Set(ids)} />)
       })
     }
-    return { retire, fetchCandidates }
+    /** Press the Add on the option showing this card, as a builder would. */
+    const add = async (name: string): Promise<void> => {
+      const option = options().find((o) => o.getAttribute('aria-label')?.endsWith(`: ${name}`))
+      if (option === undefined) throw new Error(`${name} is not on screen`)
+      await press(within(option).getByRole('button', { name: 'Add' }))
+    }
+    return { retire, add, fetchCandidates, ...props }
   }
 
-  it('advances past an added card with no further request', async () => {
-    const { retire, fetchCandidates } = mounted(six.map((n) => candidate(n)))
+  it('advances past a whole trio with no further request', async () => {
+    const { add, retire, fetchCandidates } = mounted(six.map((n) => candidate(n)))
     await screen.findByText('Ai')
     const calls = fetchCandidates.mock.calls.length
+    await add('Ai')
     await retire(['Ai'])
     await screen.findByText('Di')
-    expect(options().map((o) => o.getAttribute('aria-label')?.split(': ')[1])).toEqual([
-      'Bo',
-      'Cy',
-      'Di',
-    ])
+    expect(shown()).toEqual(['Di', 'Ed', 'Fi'])
     expect(fetchCandidates.mock.calls.length).toBe(calls)
   })
 
-  it('advances past three adds in a row, still with no further request', async () => {
-    const { retire, fetchCandidates } = mounted(six.map((n) => candidate(n)))
+  it('advances past three picks in a row, still with no further request', async () => {
+    const { add, retire, fetchCandidates } = mounted(six.map((n) => candidate(n)))
     await screen.findByText('Ai')
     const calls = fetchCandidates.mock.calls.length
+    await add('Ai')
     await retire(['Ai'])
-    await retire(['Ai', 'Bo'])
-    await retire(['Ai', 'Bo', 'Cy'])
-    await screen.findByText('Fi')
+    await add('Di')
+    await retire(['Ai', 'Di'])
+    await add('pad0')
+    await retire(['Ai', 'Di', 'pad0'])
+    // Nine candidates consumed by three picks, and the tenth is on screen.
+    await screen.findByText('pad3')
     expect(fetchCandidates.mock.calls.length).toBe(calls)
   })
 
@@ -509,6 +520,20 @@ describe('the queue serves the next trio without a request', () => {
     expect(fetchCandidates.mock.calls.length).toBe(calls)
   })
 
+  /*
+   * And it drops THAT CARD ONLY. A decision made in the feed behind the panel
+   * is not a decision about the trio — the builder never looked at these three
+   * — so the other two stay where they are and one new card slides up. Cycling
+   * all three here would throw away two cards the builder is mid-way through
+   * reading because of a click somewhere else on the page.
+   */
+  it('leaves the rest of the trio alone when the feed retires one', async () => {
+    const { retire } = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Bo')
+    await retire(['Bo'])
+    await waitFor(() => expect(shown()).toEqual(['Ai', 'Cy', 'Di']))
+  })
+
   it('skips to the next trio with no request (D5 stays a pass)', async () => {
     const { fetchCandidates } = mounted(six.map((n) => candidate(n)))
     await screen.findByText('Ai')
@@ -516,6 +541,339 @@ describe('the queue serves the next trio without a request', () => {
     await press(screen.getByRole('button', { name: /Skip these three/i }))
     await screen.findByText('Di')
     expect(fetchCandidates.mock.calls.length).toBe(calls)
+  })
+})
+
+/**
+ * "The quickbuild should cycle all three options out when you pick one. They
+ * can come back later, but if only one card cycles out then your decision is
+ * basically the same, and you just either pick the new card or pass."
+ *
+ * Retiring the taken card advanced the window by exactly one, so two thirds of
+ * the next question was the question just answered: the builder had already
+ * declined those two by choosing something else, and the panel put them back
+ * with one new card beside them. The second decision was "this one card, yes or
+ * no", which is the shape D6 and Q4 both say the panel must never take, and the
+ * only route to a genuinely new three was pressing Skip repeatedly.
+ *
+ * A PICK NOW PASSES OVER THE TRIO IT WAS MADE FROM, exactly as Skip does. The
+ * two cards not taken are PASSED, never rejected (D5): nothing is sent about
+ * them, and they come back the next time the panel asks this gap fresh.
+ */
+describe('picking one card cycles all three', () => {
+  const six = ['Ai', 'Bo', 'Cy', 'Di', 'Ed', 'Fi']
+
+  const mounted = (
+    found: readonly QuickbuildCandidate[],
+    over: Partial<Parameters<typeof Quickbuild>[0]> = {},
+  ) => {
+    const fetchCandidates = vi.fn().mockResolvedValue(found)
+    const props = {
+      plan: plan(),
+      filter: '',
+      fetchCandidates,
+      onAdd: vi.fn(),
+      onReject: vi.fn(),
+      onClose: vi.fn(),
+      onReach: vi.fn(),
+      cutCount: 0,
+      retiredIds: new Set<string>(),
+      ...over,
+    }
+    const view = render(<Quickbuild {...props} />)
+    const retire = async (ids: readonly string[]): Promise<void> => {
+      await act(async () => {
+        view.rerender(<Quickbuild {...props} retiredIds={new Set(ids)} />)
+      })
+    }
+    const add = async (name: string): Promise<void> => {
+      const option = options().find((o) => o.getAttribute('aria-label')?.endsWith(`: ${name}`))
+      if (option === undefined) throw new Error(`${name} is not on screen`)
+      await press(within(option).getByRole('button', { name: 'Add' }))
+    }
+    const reject = async (name: string): Promise<void> => {
+      const option = options().find((o) => o.getAttribute('aria-label')?.endsWith(`: ${name}`))
+      if (option === undefined) throw new Error(`${name} is not on screen`)
+      await press(within(option).getByRole('button', { name: 'Reject' }))
+    }
+    return { view, retire, add, reject, ...props }
+  }
+
+  it('replaces all three when the builder takes the first', async () => {
+    const { add } = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Ai')
+    await add('Ai')
+    expect(shown()).toEqual(['Di', 'Ed', 'Fi'])
+  })
+
+  /*
+   * The middle and the last one too. The window moves by the whole trio, not by
+   * "everything above the card you took" — a builder who takes the third would
+   * otherwise be handed the two they had just read past.
+   */
+  it('replaces all three when the builder takes the middle one', async () => {
+    const { add } = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Bo')
+    await add('Bo')
+    expect(shown()).toEqual(['Di', 'Ed', 'Fi'])
+  })
+
+  it('replaces all three when the builder takes the last', async () => {
+    const { add } = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Cy')
+    await add('Cy')
+    expect(shown()).toEqual(['Di', 'Ed', 'Fi'])
+  })
+
+  /*
+   * It does not wait for the workspace to agree. The trio moves on the click,
+   * from the panel's own record of what it passed over — so the two cards not
+   * taken cannot flash back onto the screen in the frame between the click and
+   * the optimistic deck update reaching the panel.
+   */
+  it('moves on the click, not on the deck update that follows it', async () => {
+    const { add, retire } = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Ai')
+    await add('Ai')
+    expect(shown()).toEqual(['Di', 'Ed', 'Fi'])
+    await retire(['Ai'])
+    expect(shown()).toEqual(['Di', 'Ed', 'Fi'])
+  })
+
+  /*
+   * D5, and the live precedent for getting it wrong: the deck rail's Remove
+   * button was issuing `exclude` until ADR-0051. Passing over two cards must
+   * send nothing about them — P6 would make an accidental exclusion permanent.
+   */
+  it('adds the one card and says nothing at all about the other two', async () => {
+    const { add, onAdd, onReject } = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Ai')
+    await add('Ai')
+    expect(onAdd.mock.calls).toEqual([['Ai']])
+    expect(onReject).not.toHaveBeenCalled()
+  })
+
+  /*
+   * Pick and Skip now do the same thing to the WINDOW. That is the point, and
+   * the difference between them is the whole of the difference: one of them
+   * adds a card.
+   */
+  it('moves the window exactly as far as Skip does', async () => {
+    const picked = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Ai')
+    await picked.add('Ai')
+    const afterPick = shown()
+    cleanup()
+
+    const skipped = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Ai')
+    await press(screen.getByRole('button', { name: /Skip these three/i }))
+    expect(shown()).toEqual(afterPick)
+    expect(skipped.onAdd).not.toHaveBeenCalled()
+    expect(picked.onAdd).toHaveBeenCalledTimes(1)
+  })
+
+  /*
+   * Reject is NOT a decision about the trio. It names one card, it is permanent
+   * (P6), and the two cards beside it are still the answer to the question the
+   * builder is being asked — so they stay and one new card slides up. The
+   * asymmetry is deliberate: "not this one" is not "not any of these".
+   */
+  it('does not cycle the trio when one card is rejected', async () => {
+    const { reject, retire, onReject } = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Bo')
+    await reject('Bo')
+    await retire(['Bo'])
+    expect(onReject.mock.calls).toEqual([['Bo']])
+    expect(shown()).toEqual(['Ai', 'Cy', 'Di'])
+  })
+
+  /*
+   * "They can come back later." Later is the next time the panel asks this gap
+   * fresh — a different gap, a changed filter, or reopening the panel. Never in
+   * the middle of the run of picks the builder is making, which is the whole
+   * complaint.
+   */
+  it('offers the passed-over cards again when the gap is asked fresh', async () => {
+    const { add, retire } = mounted(six.map((n) => candidate(n)))
+    await screen.findByText('Ai')
+    await add('Ai')
+    await retire(['Ai'])
+    expect(shown()).toEqual(['Di', 'Ed', 'Fi'])
+    // Away to the curve gap and back to ramp: two fresh questions.
+    await press(screen.getByRole('button', { name: /Different gap/i }))
+    await press(screen.getByRole('button', { name: /Different gap/i }))
+    await waitFor(() => expect(shown()).toEqual(['Bo', 'Cy', 'Di']))
+  })
+
+  /*
+   * And they do not come back inside the gap. A background top-up or refill
+   * lands a fresh page for the SAME question, and the cards passed over are
+   * still at the top of it — putting them back would restore the defect one
+   * request later.
+   */
+  it('keeps them out when a background top-up lands', async () => {
+    const deeper = [...six, 'Gu', 'Ha', 'Iv'].map((n) => candidate(n))
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce(six.slice(0, 4).map((n) => candidate(n)))
+      .mockResolvedValue(deeper)
+    const { add } = mounted([], { fetchCandidates })
+    await screen.findByText('Ai')
+    await add('Ai')
+    await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(2))
+    await waitFor(() => expect(shown()).toEqual(['Di', 'Ed', 'Fi']))
+  })
+
+  /*
+   * A pick can CLOSE the gap it was made for, which invalidates the whole
+   * question rather than one card. The queue is dropped on the spot — and so is
+   * the record of what was passed over, which is keyed by the gap for the same
+   * reason the skip cursor was: a count of six carried into a fresh page of
+   * three sliced past everything and reported "No more candidates for this gap"
+   * about a gap it had never shown a card for.
+   */
+  it('starts the next gap from the top when a pick closes this one', async () => {
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce(['R1', 'R2', 'R3', 'R4'].map((n) => candidate(n)))
+      .mockResolvedValue(['S1', 'S2', 'S3'].map((n) => candidate(n)))
+    const props = {
+      plan: plan({ gaps: [rampGap, curveGap] }),
+      filter: '',
+      fetchCandidates,
+      onAdd: vi.fn(),
+      onReject: vi.fn(),
+      onClose: vi.fn(),
+      onReach: vi.fn(),
+      cutCount: 0,
+      retiredIds: new Set<string>(),
+    }
+    const view = render(<Quickbuild {...props} />)
+    await screen.findByText('R1')
+    await press(within(options()[0]!).getByRole('button', { name: 'Add' }))
+    // The ramp gap closes on that accept; spot removal leads now.
+    await act(async () => {
+      view.rerender(
+        <Quickbuild
+          {...props}
+          plan={plan({ gaps: [removalGap, curveGap] })}
+          retiredIds={new Set(['R1'])}
+        />,
+      )
+    })
+    await screen.findByText('S1')
+    expect(shown()).toEqual(['S1', 'S2', 'S3'])
+    expect(screen.queryByText(/No more candidates/i)).toBeNull()
+    expect(screen.queryByText('R4')).toBeNull()
+  })
+
+  /*
+   * The staples heading counts what the panel HOLDS for this gap, and a card
+   * passed over is still held. Counting three out per pick would make the
+   * heading a count of the window rather than of the offer, and it would reach
+   * zero with cards still to come.
+   */
+  it('does not count the passed-over cards out of the staples heading', async () => {
+    const stapleGap: QuickbuildGap = {
+      kind: 'staples',
+      key: 'staple',
+      label: 'staples',
+      short: 11,
+    }
+    const { add, retire } = mounted(
+      six.map((n) => candidate(n, 'Staples')),
+      {
+        plan: plan({ gaps: [stapleGap, rampGap] }),
+      },
+    )
+    await screen.findByRole('heading', { name: /6 staples you don’t have yet/i })
+    await add('Ai')
+    await retire(['Ai'])
+    // One taken, two passed over, five still on offer.
+    await screen.findByRole('heading', { name: /5 staples you don’t have yet/i })
+  })
+
+  /*
+   * Skipping to the end is a dead end no longer. The panel held cards back, so
+   * it says that rather than "no more candidates", and the way back to them is
+   * a control rather than a trick.
+   */
+  it('offers the passed-over cards back when there is nothing else left', async () => {
+    const three = ['Ai', 'Bo', 'Cy'].map((n) => candidate(n))
+    mounted(three, { plan: plan({ gaps: [rampGap] }) })
+    await screen.findByText('Ai')
+    await press(screen.getByRole('button', { name: /Skip these three/i }))
+    await screen.findByText(/every candidate we’re holding for this gap/i)
+    expect(screen.queryByText(/Nothing in your colours/i)).toBeNull()
+    await press(screen.getByRole('button', { name: /Show the ones you passed/i }))
+    await waitFor(() => expect(shown()).toEqual(['Ai', 'Bo', 'Cy']))
+  })
+
+  /*
+   * A gap that never had an answer is still a different fact from a gap the
+   * builder worked through, and it must not borrow the sentence about cards
+   * being held back — there are none.
+   */
+  it('still blames the colours when nothing was ever held back', async () => {
+    mounted([], { plan: plan({ gaps: [rampGap] }) })
+    await screen.findByText(/Nothing in your colours fills this gap/i)
+    expect(screen.queryByRole('button', { name: /Show the ones you passed/i })).toBeNull()
+  })
+
+  /*
+   * And a card passed over is only being HELD BACK while it is still in the
+   * queue. A top-up that comes back with nothing takes the whole list away,
+   * ids and all, and there is then nothing to show again however many names the
+   * panel remembers passing — so the honest sentence is the one about the gap,
+   * and the control that would offer them back must not appear.
+   */
+  it('does not claim to be holding cards back once the queue has gone', async () => {
+    const four = ['A0', 'A1', 'A2', 'A3'].map((n) => candidate(n))
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce(four)
+      .mockResolvedValueOnce(four)
+      .mockResolvedValue([])
+    const { add, retire } = mounted([], { fetchCandidates, plan: plan({ gaps: [rampGap] }) })
+    await screen.findByText('A0')
+    // The deep page lands first, so the refill below is a refill.
+    await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(2))
+    await add('A0')
+    await retire(['A0'])
+    // The refill comes back with nothing, so the three names it passed over
+    // answer for nothing that exists.
+    await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(3))
+    await screen.findByText(/Nothing in your colours fills this gap/i)
+    expect(screen.queryByText(/every candidate we’re holding/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Show the ones you passed/i })).toBeNull()
+  })
+
+  /*
+   * The queue must not run dry between picks. Three cards leave per pick rather
+   * than one, so the refill has to come two trios early and in the background,
+   * or the builder waits for it — the whole thing this queue exists to stop.
+   */
+  it('refills in the background before the trio runs out', async () => {
+    const twelve = Array.from({ length: 12 }, (_, i) => candidate(`A${i}`))
+    const fetchCandidates = vi
+      .fn()
+      .mockResolvedValueOnce(twelve.slice(0, 4))
+      .mockResolvedValueOnce(twelve)
+      .mockResolvedValue(Array.from({ length: 12 }, (_, i) => candidate(`B${i}`)))
+    const { add, retire } = mounted([], { fetchCandidates, plan: plan({ gaps: [rampGap] }) })
+    await screen.findByText('A0')
+    // The deep page lands, so any further request is a refill and not a deepening.
+    await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(2))
+    await add('A0')
+    await retire(['A0'])
+    await add('A3')
+    await retire(['A0', 'A3'])
+    // Six of the twelve are left, which is two trios: the refill goes out now,
+    // with a trio still on screen and no wait shown for it.
+    await waitFor(() => expect(fetchCandidates.mock.calls.length).toBe(3))
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(options()).toHaveLength(OPTIONS_SHOWN)
   })
 })
 
