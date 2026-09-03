@@ -173,6 +173,39 @@ describe('errors are reported, never ignored', () => {
     expect(errorsOf('role:vibes')[0]!.message).toMatch(/unknown role/)
   })
 
+  /*
+   * `role:` was the ONE value field with no suggestion at all. Every other
+   * branch of `validateValue` offers something — `is:` lists predicates, a
+   * synergy tag gets a near-miss list, a colour gets "use letters from WUBRG" —
+   * and a mistyped role got a bare rejection, even though the vocabulary is
+   * twenty closed words and the shortest to suggest from in the whole grammar.
+   */
+  it('suggests a near-miss role rather than rejecting it bare', () => {
+    const errors = errorsOf('role:spot-removl')
+    expect(errors[0]!.message).toMatch(/unknown role/)
+    expect(errors[0]!.suggestion).toContain('spot-removal')
+  })
+
+  it('lists roles when nothing is near, and does not print all twenty', () => {
+    const suggestion = errorsOf('role:zzzzzzzz')[0]!.suggestion ?? ''
+    expect(suggestion).toContain('known:')
+    expect(suggestion.length).toBeLessThan(120)
+  })
+
+  /*
+   * A qualifier spelling nobody supports yet, and the reason the message has to
+   * be good: `)` terminates a word token, so `role:spot-removal(artifact)`
+   * splits into a bad term AND a dangling rparen. The rparen used to be
+   * swallowed in silence — `parseAnd` breaks on it and `parseQuery` never
+   * checked for leftover tokens — so the user saw one confusing error and a
+   * query that filtered on nothing.
+   */
+  it('reports the dangling ) left by a parenthesised qualifier', () => {
+    const errors = errorsOf('role:spot-removal(artifact)')
+    expect(errors.map((e) => e.message).join(' | ')).toMatch(/unknown role/)
+    expect(errors.some((e) => /unexpected \)/.test(e.message))).toBe(true)
+  })
+
   it('reports an unclosed quote and an unclosed paren', () => {
     expect(errorsOf('o:"unfinished')[0]!.message).toMatch(/unclosed quote/)
     expect(errorsOf('(t:creature')[0]!.message).toMatch(/unclosed \(/)

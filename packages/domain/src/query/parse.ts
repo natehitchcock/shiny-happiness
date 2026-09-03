@@ -190,6 +190,36 @@ const parseTerm = (token: Token, errors: QueryParseError[]): QueryNode | null =>
   return { kind: 'term', field, op, value, quoted: token.type === 'quoted' }
 }
 
+/**
+ * The candidates from `vocabulary` a typo could plausibly have meant, best first.
+ *
+ * Shared by the `role:` and the synergy-tag branches of `validateValue`. It was
+ * written for tags and is now used by both, because the two boxes take the same
+ * typos and two similarity functions that disagree is how the next one goes
+ * wrong.
+ *
+ * Two signals. A vocabulary word that CONTAINS what was typed scores above every
+ * prefix match, which is what makes `role:removal` find `spot-removal`; failing
+ * that, the count of shared leading characters, which is what a transposition
+ * leaves intact — "artifcat-etb" and "artifact-etb" agree for five, and an
+ * exact `includes` finds nothing there at all.
+ *
+ * Three is the floor because two is noise: almost every role shares two letters
+ * with something.
+ */
+const nearest = (typed: string, vocabulary: readonly string[]): readonly string[] => {
+  const shared = (word: string): number => {
+    let i = 0
+    while (i < word.length && i < typed.length && word[i] === typed[i]) i += 1
+    return i
+  }
+  return vocabulary
+    .map((word) => ({ word, score: word.includes(typed) ? typed.length + 1 : shared(word) }))
+    .filter((entry) => entry.score >= 3)
+    .sort((a, b) => b.score - a.score || a.word.localeCompare(b.word))
+    .map((entry) => entry.word)
+}
+
 const validateValue = (
   field: QueryField,
   op: ComparisonOp,
@@ -211,7 +241,29 @@ const validateValue = (
     }
   }
   if (field === 'role' && !ROLE_VALUES.has(value.toLowerCase())) {
-    return { message: `unknown role "${value}"`, suggestion: null }
+    /*
+     * `role:` was the one value field in the whole grammar with no suggestion.
+     * Every other branch of this function offers something — `is:` lists its
+     * predicates, a synergy tag gets a near-miss list, a colour is told to use
+     * WUBRG — and a mistyped role got a bare rejection.
+     *
+     * It is also the field with the LEAST excuse: twenty closed words, against
+     * the 608 tags the branch below has to truncate. The whole vocabulary would
+     * fit, and is deliberately not printed anyway — a wall of twenty roles
+     * under a search box is the seven-kilobyte problem in miniature, so this
+     * follows the same near-miss-then-truncate shape as its neighbour rather
+     * than inventing a third style.
+     *
+     * Scoring is `nearest`, shared with the tag branch below: the same typo
+     * classes turn up in both boxes and two similarity functions that disagree
+     * is how the next one goes wrong.
+     */
+    const near = nearest(value.toLowerCase(), [...ROLE_VALUES])
+    const shown = (near.length > 0 ? near : [...ROLE_VALUES]).slice(0, 5)
+    return {
+      message: `unknown role "${value}"`,
+      suggestion: `${near.length > 0 ? 'did you mean' : 'known'}: ${shown.join(', ')}…`,
+    }
   }
   if (
     (field === 'produces' || field === 'wants' || field === 'has' || field === 'tag') &&
@@ -231,19 +283,7 @@ const validateValue = (
      */
     const typed = normaliseTag(value)
     const all = [...SYNERGY_TAG_VALUES]
-    // Shared leading characters, which is what a typo leaves intact:
-    // "artifcat-etb" and "artifact-etb" agree for five. Cheap, and it finds the
-    // transposition that an exact `includes` cannot.
-    const shared = (tag: string): number => {
-      let i = 0
-      while (i < tag.length && i < typed.length && tag[i] === typed[i]) i += 1
-      return i
-    }
-    const near = all
-      .map((tag) => ({ tag, score: tag.includes(typed) ? typed.length + 1 : shared(tag) }))
-      .filter((entry) => entry.score >= 3)
-      .sort((a, b) => b.score - a.score || a.tag.localeCompare(b.tag))
-      .map((entry) => entry.tag)
+    const near = nearest(typed, all)
     const shown = (near.length > 0 ? near : all).slice(0, 6)
     const found = near.length > 0 ? near.length : all.length
     return {
@@ -362,6 +402,37 @@ export const parseQuery = (
   }
 
   const ast = parseOr()
+
+  /*
+   * Whatever the grammar could not consume, said out loud.
+   *
+   * `parseAnd` breaks on an `rparen` and `parseOr` only continues on an `or`,
+   * so a `)` with no `(` in front of it fell out of the bottom of the parser
+   * and was DROPPED IN SILENCE — the `unexpected )` error inside `parseUnary`
+   * is only reachable when a `)` opens a term, which the tokenizer makes
+   * impossible. Every stray closer took the same path.
+   *
+   * Found while looking at `role:spot-removal(artifact)`, a qualifier spelling
+   * the grammar does not support: `)` terminates a word token, so that input
+   * became a bad `role:` term plus a lost `)`. The user saw one confusing
+   * error and, because doc 10 §10.4 refuses to apply a query with errors, a
+   * search box that filtered on nothing with no second reason given.
+   *
+   * A loop rather than one report, because `((` and `)))` are equally silent
+   * and the position of each is what underlines the right character.
+   */
+  while (pos < tokens.length) {
+    const token = tokens[pos]!
+    pos += 1
+    if (token.type !== 'rparen') continue
+    errors.push({
+      position: token.position,
+      length: 1,
+      message: 'unexpected )',
+      suggestion: 'remove it, or add a ( to open the group',
+    })
+  }
+
   return ok({ ast, errors })
 }
 
