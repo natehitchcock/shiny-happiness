@@ -228,6 +228,28 @@ are the base relation.
 
 ### Found and not done
 
+- **Supertypes are still refused, and ADR-0057 §10 has the reason with a price
+  attached.** This ADR's refusal 1 swept card types and supertypes together on
+  breadth ("`Creature` alone is 55.9%"), and for `Legendary` that argument does
+  not hold: it is on 4,008 cards, **12.6%** of the corpus, well inside what
+  `artifact-etb` already carries at 33.6%. 183 cards key off a legendary
+  permanent and **181 of them (99%) carry no tag mentioning it**; honouring it
+  would add 733,464 want→supply pairs, +3.5% of the corpus total, against a
+  payoff class of 124 distinct cards by the templates above.
+
+  The real blocker is not breadth and is written out in ADR-0057 §10 so nobody
+  spends a day rediscovering it: **Magic sets supertypes in LOWER CASE in rules
+  text**, and the leading-capital match in `semantic-tokens.ts` — the thing that
+  makes "target Human" a reference and "the human cost" not one — is the entire
+  precision mechanism of this family. `subtypeLive`, the inertness filter that
+  admitted these tags in the first place, would therefore count **zero** wanters
+  for `Legendary` and refuse the word even after the generator learned to read
+  left of the em dash. Making it live means a bespoke case-insensitive matcher
+  that abandons the invariant, plus a second extraction pass, a third prefix, a
+  widened union and interface, and a re-ingest.
+
+  `is:legendary` shipped instead: the builder gets the filter, the scorer does
+  not get the pair.
 - **The eligible-card read still carries `default_printing`** (0.485 MiB) and
   still populates a `Map<OracleId, Card>` in `deck-context.ts` with 30k entries
   that are then either overwritten or never read. Both need the read to return a

@@ -329,6 +329,19 @@ The guarantee reaches past the **cut**, never past the **filter**: an excluded
 card is not a candidate at all (P6), and a card withheld by `query` stays
 withheld.
 
+**A `keyword-synergy` reason may also carry `qualifier`**, a rendered phrase
+naming what the deck's want is RESTRICTED to — `"noncreature, costing 3 or
+more"` ([ADR-0057](adr/0057-a-want-says-which-event-a-qualifier-says-which-cards.md)).
+Pillar P4 bounds the sentence by the check behind it: "enables your casting
+spells" was a claim about every instant in the deck, and a deck led by Y'shtola
+only pays off a noncreature spell costing three or more. Optional, and absent is
+the commoner case — the deck wants the tag unconditionally and the existing
+sentence already describes it. Sent **only on `direction: "enables"`**, the one
+direction the matcher evaluates a qualifier in, and only when every wanter of
+that tag is qualified and they agree; where they do not, the wider-but-true
+sentence stands. Words rather than the structure, because it is a modifier on a
+phrase the client's own tag table owns.
+
 ```
 GET /api/v1/decks/:id/combo-index
     → { comboDegreeByOracleId: Record<OracleId, number>, snapshotId }

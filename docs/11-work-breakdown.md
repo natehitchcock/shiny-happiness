@@ -7,7 +7,7 @@ scope (files it may touch), explicit dependencies, and a definition of done.
 
 ## 11.0 Current state — read this first
 
-Last updated: 2026-09-02, during the fifth build session.
+Last updated: 2026-09-03, during the fifth build session.
 
 **It runs.** `pnpm --filter @roundtable/web dev` with the API up gives a working
 deck workspace against 34,492 real cards, 110,577 printings and 108,046 real
@@ -489,6 +489,65 @@ pnpm check          # lint + typecheck + 1258 tests
 
 The integration tests need a real Postgres and SKIP (loudly) without one. The
 API-02 performance test seeds a 20,000-card corpus and takes ~40 s.
+
+**Semantic qualifiers landed, and the surprise is worth reading before the
+detail.** [ADR-0057](adr/0057-a-want-says-which-event-a-qualifier-says-which-cards.md)
+and [ADR-0058](adr/0058-a-role-is-one-word-and-not-one-job.md).
+
+A want says WHICH EVENT a card pays off; it did not say which cards can cause it,
+so Counterspell was offered as an enabler for Y'shtola, who needs a noncreature
+spell costing three or more. 2,098 of 16,845 want clauses (12.5%) carry a
+qualifier on the trigger. Honouring mana value, card type and colour removes
+**570,255 of 20,896,723 currently-scoring want→supply pairs — 2.73%.** Nothing
+is stored: the input is the wanter's own `oracle_text`, already in the eligible
+read, so `synergy_wants` is untouched and `wants:spell-cast` still matches a
+qualified want. **No migration, no re-ingest for this half.**
+
+The surprise changed what was built. Every `spell-cast` producer is an instant
+or a sorcery by type line, so 97.4% of her suppliers are already noncreature —
+her type clause removes 2.6% and her mana-value floor removes 41.2%. The brief
+emphasised the type axis and the corpus said it was nearly a no-op.
+
+Refused, each on a measurement: ordinal counts, timing and accumulated
+thresholds (game state, no card property can answer them); zone (1,045 clauses,
+1,001 of them `graveyard-creature`'s own definition); subtype and keyword
+restrictions (already carried by ADR-0046); qualifiers on payoff-only tags (zero
+pairs by construction); and the entire PRODUCES side — 4,004 effect-clause
+card-type restrictions, because "deals 3 damage to target creature" does not
+restrict a damage spell, it is what a damage spell is.
+
+**A role is one word and not one job** — ADR-0058. 446 of the 2,563 cards
+counted as `spot-removal` cannot kill a creature, and in green it is 153 of 207.
+A deck holding six Naturalizes reads "6 / 6 removal" and cannot answer anything.
+The ruling is the OPPOSITE of the tag one and deliberately so: exclude on tags
+(a trigger has no partial state), **partial on roles** (Disenchant really is
+removal). Nothing is removed from a role, a count or a group; the OFFER is
+ordered so a creature-capable answer comes first when the deck is short of one.
+Measured on 5,000 simulated green removal suites: decks that can kill nothing go
+from **15.0% to 0.0%**.
+
+The sub-target — "of your 6 removal, at least 3 must be creature-capable" — is
+DEFERRED, and the reason is recorded so nobody re-derives it: that number has no
+source, and inventing twenty of them is what ADR-0006 forbids. Fractional
+counting is refused on two live strings: "5.5 / 6" to a screen reader and "1.5
+cards short" in Quickbuild.
+
+**⚠️ A CARDS RE-INGEST IS DUE**, for ADR-0058 §8 only. The `ramp` rule demanded
+the literal phrase "basic land card", so Nature's Lore, Three Visits, Farseek
+and Scapeshift all derived to the `synergy` catch-all — the app could not tell
+what three of the format's most-played green ramp spells do. 54 cards gain
+`ramp`, **zero lose it**, 46 primary roles move and every one moves into `ramp`
+from a less specific role. `roles` and `primary_role` are stored columns:
+
+```bash
+pnpm --filter @roundtable/ingest start cards
+```
+
+No migration. `is:legendary` also shipped (ADR-0057 §10) — 183 cards key off a
+legendary permanent and 181 carry no tag for it, but supertypes cannot enter the
+vocabulary because Magic sets them in lower case and the leading-capital match
+is the whole precision rule of the subtype family. The builder gets the filter;
+the scorer does not get the pair.
 
 **Next, in order of value:**
 
