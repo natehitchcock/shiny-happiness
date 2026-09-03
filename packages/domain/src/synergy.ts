@@ -1,6 +1,12 @@
 import { TAKES_EXTRA_TURN } from './bracket-barometers.js'
 import type { Card } from './card.js'
 import type { OracleId } from './ids.js'
+import {
+  deriveWantQualifiers,
+  satisfiesQualifiers,
+  type QualifiedWant,
+  type WantQualifier,
+} from './qualifiers.js'
 import { SEMANTIC_TAGS, deriveSemanticTokens, type SemanticTag } from './semantic-tokens.js'
 import { CREATES_FOR_YOU } from './token-subject.js'
 
@@ -1714,6 +1720,23 @@ export interface SynergyProfile {
    * gap, and every such card gets its answer at the next re-ingest.
    */
   readonly has?: readonly SynergyTag[]
+  /**
+   * Which cards can cause the wanted event, where the card says (ADR-0057).
+   *
+   * `wants: ['spell-cast']` says Y'shtola pays off a spell being cast. It does
+   * not say she pays off only a noncreature one costing three or more, which is
+   * what her text says and what makes Counterspell no use to her.
+   *
+   * DERIVED, NEVER STORED, and the read carries the input already —
+   * `oracle_text` is in the eligible column list. So `synergy_wants` is
+   * untouched, there is no migration, and `wants:spell-cast` still matches a
+   * qualified want because the stored array never changed.
+   *
+   * Optional with the same reading `has` has: absent means the caller did not
+   * ask, not that the card's want is unconstrained. Only ever names a tag that
+   * is also in `wants`, and only ever a tag in `QUALIFIABLE_TAGS`.
+   */
+  readonly wantQualifiers?: readonly QualifiedWant[]
 }
 
 export const EMPTY_PROFILE: SynergyProfile = { produces: [], wants: [], has: [] }
@@ -1805,6 +1828,12 @@ export const deriveSynergy = (
      * a card IS, which is exactly the two families in `semantic-tokens.ts`.
      */
     has: semantic.has,
+    /*
+     * ADR-0057. Derived from the same `oracleText` the rule tables above read,
+     * in the same call, so a card's want and the constraint on that want can
+     * never come from two different readings of the text.
+     */
+    wantQualifiers: deriveWantQualifiers(card),
   }
 }
 
@@ -1815,12 +1844,39 @@ export const deriveSynergy = (
  * deck is built around its commander, and a 99-card deck would otherwise drown
  * the one card that defines it.
  */
+/**
+ * One deck card's constrained want, kept apart from the total (ADR-0057).
+ *
+ * `weight` is that ONE wanter's contribution, not the tag's total — which is
+ * the whole point. A deck can hold Y'shtola and Guttersnipe, and a one-mana
+ * instant fails her and satisfies him, so the answer for that candidate is
+ * neither "the tag" nor "not the tag" but the part of the tag it earns.
+ */
+export interface QualifiedDeckWant {
+  readonly weight: number
+  readonly qualifiers: readonly WantQualifier[]
+}
+
 export interface DeckSynergy {
   /** Tag → weight. */
   readonly produces: ReadonlyMap<SynergyTag, number>
   readonly wants: ReadonlyMap<SynergyTag, number>
   /** What the deck's cards ARE or HAVE (ADR-0048). Its tribe, and its evasion. */
   readonly has: ReadonlyMap<SynergyTag, number>
+  /**
+   * The QUALIFIED portion of `wants`, kept beside it rather than replacing it
+   * (ADR-0057).
+   *
+   * `wants` stays the honest total — the deck really does want `spell-cast`,
+   * and `wants:spell-cast` in the search box is right to say so. This is the
+   * subset of that total a candidate can FAIL to reach, and `synergyMatches`
+   * subtracts only what the candidate fails.
+   *
+   * Additive rather than a change to `wants`, so every existing reader of a
+   * `DeckSynergy` keeps its answer. Optional so a hand-built deck in a test
+   * does not have to carry an empty map.
+   */
+  readonly qualifiedWants?: ReadonlyMap<SynergyTag, readonly QualifiedDeckWant[]>
 }
 
 export const COMMANDER_WEIGHT = 4
@@ -1833,6 +1889,7 @@ export const deckSynergy = (
   const produces = new Map<SynergyTag, number>()
   const wants = new Map<SynergyTag, number>()
   const has = new Map<SynergyTag, number>()
+  const qualifiedWants = new Map<SynergyTag, QualifiedDeckWant[]>()
 
   const add = (
     into: Map<SynergyTag, number>,
@@ -1842,12 +1899,30 @@ export const deckSynergy = (
     for (const tag of tags ?? []) into.set(tag, (into.get(tag) ?? 0) + weight)
   }
 
+  /*
+   * The qualifier is recorded PER WANTER, never merged into the tag (ADR-0057).
+   *
+   * Two cards can want one tag on different terms and there is no single
+   * constraint that is true of both: Y'shtola needs three mana and Guttersnipe
+   * needs an instant or a sorcery, and merging them would either exclude a
+   * cheap instant she cannot use but he can, or include a creature spell
+   * neither can. The weight is what splits, so the weight is what is stored.
+   */
+  const addQualified = (profile: SynergyProfile, weight: number): void => {
+    for (const qualified of profile.wantQualifiers ?? []) {
+      const list = qualifiedWants.get(qualified.tag) ?? []
+      list.push({ weight, qualifiers: qualified.qualifiers })
+      qualifiedWants.set(qualified.tag, list)
+    }
+  }
+
   for (const id of commanders) {
     const profile = profileOf(id)
     if (profile === undefined) continue
     add(produces, profile.produces, COMMANDER_WEIGHT)
     add(wants, profile.wants, COMMANDER_WEIGHT)
     add(has, profile.has, COMMANDER_WEIGHT)
+    addQualified(profile, COMMANDER_WEIGHT)
   }
   for (const id of accepted) {
     if (commanders.includes(id)) continue
@@ -1856,9 +1931,10 @@ export const deckSynergy = (
     add(produces, profile.produces, 1)
     add(wants, profile.wants, 1)
     add(has, profile.has, 1)
+    addQualified(profile, 1)
   }
 
-  return { produces, wants, has }
+  return { produces, wants, has, qualifiedWants }
 }
 
 export interface SynergyMatch {
@@ -1904,6 +1980,22 @@ export interface SynergyMatchOptions {
    * card in the deck would always share a theme with itself.
    */
   readonly selfCounted?: boolean
+  /**
+   * The candidate's own columns, for evaluating the deck's qualified wants
+   * (ADR-0057).
+   *
+   * THE ASYMMETRY IS THE DESIGN. A producer never has to advertise anything —
+   * the matcher reads the candidate's `manaValue`, `types` and `colors`, all
+   * three of which the eligible read already ships. So honouring a qualifier
+   * costs one predicate and no new data anywhere.
+   *
+   * ABSENT MEANS "THE CALLER DID NOT ASK", never "this candidate satisfies the
+   * qualifier". Without it the answer is the unqualified one, which is
+   * OVER-inclusive — the direction that can waste a slot in the feed but can
+   * never report a real payoff as no use. Both production callers pass it;
+   * `synergy.test.ts` has a case pinning the fallback so it cannot go quiet.
+   */
+  readonly candidate?: Pick<Card, 'manaValue' | 'types' | 'colors'>
 }
 
 /**
@@ -1984,11 +2076,52 @@ export const synergyMatches = (
    * the scorer, and if one is ever wanted it belongs in the rules that emit the
    * tags, not here.
    */
+  /*
+   * How much of a wanted tag THIS candidate actually earns (ADR-0057).
+   *
+   * The deck's want is the sum of its wanters. A qualified wanter is one the
+   * candidate can FAIL — Counterspell costs two and Y'shtola needs three — so
+   * its weight comes off the total, and only its weight. Nothing else in the
+   * model changes: `deck.wants` is still the honest total of what the deck
+   * wants, and `wants:spell-cast` in the search box is still right to match.
+   *
+   * EXCLUDE, NOT REDUCE, when the whole want is qualified. A trigger has no
+   * partial state — Counterspell does not half-fire her — and the owner's words
+   * were "should not be considered". ADR-0058 makes the OPPOSITE ruling one
+   * level over, for roles, and the difference is what the two things are: a tag
+   * qualifier is a fact about the rules, a role qualifier is a judgement about
+   * coverage, and Disenchant really is removal.
+   */
+  const earned = (tag: SynergyTag): number => {
+    const total = deck.wants.get(tag) ?? 0
+    const facts = options.candidate
+    if (total === 0 || facts === undefined) return total
+    let failed = 0
+    for (const want of deck.qualifiedWants?.get(tag) ?? []) {
+      if (!satisfiesQualifiers(facts, want.qualifiers)) failed += want.weight
+    }
+    return total - failed
+  }
+
   const supplied = new Set<SynergyTag>([...candidate.produces, ...(candidate.has ?? [])])
   for (const tag of supplied) {
-    const weight = deck.wants.get(tag) ?? 0
+    const weight = earned(tag)
     if (weight > 0) matches.push({ tag, direction: 'enables', weight })
   }
+  /*
+   * THE PAYOFF DIRECTION IS NOT QUALIFIED, and the gap is named here rather
+   * than left to be found (ADR-0057).
+   *
+   * `enables` reads the DECK's qualifiers against ONE candidate, which this
+   * function has. `payoff` would read the CANDIDATE's qualifiers against every
+   * card in the deck that supplies the tag — and `deck.produces` is a weight,
+   * not a list of cards, so the columns to evaluate against are not here. They
+   * could be carried: a deck is a hundred cards and three scalars each. It is
+   * deferred because the error is far smaller and far less visible. `enables`
+   * is what puts Counterspell in the feed under Y'shtola, which is the report
+   * this ADR came from; `payoff` only inflates a weight on the one card the
+   * user is already reading a reason for, and the reason it prints is true.
+   */
   for (const tag of candidate.wants) {
     const weight = (deck.produces.get(tag) ?? 0) + (deck.has.get(tag) ?? 0)
     if (weight > 0) matches.push({ tag, direction: 'payoff', weight })

@@ -17,6 +17,7 @@ import {
   recommend,
   curveTarget,
   deckSynergy,
+  deriveWantQualifiers,
   weightsFor,
 } from '@roundtable/domain'
 import { loadDeckContext } from '../deck-context.js'
@@ -120,9 +121,25 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
           deck.entries.filter((e) => e.zone === 'accepted').map((e) => e.oracleId),
           (id) => {
             const card = context.cards.get(id)
+            /*
+             * `wantQualifiers` is DERIVED here rather than read from a column
+             * (ADR-0057), following ADR-0048's rule: derive a thing whose
+             * inputs the read already carries. The input is `oracle_text`,
+             * which the eligible read ships for every card.
+             *
+             * Derived for the DECK's cards only -- at most a hundred per
+             * request -- and never for the candidate pool, because the
+             * qualifier lives on the wanter and the candidate is judged by its
+             * own `manaValue`, `types` and `colors`. That asymmetry is what
+             * keeps it off the hot path entirely.
+             */
             return card === undefined
               ? undefined
-              : { produces: card.synergyProduces, wants: card.synergyWants }
+              : {
+                  produces: card.synergyProduces,
+                  wants: card.synergyWants,
+                  wantQualifiers: deriveWantQualifiers(card),
+                }
           },
         ),
         // What the builder said this deck is ABOUT, as opposed to what it

@@ -192,6 +192,19 @@ export interface Reason {
    * promised. Position does not survive that merge or a column sort.
    */
   guaranteed?: boolean
+  /**
+   * What a `keyword-synergy` reason's tag is RESTRICTED to, in words (ADR-0057).
+   *
+   * "Noncreature, costing 3 or more" — the constraint the deck's own cards put
+   * on the event, already rendered by the domain because it is a modifier on a
+   * phrase from `tags.ts` rather than a phrase of its own. Absent means the
+   * deck wants the tag unconditionally, which is the commoner case and the one
+   * the existing sentence already describes.
+   *
+   * Only ever sent on `direction: 'enables'`, which is the only direction the
+   * matcher evaluates a qualifier in.
+   */
+  qualifier?: string
 }
 
 export interface Recommendation {

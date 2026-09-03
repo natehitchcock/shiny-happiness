@@ -766,7 +766,29 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
        * suffix ("benefits from your discard (emphasised)"), because it is an
        * adjective on the deck's property and not a footnote about the row.
        */
-      const yours = r.emphasised === true ? `your emphasised ${tag}` : `your ${tag}`
+      /*
+       * What the deck's want is RESTRICTED to (ADR-0057, pillar P4).
+       *
+       * "Enables your casting spells" was a claim about every instant in the
+       * deck. A deck led by Y'shtola only pays off a noncreature spell costing
+       * three or more, and the card offered was chosen against that narrower
+       * test — so the sentence has to carry it or it claims more than the check
+       * behind it.
+       *
+       * PARENTHETICAL rather than woven into the phrase. "Enables your casting
+       * noncreature spells costing 3 or more" reads as one long noun and buries
+       * the restriction in the middle of it; the bracket marks it as a
+       * narrowing, which is exactly what it is. It also keeps `tags.ts` as the
+       * one place a tag's own words are written — the qualifier is a modifier
+       * the domain renders, not a second phrase for the tag.
+       *
+       * Absent for every direction but `enables`, because that is the only one
+       * the matcher checks (see `synergyMatches`). A qualifier printed on a
+       * direction nothing verified would be the overclaim this is here to stop.
+       */
+      const restricted =
+        r.qualifier === undefined || r.qualifier === '' ? tag : `${tag} (${r.qualifier})`
+      const yours = r.emphasised === true ? `your emphasised ${restricted}` : `your ${restricted}`
       /*
        * A row kept by the focus guarantee answers a different question.
        *

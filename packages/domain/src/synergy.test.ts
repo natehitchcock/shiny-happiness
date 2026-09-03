@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { Card } from './card.js'
 import { oracleId } from './ids.js'
 import type { OracleId } from './ids.js'
 import {
@@ -532,6 +533,119 @@ describe('synergyMatches', () => {
     const candidate: SynergyProfile = { produces: ['landfall', 'creature-death'], wants: [] }
 
     expect(synergyMatches(candidate, deck)[0]?.tag).toBe('creature-death')
+  })
+})
+
+/*
+ * ADR-0057. The want says WHICH EVENT; the qualifier says which cards can cause
+ * it. Y'shtola is the case the ADR was written from and the acceptance test the
+ * product owner set.
+ */
+describe('synergyMatches — a qualified want (ADR-0057)', () => {
+  const YSHTOLA = card(
+    "Y'shtola, Night's Blessed",
+    'Legendary Creature — Cat Warlock',
+    'Vigilance\n' +
+      'At the beginning of each end step, if a player lost 4 or more life this turn, you draw a card.\n' +
+      'Whenever you cast a noncreature spell with mana value 3 or greater, ' +
+      "Y'shtola deals 2 damage to each opponent and you gain 2 life.",
+  )
+  const deck = deckSynergy([oracleId("Y'shtola, Night's Blessed")], [], () =>
+    deriveSynergy(YSHTOLA),
+  )
+  const supplier: SynergyProfile = { produces: ['spell-cast'], wants: [] }
+  const facts = (manaValue: number, types: Card['types']) => ({
+    manaValue,
+    types,
+    colors: [] as Card['colors'],
+  })
+
+  it('still records the want, because the tag is wanted', () => {
+    expect(deck.wants.get('spell-cast')).toBe(COMMANDER_WEIGHT)
+  })
+
+  it("drops Counterspell, which does not cost enough to fire her", () => {
+    const matches = synergyMatches(supplier, deck, { candidate: facts(2, ['instant']) })
+
+    expect(matches.find((m) => m.tag === 'spell-cast')).toBeUndefined()
+  })
+
+  it('keeps a three-mana noncreature spell, at the full weight', () => {
+    const matches = synergyMatches(supplier, deck, { candidate: facts(3, ['sorcery']) })
+    const match = matches.find((m) => m.tag === 'spell-cast')
+
+    expect(match?.direction).toBe('enables')
+    expect(match?.weight).toBe(COMMANDER_WEIGHT)
+  })
+
+  it('drops a five-mana creature, which clears the floor and fails the type', () => {
+    expect(
+      synergyMatches(supplier, deck, { candidate: facts(5, ['creature']) }).find(
+        (m) => m.tag === 'spell-cast',
+      ),
+    ).toBeUndefined()
+  })
+
+  /*
+   * EXCLUDE, NOT REDUCE. A trigger has no partial state -- Counterspell does not
+   * half-fire Y'shtola -- which is the opposite ruling ADR-0058 makes for roles,
+   * where Disenchant really is removal.
+   */
+  it('excludes rather than reducing', () => {
+    const matches = synergyMatches(supplier, deck, { candidate: facts(1, ['instant']) })
+
+    expect(matches).toEqual([])
+  })
+
+  /*
+   * A deck's want is the SUM of its wanters, and only the qualified ones can be
+   * subtracted. An unqualified spellslinger beside her still pays a cheap spell.
+   */
+  it('subtracts only the wanters the candidate fails', () => {
+    const GUTTERSNIPE = card(
+      'Guttersnipe',
+      'Creature — Goblin Shaman',
+      'Whenever you cast an instant or sorcery spell, this creature deals 2 damage to each opponent.',
+    )
+    const profiles = new Map<OracleId, SynergyProfile>([
+      [oracleId("Y'shtola, Night's Blessed"), deriveSynergy(YSHTOLA)],
+      [oracleId('Guttersnipe'), deriveSynergy(GUTTERSNIPE)],
+    ])
+    const both = deckSynergy(
+      [oracleId("Y'shtola, Night's Blessed")],
+      [oracleId('Guttersnipe')],
+      (id) => profiles.get(id),
+    )
+    expect(both.wants.get('spell-cast')).toBe(COMMANDER_WEIGHT + 1)
+
+    // A one-mana instant fails her floor and satisfies Guttersnipe's type test.
+    const cheap = synergyMatches(supplier, both, { candidate: facts(1, ['instant']) })
+    expect(cheap.find((m) => m.tag === 'spell-cast')?.weight).toBe(1)
+
+    // A four-mana instant satisfies both.
+    const dear = synergyMatches(supplier, both, { candidate: facts(4, ['instant']) })
+    expect(dear.find((m) => m.tag === 'spell-cast')?.weight).toBe(COMMANDER_WEIGHT + 1)
+  })
+
+  /*
+   * The fallback is stated out loud because it is the dangerous half: a caller
+   * that does not hand over the candidate's own columns gets the UNQUALIFIED
+   * answer, which is over-inclusive. Absence means "did not ask", never "this
+   * candidate satisfies the qualifier".
+   */
+  it('answers unqualified when the caller supplies no candidate columns', () => {
+    expect(synergyMatches(supplier, deck).find((m) => m.tag === 'spell-cast')?.weight).toBe(
+      COMMANDER_WEIGHT,
+    )
+  })
+
+  it('leaves every unqualified tag alone', () => {
+    const sacDeck = deckSynergy([oracleId('Blood Artist')], [], () => deriveSynergy(BLOOD_ARTIST))
+    const matches = synergyMatches(deriveSynergy(ASHNODS_ALTAR), sacDeck, {
+      candidate: facts(1, ['artifact']),
+    })
+
+    expect(matches.find((m) => m.tag === 'creature-death')?.weight).toBe(COMMANDER_WEIGHT)
   })
 })
 

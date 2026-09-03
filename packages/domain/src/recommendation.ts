@@ -165,6 +165,29 @@ export type Reason =
        * (AGENTS.md R2). Only `true` is ever written.
        */
       readonly guaranteed?: boolean
+      /**
+       * What the deck's want is RESTRICTED to, in words (ADR-0057).
+       *
+       * Pillar P4 says the reason must carry the why, and it follows that a
+       * reason may not claim more than the model checked. "Enables your casting
+       * spells" was a claim about every instant in the deck; a deck led by
+       * Y'shtola only pays off a noncreature spell costing three or more, and
+       * the card being offered was chosen against that narrower test. The chip
+       * has to say so or the sentence is wider than the check behind it.
+       *
+       * Rendered words rather than the structure, because the phrasing table
+       * lives in `apps/web/src/tags.ts` and this is a modifier on a phrase from
+       * that table — shipping the union would put half a sentence in the domain
+       * and half in the client. `qualifierWords` is the one place it is built.
+       *
+       * `enables` only. The payoff direction is not qualifier-aware yet — see
+       * the note in `synergyMatches` — and a field written on a direction the
+       * matcher did not check would be the exact overclaim this exists to stop.
+       *
+       * Optional, so a reader that predates it renders the true-but-wider
+       * sentence it renders today rather than nothing (AGENTS.md R2).
+       */
+      readonly qualifier?: string
     }
   | { readonly kind: 'bracket-warning'; readonly flag: BracketFlag; readonly detail: string }
 

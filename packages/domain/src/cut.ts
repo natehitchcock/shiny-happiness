@@ -154,7 +154,10 @@ export const suggestCuts = (input: CutInput): readonly CutHint[] => {
       synergyMatches(
         { produces: card.synergyProduces, wants: card.synergyWants },
         input.deckSynergy,
-        { selfCounted: true },
+        // `candidate` is ADR-0057: the deck's qualified wants are evaluated
+        // against this card's own columns, so a two-mana counterspell in a
+        // Y'shtola deck is not credited with turning her on.
+        { selfCounted: true, candidate: card },
       ),
     )
     if (!hasTags) {

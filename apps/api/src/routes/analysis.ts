@@ -23,6 +23,7 @@ import {
   curveDeltas,
   curveTarget,
   deckSynergy,
+  deriveWantQualifiers,
   hasTargetOverrides,
   lockedComposition,
   lockedCurve,
@@ -119,7 +120,17 @@ export const registerAnalysisRoutes = (app: FastifyInstance, pool: Pool): void =
       deck.entries.filter((e) => e.zone === 'accepted').map((e) => e.oracleId),
       (id) => {
         const c = cards.get(id)
-        return c === undefined ? undefined : { produces: c.synergyProduces, wants: c.synergyWants }
+        // `wantQualifiers` derived here for the same reason the
+        // recommendations route derives it: ADR-0057 stores nothing, and the
+        // cut hints must read the deck the same way the offers do or the two
+        // panels disagree about whether a card is doing anything.
+        return c === undefined
+          ? undefined
+          : {
+              produces: c.synergyProduces,
+              wants: c.synergyWants,
+              wantQualifiers: deriveWantQualifiers(c),
+            }
       },
     )
 
