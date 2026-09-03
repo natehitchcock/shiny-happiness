@@ -364,19 +364,31 @@ describe('cardImpact', () => {
   describe('the ordering a Magic player would check', () => {
     it('puts the mass effects above the spot removal above the mana rock', () => {
       const score = (c: ImpactInput): number => cardImpact(c).score
-      expect(score(TORMENT_OF_HAILFIRE)).toBeGreaterThan(score(CYCLONIC_RIFT))
-      expect(score(CYCLONIC_RIFT)).toBeGreaterThan(score(WRATH_OF_GOD))
-      expect(score(WRATH_OF_GOD)).toBeGreaterThan(score(LIGHTNING_BOLT))
+      // The claim is mass > spot removal > mana rock, and it still holds: all
+      // three mass effects sit above all the spot removal.
+      //
+      // The two mass effects SWAPPED when ADR-0055 landed, and that is the axis
+      // working rather than a regression. Cyclonic Rift and Wrath of God are
+      // both board-wide; Rift is one-sided, which it is still credited for, but
+      // it BOUNCES and Wrath DESTROYS, and the permanents Rift answers all come
+      // back. The model has never had an axis for tempo or instant speed, which
+      // is where the rest of Rift's real-world reputation lives — the same
+      // stated blindness that prices Sol Ring at 0.68.
+      expect(score(TORMENT_OF_HAILFIRE)).toBeGreaterThan(score(WRATH_OF_GOD))
+      expect(score(WRATH_OF_GOD)).toBeGreaterThan(score(CYCLONIC_RIFT))
+      expect(score(CYCLONIC_RIFT)).toBeGreaterThan(score(LIGHTNING_BOLT))
       expect(score(LIGHTNING_BOLT)).toBeGreaterThan(score(RHYSTIC_STUDY))
       expect(score(RHYSTIC_STUDY)).toBeGreaterThan(score(SOL_RING))
       expect(score(SOL_RING)).toBeGreaterThan(score(GRIZZLY_BEARS))
     })
 
     it('pins the measured values, so a tier change cannot pass silently', () => {
+      // Lightning Bolt moved 1.4 -> 1.12 when ADR-0055 landed: it is damage, and
+      // damage is 0.8 of destroy because it only kills sometimes.
       expect(cardImpact(TORMENT_OF_HAILFIRE).score).toBe(8.4)
-      expect(cardImpact(CYCLONIC_RIFT).score).toBe(7.2)
+      expect(cardImpact(CYCLONIC_RIFT).score).toBe(5.4)
       expect(cardImpact(WRATH_OF_GOD).score).toBe(6.12)
-      expect(cardImpact(LIGHTNING_BOLT).score).toBe(1.4)
+      expect(cardImpact(LIGHTNING_BOLT).score).toBe(1.12)
       expect(cardImpact(RHYSTIC_STUDY).score).toBe(0.808)
       expect(cardImpact(SOL_RING).score).toBe(0.68)
       expect(cardImpact(GRIZZLY_BEARS).score).toBe(0)
@@ -468,7 +480,7 @@ describe('falls on — whose side the effect lands on', () => {
       oracleText: 'Exile target creature. Its controller gains life equal to its power.',
     })
     expect(cardImpact(swords).stakes).toBe('opposing')
-    expect(cardImpact(swords).score).toBe(1.2)
+    expect(cardImpact(swords).score).toBe(1.44)
   })
 
   it('does not send a mass effect scoped entirely to your own side to an opponent', () => {
@@ -561,14 +573,16 @@ describe('symmetry — a wipe that names a list of types still hits your board',
  * lie: the number is 18.48, and it is a score a card can actually reach.
  */
 describe('IMPACT_MAX', () => {
-  it('is the product of the three top rungs', () => {
-    expect(IMPACT_MAX).toBe(18.48)
+  it('is the product of the top rungs, severity included', () => {
+    // 18.48 until ADR-0055 added a fifth multiplicand. See the
+    // `IMPACT_MAX after severity` block for the reachability proof.
+    expect(IMPACT_MAX).toBe(22.176)
   })
 
-  it('is reachable — an upkeep trigger over every opponent scores exactly it', () => {
-    // Not a bound nobody touches. `unbounded` breadth plus `each opponent`
-    // takes `player` stakes and the `one-sided` symmetry branch, so no discount
-    // applies and the product stands.
+  it('no longer tops out on a card that removes nothing', () => {
+    // This card WAS the ceiling at 18.48. It still reaches the top of the other
+    // four axes; it simply cannot reach the fifth, because losing life is not
+    // removal and its severity is `none`.
     const ceiling = card({
       name: 'Ceiling',
       typeLine: 'Enchantment',
@@ -579,7 +593,8 @@ describe('IMPACT_MAX', () => {
     expect(at.persistence).toBe('upkeep')
     expect(at.stakes).toBe('player')
     expect(at.symmetry).toBe('one-sided')
-    expect(at.score).toBe(IMPACT_MAX)
+    expect(at.severity).toBe('none')
+    expect(at.score).toBe(18.48)
   })
 
   it('bounds every fixture, so nothing can draw past the end of a meter', () => {
@@ -690,8 +705,8 @@ describe('the winning clause brings its whole tuple (ADR-0043)', () => {
     expect(cardImpact(CRATERHOOF).score).toBe(6.0)
     expect(cardImpact(SOL_RING).score).toBe(0.68)
     expect(cardImpact(FOREST).score).toBe(0)
-    expect(cardImpact(CYCLONIC_RIFT).score).toBe(7.2)
-    expect(cardImpact(swords).score).toBe(1.2)
+    expect(cardImpact(CYCLONIC_RIFT).score).toBe(5.4)
+    expect(cardImpact(swords).score).toBe(1.44)
   })
 
   it('keeps Cyclonic Rift on its overload line, which is a line of its own', () => {
@@ -710,8 +725,11 @@ describe('the winning clause brings its whole tuple (ADR-0043)', () => {
     expect(cardImpact(VIRIDIAN_ZEALOT).persistence).toBe('one-shot')
   })
 
-  it('does not move IMPACT_MAX — no tier VALUE changed, only which tier a clause lands in', () => {
-    expect(IMPACT_MAX).toBe(18.48)
+  it('did not itself move IMPACT_MAX — ADR-0043 changed no tier VALUE', () => {
+    // ADR-0055 later did move it, by adding a fifth multiplicand. The claim
+    // preserved here is the narrower one: per-clause scoring alone changes only
+    // which tier a clause lands in.
+    expect(IMPACT_MAX).toBe(22.176)
   })
 })
 
@@ -1094,7 +1112,210 @@ describe('a qualifier between "target" and its noun', () => {
     expect(cardImpact(CRATERHOOF).score).toBe(6.0)
     expect(cardImpact(SOL_RING).score).toBe(0.68)
     expect(cardImpact(FOREST).score).toBe(0)
-    expect(cardImpact(CYCLONIC_RIFT).score).toBe(7.2)
-    expect(cardImpact(swords).score).toBe(1.2)
+    expect(cardImpact(CYCLONIC_RIFT).score).toBe(5.4)
+    expect(cardImpact(swords).score).toBe(1.44)
+  })
+})
+
+/**
+ * Severity — how hard the clause hits what it touches (ADR-0055).
+ *
+ * > "maybe also, as part of impact calculations, we need a severity value.
+ * > Something to quantify that flickering something is not as severe as
+ * > bouncing it, which is less severe than damage, which is less severe than
+ * > destroy, which is less severe than exile"
+ *
+ * THE SHAPE, WHICH DECIDES EVERYTHING ELSE. Severity is a multiplier, it is
+ * per-clause like every other tier, and `none` is NOT a rung on the ladder —
+ * it is the ABSENCE of the ladder, worth exactly 1.0. A clause that removes
+ * nothing is multiplied by one and is untouched, so the axis cannot make a
+ * draw spell and a bounce spell trade places.
+ *
+ * NEUTRAL SITS AT `destroy`, not at the top and not at the bottom. Two reasons,
+ * both measurable. Destroy is the largest unambiguous removal class in the
+ * corpus (1,523 cards against exile's 636 and bounce's 522), so anchoring there
+ * moves the fewest cards. And Wrath of God — an anchor quoted in doc 18 and
+ * three ADRs — is a destroy, so it holds at 6.12 for free.
+ *
+ * Rejected: neutral at the top (`exile` = 1.0, everything else a penalty),
+ * which prices every removal spell below every cantrip and is the absurdity the
+ * brief warned about. Rejected: neutral at the bottom (`flicker` = 1.0,
+ * everything else a bonus), which is a thumb on the scale for removal and
+ * inflates the whole class. Rejected: folding severity into `breadth`'s table
+ * as a refinement of "affects a permanent" — breadth answers HOW MANY and
+ * severity answers HOW HARD, and a tier table cannot carry two questions
+ * without ceasing to be a partition.
+ */
+describe('severity (ADR-0055)', () => {
+  const spell = (oracleText: string) => card({ manaCost: '{2}', typeLine: 'Instant', oracleText })
+
+  /**
+   * THE ACCEPTANCE QUARTET. Four spells identical on every other axis —
+   * `one` breadth, `one-shot` persistence, `opposing` stakes, no symmetry — so
+   * the only thing that can separate them is severity.
+   */
+  const BOUNCE = spell("Return target creature to its owner's hand.")
+  const DAMAGE = spell('This spell deals 3 damage to target creature.')
+  const DESTROY = spell('Destroy target creature.')
+  const EXILE = spell('Exile target creature.')
+
+  it('separates the quartet strictly, in the order the owner gave', () => {
+    const s = (c: ImpactInput) => cardImpact(c).score
+    expect(s(BOUNCE)).toBeLessThan(s(DAMAGE))
+    expect(s(DAMAGE)).toBeLessThan(s(DESTROY))
+    expect(s(DESTROY)).toBeLessThan(s(EXILE))
+  })
+
+  it('holds the other four tiers constant across the quartet', () => {
+    // If any of these drifted the comparison above would be measuring
+    // something else and the quartet would prove nothing.
+    for (const c of [BOUNCE, DAMAGE, DESTROY, EXILE]) {
+      const i = cardImpact(c)
+      expect(i.breadth).toBe('one')
+      expect(i.persistence).toBe('one-shot')
+      expect(i.stakes).toBe('opposing')
+      expect(i.symmetry).toBe('none')
+    }
+  })
+
+  it('names each rung', () => {
+    expect(cardImpact(BOUNCE).severity).toBe('bounce')
+    expect(cardImpact(DAMAGE).severity).toBe('damage')
+    expect(cardImpact(DESTROY).severity).toBe('destroy')
+    expect(cardImpact(EXILE).severity).toBe('exile')
+  })
+
+  it('keeps destroy at neutral, so Wrath of God does not move', () => {
+    expect(cardImpact(WRATH_OF_GOD).severity).toBe('destroy')
+    expect(cardImpact(WRATH_OF_GOD).score).toBe(6.12)
+  })
+
+  it('leaves a card that removes nothing completely alone', () => {
+    // The ruling. `none` is worth 1.0, so every non-removal card in the corpus
+    // is bit-identical to what it scored before this axis existed.
+    const draw = spell('Draw two cards.')
+    expect(cardImpact(draw).severity).toBe('none')
+    expect(cardImpact(CRATERHOOF).severity).toBe('none')
+    expect(cardImpact(CRATERHOOF).score).toBe(6.0)
+    expect(cardImpact(SOL_RING).score).toBe(0.68)
+    expect(cardImpact(FOREST).score).toBe(0)
+  })
+
+  it('never lets removal fall below an effect that touches nothing', () => {
+    // The bound that makes the multiplier safe: the weakest rung times the
+    // smallest real breadth (1.0) must still beat `none` breadth (0.5). Tap is
+    // 0.6, so the margin is real rather than lucky.
+    const tapper = spell('Tap target creature.')
+    const nothing = card({ manaCost: '{2}', typeLine: 'Instant', oracleText: 'You gain 3 life.' })
+    expect(cardImpact(tapper).score).toBeGreaterThan(cardImpact(nothing).score)
+  })
+
+  it('places flicker below bounce, and is not fooled into calling it exile', () => {
+    // Flicker IS "exile ... return to the battlefield". Matching `exile` first
+    // would make the gentlest effect on the ladder the harshest.
+    const flicker = spell('Exile target creature you control, then return it to the battlefield.')
+    expect(cardImpact(flicker).severity).toBe('flicker')
+    expect(cardImpact(flicker).score).toBeLessThan(cardImpact(BOUNCE).score)
+  })
+
+  it('reads tap as the gentlest rung', () => {
+    expect(cardImpact(spell('Tap target creature.')).severity).toBe('tap')
+  })
+
+  it('groups the effects the owner did not name, by what happens to the object', () => {
+    // The governing rule: severity describes WHAT HAPPENS TO THE THING, never
+    // how good the thing was or who chose it.
+    //
+    // counter -> destroy: a countered spell ends in the graveyard, exactly
+    //   where a destroyed permanent ends, and is equally recoverable.
+    // edict -> destroy: the chosen permanent is destroyed. That the opponent
+    //   picks their worst is a targeting-quality question, and this model has
+    //   no axis for targeting quality.
+    // -X/-X -> damage: the same probabilistic kill, so it takes the same rung
+    //   rather than inventing a second one.
+    // tuck -> exile: shuffled into a library is as unrecoverable as exile for
+    //   the permanent in question.
+    // steal -> exile: you lose it AND they gain it, which is a bigger swing
+    //   than destroy; it does not exceed exile because the permanent survives
+    //   and can still be answered.
+    expect(cardImpact(spell('Counter target spell.')).severity).toBe('destroy')
+    expect(cardImpact(spell('Target player sacrifices a creature.')).severity).toBe('destroy')
+    expect(cardImpact(spell('Target creature gets -3/-3 until end of turn.')).severity).toBe(
+      'damage',
+    )
+    expect(cardImpact(spell("Shuffle target creature into its owner's library.")).severity).toBe(
+      'exile',
+    )
+    expect(cardImpact(spell('Gain control of target creature.')).severity).toBe('exile')
+  })
+
+  it('does not call graveyard or library manipulation removal', () => {
+    // 907 clauses exile something out of a zone rather than off the
+    // battlefield. `creature` is a permanent; `creature card` is an object in a
+    // zone, and that one word is the whole guard.
+    const dig = spell('Exile the top card of your library. You may play it this turn.')
+    const gyHate = spell('Exile target creature card from a graveyard.')
+    expect(cardImpact(dig).severity).toBe('none')
+    expect(cardImpact(gyHate).severity).toBe('none')
+  })
+
+  it('takes the harshest rung when one clause does two things', () => {
+    // Lavaball Trap's real text. 82 commander-legal clauses pair damage with
+    // destroy — by far the commonest overlap — and destroy is the worse outcome,
+    // so it is the one reported. No clause in the corpus pairs destroy with
+    // exile, which is why this is not tested with an invented one.
+    const lavaball = card({
+      name: 'Lavaball Trap',
+      manaCost: '{5}{R}{R}',
+      typeLine: 'Instant — Trap',
+      oracleText: 'Destroy two target lands. Lavaball Trap deals 4 damage to each creature.',
+    })
+    expect(cardImpact(lavaball).severity).toBe('destroy')
+  })
+
+  it('takes severity from the WINNING clause, not from anywhere on the card', () => {
+    // ADR-0043's rule extended: a card whose removal clause loses must not
+    // report the removal's severity as if the winning clause had removed
+    // something. Here the anthem clause wins at 6.0 and removes nothing.
+    const mixed = card({
+      name: 'Mixed',
+      manaCost: '{4}',
+      typeLine: 'Creature — Human',
+      oracleText:
+        'Creatures you control get +2/+2.\nWhen this creature enters, tap target creature.',
+    })
+    const at = cardImpact(mixed)
+    expect(at.breadth).toBe('unbounded')
+    expect(at.severity).toBe('none')
+    expect(at.score).toBe(6.0)
+  })
+})
+
+/**
+ * `IMPACT_MAX` moves, and it moves because a fifth multiplicand exists.
+ *
+ * Still DERIVED from the tier tables and still REACHABLE — both properties are
+ * the whole reason the constant is written the way it is rather than typed.
+ */
+describe('IMPACT_MAX after severity', () => {
+  it('is the product of the four top rungs', () => {
+    // 6.0 x 2.2 x 1.4 x 1.2
+    expect(IMPACT_MAX).toBe(22.176)
+  })
+
+  it('is reachable — an upkeep exile over a targeted opponent scores exactly it', () => {
+    const ceiling = card({
+      name: 'Ceiling',
+      manaCost: '{5}',
+      typeLine: 'Enchantment',
+      oracleText: 'At the beginning of your upkeep, exile all creatures target opponent controls.',
+    })
+    const at = cardImpact(ceiling)
+    expect(at.breadth).toBe('unbounded')
+    expect(at.persistence).toBe('upkeep')
+    expect(at.stakes).toBe('player')
+    expect(at.severity).toBe('exile')
+    expect(at.symmetry).toBe('one-sided')
+    expect(at.score).toBe(IMPACT_MAX)
   })
 })
