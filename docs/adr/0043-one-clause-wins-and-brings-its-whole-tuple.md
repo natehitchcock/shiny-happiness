@@ -301,6 +301,21 @@ The First Sliver says "Sliver spells you cast": all the same clause, none
 matched. This is exactly the ADR-0038 property — a semantic for every clause —
 failing on a shape that clause-splitting has now made easy to name.
 
+## Amended by ADR-0055
+
+[ADR-0055](0055-severity-is-how-hard-not-how-many.md) adds a fifth tier,
+severity, to the clause tuple. The rule this ADR establishes is unchanged and is
+what makes that safe: severity is scored per clause like the other four, and the
+winning clause still brings all of them together — so a card whose removal
+clause loses to a drawback clause does not report the removal severity as if the
+winning clause had removed something.
+
+Two numbers here are superseded. `IMPACT_MAX` is **22.176**, not 18.48, because
+a fifth multiplicand exists; it is still derived from the tier tables and still
+reachable. And the overload keyword is no longer a clause of its own — read as
+one it was a phantom that carried no effect yet won its card under this ADR's
+rule, and 27 of the 28 overload cards scored an identical 7.2 as a result.
+
 ## Alternatives rejected
 
 **Breadth for the cascade grant.** The argument was that a static grant over an
