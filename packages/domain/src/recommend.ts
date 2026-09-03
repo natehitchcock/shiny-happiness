@@ -3,7 +3,12 @@ import type { BracketFlag } from './bracket.js'
 import type { Card, Color } from './card.js'
 import { annotateCombos, type ComboIndex } from './combo-index.js'
 import { fixingFor, isManaSource, NO_FIXING, type DeckLands } from './fixing.js'
-import { dimensionKey, type CompositionDimension, type CompositionTarget } from './composition.js'
+import {
+  dimensionKey,
+  dimensionKeysOf,
+  type CompositionDimension,
+  type CompositionTarget,
+} from './composition.js'
 import type { CompositionCounts, Deficit } from './composition-analysis.js'
 import { findDeficits, shortfalls } from './composition-analysis.js'
 import {
@@ -30,7 +35,7 @@ import {
 } from './curve.js'
 import { cardEfficiency } from './efficiency.js'
 import type { OracleId } from './ids.js'
-import { cardImpact } from './impact.js'
+import { cardImpact, type CardImpact } from './impact.js'
 import { matchesQuery, type AnnotatedCandidate } from './query/evaluate.js'
 import type { QueryNode } from './query/ast.js'
 import type { CandidateGroupKey, Reason, Recommendation } from './recommendation.js'
@@ -276,7 +281,7 @@ const isEligible = (
   return card.colorIdentity.every((color) => identity.has(color))
 }
 
-const toAnnotated = (s: Scratch): AnnotatedCandidate => ({
+const toAnnotated = (s: Scratch, impactOf: (card: Card) => CardImpact): AnnotatedCandidate => ({
   card: s.pooled.card,
   comboDegree: s.degree,
   nearCombosAt1: s.nearAt1,
@@ -300,7 +305,7 @@ const toAnnotated = (s: Scratch): AnnotatedCandidate => ({
    * one extra classifier pass over the pool, and only when a query names one of
    * these fields is the filter run at all.
    */
-  impact: cardImpact(s.pooled.card).score,
+  impact: impactOf(s.pooled.card).score,
   efficiency: cardEfficiency(s.pooled.card).score,
 })
 
@@ -333,6 +338,49 @@ const dimensionLabel = (dimension: CompositionDimension): string =>
  * has to agree with the meters.
  */
 const countedRole = (pooled: PoolCard): Role => primaryRole(pooled.roles)
+
+/**
+ * The gap this card is offered against, or `null` (ADR-0054).
+ *
+ * A card counts toward SEVERAL dimensions — one role and each of its types.
+ * That rule is stated once, in `dimensionKeysOf`, and the meters and the web
+ * app's gold overlay already read it; grouping needs exactly one of them.
+ *
+ * THE ROLE GAP WINS, and the type gap is the fallback. The reason is P4's, and
+ * it is the same one the emission-order note below gives for letting a combo
+ * group keep a staple: the more specific claim about THIS deck wins the card.
+ * "You are six short of removal and this creature is removal" tells the builder
+ * something; "you are thirty-one short of creatures and this is a creature" is
+ * the least informative sentence a card can be offered under, because every
+ * creature in the format satisfies it equally.
+ *
+ * WORST-FIRST WAS WRITTEN AND MEASURED AND REJECTED. `shortfalls` already
+ * orders the gaps worst first, so taking the first match was one line and it
+ * matched Quickbuild's `largest-first` regime. It is also wrong in practice: a
+ * type gap is ~32 on an empty deck and no role gap is ever close, so every
+ * creature would be swallowed by `fills-creature` and the role headings would
+ * be emptied of creatures — `fills-ramp` with no mana dorks in it, and every
+ * creature that answers a permanent taken out of `fills-spot-removal`. Measured
+ * on five real commanders, it moved the whole creature half of six role groups
+ * into one heading that says nothing about any of them.
+ *
+ * `dimensionKeysOf` reads `primaryRole` — the counted role, ADR-0031 — rather
+ * than the raw role array, so the heading still names a dimension the card will
+ * move when it is accepted.
+ */
+const deficitFor = (pooled: PoolCard, deficits: readonly Deficit[]): Deficit | null => {
+  const keys = new Set(
+    dimensionKeysOf({ primaryRole: countedRole(pooled), types: pooled.card.types }),
+  )
+  const matching = deficits.filter((deficit) => keys.has(dimensionKey(deficit.dimension)))
+  return (
+    matching.find((deficit) => deficit.dimension.kind === 'role') ??
+    // Worst first among the types, which `shortfalls` already ordered, so a
+    // card that is somehow short in two type dimensions still has one answer.
+    matching[0] ??
+    null
+  )
+}
 
 /**
  * Which staples group this card may LEAD with, if any (ADR-0044).
@@ -447,6 +495,61 @@ const focusGuaranteed = (members: readonly Scratch[], limit: number): readonly S
   return extra
 }
 
+/**
+ * Impact separates cards the score has already called equal (ADR-0054).
+ *
+ * A TIE-BREAK AND NOT A TERM, and the distinction is the whole argument. A term
+ * in the sum would move cards past cards the score genuinely separates, which
+ * is a much larger claim about what the product recommends and one nobody has
+ * made. A tie-break is only ever consulted where the ranking has already said
+ * two cards are the same, so it cannot distort an order the product argues for
+ * — and today that order is settled by `edhrecRank`, a popularity number from
+ * Scryfall that ADR-0008 already ruled this product does not reason from.
+ *
+ * The ties are not rare. Measured over four real commanders, 2,547 of the 2,617
+ * emitted rows — 97.3% — sit inside a run of identical scores; 147 of the 182
+ * runs hold cards whose impact differs by more than half a point; 2,460 rows
+ * move. `Dwynen's Elite` at impact 0.5 and `Lluwen` at 11.52 tied at 1.4597,
+ * and four Elf lords tied at 1.417 with `Ezuri, Renegade Leader` (impact 9.6)
+ * fourth of the four.
+ *
+ * IT ORDERS THE PAGE; IT DOES NOT CHOOSE THE PAGE. Only the rows inside the
+ * first `limit` are touched, so a tied card at position 500 does not climb into
+ * the window — the score, then `edhrecRank`, then name still decide WHICH rows
+ * appear, exactly as before, and impact only decides the order of the ones that
+ * do. That is the conservative reading of a tie-break and it is also the only
+ * affordable one, measured rather than assumed: `cardImpact` costs 6.3 µs a
+ * card, the eligible pool reaches 31,769 on a five-colour commander, and the
+ * biggest groups hold single equal-score runs thousands of rows long.
+ * Reordering whole runs took `recommend` from 133 ms to 320 ms against doc 11's
+ * 200 ms budget. Clamped to the window it is ~60 impacts per group.
+ *
+ * It also leaves `focusGuaranteed` alone, which reads past the cut and appends
+ * supporters in `edhrecRank` order. ADR-0026 already declines to reorder for
+ * that guarantee; this does not start.
+ *
+ * Stable within equal impact, so `edhrecRank` and then name still decide and
+ * the output stays totally ordered and deterministic.
+ */
+const breakTiesByImpact = (
+  members: Scratch[],
+  limit: number,
+  impactOf: (card: Card) => CardImpact,
+): void => {
+  const window = Math.min(members.length, limit)
+  for (let start = 0; start < window;) {
+    const score = members[start]?.score
+    let end = start
+    while (end + 1 < window && members[end + 1]?.score === score) end += 1
+    if (end > start) {
+      const run = members.slice(start, end + 1)
+      run.sort((a, b) => impactOf(b.pooled.card).score - impactOf(a.pooled.card).score)
+      members.splice(start, run.length, ...run)
+    }
+    start = end + 1
+  }
+}
+
 export const recommend = (input: RecommendInput): RecommendResult => {
   const identity = new Set(input.colorIdentity)
   const curve = input.curveTarget ?? curveTarget('midrange')
@@ -457,18 +560,47 @@ export const recommend = (input: RecommendInput): RecommendResult => {
   }
   const emphasis = input.emphasis ?? NO_EMPHASIS
   const limit = input.limitPerGroup ?? 60
-  const deficits = shortfalls(findDeficits(input.counts, input.targets))
-  const deficitByRole = new Map<Role, Deficit>()
-  for (const deficit of deficits) {
-    if (deficit.dimension.kind === 'role') deficitByRole.set(deficit.dimension.role, deficit)
+
+  /*
+   * One impact per card per call (ADR-0054).
+   *
+   * `cardImpact` is 6.3 µs and three places now want it: the query filter over
+   * the whole pool, the tie-break inside a group, and the emitted item. Before
+   * this the first and third each called it and the query path paid twice for
+   * every row it emitted. The cache is per CALL rather than module-level so it
+   * cannot grow across requests and cannot outlive a change to the corpus —
+   * `cardImpact` is pure, so the only thing memoising it can affect is speed.
+   */
+  const impacts = new Map<OracleId, CardImpact>()
+  const impactOf = (card: Card): CardImpact => {
+    const held = impacts.get(card.oracleId)
+    if (held !== undefined) return held
+    const computed = cardImpact(card)
+    impacts.set(card.oracleId, computed)
+    return computed
   }
+
+  /*
+   * The gaps, worst first — which `shortfalls` already guarantees, because
+   * `findDeficits` sorts by `Math.abs(delta)` descending.
+   *
+   * EVERY DIMENSION, not only the roles (ADR-0054). This loop used to read
+   * `if (deficit.dimension.kind === 'role')` and drop the rest on the floor, so
+   * `type:creature` — the second-largest gap on an empty midrange deck, at 32
+   * short — made no group, contributed no `fills-deficit` reason and never
+   * reached the `w.fill` term. `quickbuild.ts` reads the same targets correctly
+   * and said "25 more creature" at the same moment the feed had no creature
+   * gap at all: one model, two surfaces, two different answers. Doc 19 D2 says
+   * Quickbuild is a VIEW over the recommendations and never a second scorer,
+   * which is what makes the feed the side that was wrong.
+   */
+  const deficits = shortfalls(findDeficits(input.counts, input.targets))
 
   // ---- eligibility + annotation ----
   const scratch: Scratch[] = []
   for (const pooled of input.pool) {
     if (!isEligible(pooled, input, identity)) continue
     const annotation = annotateCombos(input.comboIndex, input.accepted, pooled.card.oracleId)
-    const primary = countedRole(pooled)
     const profile = {
       produces: pooled.card.synergyProduces,
       wants: pooled.card.synergyWants,
@@ -484,7 +616,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       nearAt1: annotation.near.get(1)?.length ?? 0,
       completed: annotation.completed,
       stats: input.stats?.get(pooled.card.oracleId) ?? null,
-      deficit: deficitByRole.get(primary) ?? null,
+      deficit: deficitFor(pooled, deficits),
       matchesFilter: true,
       synergy: matches,
       emphasised: emphasisMatches(profile, matches, emphasis),
@@ -510,7 +642,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
      */
     scratch.push({
       ...s,
-      matchesFilter: input.query === null || matchesQuery(input.query, toAnnotated(s)),
+      matchesFilter: input.query === null || matchesQuery(input.query, toAnnotated(s, impactOf)),
     })
   }
 
@@ -537,14 +669,17 @@ export const recommend = (input: RecommendInput): RecommendResult => {
 
   for (const s of scratch) {
     const id = s.pooled.card.oracleId
-    const primary = countedRole(s.pooled)
     const staple = offerableStaple(s.pooled, input)
     if (s.degree >= 3) s.group = 'combo-3plus'
     else if (s.degree === 2) s.group = 'combo-2'
     else if (s.degree === 1) s.group = 'combo-1'
     else if (s.nearAt1 >= 2) s.group = 'near-combo'
     else if (staple !== null) s.group = staple
-    else if (s.deficit !== null) s.group = `fills-${primary}`
+    // `fills-<dimension>`, which is a role name or a type name. Not
+    // `dimensionKey`'s prefixed form: the group key is a wire contract the web
+    // app already reads back with `dimensionName`, and only `type:creature` is
+    // ever a target, so no type name collides with a role name today.
+    else if (s.deficit !== null) s.group = `fills-${dimensionLabel(s.deficit.dimension)}`
     else if (statsAvailable && topByType.get(s.pooled.card.types[0] ?? '')?.has(id) === true) {
       s.group = `top-${s.pooled.card.types[0] ?? 'card'}`
     } else if (statsAvailable && (s.stats?.synergy ?? 0) >= SYNERGY_THRESHOLD)
@@ -746,6 +881,7 @@ export const recommend = (input: RecommendInput): RecommendResult => {
           (b.pooled.card.edhrecRank ?? Number.MAX_SAFE_INTEGER) ||
         (a.pooled.card.name < b.pooled.card.name ? -1 : 1),
     )
+    breakTiesByImpact(members, limit, impactOf)
     /*
      * The cut, then the focus's supporters it would have dropped (ADR-0026).
      *
@@ -771,8 +907,8 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       total: members.length,
       withheldByFilter: withheld.get(key) ?? 0,
       items: [
-        ...members.slice(0, limit).map((s) => toRecommendation(s, false)),
-        ...guaranteed.map((s) => toRecommendation(s, true)),
+        ...members.slice(0, limit).map((s) => toRecommendation(s, false, impactOf)),
+        ...guaranteed.map((s) => toRecommendation(s, true, impactOf)),
       ],
     })
   }
@@ -835,7 +971,11 @@ export const recommend = (input: RecommendInput): RecommendResult => {
 const withGuarantee = (reasons: readonly Reason[]): Reason[] =>
   reasons.map((r) => (r.kind === 'keyword-synergy' ? { ...r, guaranteed: true } : r))
 
-const toRecommendation = (s: Scratch, guaranteed: boolean): Recommendation => {
+const toRecommendation = (
+  s: Scratch,
+  guaranteed: boolean,
+  impactOf: (card: Card) => CardImpact,
+): Recommendation => {
   const [first, ...rest] = guaranteed ? withGuarantee(s.reasons) : s.reasons
   if (first === undefined) {
     // Unreachable: scoring guarantees at least one reason. Kept as a throw rather
@@ -867,7 +1007,7 @@ const toRecommendation = (s: Scratch, guaranteed: boolean): Recommendation => {
      * request rather than thirty thousand.
      */
     efficiency: cardEfficiency(s.pooled.card),
-    impact: cardImpact(s.pooled.card),
+    impact: impactOf(s.pooled.card),
   }
 }
 
@@ -926,7 +1066,25 @@ const rationaleFor = (key: CandidateGroupKey): string => {
     return 'One card away from a combo, more than once — these are pairs worth adding together.'
   if (key.startsWith('fills-')) return 'Directly closes a gap against your composition targets.'
   if (key.startsWith('top-')) return 'Most played for this commander, by card type.'
-  if (key === 'high-synergy') return 'Played far more in this commander than in decks generally.'
+  /*
+   * The same mistake the `other` branch below already carries a note about,
+   * one line up, and it survived the fix that was made there (ADR-0054).
+   *
+   * "Played far more in this commander than in decks generally" is a claim
+   * about how often OTHER PEOPLE play a card. ADR-0008 removed the only source
+   * this product had for that, `stats` is null in production, and the group is
+   * therefore filled entirely by `MECHANICAL_SYNERGY_THRESHOLD` — the
+   * membership chain's statistical branch above it can never fire. The
+   * playtest saw the consequence directly: "High synergy 398", full of lands
+   * whose own reasons read "benefits from your untap". Every row already said
+   * what it was doing there; the heading over them said something else.
+   *
+   * The replacement says what the group IS rather than only avoiding what it
+   * is not — a heading that dodges is the same P4 failure one step quieter —
+   * and it points at the per-row reasons, which are the evidence.
+   */
+  if (key === 'high-synergy')
+    return 'Mechanically matched to what your deck already does or wants — each row names the event. Not a measure of how often anyone plays them.'
   // `other`, the catch-all. It used to say "Widely played and legal in your
   // colours" under the heading "Staples", which with `stats: null` was every
   // eligible card in the deck's identity — a claim about popularity made over a

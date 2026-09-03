@@ -1,4 +1,5 @@
 import type { Card } from './card.js'
+import { CREATES_ANYONE, CREATES_FOR_YOU } from './token-subject.js'
 import rawVocabulary from './semantic-vocabulary.data.json' with { type: 'json' }
 
 /**
@@ -344,9 +345,18 @@ const stripOwnName = (name: string, text: string): string => {
  * It stops at a comma as well as a full stop, because past the comma the
  * sentence has moved on: "create a 2/1 Villain token with menace, THEN
  * creatures you control get +1/+0" is a token clause followed by an anthem.
+ *
+ * TWO of them, and the pair is ADR-0054 (`token-subject.ts`). `TOKEN_CLAUSE`
+ * is every creation clause and is what gets STRIPPED; `YOUR_TOKEN_CLAUSE` is
+ * the subset whose tokens are yours and is what gets PRODUCED from. Hunted
+ * Troll — "target opponent creates four 1/1 blue Faerie creature tokens with
+ * flying" — must claim neither `subtype:faerie` nor `ability:flying`, and must
+ * still have the clause taken out of the text before the payoff rules read it,
+ * or refusing to claim the Faeries would turn it into a card that WANTS them.
  */
-const TOKEN_CLAUSE =
-  /\bcreates?\b[^.\n]{0,120}?\btokens?\b(?:\s+(?:with|that has|that have)\b[^.,\n]{0,80})?/gi
+const CLAUSE_TAIL = String.raw`[^.\n]{0,120}?\btokens?\b(?:\s+(?:with|that has|that have)\b[^.,\n]{0,80})?`
+const TOKEN_CLAUSE = new RegExp(`${CREATES_ANYONE}${CLAUSE_TAIL}`, 'gi')
+const YOUR_TOKEN_CLAUSE = new RegExp(`${CREATES_FOR_YOU}${CLAUSE_TAIL}`, 'gi')
 
 /**
  * "This Vehicle", "that Saga" — a card naming its own type line.
@@ -518,8 +528,10 @@ export const deriveSemanticTokens = (
     const plain = stripOwnName(card.name, stripReminder(face))
 
     // Producers first, because the clause they read is then taken out of the
-    // text the want side sees.
-    for (const clause of plain.match(TOKEN_CLAUSE) ?? []) {
+    // text the want side sees. `YOUR_TOKEN_CLAUSE` rather than `TOKEN_CLAUSE`:
+    // a subtype you handed to an opponent is not one this deck causes to exist
+    // for itself (ADR-0054).
+    for (const clause of plain.match(YOUR_TOKEN_CLAUSE) ?? []) {
       for (const word of capitalisedWords(clause)) {
         const subtype = subtypeByWord.get(word)
         if (subtype !== undefined) produces.add(subtypeTag(subtype))
@@ -559,7 +571,7 @@ export const deriveSemanticTokens = (
     for (const keyword of abilities.keys()) {
       const grant = new RegExp(
         `\\b(?:gains?|have|has)\\b[^.\\n]{0,45}\\b${escape(keyword)}\\b` +
-          `|\\bcreates?\\b[^.\\n]{0,120}?\\btokens?\\b[^.\\n]{0,60}?\\bwith\\b[^.\\n]{0,60}?\\b${escape(keyword)}\\b`,
+          `|${CREATES_FOR_YOU}[^.\\n]{0,120}?\\btokens?\\b[^.\\n]{0,60}?\\bwith\\b[^.\\n]{0,60}?\\b${escape(keyword)}\\b`,
         'i',
       )
       if (grant.test(plain)) produces.add(abilityTag(keyword))

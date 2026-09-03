@@ -34,17 +34,55 @@ export type Role =
 /**
  * Precedence for choosing a card's `primaryRole` when it holds several.
  *
- * Composition counting needs exactly one role per card or the totals double-count
- * (Cultivate is ramp *and* land-fetch; Beast Within is spot-removal *and* makes a
- * token). Filtering still sees the full role set — only counting uses this.
+ * Composition counting needs exactly one role per card or the totals
+ * double-count (Cultivate is ramp *and* land-fetch; Beast Within is
+ * spot-removal *and* makes a token). Filtering still sees the full role set —
+ * only counting uses this. ADR-0031 makes counting and OFFERING the same
+ * question, so this list also decides which `fills-<role>` heading a card is
+ * shown under, and therefore what the product claims a card will do for a deck.
  *
- * Ordered most- to least-specific: a card that sacrifices creatures is better
- * described as a sac outlet than as "synergy", and `land` wins outright because
- * the land count is the number people check first.
+ * THE PRINCIPLE (ADR-0054). *If this card were cut, which of its jobs would the
+ * deck have to go and replace?* That is one question with one answer per pair,
+ * and it is what a composition target means: the meter says "you are four short
+ * of removal", so the card offered to close it has to be one that answers
+ * something.
+ *
+ * The list used to open `land, ramp, sac-outlet, token-maker, tutor` and only
+ * then reach the answers, and the top of it had never been argued — the comment
+ * this replaces made its case entirely about the answer block. Read against the
+ * question above, three of those four positions are wrong, and 345
+ * commander-legal cards were counted under a job their deck was not short of:
+ *
+ *   - A card that ANSWERS something and also leaves a body, a Treasure or a
+ *     land behind is bought for the answer. The rider is compensation the card
+ *     pays for its own effect: Pongify is removal that leaves an Ape, Deadly
+ *     Derision is removal that leaves a Treasure, Kayla's Command is a modal
+ *     spell whose "search for a basic Plains" mode is not why it is in a deck.
+ *     So `token-maker` (210 cards), `ramp` (99) and `tutor` (12) move BELOW the
+ *     answer block. `role.ts` already named Beast Within as "spot-removal *and*
+ *     makes a token" and then ordered it the other way round.
+ *
+ *   - `sac-outlet` does NOT move, and the difference is the whole reason this
+ *     is a judgement rather than a sort. Its removal is not a rider — it is the
+ *     outlet. Goblin Bombardment, Blasting Station, Attrition and Stronghold
+ *     Assassin spend one of your own creatures to kill something, so the two
+ *     roles are one ability, and the job with no substitute is the outlet: a
+ *     deck has many ways to kill a creature and few repeatable ways to make one
+ *     of its own die on demand. 54 cards stay where they are.
+ *
+ *   - `ramp` falls below `sac-outlet` as a consequence, and that is a
+ *     correction rather than a side effect: Ashnod's Altar, Phyrexian Altar,
+ *     Krark-Clan Ironworks and Skirk Prospector were all counted as RAMP. 26
+ *     cards, every one of them named for the outlet.
+ *
+ * `land` still wins outright, and it is barely a precedence question —
+ * `deriveRoles` short-circuits every land before this list is consulted — but
+ * it leads because the land count is the number people check first.
  *
  * The answer block — board-wipe, graveyard-hate, counterspell, spot-removal,
- * bounce — is ordered by how completely the card answers something, and three of
- * those five positions were argued in ADR-0037:
+ * bounce — moved as a block and its INTERNAL order is untouched. It is ordered
+ * by how completely the card answers something, and three of those five
+ * positions were argued in ADR-0037:
  *
  *   - `graveyard-hate` moved ABOVE `spot-removal`. It was below, and every one
  *     of the 107 cards holding it also held spot-removal (because "exile target
@@ -56,19 +94,23 @@ export type Role =
  *   - `bounce` sits BELOW `spot-removal`: bounce is the weaker answer, since the
  *     permanent comes back, so a card that does both is better described by the
  *     one that does not.
+ *
+ * `stax` closes the answer band, where it already sat relative to `bounce`.
+ * Below the band the order is unchanged: ramp, then the engines it feeds, then
+ * the roles that describe a card's shape rather than its job.
  */
 export const ROLE_PRECEDENCE: readonly Role[] = [
   'land',
-  'ramp',
   'sac-outlet',
-  'token-maker',
-  'tutor',
   'board-wipe',
   'graveyard-hate',
   'counterspell',
   'spot-removal',
   'bounce',
   'stax',
+  'ramp',
+  'token-maker',
+  'tutor',
   'recursion',
   'protection',
   'equipment',

@@ -216,10 +216,26 @@ Role assignment is **derived and imperfect**. The pipeline, in precedence order:
    `typeLine` (e.g. `/^Add \{/m` → `ramp`; `/[Dd]estroy target/` → `spot-removal`).
 
 A card may hold several roles (Cultivate is `ramp` + `land`-fetch; Beast Within is
-`spot-removal`). Composition counting must therefore either allow double-counting
-or assign a primary role — **decision: assign a `primaryRole` for counting, keep
-the full set for filtering.** The primary role is the first match in a fixed
-precedence order defined in `packages/domain/src/roles/precedence.ts`.
+`spot-removal` and makes a token). Composition counting must therefore either
+allow double-counting or assign a primary role — **decision: assign a
+`primaryRole` for counting, keep the full set for filtering.** The primary role
+is the first match in a fixed precedence order, `ROLE_PRECEDENCE` in
+`packages/domain/src/role.ts`.
+
+**That order answers one question (ADR-0054): if this card were cut, which of its
+jobs would the deck have to go and replace?** It runs `land`, `sac-outlet`, then
+the answer block (`board-wipe`, `graveyard-hate`, `counterspell`,
+`spot-removal`, `bounce`, `stax`), then the engines (`ramp`, `token-maker`,
+`tutor`, `recursion`), then the roles that describe a card's shape. A card that
+answers something and also leaves a body, a Treasure or a land behind is bought
+for the answer — the rider is compensation the card pays for its own effect —
+which is why Beast Within, Pongify and Deadly Derision count as removal.
+`sac-outlet` stays above the answers because its removal is not a rider: it *is*
+the outlet.
+
+The same precedence decides which `fills-<dimension>` heading a card is offered
+under (ADR-0031, amended by ADR-0054 §3 to read type dimensions as well as
+roles).
 
 Rule 3 will be wrong often enough to matter. Treat the curated table as a
 first-class, growing artifact, and expose "this card's role is wrong" as a

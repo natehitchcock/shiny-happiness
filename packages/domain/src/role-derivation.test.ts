@@ -190,6 +190,75 @@ describe('primaryRole', () => {
     expect(primaryRole(['bounce', 'spot-removal'])).toBe('spot-removal')
     expect(primaryRole(['bounce', 'draw'])).toBe('bounce')
   })
+
+  describe('the answer band outranks what a card leaves behind (ADR-0054)', () => {
+    it('counts removal that leaves a body as removal', () => {
+      // Rapid Hybridization, Pongify and Beast Within. `role.ts`'s own comment
+      // named Beast Within as "spot-removal AND makes a token" and then ordered
+      // it the other way, so none of the three ever counted against the
+      // spot-removal target they are the best answer to.
+      expect(primaryRole(['spot-removal', 'token-maker'])).toBe('spot-removal')
+      expect(primaryRole(['token-maker', 'board-wipe'])).toBe('board-wipe')
+      expect(primaryRole(['token-maker', 'counterspell'])).toBe('counterspell')
+      expect(primaryRole(['token-maker', 'graveyard-hate'])).toBe('graveyard-hate')
+      expect(primaryRole(['token-maker', 'bounce'])).toBe('bounce')
+    })
+
+    it('counts removal that leaves a Treasure or a land as removal', () => {
+      // The same shape one rider over: Deadly Derision, Contract Killing,
+      // Crack Open and Deathsprout are removal that pays you back a little,
+      // and a deck short of ramp does not fix it with Deadly Derision.
+      expect(primaryRole(['ramp', 'spot-removal'])).toBe('spot-removal')
+      expect(primaryRole(['ramp', 'board-wipe'])).toBe('board-wipe')
+      expect(primaryRole(['ramp', 'counterspell'])).toBe('counterspell')
+    })
+
+    it('counts a modal spell whose land mode is not why it is played', () => {
+      // Kayla's Command, Jeskai Monument, Nurturing Bristleback. Their `tutor`
+      // comes from landcycling reminder text, which is a fetch and not a
+      // threat — and either way it is not the job the deck would replace.
+      expect(primaryRole(['tutor', 'spot-removal'])).toBe('spot-removal')
+      expect(primaryRole(['tutor', 'board-wipe'])).toBe('board-wipe')
+    })
+
+    it('does NOT move the sacrifice outlet, and that is the argued half', () => {
+      // Goblin Bombardment, Blasting Station, Attrition, Stronghold Assassin.
+      // Their removal is not a rider — it IS the outlet, one ability wearing
+      // two roles — and a deck has many ways to kill a creature and few
+      // repeatable ways to make one of its own die on demand. 54 cards.
+      expect(primaryRole(['sac-outlet', 'spot-removal'])).toBe('sac-outlet')
+      expect(primaryRole(['sac-outlet', 'board-wipe'])).toBe('sac-outlet')
+      expect(primaryRole(['sac-outlet', 'counterspell'])).toBe('sac-outlet')
+    })
+
+    it('counts an altar as an outlet rather than as ramp', () => {
+      // Ashnod's Altar, Phyrexian Altar, Krark-Clan Ironworks, Skirk
+      // Prospector. 26 cards, and every one of them is named for the outlet.
+      expect(primaryRole(['ramp', 'sac-outlet'])).toBe('sac-outlet')
+    })
+
+    it('leaves ramp above the engine roles it used to sit beside', () => {
+      // Only the answer band moved past them. Cultivate is still ramp.
+      expect(primaryRole(['ramp', 'token-maker'])).toBe('ramp')
+      expect(primaryRole(['ramp', 'draw'])).toBe('ramp')
+      expect(primaryRole(['ramp', 'recursion'])).toBe('ramp')
+      expect(primaryRole(['token-maker', 'tutor'])).toBe('token-maker')
+    })
+
+    it('keeps the answer block in ADR-0037 order', () => {
+      // The band moved; its internal order did not.
+      expect(primaryRole(['board-wipe', 'graveyard-hate'])).toBe('board-wipe')
+      expect(primaryRole(['graveyard-hate', 'spot-removal'])).toBe('graveyard-hate')
+      expect(primaryRole(['counterspell', 'spot-removal'])).toBe('counterspell')
+      expect(primaryRole(['spot-removal', 'bounce'])).toBe('spot-removal')
+      expect(primaryRole(['bounce', 'stax'])).toBe('bounce')
+    })
+
+    it('keeps land first, whatever else the card does', () => {
+      expect(primaryRole(['spot-removal', 'land'])).toBe('land')
+      expect(primaryRole(['sac-outlet', 'land'])).toBe('land')
+    })
+  })
 })
 
 /**
@@ -583,5 +652,107 @@ describe('a sacrifice outlet that names a creature TYPE (ADR-0047)', () => {
     // Sanctum — keep the role the deck counts them under. Measured: the rule
     // reaches 95 cards and moves 92.
     expect(rolesOf('Land', '{T}, Sacrifice a Bird: Draw a card.')).toEqual(['land'])
+  })
+})
+
+describe('a card cleaning up after itself is not a board wipe (ADR-0054)', () => {
+  it('refuses a card that destroys the tokens it made', () => {
+    // Latent until the answer block moved above `token-maker`: all nine of
+    // these were counted as token makers, which they are, and the wrong role
+    // underneath was invisible.
+    expect(
+      rolesOf(
+        'Enchantment',
+        'When this enchantment enters, create six 1/1 green Saproling creature tokens.\nWhen this enchantment leaves the battlefield, destroy all tokens created with this enchantment.',
+      ),
+    ).not.toContain('board-wipe')
+    expect(
+      rolesOf(
+        'Creature — Human',
+        'When this creature enters, create three 0/1 black Serf creature tokens.\nWhen this creature leaves the battlefield, exile all Serf tokens.',
+      ),
+    ).not.toContain('board-wipe')
+  })
+
+  it('keeps a sweep that takes everyone’s tokens', () => {
+    // Aether Snap. The bare clause is the whole distinction: it is not
+    // cleaning up after itself, it is answering a token deck.
+    expect(
+      rolesOf('Sorcery', 'Remove all counters from all permanents and players. Exile all tokens.'),
+    ).toContain('board-wipe')
+  })
+
+  it('keeps a real wipe that merely mentions tokens later', () => {
+    // Elspeth Tirel names tokens as an EXCEPTION, forty characters away.
+    expect(
+      rolesOf(
+        'Legendary Planeswalker — Elspeth',
+        'Destroy all other permanents except for lands and tokens.',
+      ),
+    ).toContain('board-wipe')
+  })
+})
+
+describe('token-maker asks whose tokens they are (ADR-0054)', () => {
+  it('refuses a clause that names an opponent as the creator', () => {
+    // The role feeds the composition meters, so `token-maker` is a claim about
+    // how many token makers THIS deck holds. Hunted Horror makes none of them.
+    expect(
+      rolesOf(
+        'Creature — Horror',
+        'Trample\nWhen this creature enters, target opponent creates two 3/3 green Centaur creature tokens.',
+      ),
+    ).not.toContain('token-maker')
+  })
+
+  it('refuses the copy clause on the same ground', () => {
+    expect(
+      rolesOf(
+        'Creature — Elemental',
+        "When this creature enters, if it's not a token, each opponent creates a token that's a copy of it.",
+      ),
+    ).not.toContain('token-maker')
+  })
+
+  it('still reads the imperative and the symmetric clause', () => {
+    expect(rolesOf('Sorcery', 'Create a 1/1 green Squirrel creature token.')).toContain(
+      'token-maker',
+    )
+    expect(
+      rolesOf('Sorcery', 'Each player creates X 1/1 white Soldier creature tokens.'),
+    ).toContain('token-maker')
+  })
+
+  it('reads the clause and not the card', () => {
+    // Rasputin makes Knights for himself and Goblins for everyone else. He is
+    // a token maker.
+    expect(
+      rolesOf(
+        'Legendary Creature — Human Wizard',
+        'When Rasputin enters, put a dream counter on it for each opponent you have. Each opponent creates a 1/1 red Goblin creature token.\n{T}, Remove a dream counter from Rasputin: Create a 2/2 white Knight creature token with protection from red.',
+      ),
+    ).toContain('token-maker')
+  })
+
+  it('reads an opponent in the object position as the attack target', () => {
+    // "attacks one of your opponents, that attacking player creates" — the
+    // attacker is usually you, and the tokens are why the card is played.
+    expect(
+      rolesOf(
+        'Creature — Bird Cleric',
+        "Flying\nWhenever a player attacks one of your opponents, that attacking player creates a tapped 2/1 white and black Inkling creature token with flying that's attacking that opponent.",
+      ),
+    ).toContain('token-maker')
+  })
+
+  it('leaves the removal shell a token maker, which is measured not assumed', () => {
+    // "Its controller creates" was tried and refused — 54 further cards, at
+    // least 14 of which hand the token to you. See `token-subject.ts`.
+    expect(
+      rolesOf(
+        'Instant',
+        'Destroy target permanent. Its controller creates a 3/3 green Beast creature token.',
+      ),
+    ).toContain('token-maker')
   })
 })

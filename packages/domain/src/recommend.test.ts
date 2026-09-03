@@ -3,7 +3,7 @@ import { compositionTargets } from './archetype-targets.js'
 import type { Card, CardType } from './card.js'
 import type { Combo } from './combo.js'
 import { buildComboIndex } from './combo-index.js'
-import { countComposition } from './composition-analysis.js'
+import { countComposition, findDeficits, shortfalls } from './composition-analysis.js'
 import type { Deck } from './deck.js'
 import { comboId, deckId, oracleId, printingId } from './ids.js'
 import { parseQuery } from './query/parse.js'
@@ -20,8 +20,19 @@ const card = (name: string, over: Partial<Card> = {}): Card => ({
   manaValue: 2,
   colorIdentity: ['R'],
   colors: ['R'],
-  typeLine: 'Creature — Goblin',
-  types: ['creature'] as readonly CardType[],
+  /*
+   * NOT a creature by default, and that is deliberate as of ADR-0054.
+   *
+   * `type:creature` is a composition target, and an empty midrange deck is 32
+   * short of it — so once the feed started reading type dimensions, every
+   * fixture that was incidentally a Goblin landed in `fills-creature` and 28
+   * tests about eligibility, ordering, the cut and the focus guarantee started
+   * asserting against a heading they were never about. The default is now a
+   * type no target names, so a test lands in a `fills-` group only when it says
+   * it wants to. The tests that ARE about creatures set the type themselves.
+   */
+  typeLine: 'Instant',
+  types: ['instant'] as readonly CardType[],
   oracleText: '',
   power: null,
   toughness: null,
@@ -332,6 +343,87 @@ describe('deficit groups', () => {
       }),
     )
   })
+
+  /*
+   * A TYPE gap is a gap (ADR-0054).
+   *
+   * `recommend` built its deficit index with `if (deficit.dimension.kind ===
+   * 'role')` and dropped every type dimension on the floor, so `type:creature`
+   * — the second-largest gap on an empty midrange deck, at 32 short — could
+   * never make a group, never contribute a `fills-deficit` reason and never
+   * reach the `w.fill` score term. `quickbuild.ts` reads the same targets
+   * correctly and said "25 more creature", so one model was telling two
+   * surfaces different things about one gap. Doc 19 D2 says Quickbuild is a
+   * view over the recommendations and never a second scorer, which makes the
+   * feed the one that was wrong.
+   */
+  it('routes a creature into fills-creature when the deck is short of creatures', () => {
+    const result = recommend(
+      baseInput({
+        pool: [pooled('bear', { card: card('bear', { types: ['creature'] }) })],
+      }),
+    )
+    expect(groupKeys(result)).toContain('fills-creature')
+    expect(result.groups.find((g) => g.key === 'fills-creature')!.label).toMatch(/creature/)
+  })
+
+  it('carries the type gap into the reason and the score', () => {
+    const result = recommend(
+      baseInput({
+        pool: [pooled('bear', { card: card('bear', { types: ['creature'] }) })],
+      }),
+    )
+    const rec = result.groups.flatMap((g) => g.items)[0]!
+    expect(rec.reasons).toContainEqual(
+      expect.objectContaining({
+        kind: 'fills-deficit',
+        dimension: { kind: 'type', type: 'creature' },
+      }),
+    )
+    // `fillsRoleDeficit` stays a ROLE, and is null here. A type is not a role,
+    // and inventing one would put a name in the field that no meter carries.
+    expect(rec.fillsRoleDeficit).toBeNull()
+  })
+
+  it('offers a card under its ROLE gap when it has both, even though the type gap is bigger', () => {
+    /*
+     * The more specific claim about this deck wins the card (P4) — the same
+     * ruling the emission-order note makes about a staple that finishes a
+     * combo. A mana dork on an empty midrange deck is 31 short of creatures
+     * and 9 short of ramp, and "this is a creature" is a sentence every
+     * creature in the format satisfies equally.
+     *
+     * Worst-first was written and rejected: a type gap is always the biggest,
+     * so `fills-ramp` would have held no mana dorks and `fills-spot-removal`
+     * no creatures that answer permanents.
+     */
+    const dork = card('dork', { primaryRole: 'ramp', types: ['creature'] })
+    const result = recommend(baseInput({ pool: [pooled('dork', { roles: ['ramp'], card: dork })] }))
+
+    const gaps = shortfalls(
+      findDeficits(baseInput().counts, compositionTargets('midrange', null, { bracket: 3 })),
+    )
+    const creature = gaps.find((d) => d.dimension.kind === 'type')!
+    const ramp = gaps.find((d) => d.dimension.kind === 'role' && d.dimension.role === 'ramp')!
+    // The premise: the type gap really is the larger one.
+    expect(Math.abs(creature.delta)).toBeGreaterThan(Math.abs(ramp.delta))
+
+    expect(groupKeys(result)).toContain('fills-ramp')
+    expect(groupKeys(result)).not.toContain('fills-creature')
+  })
+
+  it('does not put a non-creature in the creature gap', () => {
+    const result = recommend(
+      baseInput({
+        pool: [
+          pooled('bolt', {
+            card: card('bolt', { types: ['instant'], typeLine: 'Instant', primaryRole: 'synergy' }),
+          }),
+        ],
+      }),
+    )
+    expect(groupKeys(result)).not.toContain('fills-creature')
+  })
 })
 
 describe('every recommendation explains itself (pillar P4)', () => {
@@ -393,6 +485,60 @@ describe('determinism and ordering', () => {
     const ids = idsIn(recommend(input), 'other')
     expect(ids).toEqual([oracleId('c'), oracleId('a'), oracleId('b')])
   })
+
+  /*
+   * Impact as a TIE-BREAK, not a score term (ADR-0054).
+   *
+   * Measured over four real commanders: 2,547 of the 2,617 emitted rows —
+   * 97.3% — sit inside a run of cards with the identical score, 147 of the 182
+   * runs hold cards whose impact differs by more than half a point, and 2,460
+   * rows reorder. `Dwynen's Elite` (impact 0.5) and `Lluwen` (impact 11.52)
+   * tied at 1.4597 and were separated by nothing the product argues for.
+   *
+   * A tie-break cannot distort the ranking, because it is only ever consulted
+   * where the ranking has already said the two cards are equal. That is why
+   * this is a tie-break and not a term in the sum: a term would move cards past
+   * cards the score genuinely separates, which is a different and much larger
+   * claim about what the product recommends.
+   */
+  it('breaks an exact score tie by impact, ahead of the Scryfall rank', () => {
+    const wipe = card('wipe', { edhrecRank: 900, oracleText: 'Destroy all creatures.' })
+    const cantrip = card('cantrip', { edhrecRank: 5, oracleText: 'Draw a card.' })
+    const result = recommend(
+      baseInput({
+        // Same roles, so neither reaches a `fills-` group by a different route
+        // and the two scores are identical.
+        pool: [pooled('cantrip', { card: cantrip }), pooled('wipe', { card: wipe })],
+      }),
+    )
+    const items = result.groups.find((g) => g.key === 'other')!.items
+    expect(items.map((i) => i.score)).toEqual([items[0]!.score, items[0]!.score])
+    expect(items[0]!.impact!.score).toBeGreaterThan(items[1]!.impact!.score)
+    expect(items.map((i) => i.oracleId)).toEqual([oracleId('wipe'), oracleId('cantrip')])
+  })
+
+  it('never lets impact beat the score itself', () => {
+    // The whole safety of a tie-break. A low-impact card the score puts first
+    // stays first.
+    const wipe = card('wipe', { oracleText: 'Destroy all creatures.' })
+    const cantrip = card('cantrip', { oracleText: 'Draw a card.' })
+    const result = recommend(
+      baseInput({
+        pool: [
+          pooled('wipe', { card: wipe, bracketFlags: ['game-changer'] }),
+          pooled('cantrip', { card: cantrip }),
+        ],
+      }),
+    )
+    const items = result.groups.find((g) => g.key === 'other')!.items
+    expect(items[0]!.score).toBeGreaterThan(items[1]!.score)
+    expect(items.map((i) => i.oracleId)).toEqual([oracleId('cantrip'), oracleId('wipe')])
+  })
+
+  it('still falls through to rank and name when impact ties too', () => {
+    const ids = idsIn(recommend(input), 'other')
+    expect(ids).toEqual([oracleId('c'), oracleId('a'), oracleId('b')])
+  })
 })
 
 describe('degradation when statistics are unavailable (doc 05 §5.3)', () => {
@@ -435,7 +581,9 @@ describe('query filtering (doc 13 §13.1)', () => {
   const index = buildComboIndex([combo('c1', ['creature-combo', 'A'])])
   const input = baseInput({
     pool: [
-      pooled('creature-combo'),
+      pooled('creature-combo', {
+        card: card('creature-combo', { typeLine: 'Creature — Goblin', types: ['creature'] }),
+      }),
       pooled('enchantment-combo', {
         card: card('enchantment-combo', { typeLine: 'Enchantment', types: ['enchantment'] }),
       }),
@@ -1051,7 +1199,11 @@ describe('the focus guarantee', () => {
     // guarantee reaching past the filter would make the search box a lie.
     const result = overflowing({
       emphasis: ['untap'],
-      query: ast('t:creature'),
+      // The type the plain cards carry, so the query keeps them and withholds
+      // the three artifact supporters. (It read `t:creature` while the fixture
+      // default was a Goblin; the default is now a type no target names, see
+      // `card` above.)
+      query: ast('t:instant'),
       pool: [
         ...plain(),
         supporter('sup-a', 900, { typeLine: 'Artifact', types: ['artifact'] }),
@@ -1194,6 +1346,35 @@ describe('staples lead, then staple lands, then combos, then the rest', () => {
     expect(rest.label).toBe('Everything else')
     expect(rest.rationale).not.toContain('Widely played')
     expect(idsIn(result, 'staple')).toEqual([])
+  })
+
+  it('does not claim a popularity statistic over the high-synergy group either', () => {
+    /*
+     * The identical mistake, one line up from the `other` branch that already
+     * carries the note about it (ADR-0054). "Played far more in this commander
+     * than in decks generally" is a claim about how often other people play a
+     * card, and ADR-0008 removed the only source this product had for that —
+     * `stats` is null in production, so the group is filled entirely by
+     * `MECHANICAL_SYNERGY_THRESHOLD`. The playtest saw "High synergy 398" full
+     * of lands whose reasons read "benefits from your untap": mechanically
+     * matched, and nothing whatever to do with popularity.
+     */
+    const wants: DeckSynergy = {
+      produces: new Map([['untap', COMMANDER_WEIGHT]]),
+      wants: new Map(),
+      has: new Map(),
+    }
+    const result = recommend(
+      baseInput({
+        pool: [pooled('payoff', { card: card('payoff', { synergyWants: ['untap'] }) })],
+        deckSynergy: wants,
+      }),
+    )
+    const group = result.groups.find((g) => g.key === 'high-synergy')!
+    expect(group.rationale).not.toMatch(/played|popular|more often|generally/i)
+    // And it says what the group IS, rather than merely not saying what it is
+    // not — a heading with nothing under it is the same P4 failure.
+    expect(group.rationale).toMatch(/mechanic/i)
   })
 
   it('never offers a staple outside the deck colour identity', () => {

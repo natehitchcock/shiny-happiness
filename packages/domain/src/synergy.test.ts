@@ -1514,7 +1514,7 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
       // count rather than softened to `toContain`: a vocabulary that grows
       // without anyone noticing is how two tags come to mean the same event.
       expect(SYNERGY_TAGS).toContain('damage')
-      // The count is 24 since ADR-0048 added `opponent-mill` and `extra-turns`;
+      // The count is 26 since ADR-0054 added `ritual` and `creature-cast`;
       // this card was the twenty-first and still is, because the list is
       // append-only (the ORDER is a persisted contract — see `semantic-emphasis`).
       // `EVENT_TAGS` rather than `SYNERGY_TAGS` since ADR-0046, and the reason
@@ -1523,7 +1523,7 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
       // this is what keeps anyone from adding a twenty-third without saying so.
       // `SYNERGY_TAGS` is that list plus the generated families, whose length is
       // a fact about the corpus rather than a decision anyone made here.
-      expect(EVENT_TAGS).toHaveLength(24)
+      expect(EVENT_TAGS).toHaveLength(26)
     })
 
     it('is spelled as an event, not as an archetype', () => {
@@ -2629,7 +2629,7 @@ describe('deriveSynergy — a land that is also a creature (ADR-0047)', () => {
   describe('the tag', () => {
     it('is in the vocabulary, and is the twenty-second', () => {
       expect(SYNERGY_TAGS).toContain('land-creature')
-      expect(EVENT_TAGS).toHaveLength(24)
+      expect(EVENT_TAGS).toHaveLength(26)
     })
 
     it('is spelled as an event rather than as the deck that plays it', () => {
@@ -2829,5 +2829,436 @@ describe('deriveSynergy — a land that is also a creature (ADR-0047)', () => {
       expect(interactsWith('land-creature')).not.toContain('token')
       expect(interactsWith('land-creature')).not.toContain('sacrifice-fodder')
     })
+  })
+})
+
+describe('synergyMatches — which half of a lord is the informative half (ADR-0054)', () => {
+  /*
+   * An Elf lord in an Elf deck was always "enables", never "payoff".
+   *
+   * `synergyMatches` pushed the `enables` loop before the `payoff` loop and
+   * then sorted by weight alone; `Array.prototype.sort` is stable, so an exact
+   * tie kept the first-pushed. `recommend` emits exactly one reason
+   * (`topEmphasis ?? s.synergy[0]`), so every lord showed the weaker half.
+   * Measured on a real Elf deck: all 42 Elf-typed candidates read "enables
+   * your emphasised subtype:elf" and all 12 payoff reasons went to non-Elf
+   * cards. Joraga Warcaller was described as another body rather than as the
+   * lord it is.
+   *
+   * The tie is exact by construction rather than by accident: a commander who
+   * IS an Elf and WANTS Elves contributes `COMMANDER_WEIGHT` to `has` and the
+   * same to `wants`, so `deck.wants` and `deck.has` agree on the tag.
+   */
+  const ELF_DECK: DeckSynergy = {
+    produces: new Map(),
+    wants: new Map<SynergyTag, number>([['subtype:elf', COMMANDER_WEIGHT]]),
+    has: new Map<SynergyTag, number>([['subtype:elf', COMMANDER_WEIGHT]]),
+  }
+
+  it('calls a lord a payoff rather than another body', () => {
+    const lord: SynergyProfile = {
+      produces: [],
+      wants: ['subtype:elf'],
+      has: ['subtype:elf'],
+    }
+    const [first] = synergyMatches(lord, ELF_DECK)
+
+    expect(first).toEqual({ tag: 'subtype:elf', direction: 'payoff', weight: COMMANDER_WEIGHT })
+  })
+
+  it('still credits both halves, because the score counts both', () => {
+    const lord: SynergyProfile = { produces: [], wants: ['subtype:elf'], has: ['subtype:elf'] }
+    const matches = synergyMatches(lord, ELF_DECK)
+
+    expect(matches.map((m) => m.direction).sort()).toEqual(['enables', 'payoff'])
+  })
+
+  it('leaves a plain body alone — it has only the one reading', () => {
+    const body: SynergyProfile = { produces: [], wants: [], has: ['subtype:elf'] }
+    const [first] = synergyMatches(body, ELF_DECK)
+
+    expect(first?.direction).toBe('enables')
+  })
+
+  it('never lets the tie-break beat a real weight difference', () => {
+    // The weights already say which side the deck needs more of. A deck that
+    // wants a tag far more than it supplies it must still hear "enables".
+    const deck: DeckSynergy = {
+      produces: new Map(),
+      wants: new Map<SynergyTag, number>([['untap', 9]]),
+      has: new Map<SynergyTag, number>([['untap', 1]]),
+    }
+    const engine: SynergyProfile = { produces: ['untap'], wants: ['untap'], has: [] }
+    const [first] = synergyMatches(engine, deck)
+
+    expect(first).toEqual({ tag: 'untap', direction: 'enables', weight: 9 })
+  })
+
+  it('does not let a payoff on one tag displace an enable on another', () => {
+    /*
+     * The restriction, and it is measured rather than cautious. A global
+     * direction tie-break moved 87 rows across four real decks instead of 48;
+     * the extra 39 were cross-tag, and they read worse — a sac outlet in a
+     * Meren deck lost "enables your creature-death" to "pays off your Humans".
+     * Two readings of ONE tag are two ways of saying one thing and one of them
+     * is more informative. Two different tags are two different claims.
+     */
+    const deck: DeckSynergy = {
+      produces: new Map<SynergyTag, number>([['subtype:human', 4]]),
+      wants: new Map<SynergyTag, number>([['creature-death', 4]]),
+      has: new Map(),
+    }
+    const outlet: SynergyProfile = {
+      produces: ['creature-death'],
+      wants: ['subtype:human'],
+      has: [],
+    }
+    const [first] = synergyMatches(outlet, deck)
+
+    expect(first).toEqual({ tag: 'creature-death', direction: 'enables', weight: 4 })
+  })
+
+  it('keeps theme last on a tie, because it is the weakest reading', () => {
+    const deck: DeckSynergy = {
+      produces: new Map<SynergyTag, number>([['token', 5]]),
+      wants: new Map<SynergyTag, number>([['landfall', 25]]),
+      has: new Map(),
+    }
+    // `token` pays off at 5; `landfall` is a shared want at 25 * 0.2 = 5.
+    const card: SynergyProfile = { produces: [], wants: ['token', 'landfall'], has: [] }
+    const matches = synergyMatches(card, deck)
+
+    expect(matches.map((m) => m.weight)).toEqual([5, 5])
+    expect(matches.map((m) => m.direction)).toEqual(['payoff', 'theme'])
+  })
+})
+
+describe('deriveSynergy — whose tokens they are (ADR-0054)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  // The reported card. A land that hands a Spirit to somebody else.
+  const FORBIDDEN_ORCHARD = derive(
+    'Forbidden Orchard',
+    'Land',
+    '{T}: Add {C}.\n{T}: Add one mana of any color. Whenever you tap this land for mana, target opponent creates a 1/1 colorless Spirit creature token.',
+  )
+  const HUNTED_HORROR = derive(
+    'Hunted Horror',
+    'Creature — Horror',
+    'Trample\nWhen this creature enters, target opponent creates two 3/3 green Centaur creature tokens.',
+  )
+  const CHATTER_OF_THE_SQUIRREL = derive(
+    'Chatter of the Squirrel',
+    'Sorcery',
+    'Create a 1/1 green Squirrel creature token.\nFlashback {2}{G}',
+  )
+
+  it('refuses `token` when the card names an opponent as the creator', () => {
+    expect(FORBIDDEN_ORCHARD.produces).not.toContain('token')
+    expect(HUNTED_HORROR.produces).not.toContain('token')
+  })
+
+  it('refuses `sacrifice-fodder`, which is the claim that hurt most', () => {
+    // An aristocrats deck reads `sacrifice-fodder` as bodies it may eat. These
+    // bodies belong to the player across the table.
+    expect(FORBIDDEN_ORCHARD.produces).not.toContain('sacrifice-fodder')
+    expect(HUNTED_HORROR.produces).not.toContain('sacrifice-fodder')
+  })
+
+  it('still reads the imperative, which is addressed to you', () => {
+    expect(CHATTER_OF_THE_SQUIRREL.produces).toContain('token')
+    expect(CHATTER_OF_THE_SQUIRREL.produces).toContain('sacrifice-fodder')
+  })
+
+  it('keeps a symmetric clause, because you get one too', () => {
+    // ADR-0022's ruling about "each player discards", one verb over: claiming
+    // one side and not the other would be false whichever side you picked.
+    const alliance = derive(
+      'Alliance of Arms',
+      'Sorcery',
+      'Each player may pay any amount of mana. Each player creates X 1/1 white Soldier creature tokens, where X is the total amount of mana that player paid this way.',
+    )
+
+    expect(alliance.produces).toContain('token')
+  })
+
+  it('reads the clause and not the card', () => {
+    // A card that makes its own tokens AND donates one is still a token maker.
+    const both = derive(
+      'Split Decision',
+      'Sorcery',
+      'Create a 1/1 white Soldier creature token. Target opponent creates a 1/1 green Hippo creature token.',
+    )
+
+    expect(both.produces).toContain('token')
+  })
+
+  it('does not read the donated body as something the deck WANTS either', () => {
+    // The direction inversion is the worse error (ADR-0016): a card that gives
+    // Centaurs away must not be offered to a Centaur deck as a payoff.
+    expect(HUNTED_HORROR.wants).not.toContain('subtype:centaur')
+  })
+
+  it('refuses the derived families the clause used to hand over', () => {
+    // ADR-0048's subtype and keyword tags multiply the same defect: Hunted
+    // Troll made the opponent four Faeries with flying and claimed both.
+    const troll = derive(
+      'Hunted Troll',
+      'Creature — Troll',
+      'When this creature enters, target opponent creates four 1/1 blue Faerie creature tokens with flying.',
+    )
+
+    expect(troll.produces).not.toContain('subtype:faerie')
+    expect(troll.produces).not.toContain('ability:flying')
+  })
+
+  it('reads an opponent in the OBJECT position as the attack target, not the creator', () => {
+    // Found by diffing the corpus. "Whenever a player attacks one of your
+    // opponents, that attacking player creates…" — the attacker is usually
+    // you, and the Inklings are why the card is played. Three cards say this
+    // (Combat Calligrapher, Ellie, Jolene) and a bare "opponent" in the window
+    // lost all three.
+    const calligrapher = derive(
+      'Combat Calligrapher',
+      'Creature — Bird Cleric',
+      "Flying\nInklings can't attack you or planeswalkers you control.\nWhenever a player attacks one of your opponents, that attacking player creates a tapped 2/1 white and black Inkling creature token with flying that's attacking that opponent.",
+    )
+
+    // Not `token`: that rule's window is forty characters and this token's
+    // description is forty-five, which is a pre-existing gap and not this
+    // change. `sacrifice-fodder` and the subtype are the two it does reach.
+    expect(calligrapher.produces).toContain('sacrifice-fodder')
+    expect(calligrapher.produces).toContain('subtype:inkling')
+  })
+
+  it('leaves the removal shell alone, which is measured rather than assumed', () => {
+    // "Its controller creates" was tried and refused: 54 further cards, of
+    // which at least 14 hand the token to YOU — a symmetric wipe's controller
+    // is also you, and Descent of the Dragons is pointed at your own board on
+    // purpose. ADR-0022 refused "its controller sacrifices" for this reason.
+    const beastWithin = derive(
+      'Beast Within',
+      'Instant',
+      'Destroy target permanent. Its controller creates a 3/3 green Beast creature token.',
+    )
+    const marchOfSouls = derive(
+      'March of Souls',
+      'Sorcery',
+      "Destroy all creatures. They can't be regenerated. For each creature destroyed this way, its controller creates a 1/1 white Spirit creature token with flying.",
+    )
+
+    expect(beastWithin.produces).toContain('token')
+    expect(marchOfSouls.produces).toContain('token')
+  })
+})
+
+describe('a ritual is not a mana rock (ADR-0054)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  /*
+   * "add mana needs to be a semantic. if I want more cards like dark ritual, I
+   * need a semantic to focus".
+   *
+   * `ramp` already exists as a ROLE, and the two vocabularies answer different
+   * questions. A role is a partition for counting — one per card — so `ramp`
+   * holds Sol Ring, Cultivate, Llanowar Elves and Dark Ritual in one bucket of
+   * 1,385, and there is no way to say "this deck is about rituals": `emphasis`
+   * reads tags, never roles. What the role also cannot say is the distinction
+   * that makes a ritual a ritual — mana you get ONCE against mana you get every
+   * turn.
+   *
+   * A broad `mana` tag was measured and refused: 2,402 commander-legal cards
+   * add mana and 1,141 of them are lands, so half of what such a tag would
+   * carry is the mana base the user explicitly did not want tagged.
+   */
+  it('reads the named case and its neighbours', () => {
+    expect(derive('Dark Ritual', 'Instant', 'Add {B}{B}{B}.').produces).toContain('ritual')
+    expect(derive('Seething Song', 'Instant', 'Add {R}{R}{R}{R}{R}.').produces).toContain('ritual')
+    expect(derive('Pyretic Ritual', 'Instant', 'Add {R}{R}{R}.').produces).toContain('ritual')
+  })
+
+  it('reads a permanent that eats itself for a lump of mana', () => {
+    expect(
+      derive(
+        'Lion Eye Diamond',
+        'Artifact',
+        '{T}, Discard your hand, Sacrifice this artifact: Add three mana of any one color.',
+      ).produces,
+    ).toContain('ritual')
+    expect(
+      derive('Basal Thrull', 'Creature — Thrull', 'Sacrifice this creature: Add {B}{B}.').produces,
+    ).toContain('ritual')
+  })
+
+  it('refuses a land, a rock and a dork — mana that comes back every turn', () => {
+    expect(derive('Forest', 'Basic Land — Forest', '({T}: Add {G}.)').produces).not.toContain(
+      'ritual',
+    )
+    expect(derive('Sol Ring', 'Artifact', '{T}: Add {C}{C}.').produces).not.toContain('ritual')
+    expect(
+      derive('Llanowar Elves', 'Creature — Elf Druid', '{T}: Add {G}.').produces,
+    ).not.toContain('ritual')
+  })
+
+  it('refuses a single mana, however it is spent', () => {
+    expect(
+      derive('Lotus Petal', 'Artifact', 'Sacrifice this artifact: Add one mana of any color.')
+        .produces,
+    ).not.toContain('ritual')
+  })
+
+  it('is paid off by the deck that casts three spells in a turn', () => {
+    const storm = derive(
+      'Grapeshot',
+      'Sorcery',
+      'Grapeshot deals 1 damage to any target.\nStorm (When you cast this spell, copy it for each spell cast before it this turn.)',
+    )
+    const second = derive(
+      'Kraum, Violent Cacophony',
+      'Legendary Creature — Zombie Horror',
+      'Flying, haste\nWhenever you cast your second spell each turn, draw a card.',
+    )
+
+    expect(storm.wants).toContain('ritual')
+    expect(second.wants).toContain('ritual')
+  })
+
+  it('feeds the spellslinger deck, and says so in the pair table', () => {
+    // A ritual is how a storm deck casts its next spell, and a deck full of
+    // spells is what makes a ritual worth a card. True read either way, which
+    // is the bar that table sets.
+    expect(interactsWith('ritual')).toContain('spell-cast')
+  })
+})
+
+describe('casting a CREATURE is not casting a spell (ADR-0054)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  /*
+   * "beast whisperer needs to have a semantic about benefiting from casting
+   * creature spells."
+   *
+   * It carried none. `spell-cast` is defined as an instant or a sorcery, so
+   * "whenever you cast a creature spell" matched nothing at all and Beast
+   * Whisperer's only tag was `card-draw`. 74 commander-legal cards read this
+   * way and 3 of them carried any cast tag.
+   *
+   * PAYOFF-ONLY, and the producer side is measured and refused. "A creature
+   * card IS a creature spell" would put the tag on 17,751 of the 31,782
+   * commander-legal cards — 55.9%, against 33.6% for the widest tag any real
+   * pool carries today — and would attach "enables your creature-cast" to
+   * every creature in the deck's colours, which is true of all of them and
+   * therefore says nothing about any of them. What that sentence would have
+   * said is already said better by the `type:creature` composition target and
+   * the `fills-creature` group.
+   *
+   * That leaves it standing exactly where `extra-turns` stands (ADR-0048):
+   * vocabulary and a label rather than a score, said out loud rather than left
+   * to be discovered.
+   */
+  it('reads the reported card', () => {
+    const whisperer = derive(
+      'Beast Whisperer',
+      'Creature — Elf Druid',
+      'Whenever you cast a creature spell, draw a card.',
+    )
+
+    expect(whisperer.wants).toContain('creature-cast')
+  })
+
+  it('reads the cost-reduction form', () => {
+    expect(
+      derive('Monument', 'Legendary Artifact', 'Creature spells you cast cost {1} less to cast.')
+        .wants,
+    ).toContain('creature-cast')
+  })
+
+  it('does not put it on every creature', () => {
+    const bear = derive('Grizzly Bears', 'Creature — Bear', '')
+    expect(bear.produces).not.toContain('creature-cast')
+    expect(bear.wants).not.toContain('creature-cast')
+    expect(bear.has ?? []).not.toContain('creature-cast')
+  })
+
+  it('does not confuse it with a creature ENTERING', () => {
+    // Young Pyromancer's tokens do not trigger Beast Whisperer, and offering
+    // one to the other as an enabler would be a false claim.
+    const pyromancer = derive(
+      'Young Pyromancer',
+      'Creature — Human Shaman',
+      'Whenever you cast an instant or sorcery spell, create a 1/1 red Elemental creature token.',
+    )
+
+    expect(pyromancer.wants).not.toContain('creature-cast')
+    expect(pyromancer.produces).not.toContain('creature-cast')
+  })
+})
+
+describe('the cast payoffs that reached no tag at all (ADR-0054)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  it('reads "whenever you cast an artifact spell" as an artifact deck', () => {
+    /*
+     * 31 cards, 2 of which carried any cast or enters tag. NOT a new tag:
+     * `artifact-etb` already exists, already means "this deck is about
+     * artifacts", and already has 3,568 producers. The enchantment twin needed
+     * nothing — 21 of its 22 cards were already covered — which is what makes
+     * this a gap in one rule rather than a missing distinction.
+     */
+    const automaton = derive(
+      'Patchwork Automaton',
+      'Artifact Creature — Construct',
+      'Whenever you cast an artifact spell, put a +1/+1 counter on this creature.',
+    )
+
+    expect(automaton.wants).toContain('artifact-etb')
+  })
+
+  it('reads "your second spell each turn" as the spellslinger payoff it is', () => {
+    // 59 cards, 3 covered. The same event `spell-cast` already means — any
+    // spell, not a type — so it belongs in that rule rather than in a new one.
+    const lotho = derive(
+      'Lotho, Corrupt Shirriff',
+      'Legendary Creature — Halfling Rogue',
+      'Whenever a player casts their second spell each turn, create a Treasure token.',
+    )
+
+    expect(lotho.wants).toContain('spell-cast')
+  })
+})
+
+describe('a ritual is not the mana base (ADR-0054)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  it('refuses a land that eats itself for two mana', () => {
+    /*
+     * "a land tapping for mana is almost certainly not what they want tagged".
+     * The sacrifice lands read exactly like rituals and are still the mana
+     * base: Ebon Stronghold, Dwarven Ruins, Lake of the Dead, Phyrexian Tower,
+     * Crystal Vein — 14 cards, found by diffing the corpus.
+     */
+    expect(
+      derive(
+        'Ebon Stronghold',
+        'Land',
+        'This land enters tapped.\n{T}: Add {B}.\n{T}, Sacrifice this land: Add {B}{B}.',
+      ).produces,
+    ).not.toContain('ritual')
+    expect(
+      derive('Phyrexian Tower', 'Land', '{T}: Add {C}.\n{T}, Sacrifice a creature: Add {B}{B}.')
+        .produces,
+    ).not.toContain('ritual')
+  })
+
+  it('still reads a non-land that eats itself', () => {
+    // The guard has to be about the type line and nothing else.
+    expect(
+      derive('Blood Vassal', 'Creature — Thrull', 'Sacrifice this creature: Add {B}{B}.').produces,
+    ).toContain('ritual')
   })
 })

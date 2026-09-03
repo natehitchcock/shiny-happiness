@@ -2,6 +2,7 @@ import { TAKES_EXTRA_TURN } from './bracket-barometers.js'
 import type { Card } from './card.js'
 import type { OracleId } from './ids.js'
 import { SEMANTIC_TAGS, deriveSemanticTokens, type SemanticTag } from './semantic-tokens.js'
+import { CREATES_FOR_YOU } from './token-subject.js'
 
 /**
  * Mechanical synergy (ADR-0011).
@@ -77,6 +78,26 @@ export type EventTag =
   | 'land-creature'
   | 'opponent-mill'
   | 'extra-turns'
+  /**
+   * Mana you get ONCE, in a lump (ADR-0054). Dark Ritual, Seething Song,
+   * Krark-Clan Ironworks, Basal Thrull.
+   *
+   * `ramp` already exists as a ROLE and this is not a second copy of it. A role
+   * is a partition for COUNTING — exactly one per card — so it holds Sol Ring,
+   * Cultivate, Llanowar Elves and Dark Ritual in one bucket of 1,385, and it
+   * cannot be emphasised at all: `emphasis` reads tags, never roles. What
+   * neither the role nor any other tag can say is the distinction that makes a
+   * ritual a ritual, which is that the mana does not come back next turn.
+   */
+  | 'ritual'
+  /**
+   * A payoff for CASTING A CREATURE (ADR-0054). Beast Whisperer, Vanquisher's
+   * Banner, Oketra's Monument.
+   *
+   * Payoff-only, and deliberately: see the `WANTS` rule for the measurement
+   * that refused the producer side.
+   */
+  | 'creature-cast'
 
 export type SynergyTag = EventTag | SemanticTag
 
@@ -105,6 +126,11 @@ export const EVENT_TAGS: readonly EventTag[] = [
   'land-creature',
   'opponent-mill',
   'extra-turns',
+  // APPENDED, which the docblock below requires: a tag inserted in the middle
+  // shifts every generated family's index and silently reorders the emphasis
+  // stored against decks that already exist.
+  'ritual',
+  'creature-cast',
 ]
 
 /**
@@ -377,6 +403,29 @@ const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
    * not the matcher.
    */
   ['extra-turns', 'attack-trigger'],
+
+  /*
+   * A ritual and the deck that spends it (ADR-0054).
+   *
+   * `ritual` ↔ `spell-cast` because it reads true in both directions, which is
+   * the bar this table sets: a lump of mana is how a storm deck casts its next
+   * spell, and a deck full of cheap spells is what makes a lump of mana worth a
+   * card. It is also the pairing the payoff side was measured on — 37 storm
+   * cards and 60 that trigger on your second spell each turn.
+   *
+   * `ritual` ↔ `treasure` is REFUSED, and the refusal is close enough to hurt.
+   * A Treasure is a stored lump of mana and the resemblance is exact for one
+   * turn. But `treasure`'s existing pairs are `artifact-etb` and
+   * `sacrifice-fodder` — it is in this model as an ARTIFACT that happens to
+   * make mana, which is why Treasure decks are artifact decks — and pairing it
+   * here would offer Dark Ritual to a Marionette Master deck on the strength of
+   * a word neither card says.
+   *
+   * `creature-cast` gets NO pair, for the reason `extra-turns` gets almost
+   * none: it has one side only, so a pair would be a claim about a relation
+   * this model cannot currently see either half of.
+   */
+  ['ritual', 'spell-cast'],
 ]
 
 // Over the EVENTS only. The table above is event-only by construction, and the
@@ -406,6 +455,16 @@ interface Rule {
   readonly tag: SynergyTag
   readonly test: RegExp
 }
+
+/**
+ * Two or more mana in one go, in the three ways Scryfall templates an amount
+ * (ADR-0054). Shared by the two `ritual` producer rules below so the threshold
+ * is stated once.
+ *
+ * `\{[WUBRGCX0-9/]+\}` twice over reads "Add {B}{B}" and "Add {R}{R}{R}{R}{R}";
+ * the word forms read "Add two mana of any one color" and "Add X mana".
+ */
+const ADDS_TWO_OR_MORE = String.raw`\bAdd (?:\{[WUBRGCX0-9/]+\}\s*){2,}|\bAdd (?:two|three|four|five|six|seven|X) mana\b`
 
 /**
  * Written against Scryfall oracle conventions: the card's own name is spelled
@@ -595,7 +654,16 @@ const PRODUCES: readonly Rule[] = [
   // not be read as death and can be read as damage.
   { tag: 'damage', test: /\bdamage divided\b/i },
 
-  { tag: 'token', test: /\bcreate(s)? .{0,40}\btoken/i },
+  /*
+   * WHOSE tokens (ADR-0054). `create(s)?` read the verb and not the subject, so
+   * "target opponent creates a 1/1 Spirit" was a token you could sacrifice —
+   * Forbidden Orchard, the six Hunted creatures, Clackbridge Troll, Akroan
+   * Horse. 31 commander-legal cards, every one read by hand.
+   *
+   * The subject test is `token-subject.ts`, shared with `semantic-tokens.ts`
+   * and `role-derivation.ts` because all three made this mistake separately.
+   */
+  { tag: 'token', test: new RegExp(`${CREATES_FOR_YOU} .{0,40}\\btoken`, 'i') },
   /*
    * The doublers, which never say "create" in the active voice (ADR-0048, found
    * by the commander sweep).
@@ -617,7 +685,10 @@ const PRODUCES: readonly Rule[] = [
    * makes the creature tokens is the one that should claim the bodies.
    */
   { tag: 'token', test: /\btokens? would be created\b|\bwould create one or more tokens\b/i },
-  { tag: 'sacrifice-fodder', test: /\bcreate(s)? .{0,40}\bcreature token/i },
+  // Same subject test, and this is the tag the report was written about: an
+  // aristocrats deck reads `sacrifice-fodder` as bodies it may eat, and these
+  // bodies are the opponent's.
+  { tag: 'sacrifice-fodder', test: new RegExp(`${CREATES_FOR_YOU} .{0,40}\\bcreature token`, 'i') },
 
   { tag: 'treasure', test: /\bTreasure token/i },
   // Any artifact card entering IS an artifact entering the battlefield, which is
@@ -629,9 +700,15 @@ const PRODUCES: readonly Rule[] = [
   // enchantments against ~200 payoffs — the same lopsided shape as the artifact
   // pair above, which is the precedent this follows rather than a fresh claim.
   { tag: 'enchantment-etb', test: /^[^\n]*\bEnchantment\b/ },
+  // The same subject test as the two rules above (ADR-0054). An artifact token
+  // handed to an opponent does not put an artifact onto YOUR battlefield, which
+  // is the whole of what the payoff asks for.
   {
     tag: 'artifact-etb',
-    test: /\bcreate(s)? .{0,40}\b(artifact|Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment) token/i,
+    test: new RegExp(
+      `${CREATES_FOR_YOU} .{0,40}\\b(artifact|Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment) token`,
+      'i',
+    ),
   },
 
   // The numbers were a closed list of one, so "gain 4 life" read as nothing.
@@ -822,6 +899,69 @@ const PRODUCES: readonly Rule[] = [
    * stated rather than implied.
    */
   { tag: 'extra-turns', test: TAKES_EXTRA_TURN },
+
+  /*
+   * A RITUAL: mana you get once, in a lump, and then it is gone (ADR-0054).
+   *
+   * Reported as "add mana needs to be a semantic. if I want more cards like
+   * dark ritual, I need a semantic to focus". Dark Ritual carried `spell-cast`
+   * and nothing else — the tag every instant in the format carries — so there
+   * was no way to focus on it.
+   *
+   * A BROAD `mana` TAG WAS MEASURED AND REFUSED, and the measurement is the
+   * whole of the argument. 2,402 commander-legal cards add mana; 1,141 of them
+   * are lands, 576 are creatures and 451 are artifacts. A tag half of whose
+   * members are the mana base is not a focus, it is a card type — and the user
+   * said so first: a land tapping for mana is not what they want tagged.
+   *
+   * So the line is drawn at PERSISTENCE, which is the one thing `ramp` cannot
+   * say. A Signet and a Dark Ritual are the same role and opposite cards: one
+   * is mana every turn, the other is mana this turn at the cost of the card.
+   * 75 producers, in three shapes and no more:
+   *
+   *   1. A one-shot SPELL that adds two or more. Dark Ritual, Seething Song,
+   *      Pyretic Ritual, Rite of Flame, Manamorphose, Culling the Weak.
+   *   2. A permanent that EATS ITSELF for two or more. Lion's Eye Diamond,
+   *      Krark-Clan Ironworks, Ashnod's Altar, Basal Thrull, Lotus Bloom.
+   *   3. Nothing else. "Exile this card from your hand: Add {R}" — the Spirit
+   *      Guides — was written for shape 3 and matched ZERO commander-legal
+   *      cards, because Scryfall templates those as "Exile this card from your
+   *      hand: Add {R}" on a card the corpus spells differently. A rule no card
+   *      exercises is machinery, so it is not here.
+   *
+   * TWO OR MORE IS THE LINE, and one mana is deliberately out. Lotus Petal
+   * gives one mana for one card, which is a filter and not a burst; admitting
+   * it would pull in the whole Egg cycle and every "sacrifice this: add one
+   * mana of any color" mana-fixer, which are cards a storm deck does not play.
+   * Twelve cards inside the 75 are still marginal in the other direction — the
+   * Eggs and Attendants that add two but cost more than two to use — and they
+   * are left, named here, because excluding them needs the card's own mana
+   * value and these rules read text.
+   */
+  {
+    tag: 'ritual',
+    test: new RegExp(`^[^\\n]*\\b(?:Instant|Sorcery)\\b[\\s\\S]*(?:${ADDS_TWO_OR_MORE})`),
+  },
+  /*
+   * NOT A LAND, and the guard is the user's own line: "a land tapping for mana
+   * is almost certainly not what they want tagged". The sacrifice lands read
+   * exactly like rituals — Ebon Stronghold, Dwarven Ruins, Lake of the Dead and
+   * Phyrexian Tower all eat themselves for two mana — and they are still the
+   * mana base, which is the thing being asked about. 14 cards, found by diffing
+   * the corpus rather than by inspection.
+   *
+   * `^(?![^\n]*\bLand\b)` reads the TYPE LINE, which the rules see prefixed to
+   * every face; the same instrument `role-derivation.ts` uses to keep a land a
+   * land, and the same ruling `land-creature` makes about the mana base being
+   * its own thing.
+   */
+  {
+    tag: 'ritual',
+    test: new RegExp(
+      `^(?![^\\n]*\\bLand\\b)[\\s\\S]*\\bSacrifice (?:this|[A-Z][A-Za-z'’, -]{0,28})\\b[^.\\n]{0,30}:[^.\\n]{0,20}(?:${ADDS_TWO_OR_MORE})`,
+      'i',
+    ),
+  },
 
   { tag: 'plus1-counter', test: /\bput(s)? .{0,30}\+1\/\+1 counter/i },
   /*
@@ -1306,9 +1446,25 @@ const WANTS: readonly Rule[] = [
   { tag: 'graveyard-creature', test: /\bcast .{0,40}from your graveyard\b/i },
   { tag: 'graveyard-creature', test: /\bcards? in your graveyard\b/i },
 
+  /*
+   * `whenever you cast an artifact spell` is the alternative this rule was
+   * missing (ADR-0054), and the tell is that its ENCHANTMENT twin below has
+   * carried `whenever you cast an enchantment` since it was written.
+   *
+   * The asymmetry cost 29 of 31 cards: Patchwork Automaton, Ravenous Robots,
+   * Citanul Druid, Sarinth Steelseeker and every "artifact spells you cast cost
+   * {1} less" monument reached no artifact tag at all, while their enchantment
+   * counterparts reached theirs 21 times out of 22.
+   *
+   * NOT a `artifact-cast` tag of its own. Casting an artifact and an artifact
+   * entering are the same deck asking the same question — the spell resolves
+   * and the permanent arrives — and this tag already means that deck, with
+   * 3,568 producers behind it. A second tag would split the deck in half and
+   * make each half look thinner than it is.
+   */
   {
     tag: 'artifact-etb',
-    test: /\bwhenever an artifact (you control )?enters\b|\bwhenever another artifact\b|\bmetalcraft\b|\baffinity for artifacts\b|\bimprovise\b|\bfor each artifact you control\b|\bartifacts you control (get|have)\b/i,
+    test: /\bwhenever an artifact (you control )?enters\b|\bwhenever (?:you|a player|an opponent) casts? (?:your |their )?(?:first |second )?an? artifact spell\b|\bartifact spells you cast\b|\bwhenever another artifact\b|\bmetalcraft\b|\baffinity for artifacts\b|\bimprovise\b|\bfor each artifact you control\b|\bartifacts you control (get|have)\b/i,
   },
   {
     tag: 'enchantment-etb',
@@ -1446,6 +1602,74 @@ const WANTS: readonly Rule[] = [
    * no test could fail on — the same trade the file makes on `itself` above.
    */
   { tag: 'spell-cast', test: /\bwhenever you cast a spell\b/i },
+  /*
+   * The trigger that counts spells instead of naming one (ADR-0054).
+   *
+   * "Whenever you cast your SECOND spell each turn" is 59 commander-legal
+   * cards — Kraum, Lotho, Sunstar Lightsmith, Wanda's Vision — and 3 of them
+   * carried `spell-cast`. The rule above asks for "your FIRST", which was the
+   * whole vocabulary, so the ordinal that actually marks a spellslinger deck
+   * was the one it could not read.
+   *
+   * Same tag rather than a new one: this is the event `spell-cast` already
+   * means. It is not about a card type; it is about how many spells a turn the
+   * deck casts, which is the thing an instant or sorcery in the deck answers.
+   *
+   * `a player` and `their` are in because the format prints both — Lotho reads
+   * "whenever a player casts their second spell each turn" and taxes everyone,
+   * and it is still a card you play in the deck that casts three.
+   */
+  {
+    tag: 'spell-cast',
+    test: /\bwhenever (?:you|a player|an opponent) casts? (?:your|their) (?:second|third) spell\b/i,
+  },
+  /*
+   * Casting a CREATURE is a different event from casting a spell (ADR-0054).
+   *
+   * Reported as "beast whisperer needs to have a semantic about benefiting from
+   * casting creature spells". It had none: `spell-cast`'s producer is an
+   * instant or a sorcery by type line, so a rule about creature spells could
+   * not honestly live under it, and Beast Whisperer's only tag was `card-draw`.
+   * 74 commander-legal cards, 3 of which carried any cast tag.
+   *
+   * PAYOFF-ONLY, and the producer side is refused on a measurement rather than
+   * on taste. The producer would have to be "this card is a creature", which is
+   * 17,751 of the 31,782 commander-legal cards — 55.9%. The widest tag any real
+   * pool carries today is `artifact-etb` at 33.6%, and a tag on more than half
+   * the format would attach "enables your creature-cast" to every creature in
+   * the deck's colours: true of all of them, and therefore informative about
+   * none. The sentence it would have said — "your thirty creatures turn this
+   * on" — is already said, better and with a number, by the `type:creature`
+   * composition target and the `fills-creature` group it now produces.
+   *
+   * So it stands exactly where `extra-turns` stands (ADR-0048): vocabulary and
+   * a label rather than a score. It gives the builder the focus they asked for
+   * — emphasise `creature-cast` and the other 73 payoffs come back — and it
+   * gives the card panel something true to print on Beast Whisperer.
+   *
+   * NOT folded into `creature-etb`, which was the tempting shortcut. A token
+   * entering is a creature entering and does not trigger Beast Whisperer, so
+   * offering Young Pyromancer as its enabler would be a false claim — the same
+   * error `land-creature` exists to avoid one tag over.
+   */
+  {
+    tag: 'creature-cast',
+    test: /\bwhenever (?:you|a player|an opponent) casts? (?:your |their )?(?:first |second )?an? creature spell\b|\bcreature spells you cast\b/i,
+  },
+  /*
+   * The payoff side of a ritual (ADR-0054), and what keeps the tag from being
+   * inert.
+   *
+   * Two templates, 97 cards between them. STORM is read by its reminder text
+   * rather than by the word, because "storm" is also a noun 20 cards have in
+   * their names — the trap `creature-etb` documents two rules up. The second
+   * ordinal is the other half: a deck that cares about casting three spells in
+   * a turn is a deck that pays for the third with a lump of mana.
+   */
+  {
+    tag: 'ritual',
+    test: /\bcopy it for each spell cast before it this turn\b|\bwhenever (?:you|a player|an opponent) casts? (?:your|their) (?:second|third) spell\b/i,
+  },
   /*
    * A payoff for the tokens themselves (ADR-0038).
    *
@@ -1682,6 +1906,53 @@ export interface SynergyMatchOptions {
   readonly selfCounted?: boolean
 }
 
+/**
+ * Which reading leads when two matches weigh the same (ADR-0054).
+ *
+ * The weight already answers the question that matters — it is how much of the
+ * tag the deck wants against how much it holds, so a deck short of an engine
+ * hears "enables" and a deck full of one hears "payoff", and this never
+ * overrides that. What it settles is the EXACT TIE, which is not a rare edge:
+ * a commander who both IS an Elf and WANTS Elves puts `COMMANDER_WEIGHT` into
+ * `has` and the same into `wants`, so every lord in the deck ties with itself.
+ *
+ * Before this, the tie was settled by the order the two loops below happen to
+ * push in and by `Array.prototype.sort` being stable — which is to say, by
+ * nothing. `enables` was pushed first, so on a real Elf deck all 42 Elf-typed
+ * candidates read "enables your emphasised subtype:elf" and all 12 payoff
+ * reasons went to non-Elf cards. `recommend` emits exactly one reason per
+ * card, so Joraga Warcaller was described as another body rather than as the
+ * lord it is.
+ *
+ * PAYOFF LEADS, and the argument is about how much the sentence tells you. In
+ * a tribal deck every creature of the type supplies the tag and only the lords
+ * consume it — 122 bodies against 45 lords on the deck this was measured on —
+ * so "pays off your Elves" distinguishes the card from its neighbours and "is
+ * another Elf" does not. `theme` is last for the reason `THEME_WEIGHT` already
+ * gives: it is the weakest reading in the model, a shared want with no engine
+ * behind it.
+ *
+ * WITHIN ONE TAG ONLY, and the restriction is measured rather than cautious.
+ * The first version of this made direction a global tie-break, and across four
+ * real decks it moved 87 rows instead of 48: the extra 39 were CROSS-TAG ties,
+ * where a card's `subtype:human` payoff displaced its `creature-death` enable
+ * on a sac outlet in a Meren deck. Those two are not two readings of one fact —
+ * they are different claims — and nothing here says a payoff on one tag beats
+ * an enable on another. The tag ordering at equal weight is therefore left
+ * exactly as it was, by sorting on the tag's FIRST appearance before the
+ * direction is consulted.
+ *
+ * Rejected: swapping the two loops. It settles the same-tag case today, through
+ * the stability of `sort`, and it leaves the decision invisible at the line
+ * that makes it — which is exactly how this ordering came to be unargued in the
+ * first place.
+ */
+const DIRECTION_RANK: Readonly<Record<SynergyMatch['direction'], number>> = {
+  payoff: 0,
+  enables: 1,
+  theme: 2,
+}
+
 export const synergyMatches = (
   candidate: SynergyProfile,
   deck: DeckSynergy,
@@ -1733,7 +2004,21 @@ export const synergyMatches = (
     if (shared > 0) matches.push({ tag, direction: 'theme', weight: shared * THEME_WEIGHT })
   }
 
-  return matches.sort((a, b) => b.weight - a.weight)
+  /*
+   * The order each TAG first appeared in, which is what the sort used to fall
+   * back on through `sort` being stable. Keeping it as an explicit key is what
+   * confines the direction tie-break to one tag: two matches on different tags
+   * are separated here and never reach the direction comparison at all.
+   */
+  const tagOrder = new Map<SynergyTag, number>()
+  for (const match of matches) if (!tagOrder.has(match.tag)) tagOrder.set(match.tag, tagOrder.size)
+
+  return matches.sort(
+    (a, b) =>
+      b.weight - a.weight ||
+      (tagOrder.get(a.tag) ?? 0) - (tagOrder.get(b.tag) ?? 0) ||
+      DIRECTION_RANK[a.direction] - DIRECTION_RANK[b.direction],
+  )
 }
 
 /**
