@@ -5,6 +5,7 @@ import type { CandidateGroupKey, ComboId, ScoringWeights } from '@roundtable/dom
 import {
   BRACKET_DATA,
   acceptedSet,
+  answerCoverage,
   comboDegree,
   deckGameChangers,
   deckId,
@@ -94,12 +95,23 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
        * taken is exactly the dead draw this is here to prevent.
        */
       const accepted = acceptedSet(deck)
-      const deckLands = deckLandsFrom(
-        [...accepted].flatMap((id) => {
-          const card = context.cards.get(id)
-          return card === undefined ? [] : [card]
-        }),
-      )
+      const acceptedCards = [...accepted].flatMap((id) => {
+        const card = context.cards.get(id)
+        return card === undefined ? [] : [card]
+      })
+      const deckLands = deckLandsFrom(acceptedCards)
+      /*
+       * What the deck's own answers can be pointed at (ADR-0058).
+       *
+       * Computed here for the reason `deckLands` is: it is a property of the
+       * cards the deck already holds, and `recommend` is handed a candidate
+       * pool rather than a deck. Same list, walked once.
+       *
+       * ACCEPTED only, matching `deckLands` exactly. A card in `considering` is
+       * not in the deck, and counting its removal as coverage the deck already
+       * has would stop offering the removal the deck actually needs.
+       */
+      const deckAnswers = answerCoverage(acceptedCards)
 
       const result = recommend({
         pool: context.pool,
@@ -159,6 +171,9 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
         // sends an empty set and gets fetches scored at zero, which is the
         // answer, not a missing field.
         deckLands,
+        // ADR-0058. Absent means "not asked", and the ordering term is then
+        // zero -- which is what every caller got before this existed.
+        deckAnswers,
         ...(body.limitPerGroup !== undefined ? { limitPerGroup: body.limitPerGroup } : {}),
         ...(deck.budget?.maxCardUsd !== undefined ? { maxBudgetUsd: deck.budget.maxCardUsd } : {}),
       })

@@ -1,6 +1,7 @@
+import { answerScope, underCovered } from './answer-scope.js'
 import { assertNever } from './assert-never.js'
 import type { BracketFlag } from './bracket.js'
-import type { Card, Color } from './card.js'
+import type { Card, CardType, Color } from './card.js'
 import { annotateCombos, type ComboIndex } from './combo-index.js'
 import { fixingFor, isManaSource, NO_FIXING, type DeckLands } from './fixing.js'
 import {
@@ -153,6 +154,31 @@ export interface RecommendInput {
    * never a new way to recommend a dead card. Build it with `deckLandsFrom`.
    */
   readonly deckLands?: DeckLands
+  /**
+   * What the deck's own answers can be pointed at (ADR-0058).
+   *
+   * `spot-removal` is one role and not one job: 446 of the corpus's 2,563
+   * spot-removal cards cannot kill a creature, and in green it is 144 of 207.
+   * A deck holding six Naturalizes reads "6 / 6 removal" on the meter and
+   * cannot answer a creature.
+   *
+   * A NEW INPUT for the reason `deckLands` is one: the answer is a property of
+   * the cards the deck already holds, and `recommend` is handed a candidate
+   * POOL rather than a deck. The caller that loaded the deck's own cards is the
+   * only one that can answer. Build it with `answerCoverage`.
+   *
+   * ABSENT MEANS "NOT ASKED", and the effect is that the ordering term below is
+   * zero — which is exactly what every caller got before this existed. Unlike
+   * `deckLands`, forgetting it cannot recommend a dead card; it can only fail
+   * to prefer a live one.
+   *
+   * IT NEVER CHANGES WHICH GROUP A CARD IS IN. Pillar P5 says grouping is the
+   * product's opinion and the score orders within it, and this is a score term.
+   * Nothing here removes a card from a role, from a count or from a group —
+   * that is ADR-0058's partial-not-binary ruling, and it is the opposite of
+   * ADR-0057's exclusion one level up because Disenchant really is removal.
+   */
+  readonly deckAnswers?: ReadonlyMap<CardType, number>
 }
 
 export interface CandidateGroup {
@@ -369,6 +395,32 @@ const countedRole = (pooled: PoolCard): Role => primaryRole(pooled.roles)
  * than the raw role array, so the heading still names a dimension the card will
  * move when it is accepted.
  */
+/**
+ * Half the fill weight, and the ceiling is the point (ADR-0058).
+ *
+ * This term reorders within a gap; it must never outweigh HAVING the gap. At a
+ * half, a card that closes a five-card deficit and covers nothing still beats a
+ * card that closes a one-card deficit and covers everything, which is the right
+ * priority: the meter's number is the product's opinion about what the deck
+ * needs, and this is a tie-break inside it (pillar P5).
+ */
+const ANSWER_COVERAGE_WEIGHT = 0.5
+
+/**
+ * The roles whose coverage was measured, and therefore the only ones this term
+ * speaks about.
+ *
+ * `counterspell` and `graveyard-hate` are deliberately absent. A counterspell's
+ * object is "target spell", which is not a permanent type, so `answerScope`
+ * reads nothing for 353 of the corpus's 431 counterspells; a graveyard's is the
+ * graveyard, which is the whole of that role. A term over either would be noise
+ * with a number on it.
+ */
+const COVERAGE_ROLES: ReadonlySet<Role> = new Set<Role>(['spot-removal', 'board-wipe', 'bounce'])
+
+/** Shared empty map, so the absent-input path allocates nothing per call. */
+const EMPTY_ANSWERS: ReadonlyMap<CardType, number> = new Map<CardType, number>()
+
 const deficitFor = (pooled: PoolCard, deficits: readonly Deficit[]): Deficit | null => {
   const keys = new Set(
     dimensionKeysOf({ primaryRole: countedRole(pooled), types: pooled.card.types }),
@@ -626,6 +678,50 @@ export const recommend = (input: RecommendInput): RecommendResult => {
    */
   const deficits = shortfalls(findDeficits(input.counts, input.targets))
 
+  /*
+   * Which answer this deck cannot currently make (ADR-0058).
+   *
+   * Computed ONCE per call rather than per candidate: it is a property of the
+   * deck, and asking it 3,000 times would run `answerCoverage` over the same
+   * hundred cards for every card in the pool.
+   *
+   * Empty for a deck whose answers are balanced, for a deck with no answers at
+   * all, and for a caller that did not pass `deckAnswers` — three different
+   * situations with one right response, which is to say nothing and let the
+   * existing ordering stand.
+   */
+  const shortAnswers = underCovered(input.deckAnswers ?? EMPTY_ANSWERS)
+
+  /**
+   * Whether this card closes the coverage the deck is missing, 1 or 0.
+   *
+   * BINARY rather than graded, because the claim is binary: the deck cannot
+   * kill a creature and this card can, or it cannot. A graded version would
+   * have to weigh "reaches four types" against "reaches the one type you need",
+   * and the second is what matters.
+   *
+   * Three gates, and each removes a different false positive:
+   *   - a card closing no COMPOSITION deficit gets nothing, because the
+   *     coverage question only arises once the meter has already asked for a
+   *     card. Otherwise every Lightning Bolt in the pool would rise;
+   *   - the deficit must be a ROLE deficit and one of the roles this was
+   *     measured on. `counterspell` is excluded deliberately: its object is
+   *     "target spell", which is not a permanent type, so `answerScope` reads
+   *     nothing for 353 of the 431 counterspells and a term over that would be
+   *     noise wearing a number;
+   *   - the card's own scope must contain the missing type. A card that answers
+   *     nothing has an empty scope and is not thereby penalised — it simply
+   *     scores what it scored before.
+   */
+  const coverageBonus = (s: Scratch): number => {
+    if (shortAnswers.length === 0) return 0
+    const deficit = s.deficit
+    if (deficit === null || deficit.dimension.kind !== 'role') return 0
+    if (!COVERAGE_ROLES.has(deficit.dimension.role)) return 0
+    const scope = answerScope(s.pooled.card)
+    return shortAnswers.some((type) => scope.has(type)) ? 1 : 0
+  }
+
   // ---- eligibility + annotation ----
   const scratch: Scratch[] = []
   for (const pooled of input.pool) {
@@ -839,6 +935,27 @@ export const recommend = (input: RecommendInput): RecommendResult => {
       w.synergy * ((s.stats?.synergy ?? 0) / maxSynergy) +
       w.inclusion * (s.stats?.inclusion ?? 0) +
       w.fill * (s.deficit === null ? 0 : Math.min(1, Math.abs(s.deficit.delta) / 5)) +
+      /*
+       * The answer this deck cannot currently make (ADR-0058).
+       *
+       * A meter that reads "6 / 6 removal" over six Naturalizes is satisfied
+       * and the deck cannot kill a creature. This term breaks the tie between
+       * two cards that both fill the same removal gap, in favour of the one
+       * that closes the coverage the deck is missing.
+       *
+       * SCALED OFF `w.fill` rather than a new weight, and that is a judgement
+       * about what it IS rather than a way to avoid touching `ScoringWeights`:
+       * it is a refinement of "this card fills your gap", so a builder who
+       * turns the fill weight down should turn this down with it. A separate
+       * knob would let the two disagree about a single question.
+       *
+       * A HALF of the fill term at most, so it can reorder within a gap and can
+       * never outweigh having a gap at all. A card that closes no deficit gets
+       * nothing here however well it covers, because `s.deficit === null`
+       * zeroes the term it is scaled against — the coverage question only
+       * arises once the meter has already asked for a card.
+       */
+      w.fill * ANSWER_COVERAGE_WEIGHT * coverageBonus(s) +
       w.curve * curveFit(card.manaValue, input.counts.manaCurve, curve) +
       w.keywordSynergy * synergyScore(s.synergy) +
       /*

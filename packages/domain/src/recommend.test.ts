@@ -1472,3 +1472,193 @@ describe('the staples phase honours the budget cap and the bracket', () => {
     expect(idsIn(recommend(baseInput({ pool: [changer()] })), 'staple')).toEqual([])
   })
 })
+
+/*
+ * ADR-0058. A meter reading "6 / 6 removal" over six Naturalizes is satisfied
+ * and the deck cannot kill a creature. This term breaks the tie between two
+ * cards that both fill the same removal gap.
+ */
+describe('answer coverage orders the removal gap (ADR-0058)', () => {
+  /*
+   * NAMED SO THE ALPHABET OPPOSES THE ANSWER. `Disenchant` sorts before
+   * `Murder`, and a tie in this group is broken by insertion order, so a test
+   * whose creature answer happened to sort first would pass with the whole
+   * term deleted. It was written that way first and a mutation caught it.
+   *
+   * Neither is a curated staple, which is the other trap: `Swords to
+   * Plowshares` and `Rhystic Study` are, and a staple is filed under `staple`
+   * before any `fills-` group is asked.
+   */
+  const naturalize = pooled('Disenchant', {
+    card: card('Disenchant', {
+      oracleText: 'Destroy target artifact or enchantment.',
+      roles: ['spot-removal'],
+      primaryRole: 'spot-removal',
+    }),
+    roles: ['spot-removal'],
+  })
+  const swords = pooled('Murder', {
+    card: card('Murder', { oracleText: 'Destroy target creature.', roles: ['spot-removal'], primaryRole: 'spot-removal' }),
+    roles: ['spot-removal'],
+  })
+  const both = { pool: [naturalize, swords] }
+  const scoreOf = (r: ReturnType<typeof recommend>, key: string, id: string): number =>
+    r.groups.find((g) => g.key === key)?.items.find((i) => i.oracleId === oracleId(id))?.score ?? 0
+
+  it('offers the creature answer first when the deck holds only Disenchants', () => {
+    const result = recommend(
+      baseInput({
+        ...both,
+        deckAnswers: new Map<CardType, number>([
+          ['artifact', 3],
+          ['enchantment', 3],
+        ]),
+      }),
+    )
+
+    expect(idsIn(result, 'fills-spot-removal')[0]).toEqual(oracleId('Murder'))
+    // The order is a consequence of the score, not of the alphabet.
+    const gap =
+      scoreOf(result, 'fills-spot-removal', 'Murder') -
+      scoreOf(result, 'fills-spot-removal', 'Disenchant')
+    expect(gap).toBeGreaterThan(0)
+    /*
+     * AND THE CEILING, which is the half of this that matters. The term
+     * reorders inside a gap and must never outweigh HAVING the gap, so its
+     * whole contribution stays under one fill weight — the same number the
+     * deficit term is scaled by.
+     */
+    expect(gap).toBeLessThan(DEFAULT_WEIGHTS.fill)
+  })
+
+  /*
+   * The term speaks only about the roles whose coverage was measured. A
+   * `counterspell` object is "target spell", which is not a permanent type, and
+   * `draw` has no answer scope at all -- a term over either would be noise with
+   * a number on it.
+   */
+  it('says nothing about a role whose coverage was never measured', () => {
+    const bookBurning = pooled('Book Burning', {
+      card: card('Book Burning', {
+        // Removal text on a card the meter wants for its DRAW gap. The scope
+        // reads "creature", and it must still not be reordered by this term.
+        oracleText: 'Draw two cards. Book Burning deals 3 damage to target creature.',
+        roles: ['draw'],
+        primaryRole: 'draw',
+      }),
+      roles: ['draw'],
+    })
+    const almanac = pooled('Almanac', {
+      card: card('Almanac', { oracleText: 'Draw two cards.', roles: ['draw'], primaryRole: 'draw' }),
+      roles: ['draw'],
+    })
+    const withCoverage = recommend(
+      baseInput({
+        pool: [almanac, bookBurning],
+        deckAnswers: new Map<CardType, number>([['artifact', 3]]),
+      }),
+    )
+    const without = recommend(baseInput({ pool: [almanac, bookBurning] }))
+
+    expect(idsIn(withCoverage, 'fills-draw')).toEqual(idsIn(without, 'fills-draw'))
+    // The SCORE, not just the order: two cards can keep their places while one
+    // of them silently gains a term, and that is the thing being refused here.
+    expect(scoreOf(withCoverage, 'fills-draw', 'Book Burning')).toBe(
+      scoreOf(without, 'fills-draw', 'Book Burning'),
+    )
+  })
+
+  /*
+   * A card closing no COMPOSITION deficit gets nothing from this term, however
+   * well it covers -- the coverage question only arises once the meter has
+   * already asked for a card. `stax` is the case: midrange names no stax
+   * target, so the deficit is null, and the guard is what keeps this from
+   * reading a role off it.
+   */
+  it('is silent for a card the meter never asked for', () => {
+    const staxRemoval = pooled('Contamination', {
+      card: card('Contamination', {
+        oracleText: 'Destroy target creature.',
+        roles: ['stax'],
+        primaryRole: 'stax',
+      }),
+      roles: ['stax'],
+    })
+    const withCoverage = recommend(
+      baseInput({
+        pool: [staxRemoval, naturalize],
+        deckAnswers: new Map<CardType, number>([['artifact', 3]]),
+      }),
+    )
+
+    expect(scoreOf(withCoverage, 'high-synergy', 'Contamination')).toBe(
+      scoreOf(recommend(baseInput({ pool: [staxRemoval, naturalize] })), 'high-synergy', 'Contamination'),
+    )
+  })
+
+  /*
+   * PARTIAL, NOT BINARY — the opposite ruling to ADR-0057 one level up.
+   * Disenchant really is removal and a deck needs some, so nothing here removes
+   * it from the role, from the count or from the offer.
+   */
+  it('still offers the artifact answer, one place down', () => {
+    const result = recommend(
+      baseInput({ ...both, deckAnswers: new Map<CardType, number>([['artifact', 3]]) }),
+    )
+
+    expect(idsIn(result, 'fills-spot-removal')).toContain(oracleId('Disenchant'))
+  })
+
+  it('says nothing when the deck answers are already balanced', () => {
+    const balanced = recommend(
+      baseInput({
+        ...both,
+        deckAnswers: new Map<CardType, number>([
+          ['artifact', 2],
+          ['creature', 2],
+        ]),
+      }),
+    )
+    const silent = recommend(baseInput(both))
+
+    expect(idsIn(balanced, 'fills-spot-removal')).toEqual(idsIn(silent, 'fills-spot-removal'))
+  })
+
+  /*
+   * A deck holding nothing is short of everything, and naming a type would be
+   * the model inventing a target — which is why the sub-target was deferred.
+   * `findDeficits` already says "you are six short"; this only splits a tie.
+   */
+  it('says nothing for a deck with no answers at all', () => {
+    const empty = recommend(baseInput({ ...both, deckAnswers: new Map<CardType, number>() }))
+    const silent = recommend(baseInput(both))
+
+    expect(idsIn(empty, 'fills-spot-removal')).toEqual(idsIn(silent, 'fills-spot-removal'))
+  })
+
+  /*
+   * The term is scaled off `w.fill` at a half, so it can reorder inside a gap
+   * and can never outweigh having one. A card closing no composition deficit
+   * gets nothing from it however well it covers.
+   */
+  it('never outranks the deficit it is a tie-break inside', () => {
+    // NOT a curated staple, deliberately. Rhystic Study is on the staples list
+    // and would be filed under `staple` before any `fills-` group is asked.
+    const drawGap = pooled('Divination', {
+      card: card('Divination', {
+        oracleText: 'Draw two cards.',
+        roles: ['draw'],
+        primaryRole: 'draw',
+      }),
+      roles: ['draw'],
+    })
+    const result = recommend(
+      baseInput({
+        pool: [naturalize, swords, drawGap],
+        deckAnswers: new Map<CardType, number>([['artifact', 3]]),
+      }),
+    )
+
+    expect(idsIn(result, 'fills-draw')).toEqual([oracleId('Divination')])
+  })
+})
