@@ -2441,7 +2441,9 @@ const Works = ({
     const need = missing[0]!
     const line = {
       comboId: combo.id,
-      with: others.filter((p) => p.oracleId !== need.oracleId).map((p) => partner(p.oracleId, p.name)),
+      with: others
+        .filter((p) => p.oracleId !== need.oracleId)
+        .map((p) => partner(p.oracleId, p.name)),
     }
     const at = oneAwayAt.get(need.oracleId)
     if (at !== undefined) {
@@ -2597,9 +2599,7 @@ const Works = ({
                 </span>
               ))}
               {row.lines.length > ONE_AWAY_LINES ? (
-                <span className="partners-more">
-                  +{row.lines.length - ONE_AWAY_LINES} more
-                </span>
+                <span className="partners-more">+{row.lines.length - ONE_AWAY_LINES} more</span>
               ) : null}
             </p>
           ))}
