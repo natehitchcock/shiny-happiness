@@ -1701,6 +1701,53 @@ export interface SynergyMatchOptions {
   readonly selfCounted?: boolean
 }
 
+/**
+ * Which reading leads when two matches weigh the same (ADR-0054).
+ *
+ * The weight already answers the question that matters — it is how much of the
+ * tag the deck wants against how much it holds, so a deck short of an engine
+ * hears "enables" and a deck full of one hears "payoff", and this never
+ * overrides that. What it settles is the EXACT TIE, which is not a rare edge:
+ * a commander who both IS an Elf and WANTS Elves puts `COMMANDER_WEIGHT` into
+ * `has` and the same into `wants`, so every lord in the deck ties with itself.
+ *
+ * Before this, the tie was settled by the order the two loops below happen to
+ * push in and by `Array.prototype.sort` being stable — which is to say, by
+ * nothing. `enables` was pushed first, so on a real Elf deck all 42 Elf-typed
+ * candidates read "enables your emphasised subtype:elf" and all 12 payoff
+ * reasons went to non-Elf cards. `recommend` emits exactly one reason per
+ * card, so Joraga Warcaller was described as another body rather than as the
+ * lord it is.
+ *
+ * PAYOFF LEADS, and the argument is about how much the sentence tells you. In
+ * a tribal deck every creature of the type supplies the tag and only the lords
+ * consume it — 122 bodies against 45 lords on the deck this was measured on —
+ * so "pays off your Elves" distinguishes the card from its neighbours and "is
+ * another Elf" does not. `theme` is last for the reason `THEME_WEIGHT` already
+ * gives: it is the weakest reading in the model, a shared want with no engine
+ * behind it.
+ *
+ * WITHIN ONE TAG ONLY, and the restriction is measured rather than cautious.
+ * The first version of this made direction a global tie-break, and across four
+ * real decks it moved 87 rows instead of 48: the extra 39 were CROSS-TAG ties,
+ * where a card's `subtype:human` payoff displaced its `creature-death` enable
+ * on a sac outlet in a Meren deck. Those two are not two readings of one fact —
+ * they are different claims — and nothing here says a payoff on one tag beats
+ * an enable on another. The tag ordering at equal weight is therefore left
+ * exactly as it was, by sorting on the tag's FIRST appearance before the
+ * direction is consulted.
+ *
+ * Rejected: swapping the two loops. It settles the same-tag case today, through
+ * the stability of `sort`, and it leaves the decision invisible at the line
+ * that makes it — which is exactly how this ordering came to be unargued in the
+ * first place.
+ */
+const DIRECTION_RANK: Readonly<Record<SynergyMatch['direction'], number>> = {
+  payoff: 0,
+  enables: 1,
+  theme: 2,
+}
+
 export const synergyMatches = (
   candidate: SynergyProfile,
   deck: DeckSynergy,
@@ -1752,7 +1799,21 @@ export const synergyMatches = (
     if (shared > 0) matches.push({ tag, direction: 'theme', weight: shared * THEME_WEIGHT })
   }
 
-  return matches.sort((a, b) => b.weight - a.weight)
+  /*
+   * The order each TAG first appeared in, which is what the sort used to fall
+   * back on through `sort` being stable. Keeping it as an explicit key is what
+   * confines the direction tie-break to one tag: two matches on different tags
+   * are separated here and never reach the direction comparison at all.
+   */
+  const tagOrder = new Map<SynergyTag, number>()
+  for (const match of matches) if (!tagOrder.has(match.tag)) tagOrder.set(match.tag, tagOrder.size)
+
+  return matches.sort(
+    (a, b) =>
+      b.weight - a.weight ||
+      (tagOrder.get(a.tag) ?? 0) - (tagOrder.get(b.tag) ?? 0) ||
+      DIRECTION_RANK[a.direction] - DIRECTION_RANK[b.direction],
+  )
 }
 
 /**

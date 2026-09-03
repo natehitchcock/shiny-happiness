@@ -2832,6 +2832,107 @@ describe('deriveSynergy — a land that is also a creature (ADR-0047)', () => {
   })
 })
 
+describe('synergyMatches — which half of a lord is the informative half (ADR-0054)', () => {
+  /*
+   * An Elf lord in an Elf deck was always "enables", never "payoff".
+   *
+   * `synergyMatches` pushed the `enables` loop before the `payoff` loop and
+   * then sorted by weight alone; `Array.prototype.sort` is stable, so an exact
+   * tie kept the first-pushed. `recommend` emits exactly one reason
+   * (`topEmphasis ?? s.synergy[0]`), so every lord showed the weaker half.
+   * Measured on a real Elf deck: all 42 Elf-typed candidates read "enables
+   * your emphasised subtype:elf" and all 12 payoff reasons went to non-Elf
+   * cards. Joraga Warcaller was described as another body rather than as the
+   * lord it is.
+   *
+   * The tie is exact by construction rather than by accident: a commander who
+   * IS an Elf and WANTS Elves contributes `COMMANDER_WEIGHT` to `has` and the
+   * same to `wants`, so `deck.wants` and `deck.has` agree on the tag.
+   */
+  const ELF_DECK: DeckSynergy = {
+    produces: new Map(),
+    wants: new Map<SynergyTag, number>([['subtype:elf', COMMANDER_WEIGHT]]),
+    has: new Map<SynergyTag, number>([['subtype:elf', COMMANDER_WEIGHT]]),
+  }
+
+  it('calls a lord a payoff rather than another body', () => {
+    const lord: SynergyProfile = {
+      produces: [],
+      wants: ['subtype:elf'],
+      has: ['subtype:elf'],
+    }
+    const [first] = synergyMatches(lord, ELF_DECK)
+
+    expect(first).toEqual({ tag: 'subtype:elf', direction: 'payoff', weight: COMMANDER_WEIGHT })
+  })
+
+  it('still credits both halves, because the score counts both', () => {
+    const lord: SynergyProfile = { produces: [], wants: ['subtype:elf'], has: ['subtype:elf'] }
+    const matches = synergyMatches(lord, ELF_DECK)
+
+    expect(matches.map((m) => m.direction).sort()).toEqual(['enables', 'payoff'])
+  })
+
+  it('leaves a plain body alone — it has only the one reading', () => {
+    const body: SynergyProfile = { produces: [], wants: [], has: ['subtype:elf'] }
+    const [first] = synergyMatches(body, ELF_DECK)
+
+    expect(first?.direction).toBe('enables')
+  })
+
+  it('never lets the tie-break beat a real weight difference', () => {
+    // The weights already say which side the deck needs more of. A deck that
+    // wants a tag far more than it supplies it must still hear "enables".
+    const deck: DeckSynergy = {
+      produces: new Map(),
+      wants: new Map<SynergyTag, number>([['untap', 9]]),
+      has: new Map<SynergyTag, number>([['untap', 1]]),
+    }
+    const engine: SynergyProfile = { produces: ['untap'], wants: ['untap'], has: [] }
+    const [first] = synergyMatches(engine, deck)
+
+    expect(first).toEqual({ tag: 'untap', direction: 'enables', weight: 9 })
+  })
+
+  it('does not let a payoff on one tag displace an enable on another', () => {
+    /*
+     * The restriction, and it is measured rather than cautious. A global
+     * direction tie-break moved 87 rows across four real decks instead of 48;
+     * the extra 39 were cross-tag, and they read worse — a sac outlet in a
+     * Meren deck lost "enables your creature-death" to "pays off your Humans".
+     * Two readings of ONE tag are two ways of saying one thing and one of them
+     * is more informative. Two different tags are two different claims.
+     */
+    const deck: DeckSynergy = {
+      produces: new Map<SynergyTag, number>([['subtype:human', 4]]),
+      wants: new Map<SynergyTag, number>([['creature-death', 4]]),
+      has: new Map(),
+    }
+    const outlet: SynergyProfile = {
+      produces: ['creature-death'],
+      wants: ['subtype:human'],
+      has: [],
+    }
+    const [first] = synergyMatches(outlet, deck)
+
+    expect(first).toEqual({ tag: 'creature-death', direction: 'enables', weight: 4 })
+  })
+
+  it('keeps theme last on a tie, because it is the weakest reading', () => {
+    const deck: DeckSynergy = {
+      produces: new Map<SynergyTag, number>([['token', 5]]),
+      wants: new Map<SynergyTag, number>([['landfall', 25]]),
+      has: new Map(),
+    }
+    // `token` pays off at 5; `landfall` is a shared want at 25 * 0.2 = 5.
+    const card: SynergyProfile = { produces: [], wants: ['token', 'landfall'], has: [] }
+    const matches = synergyMatches(card, deck)
+
+    expect(matches.map((m) => m.weight)).toEqual([5, 5])
+    expect(matches.map((m) => m.direction)).toEqual(['payoff', 'theme'])
+  })
+})
+
 describe('deriveSynergy — whose tokens they are (ADR-0054)', () => {
   const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
     deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
