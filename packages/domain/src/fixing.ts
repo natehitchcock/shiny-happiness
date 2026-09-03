@@ -374,13 +374,22 @@ const ANY_COLOUR =
  *
  * Quotation marks rather than parentheses, which was the first thing tried and
  * is wrong: Tundra's entire mana ability is reminder text, `({T}: Add {W} or
- * {U}.)`, and stripping parentheses deletes the card. Nothing in the land
- * corpus states its OWN ability in quotes — quotes are how Oracle attributes an
- * ability to a token, a granted permanent, or a copy. Curly quotes are matched
- * too; Oracle uses them on some printings.
+ * {U}.)`, and stripping parentheses deletes the card.
+ *
+ * ONLY WHEN THE QUOTE IS INTRODUCED BY `with` OR `have`, and that qualifier is
+ * not caution — it was written without one, on the claim that no land states
+ * its own ability in quotes, and sweeping the rendered sentence over the corpus
+ * found the one that does. **Dryad Arbor** reads `it has "{T}: Add {G}."` and
+ * was being reported as tapping for colourless, on a card that makes no
+ * colourless mana at all.
+ *
+ * The discriminator is grammatical and exact. `an artifact with "…"` describes
+ * a token being created; `lands you control have "…"` describes an ability
+ * handed to other permanents; `it has "…"` is a card talking about itself.
+ * Curly quotes are matched too; Oracle uses them on some printings.
  */
 const withoutQuotedAbilities = (line: string): string =>
-  line.replace(/["“][^"”]*["”]/g, ' ')
+  line.replace(/\b(?:with|have)\s+["“][^"”]*["”]/gi, ' ')
 
 /** Everything to the left of the first colon is what you pay. */
 const splitAbility = (line: string): { readonly cost: string; readonly effect: string } => {
@@ -683,11 +692,27 @@ const abilitySlots = (
         openness *= ONE_SHOT
         reach = 'gated'
       }
+      /*
+       * Two different questions, and the filter lands are why they are asked
+       * separately.
+       *
+       * The VALUE asks "is this worth as much as a dual?" and net mana answers
+       * yes: Mystic Gate pays one and gets two, so it nets what a plain land
+       * nets. The SENTENCE asks "is 'taps for' true?" and the answer is no —
+       * you cannot get {W} out of Mystic Gate without already having {W} or
+       * {U}. Both were being answered by `openness` alone, so all twenty filter
+       * lands rendered "taps for 2 of your 5 colours", which is false of every
+       * one of them. Found by sweeping the rendered sentence over the corpus,
+       * not by any test written from the report.
+       *
+       * So paying mana always costs the card its `taps` claim, and costs it
+       * value only when it does not get the mana back. ADR-0035's refusal to
+       * demote the filter cycle is not reopened; it is left exactly where the
+       * net-mana rule put it.
+       */
       const paid = manaInCost(cost)
-      if (paid > 0 && addedMana(sentence) - paid < 1) {
-        openness *= CONVERSION
-        reach = 'gated'
-      }
+      if (paid > 0) reach = 'gated'
+      if (paid > 0 && addedMana(sentence) - paid < 1) openness *= CONVERSION
       if (MIRRORS_A_LAND.test(line)) {
         openness *= MIRRORED
         reach = 'gated'

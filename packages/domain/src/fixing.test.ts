@@ -500,7 +500,11 @@ describe('what an ability costs to activate', () => {
       oracleText: '{T}: Add {C}.\n{U/R}, {T}: Add {U}{U}, {U}{R}, or {R}{R}.',
     })
     expect(fixingFor(filter, ['U', 'R']).value).toBe(1)
-    expect(fixingFor(filter, ['U', 'R']).reach).toBe('taps')
+    // `reach` is NOT 'taps', and this assertion used to say it was — which was
+    // the falsehood the corpus sweep of the rendered sentence caught. You
+    // cannot get {U} out of Cascade Bluffs without already having {U} or {R}.
+    // The value is what ADR-0035 protected, and the value is untouched.
+    expect(fixingFor(filter, ['U', 'R']).reach).toBe('gated')
   })
 
   it('does demote a land that pays four mana for four', () => {
@@ -529,7 +533,11 @@ describe('what an ability costs to activate', () => {
         '{T}: Add {C}.\n{1}, {T}: Add two mana in any combination of colors. Spend this mana only to cast legendary spells.',
     })
     expect(fixingFor(greatHall, five).restricted).toBe(true)
-    expect(fixingFor(greatHall, five).reach).toBe('restricted')
+    // The flag is the subject of this test. The SENTENCE says `gated`, because
+    // Great Hall is both spend-restricted and behind `{1}`, and of the two only
+    // "not just by tapping" is true of every colour it claims — `reach` reports
+    // the worst limit on the card, not the first one found.
+    expect(fixingFor(greatHall, five).reach).toBe('gated')
   })
 
   it('scores colours borrowed from a board state below mana that is merely restricted', () => {
@@ -942,5 +950,86 @@ describe('what the reason is allowed to claim', () => {
     })
     expect(fixingFor(crater, five).coloursCovered).toBe(1)
     expect(fixingFor(crater, five).reach).toBe('gated')
+  })
+})
+
+/**
+ * Two claims found false by sweeping the sentence over the whole land corpus.
+ *
+ * The score can be right while the sentence is wrong, and auditing the SCORE
+ * does not catch that. Rendering the sentence for all 1,168 legal lands and
+ * asking "is this false of the card" caught both of these, and neither would
+ * have been caught by any test written from the report.
+ */
+describe('the sentence, audited over the corpus', () => {
+  const five: Parameters<typeof fixingFor>[1] = ['W', 'U', 'B', 'R', 'G']
+
+  it('does not say a filter land TAPS for its colours, though it is worth as much', () => {
+    /*
+     * Mystic Gate taps for {C}. You cannot get {W} out of it without already
+     * having {W} or {U}, so "taps for 2 of your 5 colours" is false — and it
+     * was rendered on all twenty filter lands, the Odyssey cycle included.
+     *
+     * The VALUE is untouched, and that is the point of keeping `reach` and
+     * `value` independent: net mana says a filter land is worth exactly what a
+     * dual is worth, and the sentence says you cannot get there by tapping. The
+     * two answer different questions and ADR-0035's refusal to demote the
+     * filter cycle is not being reopened.
+     */
+    const filter = land({
+      name: 'Mystic Gate',
+      producedMana: ['W', 'U', 'C'],
+      oracleText: '{T}: Add {C}.\n{W/U}, {T}: Add {W}{W}, {W}{U}, or {U}{U}.',
+    })
+    const dual = land({
+      name: 'Hallowed Fountain',
+      producedMana: ['W', 'U'],
+      oracleText: '{T}: Add {W} or {U}.',
+    })
+
+    expect(fixingFor(filter, five).reach).toBe('gated')
+    expect(fixingFor(filter, five).value).toBe(fixingFor(dual, five).value)
+  })
+
+  it('reads a card that states its OWN ability in quotes', () => {
+    /*
+     * Dryad Arbor is the single land in the corpus whose whole mana ability is
+     * quoted reminder text about ITSELF: `it has "{T}: Add {G}."`. The
+     * quote-stripping rule was written on the claim that no land does this, and
+     * the audit found the one that does — it was reading "taps for colourless"
+     * on a card that makes no colourless mana at all.
+     *
+     * The discriminator is grammatical and exact: `with "` introduces a token's
+     * ability and `have "` an ability granted to other permanents, while `has "`
+     * is a card talking about itself.
+     */
+    const arbor = land({
+      name: 'Dryad Arbor',
+      typeLine: 'Land Creature — Forest Dryad',
+      producedMana: ['G'],
+      oracleText:
+        '(This land isn\'t a spell, it\'s affected by summoning sickness, and it has "{T}: Add {G}.")',
+    })
+    expect(fixingFor(arbor, five).coloursCovered).toBe(1)
+    expect(fixingFor(arbor, five).reach).toBe('taps')
+  })
+
+  it('still ignores an ability granted to a token or to other permanents', () => {
+    const treasureMaker = land({
+      name: 'Storm the Vault // Vault of Catlacan',
+      typeLine: 'Legendary Enchantment // Legendary Land',
+      manaValue: 4,
+      producedMana: ['W', 'U', 'B', 'R', 'G'],
+      oracleText:
+        'Whenever one or more creatures you control deal combat damage to a player, create a Treasure token. (It\'s an artifact with "{T}, Sacrifice this token: Add one mana of any color.")\n{T}: Add {U} for each artifact you control.',
+    })
+    const granter = land({
+      name: 'Forgotten Monument',
+      producedMana: ['W', 'U', 'B', 'R', 'G'],
+      oracleText: 'Other Caves you control have "{T}, Pay 1 life: Add one mana of any color."',
+    })
+    // Neither card can tap for five colours itself.
+    expect(fixingFor(treasureMaker, five).reach).not.toBe('taps')
+    expect(fixingFor(granter, five).coloursCovered).toBe(0)
   })
 })
