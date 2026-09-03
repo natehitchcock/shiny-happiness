@@ -597,7 +597,46 @@ describe('the legend and the counts', () => {
     expect(screen.getByText(/2 connections · 4 cards · 1 connected to nothing/)).toBeTruthy()
   })
 
+  it('carries membership from the caller through to a drawn edge', () => {
+    /*
+     * The prop type is the thing under test, and it can only be tested from
+     * outside. `DeckWebCard` declared two directions when the model had three
+     * (ADR-0053), and TypeScript's structural typing meant nothing broke: the
+     * workspace passed whole `api.Card`s, the field arrived at runtime, and
+     * `WebCard.synergyHas` picked it up regardless. What the missing
+     * declaration DID do is make it unwritable by any caller building a card
+     * object — including every test in this file — so the tribal path had no
+     * way to be exercised at the component boundary at all.
+     */
+    const tribe: DeckWebCard[] = [
+      card({ oracleId: 'mystic', name: 'Elvish Mystic', synergyHas: ['subtype:elf'] }),
+      card({ oracleId: 'lord', name: 'Elvish Archdruid', synergyWants: ['subtype:elf'] }),
+    ]
+    draw({
+      cards: new Map(tribe.map((c) => [c.oracleId, c])),
+      order: ['mystic', 'lord'],
+      accepted: ['mystic', 'lord'],
+      commanders: [],
+      images: new Map(),
+    })
+    // One edge, and neither card left sitting in the deck. Read `has` on
+    // neither side and the count reads "0 connections · 2 cards · 2 connected
+    // to nothing", which is the Elf deck's whole complaint in miniature.
+    expect(screen.getByText(/1 connections · 2 cards/)).toBeTruthy()
+    expect(screen.queryByText(/connected to nothing/)).toBeNull()
+  })
+
   it('states what the drawing limit dropped, rather than quietly drawing fewer', () => {
+    /*
+     * Forty cards that each produce and want `token` is K40 — 780 pairs, every
+     * one of them identical. 400 of those 780 used to be drawn, and which 400
+     * was settled by `localeCompare` on an oracle id.
+     *
+     * ADR-0053 draws 39 instead: one edge per card, which is the whole of what
+     * this deck has to say, and the readout still names the 780 it came from.
+     * The claim under test has not changed — the count line tells the truth
+     * about what was dropped — only the number it tells the truth about.
+     */
     const many = Array.from({ length: 40 }, (_, i) =>
       card({
         oracleId: `c${String(i)}`,
@@ -613,7 +652,7 @@ describe('the legend and the counts', () => {
       commanders: [],
       images: new Map(),
     })
-    expect(screen.getByText(/Showing 400 of 780 connections/)).toBeTruthy()
+    expect(screen.getByText(/Showing 39 of 780 connections/)).toBeTruthy()
   })
 })
 

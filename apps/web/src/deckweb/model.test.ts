@@ -126,7 +126,10 @@ describe('benefits edges', () => {
     })
     expect(web.edges).toHaveLength(1)
     expect(web.edges[0]?.mutual).toBe(true)
-    expect(web.edges[0]?.why).toContain('each cause something the other benefits from')
+    // "supply", not "cause" (ADR-0053): membership joined `produces` on the
+    // supply side, so one half of a mutual pair may now be supplying by BEING
+    // rather than by doing — an Elf and an Elf lord that also makes tokens.
+    expect(web.edges[0]?.why).toContain('each supply something the other benefits from')
   })
 
   it('does not connect a card to itself', () => {

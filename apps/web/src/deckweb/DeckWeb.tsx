@@ -165,6 +165,15 @@ export interface DeckWebCard {
   readonly primaryRole: string
   readonly synergyProduces: string[]
   readonly synergyWants: string[]
+  /**
+   * What the card IS or HAS (ADR-0048, ADR-0053).
+   *
+   * The web's card type declared two directions when the model had three, so
+   * on the finished Elf deck every one of the fifty edges mentioning Elves was
+   * "causes Elves" — the token makers — and the fifty-three cards that simply
+   * ARE Elves drew no tribal edge at all.
+   */
+  readonly synergyHas?: string[]
 }
 
 const IDENTITY = new Set(['W', 'U', 'B', 'R', 'G'])

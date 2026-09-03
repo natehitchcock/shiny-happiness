@@ -107,7 +107,7 @@ const archdruid = card({
   oracleId: 'archdruid',
   name: 'Elvish Archdruid',
   synergyProduces: [],
-  synergyWants: ['subtype:elf'],
+  synergyWants: ['subtype:elf', 'untap'],
   synergyHas: ['subtype:elf', 'subtype:druid'],
 })
 
@@ -116,6 +116,24 @@ const mystic = card({
   oracleId: 'mystic',
   name: 'Elvish Mystic',
   synergyProduces: [],
+  synergyWants: [],
+  synergyHas: ['subtype:elf'],
+})
+
+/** A second ordinary Elf, so the tribal claim has more than one maker. */
+const llanowar = card({
+  oracleId: 'llanowar',
+  name: 'Llanowar Elves',
+  synergyProduces: [],
+  synergyWants: [],
+  synergyHas: ['subtype:elf'],
+})
+
+/** The one card in the deck making a claim nobody else makes. */
+const quirion = card({
+  oracleId: 'quirion',
+  name: 'Quirion Ranger',
+  synergyProduces: ['untap'],
   synergyWants: [],
   synergyHas: ['subtype:elf'],
 })
@@ -135,6 +153,10 @@ const deck: api.Deck = {
     { oracleId: 'lathril', zone: 'accepted', locked: false },
     { oracleId: 'archdruid', zone: 'accepted', locked: false },
     { oracleId: 'mystic', zone: 'accepted', locked: false },
+    { oracleId: 'llanowar', zone: 'accepted', locked: false },
+    // Last in accepted order on purpose: without the diversity sort it is the
+    // last row, and it is the one row worth reading.
+    { oracleId: 'quirion', zone: 'accepted', locked: false },
   ],
 }
 
@@ -142,6 +164,8 @@ const hydrated = new Map([
   ['lathril', lathril],
   ['archdruid', archdruid],
   ['mystic', mystic],
+  ['llanowar', llanowar],
+  ['quirion', quirion],
 ])
 
 const recommendations = (over: Partial<api.Recommendations> = {}): api.Recommendations =>
@@ -303,6 +327,21 @@ describe('"Synergises with" pairs a want against membership', () => {
     expect(partners?.textContent).toMatch(/Elvish Mystic — one of your Elves/)
   })
 
+  it('counts what the previewed card IS as something a partner can pay off', async () => {
+    await openArchdruid()
+
+    /*
+     * The other half of the pairing, and the half a test that only looked at
+     * Elvish Mystic could not see. Elvish Archdruid CAUSES nothing; it is an
+     * Elf. Lathril wants Elves, so she pays off what the Archdruid is, and the
+     * line has to say "benefits from" — read the supply side as `produces`
+     * alone and the only pairing left is Lathril's Elf TOKENS, which would
+     * make the same row read "causes Elves" about the wrong relation.
+     */
+    const partners = screen.getByText('Synergises with').parentElement
+    expect(partners?.textContent).toMatch(/Lathril, Blade of the Elves — benefits from Elves/)
+  })
+
   it('names the tag in words, not in its wire spelling', async () => {
     await openArchdruid()
 
@@ -310,6 +349,25 @@ describe('"Synergises with" pairs a want against membership', () => {
     // ADR-0046: `readable()` is imported in this file and used four lines from
     // here. The hyphen-stripper leaves a namespaced tag exactly as it was.
     expect(partners?.textContent).not.toContain('subtype:elf')
+  })
+
+  it('leads with the claim the fewest partners make', async () => {
+    /*
+     * Without this the eight-row cut fills with eight copies of one sentence.
+     * Fifty-nine Elves all say "one of your Elves" and arrive in accepted
+     * order, so the untapper and the token maker fall off the end — the
+     * panel's own version of the hairball ADR-0053 refuses in the graph.
+     *
+     * Here three partners say "Elves" and only Quirion Ranger says
+     * "untapping", so Quirion leads — even though it is last in accepted
+     * order, which is where the sort left it before.
+     */
+    await openArchdruid()
+
+    const partners = screen.getByText('Synergises with').parentElement
+    const text = partners?.textContent ?? ''
+    expect(text).toContain('Quirion Ranger')
+    expect(text.indexOf('Quirion Ranger')).toBeLessThan(text.indexOf('Elvish Mystic'))
   })
 })
 
@@ -397,5 +455,10 @@ describe('the filter error carries the near-miss list', () => {
 
     await waitFor(() => expect(screen.getByText('unknown role "xyz"')).toBeDefined())
     expect(screen.queryByText(/did you mean/)).toBeNull()
+    // Nothing AT ALL follows the message, not an empty paragraph. `null` is the
+    // parser's real answer for an error it has nothing to add to — a bad colour
+    // letter is fully explained by its own message — and a hint that hints at
+    // nothing is a second thing on screen saying there is more to know.
+    expect(screen.getByText('unknown role "xyz"').nextElementSibling).toBeNull()
   })
 })

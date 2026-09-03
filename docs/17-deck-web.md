@@ -233,15 +233,37 @@ Measured on that deck, and this is the finding that reshaped the rules:
    scarce edges are dropped and the count says so: "showing 400 of 691
    connections". Silently drawing fewer than the truth is worse than an
    unreadable graph.
+6. **An edge has to tell one of its two cards something new** — ADR-0053. If
+   both endpoints already carry an edge for the tag, the pair is not drawn. The
+   graph shows that a card takes part in a relation; it does not draw every pair
+   in that relation. Added when membership joined the supply side and a 60-card
+   Elf deck went from 173 connections to 820, of which 735 said "Elf" — a
+   near-complete bipartite blob whose members all tie on score, so the ceiling
+   alone would have kept an arbitrary 315 of them.
+
+**A benefits edge reads three directions, not two** — ADR-0048, wired up in
+ADR-0053. The supply side is `produces ∪ has`, because being an Elf is a way of
+supplying Elves. `has ↔ has` is **not** an edge: on that Elf deck it is the
+complete graph, 1,770 edges on sixty nodes, and it adds no reachability the
+lords do not already give. Membership takes its own clause in the sentence, so
+the table view reads "Quirion Ranger **is one of your Elves** and causes
+untapping; Elvish Harbinger benefits from it" — calling an Elf a *cause* of
+Elves is the one thing the third direction exists to prevent.
 
 **Scarcity replaces "weight", which is the change rule 1's measurement forced.**
-A tag is worth `1 / (number of deck cards that produce it)`, and an edge is
-worth the sum over its shared tags. In the aristocrats deck forty cards produce
-`lifeloss` and one produces `landfall`: an edge on the fortieth drain effect is
-not news, and an edge into the deck's only land engine is the deck. That gives
-the range a tag count does not have — it also drives the 1–3 px stroke — and it
-ranks the right thing rather than merely ranking *something*. Combo edges are
-never dropped, and ties break on the oracle-id pair so the cut is reproducible.
+A tag is worth `1 / (number of deck cards that SUPPLY it — produce it or are
+it)`, and an edge is worth the sum over its shared tags. In the aristocrats deck
+forty cards produce `lifeloss` and one produces `landfall`: an edge on the
+fortieth drain effect is not news, and an edge into the deck's only land engine
+is the deck. That gives the range a tag count does not have — it also drives the
+1–3 px stroke — and it ranks the right thing rather than merely ranking
+*something*. Combo edges are never dropped, and ties break on the oracle-id pair
+so the cut is reproducible.
+
+The denominator counts suppliers rather than producers for a reason ADR-0053
+measured: four cards in the Elf deck PRODUCE `subtype:elf` and sixty supply it,
+so counting only producers scored every tribal edge at `1/4` and put it fifteen
+times above a genuinely rare engine.
 
 **What is NOT reduced, deliberately.** The graph still draws every card and
 every kept edge at full opacity until something is focused. Focus is the reading
