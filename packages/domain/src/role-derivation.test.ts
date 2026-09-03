@@ -477,6 +477,85 @@ describe('taxonomy corrections', () => {
       expect(roles).toContain('tutor')
     })
 
+    /*
+     * THE WORD "BASIC" WAS THE WHOLE GAP (ADR-0058).
+     *
+     * The rule read `search your library for (a|up to N) BASIC LAND CARD …
+     * onto the battlefield`, and the format's best ramp spells say neither
+     * word: they name a Forest. 145 non-land cards search out a land and put it
+     * onto the battlefield or into hand without holding the `ramp` role, and
+     * the ones below are four-ofs in half the green decks in the format.
+     *
+     * Every one of the 38 corpus matches for the named-type rule was read by
+     * hand and all 38 are genuine ramp -- there is no false positive to report,
+     * which is why the rule is admitted as written.
+     */
+    it.each([
+      ["Nature's Lore", 'Search your library for a Forest card, put that card onto the battlefield.'],
+      ['Three Visits', 'Search your library for a Forest card, put it onto the battlefield.'],
+      [
+        'Farseek',
+        'Search your library for a Plains, Island, Swamp, or Mountain card, put it onto the battlefield tapped, then shuffle.',
+      ],
+      [
+        'Skyshroud Claim',
+        'Search your library for up to two Forest cards, put them onto the battlefield, then shuffle.',
+      ],
+      [
+        'Aerial Surveyor',
+        'Whenever this Vehicle attacks, search your library for a basic Plains card, put it onto the battlefield tapped, then shuffle.',
+      ],
+    ])('%s is ramp, though it never says "basic land card"', (_name, text) => {
+      expect(rolesOf('Sorcery', text)).toContain('ramp')
+    })
+
+    /*
+     * The same gap one wording over: "a land card" onto the battlefield, which
+     * the old rule refused because it demanded "basic". 16 further cards, also
+     * hand-checked, also all ramp.
+     */
+    it.each([
+      ['Crop Rotation', 'Sacrifice a land: Search your library for a land card, put it onto the battlefield, then shuffle.'],
+      [
+        'Knight of the Reliquary',
+        'Sacrifice a Forest or Plains: Search your library for a land card, put it onto the battlefield, then shuffle.',
+      ],
+    ])('%s is ramp without the word "basic"', (_name, text) => {
+      expect(rolesOf('Sorcery', text)).toContain('ramp')
+    })
+
+    /*
+     * THE LINE. A land going to HAND by way of a named type is deliberately NOT
+     * admitted, and the population is why: it is 84 more cards and 51 of them
+     * are landcycling, whose text is a discard ability on a Dragon. Calling
+     * Timeless Dragon ramp would be the ADR-0031 defect this rule exists to fix,
+     * pointed the other way.
+     *
+     * `land card … into your hand` stays ramp, unchanged -- that rule was
+     * argued in this file for Traveler's Amulet and is not what this touches.
+     */
+    it('does not call landcycling ramp', () => {
+      const roles = rolesOf(
+        'Creature — Dragon',
+        'Flying\nPlainscycling {2} ({2}, Discard this card: Search your library for a Plains card, reveal it, put it into your hand, then shuffle.)',
+      )
+      expect(roles).not.toContain('ramp')
+    })
+
+    /*
+     * The capital is what marks a land type, exactly as it marks a subtype in
+     * `semantic-tokens.ts`. Without it "search your library for a mountain of
+     * cards" would be ramp.
+     */
+    it('reads the land type by its capital, not by the word', () => {
+      expect(
+        rolesOf(
+          'Sorcery',
+          'Search your library for a card that shares a name with a mountain range and put it onto the battlefield.',
+        ),
+      ).not.toContain('ramp')
+    })
+
     it('does not read "nonland card" as a land search', () => {
       expect(
         rolesOf(

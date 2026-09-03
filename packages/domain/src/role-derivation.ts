@@ -45,6 +45,63 @@ const HEURISTICS: readonly Heuristic[] = [
     test: /search your library for (a|up to \w+) basic land card[^.]*onto the battlefield/i,
   },
   /*
+   * THE WORD "BASIC" WAS THE WHOLE GAP (ADR-0058).
+   *
+   * The rule above demands the literal phrase "basic land card", and the
+   * format's best ramp spells say neither word — they name a Forest. Nature's
+   * Lore, Three Visits, Farseek, Skyshroud Claim, Wood Elves, Knight of the
+   * White Orchid, Ranger's Path and Nissa, Who Shakes the World all derived to
+   * the `synergy` catch-all, which means the app told a builder it could not
+   * tell what Three Visits does.
+   *
+   * Measured: 145 non-land cards search out a land, put it onto the
+   * battlefield or into hand, and hold no `ramp` role. This rule and the one
+   * below reach 54 of them, and EVERY ONE OF THE 54 WAS READ BY HAND. There is
+   * no false positive to report, which is why they are admitted as written and
+   * why neither carries a guard it does not need.
+   *
+   * NO `i` FLAG on the land types, and the capital carries the whole
+   * distinction — the same rule `semantic-tokens.ts` relies on and the same one
+   * the tribal sacrifice rule below relies on. Magic capitalises a land type
+   * whenever it names one, so "a Mountain card" is a land and "a mountain of
+   * cards" is not. `[Ss]earch` covers the two ways the clause starts, since a
+   * triggered ability puts it mid-sentence.
+   *
+   * ONTO THE BATTLEFIELD ONLY, and the refusal is the larger half of the
+   * decision. Admitting "into your hand" for a named type is 84 further cards
+   * and 51 of them are LANDCYCLING — "Plainscycling {2} ({2}, Discard this
+   * card: search your library for a Plains card…)" — which is a discard ability
+   * on a Dragon. Timeless Dragon counted as ramp would be ADR-0031's defect
+   * pointed the other way: a card counted under a job it does not do. The
+   * existing "land card … into your hand" rule below is untouched; it was
+   * argued in this file for Traveler's Amulet and this changes nothing about it.
+   */
+  {
+    role: 'ramp',
+    test: /[Ss]earch(?:es)? your library for [^.]{0,60}\b(?:Plains|Island|Swamp|Mountain|Forest)\b[^.]{0,100}?onto the battlefield/,
+  },
+  /*
+   * The same gap, one wording over: "a land card" onto the battlefield.
+   *
+   * The rule at the top of this block wanted "BASIC land card", and 16 cards
+   * say only "a land card" — Crop Rotation, Knight of the Reliquary, Ulvenwald
+   * Hydra, Hour of Promise, Reshape the Earth, Tempt with Discovery. All
+   * hand-checked, all ramp.
+   *
+   * A SEPARATE RULE rather than making `basic` optional in the one above,
+   * because the two claims are different and a reader should be able to see
+   * which one a card matched: that rule is about fetching a basic, this is
+   * about fetching any land, and folding them would hide the second behind an
+   * `?` nobody would notice.
+   *
+   * `\bland card` rather than `land card`, so "nonland card" is not a land
+   * search — the same guard the hand rule below carries, for the same reason.
+   */
+  {
+    role: 'ramp',
+    test: /search your library for (a|up to \w+) \bland card[^.]*onto the battlefield/i,
+  },
+  /*
    * A land tutor is ramp (report 4). The rule above only caught a land put ONTO
    * THE BATTLEFIELD, so Sylvan Scrying and Expedition Map were tutors while
    * Traveler's Amulet and Renegade Map — the same card, one turn slower — were
