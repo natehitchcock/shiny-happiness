@@ -17,7 +17,7 @@
     "`impact.ts` — the generator imports `cardImpact` rather than reimplementing",
     "it, because two copies would drift the day either changed."
   ],
-  "generatedAt": "2026-09-02",
+  "generatedAt": "2026-09-03",
   "corpus": {
     "commanderLegal": 31782,
     "vanillaCreatures": 339
@@ -64,9 +64,12 @@
     "slope": 1.6993,
     "intercept": 0.5414,
     "n": 319,
-    "overManaValues": [1, 6]
+    "overManaValues": [
+      1,
+      6
+    ]
   },
-  "statPointsPerImpactPoint": 0.4919,
+  "statPointsPerImpactPoint": 0.5126,
   "exchangeRateByManaValue": [
     {
       "manaValue": 1,
@@ -74,7 +77,7 @@
       "vanilla": 2.97,
       "all": 2.34,
       "gap": 0.62,
-      "meanImpact": 1.619
+      "meanImpact": 1.554
     },
     {
       "manaValue": 2,
@@ -82,7 +85,7 @@
       "vanilla": 4.04,
       "all": 3.4,
       "gap": 0.64,
-      "meanImpact": 1.967
+      "meanImpact": 1.901
     },
     {
       "manaValue": 3,
@@ -90,7 +93,7 @@
       "vanilla": 5.3,
       "all": 4.48,
       "gap": 0.82,
-      "meanImpact": 2.334
+      "meanImpact": 2.236
     },
     {
       "manaValue": 4,
@@ -98,7 +101,7 @@
       "vanilla": 6.78,
       "all": 5.81,
       "gap": 0.97,
-      "meanImpact": 2.515
+      "meanImpact": 2.406
     },
     {
       "manaValue": 5,
@@ -106,7 +109,7 @@
       "vanilla": 9.08,
       "all": 7.29,
       "gap": 1.79,
-      "meanImpact": 2.565
+      "meanImpact": 2.46
     },
     {
       "manaValue": 6,
@@ -114,7 +117,7 @@
       "vanilla": 11.8,
       "all": 9.05,
       "gap": 2.75,
-      "meanImpact": 2.611
+      "meanImpact": 2.487
     }
   ]
 }

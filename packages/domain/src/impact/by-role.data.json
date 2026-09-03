@@ -23,7 +23,7 @@
     "to affect (`breadth: none`) — the blindness doc 18 §18.2 accepts rather",
     "than patches, measured per role so the interface can state it."
   ],
-  "generatedAt": "2026-09-02",
+  "generatedAt": "2026-09-03",
   "corpus": {
     "commanderLegal": 31782
   },
@@ -44,16 +44,16 @@
     },
     "board-wipe": {
       "n": 519,
-      "q1": 6.12,
+      "q1": 4.896,
       "median": 6.12,
-      "q3": 8.4,
+      "q3": 7.2,
       "noCountableEffect": 71
     },
     "bounce": {
       "n": 281,
-      "q1": 1.2,
-      "median": 1.2,
-      "q3": 1.92,
+      "q1": 0.9,
+      "median": 0.9,
+      "q3": 1.44,
       "noCountableEffect": 8
     },
     "counterspell": {
@@ -67,8 +67,8 @@
       "n": 3738,
       "q1": 0.68,
       "median": 0.935,
-      "q3": 1.6,
-      "noCountableEffect": 2067
+      "q3": 1.584,
+      "noCountableEffect": 2069
     },
     "equipment": {
       "n": 619,
@@ -81,8 +81,8 @@
       "n": 7335,
       "q1": 0.425,
       "median": 0.808,
-      "q3": 1.92,
-      "noCountableEffect": 4339
+      "q3": 1.9,
+      "noCountableEffect": 4340
     },
     "graveyard-hate": {
       "n": 112,
@@ -103,7 +103,7 @@
       "q1": 0.425,
       "median": 0.95,
       "q3": 2.28,
-      "noCountableEffect": 618
+      "noCountableEffect": 619
     },
     "ramp": {
       "n": 1508,
@@ -116,43 +116,43 @@
       "n": 939,
       "q1": 0.85,
       "median": 1.2,
-      "q3": 2.28,
+      "q3": 1.92,
       "noCountableEffect": 260
     },
     "sac-outlet": {
-      "n": 294,
+      "n": 464,
       "q1": 0.68,
       "median": 0.808,
-      "q3": 2.24,
-      "noCountableEffect": 159
+      "q3": 1.92,
+      "noCountableEffect": 251
     },
     "spot-removal": {
-      "n": 2703,
+      "n": 2672,
       "q1": 1.2,
       "median": 1.2,
-      "q3": 1.92,
+      "q3": 1.792,
       "noCountableEffect": 0
     },
     "stax": {
       "n": 93,
       "q1": 0.425,
       "median": 0.6,
-      "q3": 1.4,
+      "q3": 1.44,
       "noCountableEffect": 54
     },
     "synergy": {
-      "n": 11629,
+      "n": 11594,
       "q1": 0.5,
-      "median": 1.1,
-      "q3": 2.2,
-      "noCountableEffect": 5642
+      "median": 0.96,
+      "q3": 1.92,
+      "noCountableEffect": 5613
     },
     "token-maker": {
       "n": 2799,
       "q1": 0.5,
       "median": 0.935,
       "q3": 1.92,
-      "noCountableEffect": 1683
+      "noCountableEffect": 1684
     },
     "tutor": {
       "n": 211,
