@@ -30,6 +30,7 @@ export interface ImpactView {
   readonly persistence: 'one-shot' | 'activated' | 'triggered' | 'upkeep'
   readonly stakes: 'self' | 'own' | 'opposing' | 'player'
   readonly symmetry: 'none' | 'symmetric' | 'one-sided'
+  readonly severity: 'none' | 'tap' | 'flicker' | 'bounce' | 'damage' | 'destroy' | 'exile'
   readonly scales: boolean
   readonly fragile: boolean
 }
@@ -73,10 +74,10 @@ export interface EfficiencyView {
 }
 
 /**
- * The top of the impact scale: 18.48.
+ * The top of the impact scale: 22.176.
  *
  * MIRRORS `IMPACT_MAX` in `packages/domain/src/impact.ts`, where it is derived
- * from the three tier tables rather than written down. The duplication is the
+ * from the four tier tables rather than written down. The duplication is the
  * price of `@roundtable/ui` not depending on `@roundtable/domain`, and it is
  * paid with a test rather than a promise — `apps/web/src/metrics-contract.test.ts`
  * imports both constants and asserts they are equal, so moving a rung in the
@@ -90,7 +91,7 @@ export interface EfficiencyView {
  * measured wrong (ADR-0025: 93 of 1,448 rows above 13), and a meter drawn
  * against it would have pegged the best cards in the format at "full".
  */
-export const IMPACT_MAX = 18.48
+export const IMPACT_MAX = 22.176
 
 /**
  * A metric value as text — the stored number, unrounded.
@@ -180,6 +181,27 @@ const REPEATS: Readonly<Record<ImpactView['persistence'], string>> = {
   upkeep: 'every upkeep',
 }
 
+/**
+ * What is left of the thing afterwards (doc 18 §18.17).
+ *
+ * The register is the pane's own — these read as the end of a sentence starting
+ * "Ends up", the way "Reach" reads as "everything at once". `none` has no entry
+ * because it draws no row at all: 79.5% of the corpus removes nothing, and a
+ * row saying so on four cards in five is noise rather than information.
+ *
+ * `damage` says out loud that it is not always lethal, because that is the one
+ * rung whose severity is probabilistic and a reader who is not told will assume
+ * otherwise.
+ */
+const ENDS_UP: Readonly<Record<Exclude<ImpactView['severity'], 'none'>, string>> = {
+  tap: 'tapped, and still there',
+  flicker: 'right back where it was',
+  bounce: "in its owner's hand",
+  damage: 'damaged, and dead only sometimes',
+  destroy: 'in the graveyard',
+  exile: 'gone for good',
+}
+
 const FALLS_ON: Readonly<Record<ImpactView['stakes'], string>> = {
   self: 'itself',
   own: 'your own side',
@@ -220,7 +242,14 @@ export interface MetricRow {
   readonly value: string
 }
 
-/** The three tier rows. Empty for a card with no rules text — see `impactNotes`. */
+/**
+ * The tier rows. Empty for a card with no rules text — see `impactNotes`.
+ *
+ * "Ends up" is drawn ONLY when the card removes something. It is the one row
+ * that does not apply to every card, and printing "Ends up: nothing" on the
+ * 79.5% of the corpus with `severity: 'none'` would be a row that never varies
+ * — which is a row that stops being read.
+ */
 export const impactRows = (impact: ImpactView): readonly MetricRow[] => {
   if (impact.score === 0) return []
   return [
@@ -230,6 +259,7 @@ export const impactRows = (impact: ImpactView): readonly MetricRow[] => {
       label: 'Falls on',
       value: FALLS_ON[impact.stakes] + qualifier(impact.stakes, impact.symmetry),
     },
+    ...(impact.severity === 'none' ? [] : [{ label: 'Ends up', value: ENDS_UP[impact.severity] }]),
   ]
 }
 
@@ -443,6 +473,7 @@ export const impactAlgorithm = (): readonly string[] => [
   'Reach — how much the effect names, from nothing it can count up to everything at once. This is the biggest of the three by far, and it is why a wrath outscores a removal spell rather than doubling it.',
   'Repeats — once, or every time you pay, or every trigger, or every upkeep. Capped low on purpose: a permanent that repeats is worth about twice a one-shot, and past that what ends the effect is the game ending.',
   'Falls on — itself, your side, an opponent’s, or a player. A small nudge either way, not a multiplier that decides the number.',
+  'Ends up — only for cards that remove something, and only how hard: tapped, flickered, bounced, damaged, destroyed, exiled. Destroy is the neutral point, so a card that removes nothing is not scored down for it.',
   'A mass effect that catches your own board keeps a little less than all of it, because it is pointed at you as well.',
   'Effects only, and that is the honest limit. A card whose job is mana, or a tax, or a card draw, names nothing the model can count, so it lands near the floor however good it is in play. That is a blind spot, not a verdict — which is what the line about its role is for.',
   'Nothing is special-cased, and the deck is never consulted: this is a fact about the card, the same in every deck.',

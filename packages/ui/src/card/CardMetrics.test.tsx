@@ -15,6 +15,7 @@ const WRATH_IMPACT: ImpactView = {
   persistence: 'one-shot',
   stakes: 'opposing',
   symmetry: 'symmetric',
+  severity: 'none',
   scales: false,
   fragile: false,
 }
@@ -35,6 +36,7 @@ const LAND_IMPACT: ImpactView = {
   persistence: 'one-shot',
   stakes: 'self',
   symmetry: 'none',
+  severity: 'none',
   scales: false,
   fragile: false,
 }
@@ -56,6 +58,7 @@ const SOL_RING_IMPACT: ImpactView = {
   persistence: 'activated',
   stakes: 'own',
   symmetry: 'none',
+  severity: 'none',
   scales: false,
   fragile: false,
 }
@@ -101,7 +104,7 @@ describe('CardMetrics — the scale is on the screen', () => {
     const fill = metrics().querySelector('.rt-metric-fill')
     // A board wipe is a third of the way up this scale. If the fill ever reads
     // 100% for it, the meter has stopped dividing by anything.
-    expect(fill?.getAttribute('style')).toMatch(/inline-size:\s*33\.11/)
+    expect(fill?.getAttribute('style')).toMatch(/inline-size:\s*27\.59/)
   })
 
   it('labels efficiency with its unit rather than a second bare score', () => {

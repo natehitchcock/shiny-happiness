@@ -654,7 +654,7 @@ const reaches = (verb: string, gap = 40): RegExp =>
  * Swords to Plowshares.
  */
 const SEV_FLICKER =
-  /\bexiles?\b[^.;:\n]{0,80}?\breturns? (?:it|them|that card|those cards)\b[^.;:\n]{0,40}?\bto the battlefield\b/
+  /\bexiles?\b[^;:\n]{0,120}?\breturns? (?:it|them|that card|those cards)\b[^;:\n]{0,60}?\bto the battlefield\b/
 const SEV_TAP = reaches('taps?', 30)
 const SEV_BOUNCE = /\breturns?\b[^.;:\n]{0,60}?to (?:its|their) owner'?s?'? hand/
 /** −X/−X is damage's twin: the same probabilistic kill, so it takes the same rung. */
@@ -669,8 +669,24 @@ const SEV_DESTROY = reaches('destroys?')
 /** Tuck: shuffled into a library is as unrecoverable as exile for that permanent. */
 const SEV_TUCK =
   /\b(?:shuffles?|puts?)\b[^.;:\n]{0,60}?\binto (?:its|their|his or her) owner'?s?'? library/
-/** Steal: you lose it AND they gain it, a bigger swing than destroy. */
-const SEV_STEAL = /\bgains? control of\b[^.;:\n]{0,40}?\b(?:target|all|each|every)\b/
+/**
+ * Steal: THEY lose it and YOU gain it, a bigger swing than destroy.
+ *
+ * `gain`, never `gains`, and that one letter is the whole rule. Third person is
+ * always somebody else doing the gaining, which is either a control RESET —
+ * "each player gains control of all permanents they own", which hands
+ * everything back — or a donate. Nine commander-legal cards are resets and all
+ * nine read as exile-grade removal before the distinction was drawn; Brooding
+ * Saurian, whose entire text returns every permanent to its owner, reached the
+ * ceiling at 22.176.
+ *
+ * `STEAL_NOT_YOURS` then removes the cases where a player noun is doing the
+ * gaining anyway — "have target opponent gain control of target permanent" is a
+ * gift, and giving something away is not removal.
+ */
+const SEV_STEAL = /\bgain control of\b[^.;:\n]{0,40}?\b(?:target|all|each|every)\b/
+const STEAL_NOT_YOURS =
+  /\b(?:opponent|player)s?\b[^.;:\n]{0,20}?\bgain control of\b|\bgain control of\b[^.;:\n]{0,40}?\byou own\b/
 const SEV_EXILE = reaches('exiles?')
 
 /**
@@ -711,6 +727,7 @@ const severityOf = (clause: string, breadth: BreadthTier): SeverityTier => {
   let best: SeverityTier = 'none'
   for (const [tier, pattern] of SEVERITY_RULES) {
     if (tier === 'exile' && flickers && pattern === SEV_EXILE) continue
+    if (pattern === SEV_STEAL && STEAL_NOT_YOURS.test(clause)) continue
     if (!pattern.test(clause)) continue
     if (best === 'none' || SEVERITY_VALUE[tier] > SEVERITY_VALUE[best]) best = tier
   }

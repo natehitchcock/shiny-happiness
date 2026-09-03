@@ -29,13 +29,14 @@ import {
  * card.
  */
 
-/** `cardImpact(WRATH_OF_GOD)` — unbounded, one-shot, opposing, symmetric. */
+/** `cardImpact(WRATH_OF_GOD)` — unbounded, one-shot, opposing, symmetric, destroy. */
 const WRATH: ImpactView = {
   score: 6.12,
   breadth: 'unbounded',
   persistence: 'one-shot',
   stakes: 'opposing',
   symmetry: 'symmetric',
+  severity: 'destroy',
   scales: false,
   fragile: false,
 }
@@ -47,6 +48,7 @@ const TORMENT: ImpactView = {
   persistence: 'one-shot',
   stakes: 'player',
   symmetry: 'one-sided',
+  severity: 'none',
   scales: true,
   fragile: false,
 }
@@ -58,6 +60,7 @@ const VANILLA: ImpactView = {
   persistence: 'one-shot',
   stakes: 'self',
   symmetry: 'none',
+  severity: 'none',
   scales: false,
   fragile: false,
 }
@@ -69,6 +72,7 @@ const FRAGILE: ImpactView = {
   persistence: 'one-shot',
   stakes: 'opposing',
   symmetry: 'none',
+  severity: 'none',
   scales: false,
   fragile: true,
 }
@@ -88,6 +92,7 @@ const CRATERHOOF: ImpactView = {
   persistence: 'one-shot',
   stakes: 'own',
   symmetry: 'one-sided',
+  severity: 'none',
   scales: false,
   fragile: false,
 }
@@ -104,6 +109,7 @@ const AGATHA: ImpactView = {
   persistence: 'activated',
   stakes: 'own',
   symmetry: 'one-sided',
+  severity: 'none',
   scales: false,
   fragile: false,
 }
@@ -115,6 +121,7 @@ const CYCLONIC_RIFT: ImpactView = {
   persistence: 'one-shot',
   stakes: 'opposing',
   symmetry: 'one-sided',
+  severity: 'none',
   scales: false,
   fragile: false,
 }
@@ -126,6 +133,7 @@ const DISK: ImpactView = {
   persistence: 'activated',
   stakes: 'opposing',
   symmetry: 'symmetric',
+  severity: 'none',
   scales: false,
   fragile: false,
 }
@@ -198,9 +206,12 @@ describe('impactFraction', () => {
   it('places a score as a percentage of the model ceiling', () => {
     expect(impactFraction(IMPACT_MAX)).toBe(100)
     expect(impactFraction(0)).toBe(0)
-    // Wrath of God is a third of the way up, which is the shape of the claim the
-    // meter makes: a board wipe is a high card and is nowhere near the top.
-    expect(impactFraction(6.12)).toBeCloseTo(33.1, 1)
+    // Wrath of God is a bit over a quarter of the way up, which is the shape of
+    // the claim the meter makes: a board wipe is a high card and is nowhere near
+    // the top. It was a third until ADR-0055 added severity and the ceiling rose
+    // from 18.48 to 22.176 — the meter moved because the scale did, not because
+    // the card did.
+    expect(impactFraction(6.12)).toBeCloseTo(27.6, 1)
   })
 
   it('never runs past either end of the track', () => {
@@ -213,12 +224,32 @@ describe('impactFraction', () => {
 })
 
 describe('impactRows', () => {
-  it('says what a wrath reaches, how often, and whose board — including yours', () => {
+  it('says what a wrath reaches, how often, whose board, and what is left', () => {
     expect(impactRows(WRATH)).toEqual([
       { label: 'Reach', value: 'everything at once' },
       { label: 'Repeats', value: 'once, then it is done' },
       { label: 'Falls on', value: "an opponent's side, your board included" },
+      { label: 'Ends up', value: 'in the graveyard' },
     ])
+  })
+
+  it('draws no "Ends up" row for a card that removes nothing', () => {
+    // 79.5% of the corpus has `severity: 'none'`. A row that never varies on
+    // four cards in five is a row that stops being read, so it is not drawn.
+    const rows = impactRows(CRATERHOOF)
+    expect(rows.map((row) => row.label)).not.toContain('Ends up')
+    expect(rows).toHaveLength(3)
+  })
+
+  it('names each rung in the pane\u2019s own register', () => {
+    const endsUp = (severity: ImpactView['severity']): string | undefined =>
+      impactRows({ ...WRATH, severity }).find((row) => row.label === 'Ends up')?.value
+    expect(endsUp('tap')).toBe('tapped, and still there')
+    expect(endsUp('flicker')).toBe('right back where it was')
+    expect(endsUp('bounce')).toBe("in its owner's hand")
+    expect(endsUp('damage')).toBe('damaged, and dead only sometimes')
+    expect(endsUp('destroy')).toBe('in the graveyard')
+    expect(endsUp('exile')).toBe('gone for good')
   })
 
   it('distinguishes a one-sided mass effect from a symmetric one', () => {
@@ -230,6 +261,8 @@ describe('impactRows', () => {
     const falls = impactRows(TORMENT).find((row) => row.label === 'Falls on')
     expect(falls?.value).toBe('a player, not the board, never you')
     expect(falls?.value).not.toBe(impactRows(WRATH)[2]?.value)
+    // Torment removes nothing — it takes life and cards, not permanents.
+    expect(impactRows(TORMENT).map((row) => row.label)).not.toContain('Ends up')
   })
 
   it('does not tell a card that only hits your own board that it never hits yours', () => {
@@ -287,7 +320,7 @@ describe('impactRows', () => {
  * drift out of step with the data file it came from.
  */
 describe('impactAlgorithm', () => {
-  it('names the three readings the pane already shows, in the pane\'s own words', () => {
+  it("names the three readings the pane already shows, in the pane's own words", () => {
     const said = impactAlgorithm().join(' ')
     expect(said).toContain('Reach')
     expect(said).toContain('Repeats')
