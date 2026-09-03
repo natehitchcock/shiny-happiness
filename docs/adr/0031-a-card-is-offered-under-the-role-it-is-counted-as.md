@@ -4,12 +4,30 @@ Date: 2026-09-01
 
 ## Status
 
-Accepted.
+Accepted. **Amended by [ADR-0054](0054-whose-event-is-it-and-what-is-a-card-counted-as.md) §3.**
 
 > **Number 0031 was assigned to this work.** 0030 (the picture flips and the
 > text does not) is the highest taken. The next agent should take 0032 and
 > should not derive a free number by reading the directory — three pairs of
 > agents have collided that way.
+
+### The amendment, in one paragraph
+
+This ADR says grouping uses `primaryRole(roles)`, and that was right about the
+defect it fixed and too narrow about the rule behind it. `recommend` could only
+see ROLE dimensions — it built its deficit index with
+`if (deficit.dimension.kind === 'role')` and dropped the rest — so `type:creature`,
+a real composition target and the second-largest gap on an empty midrange deck,
+could never make a group at all. ADR-0054 §3 widens the statement to the one this
+ADR was really making: **a card is offered under a dimension it is COUNTED
+under**, and `dimensionKeysOf` — "one role and each of its types", the single
+definition the meters already read — says which those are. The role gap still
+wins where a card has both, for this ADR's own reason: the more specific claim
+about the deck wins the card.
+
+ADR-0054 §2 also re-derives `ROLE_PRECEDENCE`, which this ADR named as the single
+place to win an argument about what a card counts as. It was won: `token-maker`,
+`ramp` and `tutor` moved below the answer block.
 
 ## Context
 
