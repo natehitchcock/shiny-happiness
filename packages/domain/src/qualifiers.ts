@@ -172,21 +172,113 @@ const COLOUR_WORDS: ReadonlyMap<string, Color> = new Map([
 ])
 
 /**
- * The cast trigger, and its object phrase.
+ * The cast trigger, and the sentence it opens.
  *
- * Runs to the comma that ends the trigger, because past the comma the sentence
- * is the EFFECT and its words are not about the spell that caused it — the same
- * clause-is-the-unit ruling `synergy.ts` makes three times.
+ * Runs to the end of the SENTENCE, not to the first comma, and `objectPhrase`
+ * below finds the end of the trigger inside it. That split is ADR-0057's
+ * correction: `[^,.)\n]` was both too long and too short at once — it ran past
+ * the trigger into a second event, and it stopped inside a list.
  *
  * `casts?` and `copy|copies` because magecraft says "cast or copy", and the
- * closing `)` is admitted because prowess only ever states its qualifier inside
- * reminder text: Monastery Swiftspear's rules text is the word "Prowess" and a
- * parenthesis. `semantic-tokens.ts` strips reminder text and is right to — a
- * Reach reminder made 417 Spiders look like flying payoffs — but here the
+ * closing `)` still ends the run because prowess only ever states its qualifier
+ * inside reminder text: Monastery Swiftspear's rules text is the word "Prowess"
+ * and a parenthesis. `semantic-tokens.ts` strips reminder text and is right to
+ * — a Reach reminder made 417 Spiders look like flying payoffs — but here the
  * reminder is the only place the qualifier is written down.
  */
 const CAST_TRIGGER =
-  /\b[Ww]henever (?:you|a player|an opponent) (?:casts?|copy|copies)(?: or (?:casts?|copy|copies))? ([^,.)\n]{0,90})/g
+  /\b[Ww]henever (?:you|a player|an opponent) (?:casts?|copy|copies)(?: or (?:casts?|copy|copies))? ([^.)\n]{0,200})/g
+
+/**
+ * A SERIAL comma, which continues the object phrase rather than ending it.
+ *
+ * The trigger's own comma is followed by a clause; a list's comma is followed by
+ * another item. The difference this reads is the serial comma itself — the `+`
+ * requires at least one interior `word,` — and it is load-bearing rather than
+ * decorative. With `*` the phrase "a noncreature spell, and create a 1/1 white
+ * Spirit creature token" continues through the effect and the card claims to
+ * want white creature spells.
+ *
+ * Two commander-legal cards state one, and both were the whole of the damage it
+ * did: "a spell that's white, blue, black, or red" was read as `white`, and
+ * Quirion Dryad and Questing Druid were the only two cards the qualifier
+ * silenced to zero candidates.
+ */
+const SERIAL_LIST = /^,(?:\s+[a-z]+,)+\s+(?:or|and)\s+[a-z]+(?![a-z])/
+
+/**
+ * The relative clause that describes the TARGET, not the spell.
+ *
+ * "Whenever you cast a spell that targets this creature" — `creature` is what
+ * the spell points at. Reading it as the spell's own type inverts the filter
+ * exactly, because every `spell-cast` supplier is an instant or a sorcery by
+ * construction: `include: ['creature']` keeps only the 186 adventure and MDFC
+ * creature-halves, which are the only suppliers that CANNOT trigger it.
+ */
+const TARGET_CLAUSE = /\s+that targets?\b/
+
+/**
+ * A second trigger event, sharing the "whenever" but not the "cast".
+ *
+ * "Whenever you cast a spell from exile OR A LAND YOU CONTROL ENTERS from
+ * exile" is two triggers. The capture ran through both and derived `land`,
+ * which no instant or sorcery can be, so Faldorn's payoff set became the eleven
+ * MDFCs with a land back face.
+ *
+ * The marker is a VERB, and that is the whole distinction: a disjunct naming
+ * another kind of spell is a bare noun phrase ("a noncreature spell or a Dragon
+ * spell"), where a disjunct that is its own event has to say what happens.
+ * `ELIDED` is the shape that reuses the subject — "cast a spell or ACTIVATE an
+ * ability" — and `OWN` the shape that brings its own.
+ *
+ * Scanned per disjunct rather than over the tail, and that is why Unbound
+ * Flourishing survives: "an instant or sorcery spell or activate an ability"
+ * must end at the SECOND `or`, and a search over everything after the first one
+ * would find `activate` and cost the card its `sorcery`.
+ */
+const ELIDED_EVENT = /^(?:activates?|plays?|copy|copies|cycles?|discards?|sacrifices?)\b/
+const OWN_EVENT = /\b(?:enters?|dies?|leaves?|attacks?|blocks?|becomes?|is put|are put)\b/
+
+/**
+ * Where the trigger ends inside the sentence it opened.
+ *
+ * Three boundaries, taken at the EARLIEST of them, so the order they are
+ * written in cannot change the answer. Everything past the boundary is either
+ * the effect, the target, or a different event — and in all three cases its
+ * words are not about the spell that was cast.
+ */
+const objectPhrase = (sentence: string): string => {
+  // 1. The comma that ends the trigger, stepping over serial commas.
+  let phrase = ''
+  let rest = sentence
+  for (;;) {
+    const comma = rest.indexOf(',')
+    if (comma < 0) {
+      phrase += rest
+      break
+    }
+    phrase += rest.slice(0, comma)
+    const tail = rest.slice(comma)
+    const list = SERIAL_LIST.exec(tail)
+    if (list === null) break
+    phrase += list[0]
+    rest = tail.slice(list[0].length)
+  }
+
+  // 2. The target clause, and 3. the second event. Earliest wins.
+  const ends: number[] = [phrase.length]
+  const target = TARGET_CLAUSE.exec(phrase)
+  if (target !== null) ends.push(target.index)
+  for (const or of phrase.matchAll(/ or /g)) {
+    const after = phrase.slice(or.index + ' or '.length)
+    const disjunct = after.split(' or ')[0] ?? after
+    if (ELIDED_EVENT.test(after) || OWN_EVENT.test(disjunct)) {
+      ends.push(or.index)
+      break
+    }
+  }
+  return phrase.slice(0, Math.min(...ends))
+}
 
 const uniq = <T>(values: readonly T[]): readonly T[] => [...new Set(values)]
 
@@ -260,7 +352,7 @@ export const deriveWantQualifiers = (card: Pick<Card, 'oracleText'>): readonly Q
   if (!QUALIFIABLE_TAGS.has('spell-cast')) return []
   const found: (readonly WantQualifier[])[] = []
   for (const match of card.oracleText.matchAll(CAST_TRIGGER)) {
-    const qualifiers = parseObject(match[1] ?? '')
+    const qualifiers = parseObject(objectPhrase(match[1] ?? ''))
     // A bare "whenever you cast a spell" states no constraint, and a trigger
     // that states none makes every other trigger on the card irrelevant: the
     // card is turned on by anything. Reported as an empty list, which

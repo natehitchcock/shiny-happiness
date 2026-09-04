@@ -274,6 +274,197 @@ describe('deriveWantQualifiers', () => {
       { kind: 'card-type', include: [], exclude: ['creature'] },
     ])
   })
+
+  /*
+   * ------------------------------------------------------ THE TARGET CLAUSE
+   *
+   * ADR-0057's correction. "A spell that targets this creature" says nothing
+   * about the spell and everything about what it points at, so reading its
+   * words as the spell's type INVERTS the filter: every `spell-cast` supplier
+   * is an instant or a sorcery by construction, so `include: ['creature']`
+   * keeps only the adventure and MDFC creature-halves — the 186 cards that are
+   * the ONLY ones which cannot trigger a Heroic creature.
+   *
+   * 76 commander-legal cards state one, 387,572 of the 710,860 corpus pairs the
+   * qualifier removed, and all of it in the wrong direction.
+   */
+  it('reads nothing from a Heroic trigger, whose words describe the target', () => {
+    const phalanx = card(
+      'Phalanx Leader',
+      'Creature — Human Soldier',
+      'Heroic — Whenever you cast a spell that targets this creature, ' +
+        'put a +1/+1 counter on each creature you control.',
+    )
+    expect(deriveWantQualifiers(phalanx)).toEqual([])
+  })
+
+  it('keeps the words before "that targets" and drops the ones after', () => {
+    const scolding = card(
+      'Scolding Administrator',
+      'Creature — Human Advisor',
+      'Whenever you cast an instant or sorcery spell that targets a creature, ' +
+        'put a +1/+1 counter on this creature.',
+    )
+    expect(forTag(scolding, 'spell-cast')).toEqual([
+      { kind: 'card-type', include: ['instant', 'sorcery'], exclude: [] },
+    ])
+  })
+
+  it('keeps a noncreature clause stated before the target clause', () => {
+    const feather = card(
+      'Feather, Radiant Arbiter',
+      'Legendary Creature — Angel',
+      'Flying\nWhenever you cast a noncreature spell that targets only Feather, ' +
+        'you may choose any number of other creatures that spell could target.',
+    )
+    expect(forTag(feather, 'spell-cast')).toEqual([
+      { kind: 'card-type', include: [], exclude: ['creature'] },
+    ])
+  })
+
+  it('reads nothing from a target clause that names two permanent types', () => {
+    // The chip said "creature or artifact" for a card that cares about neither.
+    const duplimancy = card(
+      'Vesuvan Duplimancy',
+      'Enchantment',
+      'Whenever you cast a spell that targets only a single artifact or creature you control, ' +
+        "create a token that's a copy of that artifact or creature, except it's not legendary.",
+    )
+    expect(deriveWantQualifiers(duplimancy)).toEqual([])
+  })
+
+  /*
+   * --------------------------------------------------- THE SECOND EVENT
+   *
+   * "Whenever you cast a spell from exile OR A LAND YOU CONTROL ENTERS from
+   * exile" is two triggers, and only the first has a spell in it. The capture
+   * ran to the first comma and swallowed the second, deriving `land` — which no
+   * instant or sorcery can ever be, so the whole payoff set was replaced by the
+   * eleven MDFCs with a land back face.
+   *
+   * Three cards in the corpus state one, and the marker is a VERB: a disjunct
+   * that is its own event has a subject and a verb, where a disjunct that is
+   * another kind of spell is a bare noun phrase.
+   */
+  it('stops at a disjunct that is a second trigger, not another kind of spell', () => {
+    const faldorn = card(
+      'Faldorn, Dread Wolf Herald',
+      'Legendary Creature — Human Werewolf',
+      'Whenever you cast a spell from exile or a land you control enters from exile, ' +
+        'create a 2/2 green Wolf creature token.',
+    )
+    expect(deriveWantQualifiers(faldorn)).toEqual([])
+  })
+
+  it('stops at a second event whose subject is elided', () => {
+    const flourishing = card(
+      'Unbound Flourishing',
+      'Enchantment',
+      'Whenever you cast an instant or sorcery spell or activate an ability, ' +
+        'if that spell or ability has a single target, copy it.',
+    )
+    expect(forTag(flourishing, 'spell-cast')).toEqual([
+      { kind: 'card-type', include: ['instant', 'sorcery'], exclude: [] },
+    ])
+  })
+
+  /*
+   * The boundary the `disjunct` narrowing is for, and the only test here whose
+   * text is not printed on a card.
+   *
+   * Unbound Flourishing already proves the ELIDED half — "an instant or sorcery
+   * spell or activate an ability" must end at the SECOND `or`, and a scan over
+   * everything after the first one would find `activate` and cost the card its
+   * `sorcery`. The OWN half has the same hazard and NO printed card states it:
+   * searched all 34,495 rows for a cast trigger whose second event sits behind
+   * a disjunction, and there are none. The branch is kept because it is the
+   * same rule as the half that is real, and it is pinned here rather than left
+   * as an untested defence.
+   */
+  it('ends at the disjunct that is the event, not at the one before it', () => {
+    const synthetic = card(
+      'Fixture',
+      'Creature — Elemental',
+      'Whenever you cast an instant or sorcery spell or a land you control enters, draw a card.',
+    )
+    expect(forTag(synthetic, 'spell-cast')).toEqual([
+      { kind: 'card-type', include: ['instant', 'sorcery'], exclude: [] },
+    ])
+  })
+
+  it('leaves a genuine disjunction of spell kinds alone', () => {
+    // The control for the rule above: "a Dragon spell" is a noun phrase, not an
+    // event, so the trigger does not end at its `or`.
+    const whelp = card(
+      'Runescale Stormbrood',
+      'Creature — Dragon',
+      'Flying\nWhenever you cast a noncreature spell or a Dragon spell, ' +
+        'put a +1/+1 counter on this creature.',
+    )
+    expect(forTag(whelp, 'spell-cast')).toEqual([
+      { kind: 'card-type', include: [], exclude: ['creature'] },
+    ])
+  })
+
+  /*
+   * Appa is the control the report named: the same "from exile" trigger with the
+   * comma in the right place. It derived nothing before this change and must
+   * derive nothing after it, which is what proves the fix is the second event
+   * and not the words "from exile".
+   */
+  it('still reads nothing from a from-exile trigger that states no card property', () => {
+    const appa = card(
+      'Appa, Steadfast Guardian',
+      'Legendary Creature — Bison',
+      'Flash\nFlying\nWhenever you cast a spell from exile, ' +
+        'create a 1/1 white Ally creature token.',
+    )
+    expect(deriveWantQualifiers(appa)).toEqual([])
+  })
+
+  /*
+   * ------------------------------------------------------- THE SERIAL LIST
+   *
+   * `[^,.)\n]` ended the object phrase at the FIRST comma, which is right for
+   * the comma that ends a trigger and wrong for the commas inside a list. Two
+   * cards state one, and both were reduced to a single colour: Quirion Dryad
+   * and Questing Druid were the only two cards the qualifier silenced to zero
+   * candidates on a real deck.
+   */
+  it('reads a whole comma-separated colour list, not just its first item', () => {
+    const dryad = card(
+      'Quirion Dryad',
+      'Creature — Dryad',
+      "Whenever you cast a spell that's white, blue, black, or red, " +
+        'put a +1/+1 counter on this creature.',
+    )
+    expect(forTag(dryad, 'spell-cast')).toEqual([{ kind: 'colour', colors: ['W', 'U', 'B', 'R'] }])
+    expect(satisfiesQualifiers(candidate(1, ['instant'], ['G']), forTag(dryad, 'spell-cast'))).toBe(
+      false,
+    )
+    expect(satisfiesQualifiers(candidate(1, ['instant'], ['B']), forTag(dryad, 'spell-cast'))).toBe(
+      true,
+    )
+  })
+
+  /*
+   * The boundary that keeps the list rule from eating the effect. A trigger's
+   * own comma is followed by a clause, not by a list item, and the difference
+   * this rule reads is the SERIAL comma: a list has one inside it. Without that
+   * `+` this phrase extends through "and create a 1/1 white Spirit creature
+   * token" and the card claims to want white creature spells.
+   */
+  it('does not mistake the trigger comma for a list comma', () => {
+    const wizard = card(
+      'Whispering Wizard',
+      'Creature — Human Wizard',
+      'Whenever you cast a noncreature spell, and create a 1/1 white Spirit creature token ' +
+        'with flying.',
+    )
+    expect(forTag(wizard, 'spell-cast')).toEqual([
+      { kind: 'card-type', include: [], exclude: ['creature'] },
+    ])
+  })
 })
 
 describe('satisfiesQualifiers', () => {
