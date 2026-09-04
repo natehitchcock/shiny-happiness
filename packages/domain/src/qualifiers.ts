@@ -457,10 +457,19 @@ export const suppliedWants = <Tag extends string>(
   },
   options: { readonly candidate?: Pick<Card, 'manaValue' | 'types' | 'colors'> } = {},
 ): readonly Tag[] => {
-  const wanted = new Set<string>(wanter.wants)
+  /*
+   * ARRAYS, NOT SETS, and it is measured rather than preferred. This runs once
+   * per PAIR inside the deck web's O(n²) loop — 10,000 calls on a hundred
+   * nodes, against a 16 ms budget for the whole build — and a card carries a
+   * handful of tags. Building two Sets per call to search three elements cost
+   * the budget outright: the first version of this measured 16.04 ms where the
+   * raw intersection it replaced measured 15.2, and `deckweb/model.test.ts`
+   * failed on it. `includes` over a three-element array is faster than
+   * allocating the Set that would search it.
+   */
   const out: Tag[] = []
-  for (const tag of new Set(supplied)) {
-    if (!wanted.has(tag)) continue
+  for (const tag of supplied) {
+    if (!wanter.wants.includes(tag) || out.includes(tag)) continue
     const qualified = wanter.qualifiers?.find((q) => (q.tag as string) === tag)
     const facts = options.candidate
     if (qualified !== undefined && facts !== undefined) {

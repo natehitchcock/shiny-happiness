@@ -374,9 +374,35 @@ describe('doc 17 §17.8’s budget', () => {
   it('computes a 100-node web in well under 16 ms', () => {
     // The tags are spread so the deck is genuinely dense rather than a line.
     const tags = ['token', 'creature-death', 'lifegain', 'lifeloss', 'treasure']
-    const cards = Array.from({ length: 100 }, (_, i) =>
-      card(`c${String(i)}`, [tags[i % 5]!], [tags[(i + 1) % 5]!, tags[(i + 2) % 5]!]),
-    )
+    /*
+     * WITH ORACLE TEXT AND FACTS, because production has them and the
+     * qualifier is read from them (ADR-0057).
+     *
+     * A fixture of bare tag arrays measured the wrong function: `oracleText`
+     * absent skips the derivation entirely and absent facts skip
+     * `satisfiesQualifiers`, so the budget covered neither. Every twentieth
+     * card states a real qualified trigger and every fifth supplies
+     * `spell-cast`, which is what makes the inner loop evaluate a qualifier
+     * rather than step over one.
+     */
+    const cards = Array.from({ length: 100 }, (_, i): WebCard => {
+      const wants = [tags[(i + 1) % 5]!, tags[(i + 2) % 5]!]
+      const produces = [tags[i % 5]!]
+      return {
+        oracleId: `c${String(i)}`,
+        name: `Card c${String(i)}`,
+        synergyProduces: i % 5 === 0 ? [...produces, 'spell-cast'] : produces,
+        synergyWants: i % 20 === 0 ? [...wants, 'spell-cast'] : wants,
+        manaValue: i % 7,
+        types: [(['creature', 'instant', 'sorcery', 'artifact'] as const)[i % 4]!],
+        colors: [(['W', 'U', 'B', 'R', 'G'] as const)[i % 5]!],
+        oracleText:
+          'Vigilance, trample\n' +
+          'At the beginning of each end step, if a player lost 4 or more life this turn, draw a card.\n' +
+          'Whenever you cast a noncreature spell with mana value 3 or greater, ' +
+          'this creature deals 2 damage to each opponent and you gain 2 life.',
+      }
+    })
     /*
      * The BEST of several runs, not a single one.
      *
