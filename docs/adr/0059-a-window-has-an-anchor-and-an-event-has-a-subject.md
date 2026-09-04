@@ -435,7 +435,8 @@ agent starts from the measurement rather than the symptom.
   "self lifeloss".
 - `treasure`'s payoff rule matches zero cards (§2) and is left as a named gap.
 - Valence is unexpressible and is not attempted (§6).
-- Every assertion added here was mutation-checked: **35 mutations, 35 killed.**
+- Every assertion added here was mutation-checked: **39 mutations, 39 killed**, re-run in full against the finished tree after
+  the mid-flight rebase onto ADR-0060.
   Two earlier attempts escaped and were **bad mutations rather than test gaps** —
   an alternation prepended to a regex disables nothing, and stripping one branch
   of three left the branch the card matched. Both were rewritten until they bit.
