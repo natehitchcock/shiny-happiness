@@ -8,7 +8,7 @@ import {
   type WantQualifier,
 } from './qualifiers.js'
 import { SEMANTIC_TAGS, deriveSemanticTokens, type SemanticTag } from './semantic-tokens.js'
-import { CREATES_FOR_YOU } from './token-subject.js'
+import { CREATES_FOR_YOU, addressedToYou, forYou } from './token-subject.js'
 
 /**
  * Mechanical synergy (ADR-0011).
@@ -777,10 +777,28 @@ const PRODUCES: readonly Rule[] = [
     ),
   },
 
-  // The numbers were a closed list of one, so "gain 4 life" read as nothing.
+  /*
+   * The numbers were a closed list of one, so "gain 4 life" read as nothing.
+   *
+   * WHOSE LIFE (ADR-0059). Swords to Plowshares — "Exile target creature. ITS
+   * CONTROLLER gains life equal to its power" — ranked #1 in Staples for a
+   * Heliod deck on the reason "enables your emphasised gaining life", and
+   * Heliod triggers on YOU gaining life. 24 commander-legal cards, every one
+   * read by hand, every one a card that hands the life across the table:
+   * Illumination, Nature's Claim, Condemn, Oust, Last Breath, both
+   * Phelddagrifs, Grove of the Burnwillows, the free-spell cycle that pays an
+   * opponent life for its own cost.
+   *
+   * `lifelink` keeps no subject test, and does not need one: it is a keyword on
+   * a permanent, and the permanent is on the battlefield of whoever controls
+   * it, which in a deck of yours is you.
+   */
   {
     tag: 'lifegain',
-    test: /\bgains? (\d+|X) life\b|\bgains? life equal to\b|\bgains? that much life\b|\blifelink\b/i,
+    test: new RegExp(
+      `${forYou()}\\bgains? (\\d+|X) life\\b|${forYou()}\\bgains? life equal to\\b|${forYou()}\\bgains? that much life\\b|\\blifelink\\b`,
+      'i',
+    ),
   },
   {
     tag: 'lifeloss',
@@ -844,9 +862,31 @@ const PRODUCES: readonly Rule[] = [
     test: /\bdamage divided [^.\n]{0,40}among (?:any number of targets|one, two, or three targets)\b/i,
   },
 
+  /*
+   * WHOSE CARD (ADR-0059). "Target opponent draws a card" is Bargain, and every
+   * rule here read the verb and not the subject — so a card whose whole text is
+   * a gift to an opponent came back as a draw engine, with `draw` as its
+   * primary role. 37 commander-legal cards, all read by hand: Bargain, Lord of
+   * Tresserhorn, Master of the Feast, Forced Fruition, Thought-Knot Seer, Call
+   * to Heel, Introduction to Annihilation, both Phelddagrifs.
+   *
+   * Half of them are not gifts at all but TRIGGER CONDITIONS — "whenever an
+   * opponent draws a card, this deals 1 damage to that player" is Underworld
+   * Dreams, Fate Unraveler, Razorkin Needlehead, Orcish Bowmasters and
+   * Smothering Tithe. Those cards draw nobody anything; the words are the
+   * clause the card is waiting for. An adjacency test is what tells them from
+   * a gift, and it is why the general refusal in `token-subject.ts` asks for
+   * the subject to sit against the verb rather than within a window: the same
+   * fifty-character reach that `creates` can afford took `card-draw` off 118
+   * cards here, and most of those were the payoffs — Consecrated Sphinx draws
+   * two BECAUSE an opponent drew one.
+   */
   {
     tag: 'card-draw',
-    test: /\bdraws? (a|two|three|four|five|six|seven|X|that many|\d+) cards?\b|\bdraws? cards equal to\b/i,
+    test: new RegExp(
+      `${forYou()}\\bdraws? (a|two|three|four|five|six|seven|X|that many|\\d+) cards?\\b|${forYou()}\\bdraws? cards equal to\\b`,
+      'i',
+    ),
   },
   // Whose discard. "Target opponent discards two cards" is a hand attack, not a
   // loot engine, and this tag's payoffs are madness and "whenever you discard" —
@@ -1075,7 +1115,27 @@ const PRODUCES: readonly Rule[] = [
     tag: 'landfall',
     test: /\bplay (?:an|one|two|three|X|another|any number of) additional lands?\b|\bput(s)? .{0,30}land .{0,20}battlefield/i,
   },
-  { tag: 'landfall', test: /\bland cards?\b[^.]{0,60}\bonto the battlefield\b/i },
+  /*
+   * WHOSE LAND (ADR-0059). Path to Exile — "Its controller may search their
+   * library for a basic land card, put that card onto the battlefield" — is the
+   * opponent's landfall, and a landfall deck was being offered it as an
+   * enabler. 14 commander-legal cards, all read by hand: Path, Ghost Quarter,
+   * Assassin's Trophy, Cleansing Wildfire, Erode, Sandworm, Old-Growth Dryads.
+   *
+   * This is the only caller that passes a `between` to the refusal, and the
+   * reason is that this rule is anchored on a NOUN. The subject of the clause
+   * is the subject of "search", four words to the left of "land card", so the
+   * search phrase is spelled out rather than covered by a window — a window
+   * wide enough to reach the subject would also reach into the previous
+   * sentence, which is where "you gain 3 life" and "you draw a card" live.
+   */
+  {
+    tag: 'landfall',
+    test: new RegExp(
+      `${forYou(String.raw`search(?:es)? (?:your|their) library for [^.\n]{0,40}`)}\\bland cards?\\b[^.]{0,60}\\bonto the battlefield\\b`,
+      'i',
+    ),
+  },
   /*
    * The fetch that never says "land" (ADR-0038).
    *
@@ -1096,7 +1156,10 @@ const PRODUCES: readonly Rule[] = [
    */
   {
     tag: 'landfall',
-    test: /\bsearch(?:es)? (?:your|their) library for [^.\n]{0,80}\b(?:Plains|Island|Swamp|Mountain|Forest)\b[^.\n]{0,60}\bonto the battlefield\b/i,
+    test: new RegExp(
+      `${forYou()}\\bsearch(?:es)? (?:your|their) library for [^.\\n]{0,80}\\b(?:Plains|Island|Swamp|Mountain|Forest)\\b[^.\\n]{0,60}\\bonto the battlefield\\b`,
+      'i',
+    ),
   },
 
   // Nothing produced `attack-trigger` at all, so 1,848 cards wanted an event no
@@ -1277,8 +1340,27 @@ const WANTS: readonly Rule[] = [
   // exception being Alabaster Dragon, whose death trigger is a drawback.
   { tag: 'creature-death', test: /\bwhen\b[^.]{0,40}\bdies\b/i },
 
-  // A sacrifice outlet wants fodder as much as fodder wants an outlet.
-  { tag: 'sacrifice-fodder', test: /\bsacrifice (a|another|an) creature\b/i },
+  /*
+   * A sacrifice outlet wants fodder as much as fodder wants an outlet.
+   *
+   * WHOSE SACRIFICE (ADR-0059). The producer side has told an outlet from an
+   * edict since ADR-0022 and this side never did, so "any opponent may
+   * sacrifice a creature of their choice" read as a payoff for your own tokens.
+   * Clackbridge Troll was offered to an aristocrats deck as "benefits from your
+   * expendable bodies", and the Goats it eats are the ones it gave away. Nine
+   * commander-legal cards, all read by hand, all edicts or punishers:
+   * Clackbridge Troll, Desecration Demon, Predatory Nightstalker, Pillar Tombs
+   * of Aku, Brain Gorgers, Innocent Traveler, Mogis, Tomb Blade, Unnatural
+   * Hunger.
+   *
+   * `addressedToYou` rather than `forYou`, because the verb is a bare
+   * infinitive and having NO named subject is what makes the clause yours —
+   * ADR-0022's device, one verb over.
+   */
+  {
+    tag: 'sacrifice-fodder',
+    test: new RegExp(`${addressedToYou()}\\bsacrifice (a|another|an) creature\\b`, 'i'),
+  },
   { tag: 'token', test: /\bfor each creature you control\b|\bcreatures you control get\b/i },
   { tag: 'token', test: /\bwhenever .{0,30}token .{0,20}enters\b/i },
 

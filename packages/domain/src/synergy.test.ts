@@ -3564,3 +3564,185 @@ describe('a trigger subject is longer than forty characters (ADR-0059)', () => {
     expect(unrelated.wants).not.toContain('creature-death')
   })
 })
+
+/**
+ * "Its controller" is two different people (ADR-0059).
+ *
+ * ADR-0022 gave the model a subject and ADR-0054 gave the token family one.
+ * Four more families never got the question, and the phrase they all lose it to
+ * is the same: `lifegain`, `landfall`, `card-draw` and the `sacrifice-fodder`
+ * WANT all read a verb whose subject was somebody across the table.
+ *
+ * The reported case is the sharpest. Swords to Plowshares — "Exile target
+ * creature. ITS CONTROLLER gains life equal to its power" — ranked #1 in
+ * Staples for a Heliod deck, whose reason read "enables your emphasised gaining
+ * life". Heliod triggers on YOU gaining life. The card never triggers him.
+ *
+ * The test lives beside the other subject tests and the refusal itself lives in
+ * `token-subject.ts`, which is now the one place the question is decided —
+ * ADR-0054 put it there because four rule tables had made the mistake
+ * independently, and this is the fifth through eighth.
+ */
+describe('deriveSynergy — whose life, whose card, whose land (ADR-0059)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  const SWORDS = derive(
+    'Swords to Plowshares',
+    'Instant',
+    "Exile target creature. Its controller gains life equal to its power.",
+  )
+  const PATH = derive(
+    'Path to Exile',
+    'Instant',
+    'Exile target creature. Its controller may search their library for a basic land card, put that card onto the battlefield tapped, then shuffle.',
+  )
+
+  it('refuses the life the card gives away', () => {
+    // 24 cards, every one read by hand: Swords, Path, Illumination, Nature's
+    // Claim, Condemn, Oust, Last Breath, Lay Down Arms, the Phelddagrifs.
+    expect(SWORDS.produces).not.toContain('lifegain')
+    expect(derive('Illumination', 'Instant', 'Counter target artifact or enchantment spell. Its controller gains life equal to its mana value.').produces).not.toContain('lifegain')
+    expect(derive("Nature's Claim", 'Instant', 'Destroy target artifact or enchantment. Its controller gains 4 life.').produces).not.toContain('lifegain')
+  })
+
+  it('refuses the land the opponent fetches', () => {
+    expect(PATH.produces).not.toContain('landfall')
+    expect(derive('Ghost Quarter', 'Land', '{T}: Add {C}.\n{T}, Sacrifice this land: Destroy target land. Its controller may search their library for a basic land card, put it onto the battlefield, then shuffle.').produces).not.toContain('landfall')
+  })
+
+  it('refuses the card the opponent draws', () => {
+    expect(derive('Bargain', 'Sorcery', 'Target opponent draws a card.\nYou gain 7 life.').produces).not.toContain('card-draw')
+    expect(derive('Master of the Feast', 'Creature — Demon', 'Flying\nAt the beginning of your upkeep, each opponent draws a card.').produces).not.toContain('card-draw')
+    expect(derive('Introduction to Annihilation', 'Sorcery', 'Exile target nonland permanent. Its controller draws a card.').produces).not.toContain('card-draw')
+  })
+
+  it('still reads the same phrase when the antecedent is yours', () => {
+    /*
+     * The half the refusal must NOT take, and the reason the antecedent test is
+     * `target` rather than a list of removal verbs. In a trigger the "it" is a
+     * permanent that fired an ability, which in your own deck is yours — and
+     * Edric is played precisely because YOU draw.
+     */
+    const sliver = derive(
+      'Essence Sliver',
+      'Creature — Sliver',
+      'Whenever a Sliver deals damage, its controller gains that much life.',
+    )
+    const edric = derive(
+      'Edric, Spymaster of Trest',
+      'Legendary Creature — Elf Rogue',
+      'Whenever a creature deals combat damage to one of your opponents, its controller may draw a card.',
+    )
+
+    expect(sliver.produces).toContain('lifegain')
+    expect(edric.produces).toContain('card-draw')
+  })
+
+  it('leaves a symmetric clause alone, because you get one too', () => {
+    /*
+     * ADR-0022's ruling about "each player discards", in a pronoun. "That
+     * player" refers back to "each player" and therefore includes you, so the
+     * pronoun is only refused when its own sentence names an opponent. Nine
+     * cards turn on this, and Horn of Greed is the clearest: it is a card you
+     * play to draw off your own lands.
+     */
+    const horn = derive(
+      'Horn of Greed',
+      'Artifact',
+      'Whenever a player plays a land, that player draws a card.',
+    )
+    const ashes = derive(
+      'From the Ashes',
+      'Sorcery',
+      'Destroy all nonbasic lands. For each land destroyed this way, its controller may search their library for a basic land card and put it onto the battlefield.',
+    )
+
+    expect(horn.produces).toContain('card-draw')
+    // A wipe names no target, so the antecedent test refuses it for free —
+    // which is why `target` was chosen over a list of removal verbs.
+    expect(ashes.produces).toContain('landfall')
+  })
+
+  it('still refuses the pronoun when its own sentence names an opponent', () => {
+    const fruition = derive(
+      'Forced Fruition',
+      'Enchantment',
+      'Whenever an opponent casts a spell, that player draws seven cards.',
+    )
+
+    expect(fruition.produces).not.toContain('card-draw')
+  })
+
+  it('reads the clause and not the card', () => {
+    // Armistice draws YOU a card in the same sentence that gives an opponent
+    // life. The refusal has to take one and leave the other.
+    const armistice = derive(
+      'Armistice',
+      'Enchantment',
+      '{3}{W}{W}: You draw a card and target opponent gains 3 life.',
+    )
+
+    expect(armistice.produces).toContain('card-draw')
+    expect(armistice.produces).not.toContain('lifegain')
+  })
+
+  it('does not read an edict as a payoff for your own tokens', () => {
+    /*
+     * The WANT side of `sacrifice-fodder` had no subject test at all, so
+     * Clackbridge Troll was offered to an aristocrats deck as "benefits from
+     * your expendable bodies". Your bodies are the one thing that does not turn
+     * it on: the Goats are the opponent's, and so is the choice.
+     */
+    const troll = derive(
+      'Clackbridge Troll',
+      'Creature — Troll',
+      'Trample, haste\nWhen this creature enters, target opponent creates three 0/1 white Goat creature tokens.\nAt the beginning of combat on your turn, any opponent may sacrifice a creature of their choice. If a player does, tap this creature and you lose 3 life.',
+    )
+    const demon = derive(
+      'Desecration Demon',
+      'Creature — Demon',
+      'Flying\nAt the beginning of each combat, any opponent may sacrifice a creature of their choice. If a player does, tap this creature and put a +1/+1 counter on it.',
+    )
+
+    // "Any PLAYER may sacrifice" is the same clause without the word opponent,
+    // and it is why this rule takes `addressedToYou` rather than `forYou`.
+    const gorgers = derive(
+      'Brain Gorgers',
+      'Creature — Zombie',
+      'When you cast this spell, any player may sacrifice a creature of their choice. If a player does, counter Brain Gorgers.',
+    )
+
+    expect(troll.wants).not.toContain('sacrifice-fodder')
+    expect(demon.wants).not.toContain('sacrifice-fodder')
+    expect(gorgers.wants).not.toContain('sacrifice-fodder')
+  })
+
+  it('still reads a sacrifice outlet, which is the imperative addressed to you', () => {
+    expect(deriveSynergy(ASHNODS_ALTAR).wants).toContain('sacrifice-fodder')
+    const viscera = derive(
+      'Viscera Seer',
+      'Creature — Vampire Wizard',
+      'Sacrifice a creature: Scry 1.',
+    )
+
+    expect(viscera.wants).toContain('sacrifice-fodder')
+  })
+
+  it('leaves the token family refused, which was re-measured and not assumed', () => {
+    /*
+     * ADR-0054 rejected "its controller creates" at ~74% precision and this
+     * change does not rescue it. Restricting the phrase to a TARGETED
+     * antecedent is what makes it safe for life, cards and lands; the cards
+     * that broke it for tokens name a target too. Descent of the Dragons and
+     * Saw in Half are pointed at your own board on purpose.
+     */
+    const sawInHalf = derive(
+      'Saw in Half',
+      'Instant',
+      "Destroy target creature. If that creature dies this way, its controller creates two tokens that are copies of that creature, except they're 1/1.",
+    )
+
+    expect(sawInHalf.produces).toContain('token')
+  })
+})

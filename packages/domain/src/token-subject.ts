@@ -1,5 +1,27 @@
 /**
- * Whose tokens are these? (ADR-0054)
+ * WHOSE EVENT IS IT — the one place the question gets answered (ADR-0054,
+ * ADR-0059).
+ *
+ * This file started as the token family's subject test and is now the subject
+ * test, full stop. ADR-0059 found the same defect in four more families and the
+ * lesson of the first four applies to them exactly: a rule table that answers
+ * "whose" for itself is a rule table that will answer it differently from the
+ * next one. The two halves are:
+ *
+ *   1. `CREATES_FOR_YOU` / `CREATES_ANYONE` — the token verb, below.
+ *   2. `forYou` / `addressedToYou` — the general subject refusal, at the foot
+ *      of this file, composable in front of ANY verb.
+ *
+ * THE TWO HALVES HAVE DIFFERENT WINDOWS AND THAT IS THE INTERESTING PART.
+ * `creates` can afford a fifty-character reach back to the word "opponent"
+ * because a trigger CONDITION about an opponent creating something is rare.
+ * `draws` cannot: "Whenever an opponent draws a card, YOU may draw two cards"
+ * is Consecrated Sphinx, and the same fifty characters took `card-draw` off 118
+ * cards, most of them the payoffs that are the reason the deck exists. Measured,
+ * card by card. So the general refusal below asks for the subject to be
+ * ADJACENT to the verb, and the reach that `creates` needs is not shared with
+ * it. Two windows, one file, and the reason each is what it is written down
+ * beside it — which is the whole point of them being in the same file.
  *
  * ADR-0022 established that a synergy event has a SUBJECT — "you discard a
  * card" and "each opponent discards a card" are two different events — and it
@@ -114,3 +136,116 @@ export const CREATES_FOR_YOU = String.raw`(?:\bcreate\b|${NOT_AN_OPPONENT}\bcrea
  * has to be a refusal to CLAIM, not a refusal to LOOK.
  */
 export const CREATES_ANYONE = String.raw`\bcreates?\b`
+
+/**
+ * THE PERMANENT THIS CARD JUST ANSWERED (ADR-0059).
+ *
+ * "Its controller" is the phrase four more families were losing their subject
+ * to, and the reason ADR-0054 refused it for `creates` is that it does not mean
+ * one thing. Read the antecedent and it means two:
+ *
+ *   Swords to Plowshares  "Exile TARGET creature. Its controller gains life…"
+ *   Essence Sliver        "Whenever a Sliver deals damage, its controller
+ *                          gains that much life."
+ *
+ * The first "it" is a permanent you answered — somebody else's, because that is
+ * what removal is pointed at. The second is a creature that TRIGGERED
+ * something, which in your own deck is yours. One phrase, opposite owners, and
+ * a rule that reads the phrase without the antecedent gets one of them wrong.
+ *
+ * `target` IS THE ANTECEDENT TEST, and it is the game's own word for "the thing
+ * this card is answering". It was chosen over a list of answer verbs (destroy,
+ * exile, counter, return, put) after both were measured, and it is better in
+ * the way that matters: it refuses the SYMMETRIC shells for free. "Destroy ALL
+ * nonbasic lands. For each land destroyed this way, its controller may search…"
+ * is From the Ashes, where the controller is also you — and a verb list catches
+ * it while `target` does not, because a wipe names no target. Wave of Vitriol,
+ * March of Souls and Martyr's Cry are the same sentence.
+ *
+ * Measured over the commander-legal corpus, this refusal removes 24 `lifegain`,
+ * 37 `card-draw` and 14 `landfall` claims, and ALL 75 were read by hand and all
+ * 75 are cards that hand the life, the card or the land across the table. The
+ * cards it deliberately keeps are the other reading: Essence Sliver, Genju of
+ * the Fields, Edric, Spymaster of Trest, Selvala, Kavu Lair, Synapse Sliver,
+ * Horn of Greed, Glademuse, Ludevic and Nekusar all say "its controller" or
+ * "that player" about somebody who is usually you.
+ *
+ * The window is 100 characters and stops at the newline rather than the full
+ * stop, because the antecedent is normally in the PREVIOUS sentence — "Exile
+ * target creature. Its controller…" — which is what makes this one of the few
+ * gaps in this codebase that has to cross a sentence. It stays inside one face
+ * for the reason every other gap here does. The cost is one card, named:
+ * Dire-Strain Rampage puts its second "its controller" clause 200 characters
+ * past the target and keeps its `landfall`.
+ *
+ * `token` IS STILL REFUSED, and re-measured rather than assumed. Restricting
+ * ADR-0054's rejected "its controller creates" to a targeted antecedent does
+ * NOT rescue its precision: the cards that broke it — March of Souls, Rampage
+ * of the Clans, Descent of the Dragons, Terastodon, Saw in Half — are removal
+ * shells whose controller is you on purpose, and Descent, Terastodon and Saw in
+ * Half all name a target. That refusal stands exactly where ADR-0054 left it.
+ */
+const ANSWERED = String.raw`\btarget\b[^\n]{0,100}`
+
+/**
+ * Refuses a verb whose subject is somebody else. Zero-width, so it composes in
+ * front of the verb the rule is really about.
+ *
+ * `between` is whatever the rule's own pattern puts between the subject and the
+ * word it anchors on, and it is a parameter rather than a window because a
+ * window is how the `creates` half above got a reach it can afford and this
+ * half cannot. `landfall` is the only caller that passes one: its rule is
+ * anchored on the noun "land card" and not on a verb, so the search phrase in
+ * "its controller may SEARCH THEIR LIBRARY FOR A BASIC land card" has to be
+ * spelled out rather than covered by a gap that would also cover a sentence.
+ *
+ * "THAT PLAYER" IS ONLY REFUSED AFTER AN OPPONENT, and that is the narrowest
+ * entry here and the one that took the most measuring. Bare, it costs nine real
+ * cards — Horn of Greed, Glademuse, Nekusar, Ludevic, Fevered Visions, Walking
+ * Archive, Ghirapur Orrery, Archivist of Gondor and Super Intelligence — every
+ * one of them a card where "that player" refers back to "each player" and
+ * therefore includes you. That is ADR-0022's ruling about "each player
+ * discards" in a pronoun. Requiring an opponent in the same sentence keeps all
+ * nine and still refuses Forced Fruition, whose sentence names one.
+ *
+ * The cost of that narrowness is stated rather than hidden: Teferi's Puzzle Box
+ * keeps `card-draw`, because "each player shuffles their hand into their
+ * library, then draws that many cards" genuinely draws you cards. It is a
+ * prison piece that happens to draw, which is a judgement about the card and
+ * not about its subject, and this file only answers the second question.
+ */
+export const forYou = (between = ''): string =>
+  String.raw`(?<!\b(?:target|each|an|any|another|that|the) opponents? (?:may )?${between})` +
+  String.raw`(?<!\bdefending player (?:may )?${between})` +
+  String.raw`(?<!\beach other player (?:may )?${between})` +
+  String.raw`(?<!\bopponents?\b[^.\n]{0,50}\bthat player (?:may )?${between})` +
+  String.raw`(?<!${ANSWERED}\bits controller (?:may )?${between})`
+
+/**
+ * The same refusal for a verb in the BARE INFINITIVE, where having no named
+ * subject at all is what makes the clause yours (ADR-0059).
+ *
+ * ADR-0022's device, one verb over. "Sacrifice a creature:" is an outlet you
+ * feed with your own board and is addressed to you; "any opponent may sacrifice
+ * a creature of their choice" is an edict, and the producer side has called
+ * that `opponent-sacrifice` since ADR-0022 while the WANT side went on reading
+ * it as a payoff for your own tokens. Clackbridge Troll was offered to an
+ * aristocrats deck as "benefits from your expendable bodies"; your bodies are
+ * the one thing that does not turn it on.
+ *
+ * Wider than `forYou` by the players a card names WITHOUT the word "opponent",
+ * and that widening is safe here for a reason it is not safe on `draws`: an
+ * infinitive after "may" always has its subject spelled out immediately before
+ * it, so there is no symmetric "each player draws" shape to protect. Measured:
+ * nine cards, all nine read by hand, all nine edicts or punishers — Clackbridge
+ * Troll, Desecration Demon, Predatory Nightstalker, Pillar Tombs of Aku, Brain
+ * Gorgers, Innocent Traveler, Mogis, Tomb Blade, Unnatural Hunger.
+ *
+ * The punisher clause is the same one ADR-0022 found on `discard`: "loses 3
+ * life UNLESS THEY sacrifice a permanent" puts the infinitive in the sentence
+ * because its subject is "they", and an adjacency test reads right past it.
+ */
+export const addressedToYou = (between = ''): string =>
+  forYou(between) +
+  String.raw`(?<!\b(?:target|each|an|any|another|that|the) players? (?:may )?${between})` +
+  String.raw`(?<!\bunless (?:they|that player|its controller|an opponent) ${between})`
