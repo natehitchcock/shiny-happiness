@@ -532,7 +532,47 @@ source, and inventing twenty of them is what ADR-0006 forbids. Fractional
 counting is refused on two live strings: "5.5 / 6" to a screen reader and "1.5
 cards short" in Quickbuild.
 
-**⚠️ A CARDS RE-INGEST IS DUE**, for ADR-0058 §8 only. The `ramp` rule demanded
+**A window has an anchor, and an event has a subject** —
+[ADR-0059](adr/0059-a-window-has-an-anchor-and-an-event-has-a-subject.md). Four
+playtests found defects in `synergy.ts` that turned out to be **two classes**.
+
+*A window measured from the wrong anchor.* `token` and `sacrifice-fodder` read
+one clause and differed by nine characters — `creature token` starts nine
+characters earlier than `token` — so the NARROWER rule was the easier one to
+match and **277 cards were fodder that was not a token**, Aviation Pioneer among
+them with `primary_role: token-maker` beside tags saying it makes none. All
+three token rules now end at the same word and `sacrifice-fodder ⊆ token` is
+structural, pinned as a property rather than a number. The class audit that
+followed found the same defect on the trigger side: `whenever .{0,40} dies`
+reached 308 of 430, so Blood Artist wanted deaths at 33 characters and **Zulaport
+Cutthroat did not at 46**. Every bounded window in the file is now measured in
+§2 of the ADR, including one — `treasure`'s payoff — that **matches zero cards**
+and is left as a named gap.
+
+*An event whose subject was never asked.* Swords to Plowshares ranked **#1 in
+Staples for a Heliod deck** on "enables your emphasised gaining life"; the life
+goes to **its controller**. `lifegain`, `landfall`, `card-draw` and the
+`sacrifice-fodder` want lose 84 such claims, all read by hand. The antecedent
+test is the word `target`, which refuses the symmetric wipes for free. `lifeloss`
+needed the harder answer — 257 of its 1,062 producers lose the life themselves,
+and neither half-fix is available — so `self-lifeloss` is appended to
+`EVENT_TAGS`, 317 producers and 12 payoffs.
+
+*And `untap` was the largest want in every deck in the product*: `/\{T\}:/`
+meant **1,129 of 1,194 lands**, 94.5%. Narrowed to a tap ability that does
+something other than add mana and does not eat its own permanent — 24.6% — which
+also recovered 399 compound-cost abilities the old rule could not see at all.
+
+**Valence is not expressible and was not attempted.** Halvar reads "whenever
+equipped creature dies" as a want; so does Skullclamp. 16 cards share that
+clause, 10 are payoffs and 6 are consolations, and Avarice Amulet is an outright
+drawback. No clause-level test separates them — the difference is what the effect
+is WORTH, and `wants` has no sign. §6 of the ADR records the measurement so the
+next agent starts there.
+
+**⚠️ A CARDS RE-INGEST IS DUE**, for ADR-0058 §8 and ADR-0059 (all of it —
+`synergy_produces` and `synergy_wants` are stored columns, and `self-lifeloss` is
+a new value in an existing `text[]`, so no migration). The `ramp` rule demanded
 the literal phrase "basic land card", so Nature's Lore, Three Visits, Farseek
 and Scapeshift all derived to the `synergy` catch-all — the app could not tell
 what three of the format's most-played green ramp spells do. 54 cards gain
