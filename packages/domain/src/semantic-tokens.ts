@@ -369,6 +369,80 @@ const YOUR_TOKEN_CLAUSE = new RegExp(`${CREATES_FOR_YOU}${CLAUSE_TAIL}`, 'gi')
 const SELF_REFERENCE = /\b(?:[Tt]his|[Tt]hat) [A-Z][a-z]+\b/g
 
 /**
+ * A subtype the card says it is NOT about (ADR-0059).
+ *
+ * `Karn Liberated` wanted `subtype:aura` out of "leaving in exile all NON-AURA
+ * permanent cards", and `Mikaeus, the Unhallowed` benefited from Humans on the
+ * strength of "Other NON-HUMAN creatures you control get +1/+1" — which is the
+ * opposite of what he is played for. He is a Zombie.
+ *
+ * `non-⟨Subtype⟩` DOES NOT ALWAYS MEAN THE CARD IS NOT ABOUT THAT SUBTYPE, and
+ * this file already had a test saying so. Ruthless Winnower — "each player
+ * sacrifices a NON-ELF creature of their choice" — is an Elf deck's card: the
+ * edict spares your board and eats everybody else's, and the negation is the
+ * whole reason to play it. That test is right and it is the one that found the
+ * discriminator, because the two cards differ by one readable fact:
+ *
+ *   Ruthless Winnower       Creature — ELF Warrior      "non-Elf"   → wants Elf
+ *   Mikaeus, the Unhallowed Creature — ZOMBIE           "non-Human" → does not
+ *   Karn Liberated          Planeswalker — Karn         "non-Aura"  → does not
+ *
+ * A NEGATION IS A WANT ONLY WHEN THE CARD IS THAT SUBTYPE ITSELF. "Not one of
+ * mine" is a tribal card's way of naming its tribe; "not one of those" is
+ * everybody else's way of naming a category, and the second is what Karn and
+ * Mikaeus are doing. The type line is the fact that tells them apart, and it is
+ * the same instrument `land-creature` and `ritual` already use in `synergy.ts`.
+ *
+ * The whole token is blanked, hyphen and all, because `CAPITALISED` above
+ * deliberately starts at a capital and so reads `Human` straight out of
+ * `non-Human`. That property is load-bearing for its own reason — the note on
+ * `CAPITALISED` measures it at 165 cards — and this is the other half of it.
+ *
+ * THE CLAUSE IS THE UNIT and only the negated mention is blanked, which keeps
+ * the cards that mean both even when the type line does not save them: Winota,
+ * Joiner of Forces triggers on "a NON-HUMAN creature you control attacks" and
+ * then puts "a HUMAN creature card" onto the battlefield, and the second
+ * mention is untouched.
+ */
+const NEGATED_SUBTYPE = /\bnon-[A-Z][A-Za-z'’-]*/g
+
+/**
+ * An Aura that MAKES its host a subtype rather than caring about one
+ * (ADR-0059).
+ *
+ * `Frogify` wanted `subtype:frog`. It does not benefit from Frogs; it turns an
+ * opponent's creature into one, which is the direction inversion ADR-0016 calls
+ * the worst error this model can make. 11 commander-legal cards —
+ * Ichthyomorphosis, Witness Protection, Kenrith's Transformation, Lignify,
+ * Reprobation, Oni Possession.
+ *
+ * REFUSED, not re-pointed at `produces`, and that is the deliberate call. The
+ * symmetry with ADR-0048's "granting a keyword is CAUSING it" is tempting and
+ * it breaks on the subject: the creature being transformed is the one the card
+ * just answered, so the Frog is the opponent's. ADR-0054 made that ruling about
+ * a donated token and it is the same ruling one clause over.
+ *
+ * The gap between the noun and the verb is what reads Frogify at all: it says
+ * "enchanted creature LOSES ALL ABILITIES AND IS a blue Frog", so the two are
+ * not adjacent. `[^.\n]` keeps the reach inside the sentence the Aura's own
+ * clause occupies.
+ *
+ * "AS LONG AS" AND "IF" TURN THE SAME WORDS INTO THEIR OPPOSITE, and the guard
+ * for it was found by diffing the corpus rather than by reading. "Enchanted
+ * creature IS a Knight" is Dub making one; "AS LONG AS equipped creature IS a
+ * Human, it has lifelink" is Butcher's Cleaver asking for one. The second is a
+ * CONDITION — the card is worth more in a deck full of that subtype, which is
+ * the definition of a want — and an unguarded rule read it as a transformation
+ * and took the tag off the whole Human-Equipment cycle. 12 cards: Butcher's
+ * Cleaver, Sharpened Pitchfork, True-Faith Censer, Silver-Inlaid Dagger, Heavy
+ * Mattock, Bladed Bracers, Harvest Hand, Hope Against Hope, Equestrian Skill,
+ * Blade of the Bloodchief, Lavamancer's Skill and Howl of the Hunt. 61 clauses
+ * become 49, and all 12 handed back are payoffs.
+ */
+const TRANSFORMED_HOST =
+  /(?<!\bas long as )(?<!\bif )\b(?:enchanted|equipped) creature\b[^.\n]{0,40}?\b(?:is|becomes) an?\b[^.\n]*/gi
+
+/**
  * Capitalised words, which is how the subtype rules read the text at all.
  *
  * Extracting the words and looking each one up beats testing 241 patterns
@@ -400,20 +474,49 @@ const capitalisedWords = (text: string): Set<string> => {
  * and closed. Each asks for the keyword in a position where the card is keying
  * OFF it rather than handing it out.
  */
-const abilityPayoffPatterns = (keyword: string): readonly RegExp[] => {
-  const key = escape(keyword)
+/**
+ * The keyword, refusing the longer keywords it is a PREFIX of (ADR-0059).
+ *
+ * `Double` and `Double strike` are both in the vocabulary and `\bDouble\b`
+ * matches inside the second, so 177 of the 304 commander-legal cards carrying
+ * `ability:double` are cards whose text says "double strike" and nothing else.
+ * The focus prompt offered the builder "double" and "double strike" as adjacent
+ * chips meaning the same thing.
+ *
+ * BUILT FROM THE VOCABULARY rather than written as a list of pairs, because the
+ * vocabulary is generated and the pairs are not stable: today there are four —
+ * Double/Double strike, Hexproof/Hexproof from, Manifest/Manifest dread,
+ * Partner/Partner with — and a fifth arrives already handled. That is the
+ * ruling ADR-0060 made one file over: a list is the defect.
+ *
+ * The guard is a lookahead over the REMAINDER, not over the whole longer
+ * keyword, so it composes after `\b${key}\b` wherever that appears.
+ */
+const keywordPattern = (keyword: string, vocabulary: readonly string[]): string => {
+  const longer = vocabulary
+    .filter((other) => other.toLowerCase().startsWith(`${keyword.toLowerCase()} `))
+    .map((other) => escape(other.slice(keyword.length + 1)))
+  const guard = longer.length === 0 ? '' : `(?! (?:${longer.join('|')})\\b)`
+  return `\\b${escape(keyword)}\\b${guard}`
+}
+
+const abilityPayoffPatterns = (
+  keyword: string,
+  vocabulary: readonly string[],
+): readonly RegExp[] => {
+  const key = keywordPattern(keyword, vocabulary)
   return [
     // The anthem: "Creatures you control with flying get +1/+1."
     new RegExp(
-      `\\b(?:creatures?|permanents?|spells?)\\b[^.\\n]{0,40}\\bwith ${key}\\b[^.\\n]{0,40}\\b(?:gets?|have|has|gains?)\\b`,
+      `\\b(?:creatures?|permanents?|spells?)\\b[^.\\n]{0,40}\\bwith ${key}[^.\\n]{0,40}\\b(?:gets?|have|has|gains?)\\b`,
       'i',
     ),
     // The trigger: "whenever a creature you control with trample attacks".
-    new RegExp(`\\bwhenever\\b[^.,\\n]{0,60}\\bwith ${key}\\b`, 'i'),
+    new RegExp(`\\bwhenever\\b[^.,\\n]{0,60}\\bwith ${key}`, 'i'),
     // The count: "for each creature you control with vigilance".
-    new RegExp(`\\bfor each\\b[^.\\n]{0,40}\\bwith ${key}\\b`, 'i'),
+    new RegExp(`\\bfor each\\b[^.\\n]{0,40}\\bwith ${key}`, 'i'),
     // The condition: "as long as you control a creature with flying".
-    new RegExp(`\\bas long as\\b[^.\\n]{0,50}\\bwith ${key}\\b`, 'i'),
+    new RegExp(`\\bas long as\\b[^.\\n]{0,50}\\bwith ${key}`, 'i'),
   ]
 }
 
@@ -432,7 +535,8 @@ const compile = (vocabulary: SemanticVocabulary): Compiled => {
     subtypeByWord.set(pluralOfSubtype(word), word)
   }
   const abilities = new Map<string, readonly RegExp[]>()
-  for (const keyword of vocabulary.abilities) abilities.set(keyword, abilityPayoffPatterns(keyword))
+  for (const keyword of vocabulary.abilities)
+    abilities.set(keyword, abilityPayoffPatterns(keyword, vocabulary.abilities))
   /*
    * A keyword's NAME is not a subtype reference (ADR-0046).
    *
@@ -521,6 +625,13 @@ export const deriveSemanticTokens = (
   const has = new Set<SemanticTag>(semanticMembership(card, vocabulary))
   const produces = new Set<SemanticTag>()
   const wants = new Set<SemanticTag>()
+  // What the card IS, which is what decides whether a `non-⟨Subtype⟩` clause
+  // names its own tribe or somebody else's category (ADR-0059).
+  const ownSubtypes = new Set<string>()
+  for (const word of subtypesOfTypeLine(card.typeLine)) {
+    const subtype = subtypeByWord.get(word)
+    if (subtype !== undefined) ownSubtypes.add(subtype)
+  }
 
   const faces = card.oracleTextFaces ?? [card.oracleText]
   for (const face of faces) {
@@ -542,7 +653,18 @@ export const deriveSemanticTokens = (
     // A keyword's own name is not a subtype reference: "Will of the council" is
     // an ability word and Will is a planeswalker type. Blanked only for the
     // SUBTYPE read — the keyword payoff patterns below need the name intact.
+    // A subtype the card says it is NOT about, and a subtype the card MAKES
+    // rather than wants (ADR-0059). Both are blanked for the SUBTYPE read only,
+    // the way the keyword names above are: the keyword rules read `remaining`.
+    //
+    // A negation survives when the card IS that subtype, because "not one of
+    // mine" is how a tribal card names its tribe — see `NEGATED_SUBTYPE`.
     let forSubtypes = remaining
+      .replace(NEGATED_SUBTYPE, (negated) => {
+        const subtype = subtypeByWord.get(negated.slice('non-'.length))
+        return subtype !== undefined && ownSubtypes.has(subtype) ? negated : ' '
+      })
+      .replace(TRANSFORMED_HOST, ' ')
     for (const phrase of phrases) forSubtypes = forSubtypes.replace(phrase, ' ')
     for (const word of capitalisedWords(forSubtypes)) {
       const subtype = subtypeByWord.get(word)
@@ -569,9 +691,12 @@ export const deriveSemanticTokens = (
      * does. The token clause is removed for the WANT read and kept for this one.
      */
     for (const keyword of abilities.keys()) {
+      // The same prefix guard the payoff patterns take (ADR-0059): "target
+      // creature gains DOUBLE STRIKE" grants one keyword, not two.
+      const key = keywordPattern(keyword, vocabulary.abilities)
       const grant = new RegExp(
-        `\\b(?:gains?|have|has)\\b[^.\\n]{0,45}\\b${escape(keyword)}\\b` +
-          `|${CREATES_FOR_YOU}[^.\\n]{0,120}?\\btokens?\\b[^.\\n]{0,60}?\\bwith\\b[^.\\n]{0,60}?\\b${escape(keyword)}\\b`,
+        `\\b(?:gains?|have|has)\\b[^.\\n]{0,45}${key}` +
+          `|${CREATES_FOR_YOU}[^.\\n]{0,120}?\\btokens?\\b[^.\\n]{0,60}?\\bwith\\b[^.\\n]{0,60}?${key}`,
         'i',
       )
       if (grant.test(plain)) produces.add(abilityTag(keyword))
