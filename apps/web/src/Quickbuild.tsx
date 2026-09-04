@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+} from 'react'
 import { Detail, type CardView } from '@roundtable/ui'
 import {
   DECK_SIZE,
@@ -479,6 +487,24 @@ export const Quickbuild = ({
 
   const panelRef = useRef<HTMLDivElement>(null)
   const openerRef = useRef<Element | null>(null)
+  /**
+   * The first option on screen, which is where the next decision starts.
+   *
+   * Held as an element rather than looked up by selector when it is needed: the
+   * trio that replaced the old one is already committed when the layout effect
+   * below runs, so this ref is pointing at the NEW first option — which is
+   * exactly the element a selector would have had to find, without a selector
+   * to keep in step with the markup.
+   */
+  const firstOptionRef = useRef<HTMLLIElement>(null)
+  /**
+   * A pick or a skip has just replaced the trio, and focus is owed a home.
+   *
+   * A ref rather than state, for the same reason `focusAfterAct` in `App.tsx`
+   * is one: setting it must not cause a render, and it is written during an
+   * event and read in the layout effect of the render that event caused.
+   */
+  const restoreFocus = useRef(false)
 
   /*
    * The gap on screen: the one the builder chose while it is still open, and
@@ -513,6 +539,77 @@ export const Quickbuild = ({
       if (opener instanceof HTMLElement && document.contains(opener)) opener.focus()
     }
   }, [])
+
+  /*
+   * AFTER A PICK OR A SKIP, THE READER GOES BACK TO THE TOP OF THE OPTIONS
+   * (ADR-0061).
+   *
+   * The control that was pressed leaves the document — ADR-0056 cycles all
+   * three options, so the whole trio does — and focus falls to `<body>`. The
+   * workspace's `focusAfterAct` then caught that and sent focus to a suggestion
+   * row in the feed BEHIND this panel, which is off screen, outside the focus
+   * trap, and some way down a list the builder cannot see. The browser scrolled
+   * to reveal it, which is the report: "every time I select an option, I scroll
+   * down half the page". Measured at 390px, three consecutive picks moved the
+   * page 1065, 1338 and 1606 pixels against an 844px viewport.
+   *
+   * CLAIMING THE FOCUS HERE IS WHAT FIXES IT, and it is not a race that this
+   * happens to win. React fires layout effects bottom-up, so this one runs
+   * before the workspace's; it leaves focus on a connected element that is not
+   * `<body>`, and `focusAfterAct`'s guard — which claims focus ONLY from
+   * `<body>` or from an element that has left the document — therefore declines
+   * and clears itself. The implication runs the other way too: this effect
+   * declines only when focus is already connected and not `<body>`, which is
+   * exactly the condition under which the workspace's also declines. So the
+   * feed can never take focus from a Quickbuild pick, whichever way the branch
+   * goes.
+   *
+   * `focusAfterAct` is deliberately LEFT ALONE. It is the feed's own answer to
+   * a real defect — Enter on a feed Add used to drop focus and cost seven tabs
+   * per card — and it still does that job untouched. An `origin` flag on
+   * `decide` was tried and removed: the argument above makes it unreachable, no
+   * test could distinguish a build with it from a build without it, and
+   * defensive code that nothing can pin is code that rots.
+   *
+   * THE FIRST OPTION, because that is where the next decision begins. The `<li>`
+   * and not its Add button: the button sits under a whole card detail, so
+   * landing on it would put the top of the option off screen — a smaller
+   * version of the same complaint — while the `<li>` starts at the top of the
+   * trio and carries "Option 1 of 3: <name>" as its accessible name, so a
+   * screen-reader user is told which option they are on as well as that
+   * something changed. The live region says what the trio now holds; this says
+   * where the reader now is. Both are needed and neither replaces the other.
+   *
+   * A LAYOUT EFFECT, so focus moves before the browser paints and never
+   * visibly rests on `<body>`.
+   *
+   * NO `scrollIntoView` HERE, DELIBERATELY. Focusing an element already scrolls
+   * the minimum needed to reveal it, which is `block: 'nearest'` by another
+   * name: nothing happens when the option is already visible — the desktop
+   * case, where the trio is one screenful and nobody has complained — and when
+   * it is above the viewport, as it is on a phone after a pick, the scroll is
+   * upward to the top of the option. An explicit scroll would have to
+   * re-derive that, and would move the page in the case that currently does
+   * not move at all. It is instant for the same reason `revealBracket`'s is:
+   * no stylesheet sets `scroll-behavior: smooth`, so there is no animation for
+   * `prefers-reduced-motion` to suppress and nothing to watch on the way.
+   *
+   * Claims focus only from `<body>` or from an element that has left the
+   * document — the two ways the browser signals "the thing you were on is
+   * gone" — so a builder who tabbed to Close or to "Different gap" while the
+   * trio was swapping is not dragged back into the list. The same guard, for
+   * the same reason, as the one in `App.tsx`.
+   */
+  useLayoutEffect(() => {
+    if (!restoreFocus.current) return
+    restoreFocus.current = false
+    const active = document.activeElement
+    if (active !== null && active !== document.body && active.isConnected) return
+    // The panel itself when the gap has run out: there is no option to land on,
+    // and the sentence explaining why — with its own controls — is at the top
+    // of what is left. Never nothing, which is `<body>` and a lost reader.
+    ;(firstOptionRef.current ?? panelRef.current)?.focus()
+  })
 
   /*
    * Escape closes, and focus is TRAPPED while open (§19.5).
@@ -821,6 +918,9 @@ export const Quickbuild = ({
     if (gap === undefined) return
     setHeld(new Set([...held, ...ids]))
     setFocused(0)
+    // The trio on screen is about to be replaced, so whatever was focused
+    // inside it is on its way out of the document. See the layout effect.
+    restoreFocus.current = true
   }
 
   /*
@@ -1102,6 +1202,16 @@ export const Quickbuild = ({
                   return (
                     <li
                       key={candidate.oracleId}
+                      ref={at === 0 ? firstOptionRef : undefined}
+                      /*
+                       * Focusable by SCRIPT only (ADR-0061). `-1` keeps the
+                       * option out of the Tab ring — Tab still goes straight to
+                       * Add and Reject, and the trap's own wrap is unaffected
+                       * because its selector excludes `tabindex="-1"` — while
+                       * letting the layout effect above put the reader on the
+                       * top of the trio after a pick.
+                       */
+                      tabIndex={-1}
                       className={
                         at === focus ? 'quickbuild-option is-focused' : 'quickbuild-option'
                       }

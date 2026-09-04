@@ -4263,6 +4263,18 @@ select {
   border-left-color: var(--brass);
 }
 
+/* The option itself takes focus after a pick (ADR-0061), so it needs a ring of
+   its own and not only the left-border tint it shares with `:focus-within`.
+   The reader has just been MOVED here rather than having tabbed here, which is
+   exactly when "where am I" is hardest to answer, and a border colour alone is
+   the one signal `.is-focused` above is careful not to rely on. Matches the
+   panel's own `:focus-visible` so a script-placed focus looks like every other
+   focus in the panel. */
+.quickbuild-option:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: -2px;
+}
+
 .quickbuild-group {
   margin-top: calc(var(--step) / 2);
   font-style: italic;
