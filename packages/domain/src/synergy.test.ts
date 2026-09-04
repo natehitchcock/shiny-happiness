@@ -3376,3 +3376,191 @@ describe('a ritual is not the mana base (ADR-0054)', () => {
     ).toContain('ritual')
   })
 })
+
+/**
+ * A window measured from the wrong anchor (ADR-0059).
+ *
+ * Two rules read the same clause and differ by nine characters:
+ *
+ *   token            `${CREATES_FOR_YOU} .{0,40}\btoken`
+ *   sacrifice-fodder `${CREATES_FOR_YOU} .{0,40}\bcreature token`
+ *
+ * `creature token` STARTS nine characters earlier than the bare word `token`,
+ * so inside a window of the same size the NARROWER rule is the easier one to
+ * match. Any token whose description runs 32 to 40 characters got
+ * `sacrifice-fodder` and lost `token` — 277 commander-legal cards — and the
+ * card that reported it says `primary_role: token-maker` on the same row as
+ * tags claiming it makes no tokens.
+ *
+ * The fix is the anchor, not the number: both windows now end at the word
+ * `token`, and the difference between the rules is a zero-width lookbehind
+ * rather than a longer noun phrase. That makes the containment STRUCTURAL —
+ * fodder cannot match where token does not — which is what the property test
+ * below pins, because a number chosen by measurement can be un-chosen and an
+ * invariant cannot.
+ */
+describe('a token description is measured to the word `token` (ADR-0059)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  // The reported card. Its description runs 38 characters from `create` to the
+  // word `token`, which is inside the old fodder window and outside the old
+  // token window.
+  const AVIATION_PIONEER = derive(
+    'Aviation Pioneer',
+    'Creature — Human Artificer',
+    'When this creature enters, create a 1/1 colorless Thopter artifact creature token with flying.',
+  )
+  // The card the playtest watched it happen to, in a token deck, on screen.
+  const FOUNDRY = derive(
+    'Foundry of the Consuls',
+    'Land',
+    '{T}: Add {C}.\n{5}, {T}, Sacrifice this land: Create two 1/1 colorless Thopter artifact creature tokens with flying.',
+  )
+
+  it('reads the token a long description describes', () => {
+    expect(AVIATION_PIONEER.produces).toContain('token')
+    expect(FOUNDRY.produces).toContain('token')
+  })
+
+  it('still reads the fodder it always read', () => {
+    expect(AVIATION_PIONEER.produces).toContain('sacrifice-fodder')
+    expect(FOUNDRY.produces).toContain('sacrifice-fodder')
+  })
+
+  it('reads an artifact creature token as an artifact entering', () => {
+    // The same anchor defect one adjective over: the rule wanted `artifact
+    // token` adjacent and the game writes `Thopter ARTIFACT CREATURE token`.
+    // 133 commander-legal cards, and a Thopter is an artifact entering the
+    // battlefield whatever else it is.
+    expect(AVIATION_PIONEER.produces).toContain('artifact-etb')
+    expect(FOUNDRY.produces).toContain('artifact-etb')
+  })
+
+  it('never claims the fodder without claiming the token', () => {
+    /*
+     * The invariant, over every description length the window can hold. This is
+     * the test the numbers cannot drift past: `sacrifice-fodder` is `token`
+     * plus a condition, so a card carrying the first and not the second is a
+     * contradiction rather than a missing card.
+     */
+    for (let length = 0; length <= 80; length += 1) {
+      const filler = 'x'.repeat(length)
+      const profile = derive(
+        'Filler',
+        'Sorcery',
+        `Create a ${filler} 1/1 white Soldier creature token.`,
+      )
+      if (profile.produces.includes('sacrifice-fodder')) {
+        expect(profile.produces).toContain('token')
+      }
+    }
+  })
+
+  it('keeps the subject test the window sits in front of', () => {
+    // Widening the window must not widen whose tokens they are (ADR-0054).
+    const hunted = derive(
+      'Hunted Horror',
+      'Creature — Horror',
+      'Trample\nWhen this creature enters, target opponent creates two 3/3 green Centaur creature tokens.',
+    )
+
+    expect(hunted.produces).not.toContain('token')
+    expect(hunted.produces).not.toContain('sacrifice-fodder')
+  })
+})
+
+/**
+ * The same defect on the trigger side: a window sized for a short subject
+ * (ADR-0059).
+ *
+ * `whenever .{0,40}\bdies\b` reaches 308 of the 430 commander-legal cards that
+ * carry a "whenever … dies" trigger. Blood Artist's subject is 33 characters
+ * and matches; Zulaport Cutthroat's is the same sentence plus "you control",
+ * runs to 46, and matched nothing at all — so the two halves of one aristocrats
+ * deck disagreed about whether deaths were worth anything.
+ *
+ * 80 is where the measurement stops paying: it reaches 423 of the 430, every
+ * one of the cards it adds is a real death trigger, and the first match at 90
+ * is Rivaz of the Claw, where the words in the window are no longer a subject
+ * at all.
+ */
+describe('a trigger subject is longer than forty characters (ADR-0059)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  it('reads the aristocrats drain that was reachable by nothing', () => {
+    const zulaport = derive(
+      'Zulaport Cutthroat',
+      'Creature — Human Rogue Ally',
+      'Whenever this creature or another creature you control dies, each opponent loses 1 life and you gain 1 life.',
+    )
+    const butcher = derive(
+      'Butcher of Malakir',
+      'Creature — Vampire Warrior',
+      'Flying\nWhenever this creature or another creature you control dies, each opponent sacrifices a creature of their choice.',
+    )
+    const celebrant = derive(
+      'Cruel Celebrant',
+      'Creature — Vampire Soldier',
+      'Whenever this creature or another creature or planeswalker you control dies, each opponent loses 1 life and you gain 1 life.',
+    )
+
+    expect(zulaport.wants).toContain('creature-death')
+    expect(butcher.wants).toContain('creature-death')
+    expect(celebrant.wants).toContain('creature-death')
+  })
+
+  it('reads the attack triggers the thirty-character window could not', () => {
+    // 69 cards, all the same shape: the subject is a qualified creature rather
+    // than a name. Winota, Kindred Discovery, Nahiri, Hooded Blightfang.
+    const winota = derive(
+      'Winota, Joiner of Forces',
+      'Legendary Creature — Human Soldier',
+      'Whenever a non-Human creature you control attacks, look at the top six cards of your library.',
+    )
+    const blightfang = derive(
+      'Hooded Blightfang',
+      'Creature — Snake',
+      'Deathtouch\nWhenever a creature you control with deathtouch attacks, each opponent loses 1 life and you gain 1 life.',
+    )
+
+    expect(winota.wants).toContain('attack-trigger')
+    expect(blightfang.wants).toContain('attack-trigger')
+  })
+
+  it('keeps the subject whose own name carries a full stop', () => {
+    /*
+     * Why the attack rule's gap stays `.` where the death rule's became
+     * `[^.\n]`. The sentence boundary costs exactly one card in the corpus and
+     * it is this one — the honorific trap `creature-etb` documents on "J. Jonah
+     * Jameson" and "Ms. Marvel" — and it buys nothing measurable at sixty
+     * characters. `.` is already bounded by the face, which is the guarantee
+     * that mattered.
+     */
+    const foxglove = derive(
+      'Mr. Foxglove',
+      'Legendary Creature — Fox Noble',
+      "Lifelink\nWhenever Mr. Foxglove attacks, draw cards equal to the number of cards in defending player's hand minus the number of cards in your hand.",
+    )
+
+    expect(foxglove.wants).toContain('attack-trigger')
+  })
+
+  it('does not let the wider window leave the sentence it started in', () => {
+    /*
+     * The window was `.{0,40}`, which crosses a full stop. Widening a gap that
+     * can leave its own sentence is how a trigger condition finds its verb in
+     * the next ability — so the gap became `[^.\n]`, which is this file's own
+     * instrument. Measured to cost nothing at eighty characters, and pinned
+     * here so a later widening cannot quietly restore it.
+     */
+    const unrelated = derive(
+      'Unrelated Clauses',
+      'Enchantment',
+      'Whenever you cast a spell, draw a card. Something in the next sentence dies.',
+    )
+
+    expect(unrelated.wants).not.toContain('creature-death')
+  })
+})

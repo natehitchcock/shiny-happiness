@@ -473,6 +473,46 @@ interface Rule {
 const ADDS_TWO_OR_MORE = String.raw`\bAdd (?:\{[WUBRGCX0-9/]+\}\s*){2,}|\bAdd (?:two|three|four|five|six|seven|X) mana\b`
 
 /**
+ * How far a token's description may run, MEASURED TO THE WORD `token`
+ * (ADR-0059).
+ *
+ * Three rules read one clause — "create a 1/1 colorless Thopter artifact
+ * creature token with flying" — and each wants a different thing out of it:
+ * that a token was made, that it was a creature, that it was an artifact. They
+ * used to spell the window out three times, each in front of a different noun
+ * phrase, and that is the defect:
+ *
+ *   token            `.{0,40}\btoken`
+ *   sacrifice-fodder `.{0,40}\bcreature token`
+ *
+ * `creature token` STARTS nine characters earlier than the bare word `token`
+ * does, so at the same window size the NARROWER rule is the EASIER one to
+ * match. Every token described in 32 to 40 characters was fodder that was not a
+ * token: 277 commander-legal cards, reported on Aviation Pioneer, whose row
+ * said `primary_role: token-maker` beside tags claiming it makes no tokens.
+ *
+ * So all three windows now END AT THE SAME WORD and the difference between the
+ * rules is a zero-width lookbehind. `sacrifice-fodder ⊆ token` is then true by
+ * construction rather than by arithmetic, which is what the property test in
+ * the suite pins — a number chosen by measurement can be un-chosen, and an
+ * invariant cannot.
+ *
+ * 49 IS THE VALUE THAT CHANGES NOTHING ELSE, and that is why it is 49 rather
+ * than a round number: it is the old 40 plus the nine characters of
+ * "creature ", so `sacrifice-fodder` reads exactly the 2,536 cards it read
+ * before and `token` gains the 277 it should always have had. Widening further
+ * keeps paying a little (50 adds 22, 60 adds 59) and every extra card is one
+ * `sacrifice-fodder` was already claiming, which is a second change and not
+ * this one.
+ *
+ * The gap stays `.` rather than becoming `[^.\n]`: measured over the corpus, a
+ * sentence-crossing gap matches ZERO cards that the sentence-bounded one
+ * refuses, and this file's own ruling is that a branch a test cannot fail on is
+ * machinery.
+ */
+const TOKEN_DESCRIPTION = String.raw`.{0,49}`
+
+/**
  * Written against Scryfall oracle conventions: the card's own name is spelled
  * out rather than `~`, reminder text is present, ability words are capitalised.
  *
@@ -668,8 +708,11 @@ const PRODUCES: readonly Rule[] = [
    *
    * The subject test is `token-subject.ts`, shared with `semantic-tokens.ts`
    * and `role-derivation.ts` because all three made this mistake separately.
+   *
+   * The WINDOW is `TOKEN_DESCRIPTION` and the anchor is the word `token`, which
+   * is ADR-0059 and is the reason these three rules now read the way they do.
    */
-  { tag: 'token', test: new RegExp(`${CREATES_FOR_YOU} .{0,40}\\btoken`, 'i') },
+  { tag: 'token', test: new RegExp(`${CREATES_FOR_YOU} ${TOKEN_DESCRIPTION}\\btoken`, 'i') },
   /*
    * The doublers, which never say "create" in the active voice (ADR-0048, found
    * by the commander sweep).
@@ -694,7 +737,14 @@ const PRODUCES: readonly Rule[] = [
   // Same subject test, and this is the tag the report was written about: an
   // aristocrats deck reads `sacrifice-fodder` as bodies it may eat, and these
   // bodies are the opponent's.
-  { tag: 'sacrifice-fodder', test: new RegExp(`${CREATES_FOR_YOU} .{0,40}\\bcreature token`, 'i') },
+  //
+  // The `creature` is a ZERO-WIDTH lookbehind rather than part of the noun
+  // phrase, which is what makes this rule's matches a subset of `token`'s by
+  // construction rather than by arithmetic (ADR-0059).
+  {
+    tag: 'sacrifice-fodder',
+    test: new RegExp(`${CREATES_FOR_YOU} ${TOKEN_DESCRIPTION}(?<=\\bcreature )\\btoken`, 'i'),
+  },
 
   { tag: 'treasure', test: /\bTreasure token/i },
   // Any artifact card entering IS an artifact entering the battlefield, which is
@@ -706,13 +756,23 @@ const PRODUCES: readonly Rule[] = [
   // enchantments against ~200 payoffs — the same lopsided shape as the artifact
   // pair above, which is the precedent this follows rather than a fresh claim.
   { tag: 'enchantment-etb', test: /^[^\n]*\bEnchantment\b/ },
-  // The same subject test as the two rules above (ADR-0054). An artifact token
-  // handed to an opponent does not put an artifact onto YOUR battlefield, which
-  // is the whole of what the payoff asks for.
+  /*
+   * The same subject test as the two rules above (ADR-0054). An artifact token
+   * handed to an opponent does not put an artifact onto YOUR battlefield, which
+   * is the whole of what the payoff asks for.
+   *
+   * Same anchor as the two rules above, and one adjective wider (ADR-0059). The
+   * rule wanted `artifact token` adjacent and the game writes the whole type
+   * line out: "create a 1/1 colorless Thopter ARTIFACT CREATURE token with
+   * flying". 133 commander-legal cards — Foundry of the Consuls, Sram's
+   * Expertise, Tezzeret, every Servo and Thopter and Mite maker that is not
+   * itself an artifact — and a Thopter is an artifact entering the battlefield
+   * whatever else it also is.
+   */
   {
     tag: 'artifact-etb',
     test: new RegExp(
-      `${CREATES_FOR_YOU} .{0,40}\\b(artifact|Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment) token`,
+      `${CREATES_FOR_YOU} ${TOKEN_DESCRIPTION}(?<=\\b(?:artifact|Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment) (?:creature )?)\\btoken`,
       'i',
     ),
   },
@@ -1175,7 +1235,37 @@ const PRODUCES: readonly Rule[] = [
 const WANTS: readonly Rule[] = [
   // The user's example: a death trigger on the commander wants creatures to die.
   { tag: 'creature-death', test: /\bwhenever (a|another) .{0,40}creature .{0,20}dies\b/i },
-  { tag: 'creature-death', test: /\bwhenever .{0,40}\bdies\b/i },
+  /*
+   * The window is the trigger's SUBJECT, and forty characters is not a subject
+   * (ADR-0059).
+   *
+   * 430 commander-legal cards carry a "whenever … dies" trigger and this rule
+   * reached 308 of them. Blood Artist's subject — "Blood Artist or another
+   * creature " — is 33 characters and matched; Zulaport Cutthroat prints the
+   * same sentence plus "you control", which runs to 46, and matched nothing at
+   * all. So the two cards an aristocrats deck is built out of disagreed about
+   * whether a death was worth anything, and the one at EDHREC 234 was the one
+   * that said no. Cruel Celebrant, Butcher of Malakir, Kalastria Highborn,
+   * Xathrid Necromancer and Headless Rider are the same sentence again.
+   *
+   * EIGHTY is where the measurement stops paying, and the ceiling was found by
+   * reading the cards each widening admits rather than by picking a round
+   * number. 60 reaches 413, 80 reaches 423 and every one of the 91 cards it
+   * adds is a real death trigger. The FIRST match at 90 is Rivaz of the Claw,
+   * where the words inside the window have stopped being a subject — which is
+   * the signal that the window has left the grammar it was measuring.
+   *
+   * The gap is `[^.\n]` rather than `.`, which is this file's own instrument
+   * for staying inside one sentence and one face. Measured to cost NOTHING at
+   * eighty characters — the two produce identical sets — and taken anyway,
+   * because widening a gap that can leave its own sentence is how a trigger
+   * condition finds its verb in the next ability. A `[^.,\n]` gap was measured
+   * too and refused: the comma costs three real cards whose subject contains
+   * one ("Whenever a nontoken, non-Angel creature you control dies" is
+   * Valkyrie's Call), and the comma boundary that ADR-0022 relies on elsewhere
+   * is about where an EFFECT begins, which is past the verb this rule ends at.
+   */
+  { tag: 'creature-death', test: /\bwhenever [^.\n]{0,80}\bdies\b/i },
   { tag: 'creature-death', test: /\bwhenever you sacrifice\b/i },
   // "When this creature dies…" — the one-shot form.
   //
@@ -1524,7 +1614,26 @@ const WANTS: readonly Rule[] = [
     tag: 'plus1-counter',
     test: /\b(?:each|another|other|all|target|attacking) creatures?[a-z' ]{0,25} with (?:a |one or more )?\+1\/\+1 counters? on (?:them|it)\b/i,
   },
-  { tag: 'attack-trigger', test: /\bwhenever .{0,30}attacks\b/i },
+  /*
+   * The same window, one trigger over (ADR-0059).
+   *
+   * Thirty characters holds a NAME — "Whenever Adeline attacks" — and not a
+   * described subject. 1,764 commander-legal cards carry a "whenever … attacks"
+   * trigger and this reached 1,694; the 69 it could not see are Winota, Joiner
+   * of Forces ("whenever a non-Human creature you control attacks"), Kindred
+   * Discovery, Nahiri, Forged in Fury, Hooded Blightfang and every Samurai that
+   * cares about attacking alone. Sixty reaches 1,763 and the one beyond it is
+   * not an attack trigger.
+   *
+   * The gap stays `.` here where the `dies` rule above took `[^.\n]`, and the
+   * difference is measured rather than an oversight. `.` is already bounded by
+   * the face — it cannot cross a newline — and the extra sentence boundary buys
+   * nothing at sixty characters and costs exactly one card: Mr. Foxglove, whose
+   * own NAME carries a full stop. That is the honorific trap `creature-etb`
+   * documents below on "J. Jonah Jameson" and "Ms. Marvel", and it is worth a
+   * card here and nothing there.
+   */
+  { tag: 'attack-trigger', test: /\bwhenever .{0,60}attacks\b/i },
   /*
    * The attack trigger Magic stopped writing as "attacks" (ADR-0038).
    *
