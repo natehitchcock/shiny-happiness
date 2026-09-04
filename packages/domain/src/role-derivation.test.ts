@@ -1077,8 +1077,22 @@ describe('stax names whose spells it taxes (ADR-0060 §3)', () => {
       ['Drannith Magistrate', 'Creature — Human Wizard', "Your opponents can't cast spells from anywhere other than their hands."],
       ['Torpor Orb', 'Artifact', "Creatures entering don't cause abilities to trigger."],
       ['Silent Arbiter', 'Artifact Creature — Construct', 'No more than one creature can attack each combat.\nNo more than one creature can block each combat.'],
+      [
+        'Ethersworn Canonist',
+        'Creature — Human Cleric',
+        "Each player who has cast a nonartifact spell this turn can't cast additional nonartifact spells.",
+      ],
+      ['Curse of Exhaustion', 'Enchantment — Aura Curse', "Enchant player\nEnchanted player can't cast more than one spell each turn."],
     ])('%s holds stax', (_name, typeLine, text) => {
       expect(rolesOf(typeLine, text)).toContain('stax')
+    })
+
+    it('leaves a card that taxes ITS OWN controller alone', () => {
+      // Yawgmoth's Agenda, Colfenor's Plans, Moderation, Hedonist's Trove,
+      // Conduit of Worlds. A drawback paid for an engine is not a lock.
+      expect(
+        rolesOf('Enchantment', "You can't cast more than one spell each turn."),
+      ).not.toContain('stax')
     })
   })
 })
