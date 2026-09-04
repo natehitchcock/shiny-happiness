@@ -1082,3 +1082,125 @@ describe('stax names whose spells it taxes (ADR-0060 §3)', () => {
     })
   })
 })
+
+describe('an answer that answers several is still an answer (ADR-0060 §5)', () => {
+  it.each([
+    ['By Force', 'Destroy X target artifacts.'],
+    ['Force of Vigor', 'Destroy up to two target artifacts and/or enchantments.'],
+    ['Curse of the Swine', 'Exile X target creatures.'],
+    ['Noxious Gearhulk', 'When this creature enters, you may destroy another target creature.'],
+    ['Violent Ultimatum', 'Destroy three target permanents.'],
+  ])('%s is removal', (_name, text) => {
+    expect(rolesOf('Sorcery', text)).toContain('spot-removal')
+  })
+
+  it('keeps the graveyard guard', () => {
+    expect(rolesOf('Instant', "Exile two target cards from a graveyard.")).not.toContain(
+      'spot-removal',
+    )
+  })
+
+  it('keeps the blink guard', () => {
+    expect(
+      rolesOf(
+        'Instant',
+        'Exile up to two target creatures you control, then return them to the battlefield.',
+      ),
+    ).not.toContain('spot-removal')
+  })
+
+  it('reads X damage, which the mass rule already read', () => {
+    expect(rolesOf('Sorcery', 'Blaze deals X damage to any target.')).toContain('spot-removal')
+  })
+})
+
+describe("blue answers a creature by turning it into a Frog (ADR-0060 §5)", () => {
+  it.each([
+    [
+      'Frogify',
+      'Enchant creature\nEnchanted creature loses all abilities and is a blue Frog creature with base power and toughness 1/1.',
+    ],
+    [
+      'Ichthyomorphosis',
+      'Enchant creature\nEnchanted creature loses all abilities and is a blue Fish with base power and toughness 0/1.',
+    ],
+    ['Song of the Dryads', 'Enchant permanent\nEnchanted permanent is a colorless Forest land.'],
+    [
+      'Imprisoned in the Moon',
+      'Enchant creature, land, or planeswalker\nEnchanted permanent is a colorless land with "{T}: Add {C}" and loses all other card types and abilities.',
+    ],
+  ])('%s is removal', (_name, text) => {
+    expect(rolesOf('Enchantment — Aura', text)).toContain('spot-removal')
+  })
+
+  it('leaves the combat trick alone, because the creature comes back', () => {
+    expect(
+      rolesOf(
+        'Instant',
+        'Until end of turn, target creature loses all abilities and becomes a blue Frog creature with base power and toughness 1/1.',
+      ),
+    ).not.toContain('spot-removal')
+  })
+
+  it('does not read an ability the Aura QUOTES as one it grants away', () => {
+    // Bronzehide Lion returns as an Aura and then loses ITS OWN abilities. The
+    // anchor to the start of a line is the only thing that reads the difference.
+    expect(
+      rolesOf(
+        'Creature — Cat',
+        '{G}{W}: This creature gains indestructible until end of turn.\nWhen this creature dies, return it to the battlefield. It\'s an Aura enchantment with enchant creature you control and "{G}{W}: Enchanted creature gains indestructible until end of turn," and it loses all other abilities.',
+      ),
+    ).not.toContain('spot-removal')
+  })
+})
+
+describe('a sweeper measured in X is still a sweeper (ADR-0060 §6)', () => {
+  it('reads Toxic Deluge', () => {
+    expect(
+      rolesOf(
+        'Sorcery',
+        'As an additional cost to cast this spell, pay X life.\nAll creatures get -X/-X until end of turn.',
+      ),
+    ).toContain('board-wipe')
+  })
+
+  it('holds the threshold, which is about toughness and not about X', () => {
+    expect(rolesOf('Sorcery', 'All creatures get -1/-1 until end of turn.')).not.toContain(
+      'board-wipe',
+    )
+    expect(rolesOf('Sorcery', 'All creatures get -X/-0 until end of turn.')).not.toContain(
+      'board-wipe',
+    )
+  })
+})
+
+describe('protection asks whose keyword it is (ADR-0060 §6)', () => {
+  it('does not claim protection given to an opponent’s tokens', () => {
+    // Hunted Horror. Offered to a mono-black deck under "fills protection gap".
+    expect(
+      rolesOf(
+        'Creature — Horror',
+        'Trample\nWhen this creature enters, target opponent creates two 3/3 green Centaur creature tokens with protection from black.',
+      ),
+    ).not.toContain('protection')
+  })
+
+  it('still claims a keyword on a token that is yours', () => {
+    expect(
+      rolesOf(
+        'Creature — Merfolk',
+        'When this creature enters, create a 1/1 blue Merfolk creature token with hexproof.',
+      ),
+    ).toContain('protection')
+  })
+
+  it('still claims the card’s own keyword when it also donates a token', () => {
+    // The clause is the unit, never the card.
+    expect(
+      rolesOf(
+        'Creature — Troll',
+        'Hexproof\nWhen this creature enters, target opponent creates two 1/1 green Faerie creature tokens with flying.',
+      ),
+    ).toContain('protection')
+  })
+})

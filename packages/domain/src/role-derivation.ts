@@ -1,7 +1,7 @@
 import type { Card } from './card.js'
 import type { OracleId } from './ids.js'
 import { primaryRole, type Role } from './role.js'
-import { CREATES_FOR_YOU } from './token-subject.js'
+import { CREATES_FOR_YOU, OPPONENT_SUBJECT } from './token-subject.js'
 
 /**
  * Role derivation (doc 02 §2.4, DOM-04).
@@ -372,7 +372,25 @@ const HEURISTICS: readonly Heuristic[] = [
    * old `-\d+` also matched `-0` — five cards that reduce power only and kill
    * nothing at all.
    */
-  { role: 'board-wipe', test: /all creatures get -\d+\/-([2-9]|\d{2,})/i },
+  /*
+   * X, HERE TOO (ADR-0060 §6). The rule read `-\d+/-\d+` and Toxic Deluge says
+   * `-X/-X`, so the format's best black sweeper derived `roles: [synergy]` and
+   * Quickbuild offered it under "WHY THIS IS HERE: synergy".
+   *
+   * The playtest asked whether X was excluded deliberately. It was not: the
+   * mass-DAMAGE rule twelve lines up admits X and says why — "X is included
+   * because it has no cap" — and the comment on this rule says the two must
+   * agree ("a mass -X/-X is a number against toughness exactly as damage is, so
+   * it cannot have a different threshold"). The reasoning covered X and the
+   * regex did not.
+   *
+   * 8 cards, every one a real wipe: Toxic Deluge, Bane of the Living, Kagemaro,
+   * Cloudkill, Terror Tide, Deluge of Doom, Ichor Explosion, Tip the Scales.
+   * The threshold is untouched, so the 19 cards printing -1/-1 or -X/-0 —
+   * Shrivel, Night of Souls' Betrayal, Meishin — stay out for the reason they
+   * were already out.
+   */
+  { role: 'board-wipe', test: /all creatures get -[X\d]+\/-(X|[2-9]|\d{2,})/i },
   /*
    * "Making each opponent sac one creature is not a board wipe." The old rule
    * was `sacrifices (all|\w+) creatures?` and `\w+` matched "a", so 70 of its 86
@@ -407,7 +425,23 @@ const HEURISTICS: readonly Heuristic[] = [
   },
   { role: 'bounce', test: /return all [^.\n]{0,60}?to (its|their) owners'? hands?/i },
 
-  { role: 'spot-removal', test: /destroy target\b/i },
+  /*
+   * REMOVAL THAT ANSWERS MORE THAN ONE THING IS STILL REMOVAL (ADR-0060 §5).
+   *
+   * `destroy target` and `exile target` demanded that the verb and the word
+   * "target" be adjacent, so every quantified answer in the format fell to the
+   * catch-all: "Destroy X target artifacts" (By Force, Heliod's Intervention,
+   * Vandalblast's overload), "Destroy up to two target permanents" (Force of
+   * Vigor), "Exile X target creatures" (Curse of the Swine), "destroy up to one
+   * target" (Noxious Gearhulk, Skyclave Apparition, Cavalier of Dawn).
+   *
+   * This is the article audit's finding in the file's most consequential rule,
+   * and it reads the same shared `QUANTIFIER`. The guards are untouched — the
+   * graveyard guard and the `you control` blink guard both still apply, so
+   * "exile up to one target creature you control" is still a blink and ADR-0048's
+   * measured refusal of the symmetric flickers is unchanged.
+   */
+  { role: 'spot-removal', test: new RegExp(`destroy (?:(?:${QUANTIFIER}) )?target\\b`, 'i') },
   /*
    * The graveyard guard is report 5: `exile target` matched "exile target
    * player's graveyard" and "exile target card from a graveyard", which is how
@@ -439,9 +473,59 @@ const HEURISTICS: readonly Heuristic[] = [
    */
   {
     role: 'spot-removal',
-    test: /exile target\b(?![^.\n]{0,50}\bgraveyard\b)(?![^.\n]{0,60}\byou control\b)/i,
+    test: new RegExp(
+      `exile (?:(?:${QUANTIFIER}) )?target\\b(?![^.\\n]{0,50}\\bgraveyard\\b)(?![^.\\n]{0,60}\\byou control\\b)`,
+      'i',
+    ),
   },
-  { role: 'spot-removal', test: /deals? \d+ damage to (target|any target)/i },
+  /*
+   * X IS A NUMBER WITH NO CAP, AND THIS FILE ALREADY SAID SO (ADR-0060 §5).
+   *
+   * The mass-damage rule below reads `(X|[2-9]|\d{2,})` and its comment states
+   * the reason in one sentence: "X is included because it has no cap." The
+   * single-target rule read a bare `\d+` and so could not see the same letter —
+   * so Blaze, Lava Burst, Devil's Play, Fireball, Volcanic Geyser,
+   * Electrodominance, Bonfire of the Damned and 164 more derived to `synergy`,
+   * which told a red deck the app could not tell what Blaze does.
+   *
+   * Two rules in one file disagreeing about one token, with an argument written
+   * beside only one of them. There is no second argument to make; the first one
+   * covers both.
+   */
+  { role: 'spot-removal', test: /deals? [X\d]+ damage to (target|any target)/i },
+  /*
+   * BLUE'S REAL REMOVAL, FILED UNDER ITS CARD TYPE (ADR-0060 §5).
+   *
+   * Mono-blue holds 46 `spot-removal` cards against mono-red's 853, and the
+   * gap is mostly bookkeeping: blue does not destroy a creature, it turns it
+   * into a Frog. Frogify, Ichthyomorphosis, Kasmina's Transmutation, Witness
+   * Protection, Kenrith's Transformation, Reprobation and Utter Insignificance
+   * were `aura` and nothing else, and Song of the Dryads and Imprisoned in the
+   * Moon — the format's premier catch-all answers to a permanent of ANY type —
+   * were `aura` and `ramp`, the second because the ramp rule read the "{T}: Add
+   * {C}" the card grants to the permanent it is imprisoning.
+   *
+   * 34 cards, all read by hand. Two shapes, because they are two claims: an
+   * enchanted permanent that LOSES ALL ITS ABILITIES is answered, and one that
+   * IS A LAND now is answered more completely still.
+   *
+   * ANCHORED TO THE START OF A LINE, which is what separates the Aura's own
+   * static ability from a clause it quotes. Bronzehide Lion returns as an Aura
+   * granting `"{G}{W}: Enchanted creature gains indestructible"` and then "loses
+   * all other abilities" — its own abilities, not the enchanted creature's — and
+   * the anchor is the only thing that reads the difference.
+   *
+   * THE ONE-SHOT VERSION IS REFUSED, 40 cards. "Until end of turn, target
+   * creature loses all abilities and becomes a green Elk" (Turn to Frog,
+   * Snakeform, Humble, Ovinize, Gift of Tusks) is a combat trick: the creature
+   * is back next turn, which is the same reason ADR-0037 puts `bounce` below
+   * `spot-removal`. Oko's +1 is the one real loss in that 40 and it is left,
+   * named, rather than admitted with 39 tricks behind it.
+   */
+  {
+    role: 'spot-removal',
+    test: /^Enchanted (?:creature|permanent)[^.\n]{0,110}?(?:loses all (?:other )?(?:card types and )?abilities|is an? [^.\n]{0,40}\bland\b)/m,
+  },
   { role: 'spot-removal', test: /target (player|opponent) sacrifices a creature/i },
 
   /*
@@ -483,7 +567,33 @@ const HEURISTICS: readonly Heuristic[] = [
     test: /if an? [^.]{0,30}(card|token|permanent) would be put into (a|an opponent's|their|your) graveyard from anywhere, exile it instead/i,
   },
 
-  { role: 'protection', test: /\b(hexproof|shroud|indestructible|protection from)\b/i },
+  /*
+   * WHOSE KEYWORD IS IT (ADR-0060 §6) — the subject question's fifth table.
+   *
+   * The rule was the bare keyword with no subject at all, so Hunted Horror —
+   * "target opponent creates two 3/3 green Centaur creature tokens WITH
+   * PROTECTION FROM BLACK" — held `protection` as its PRIMARY role and was
+   * offered to a mono-black-heavy deck under "fills protection gap". The
+   * protection is on the two bodies the opponent just got.
+   *
+   * ADR-0054 fixed this shape in three files and built `token-subject.ts` so it
+   * could not recur; `role-derivation.ts`'s own `token-maker` rule already reads
+   * from it. This reads the SAME list — `OPPONENT_SUBJECT`, exported from that
+   * file rather than written out again here, which is the whole point of the
+   * file existing.
+   *
+   * The refusal is scoped to a creation clause, not to the keyword: a card that
+   * gives an opponent a token AND has hexproof itself keeps `protection`,
+   * because the clause is the unit, never the card — the ruling `synergy.ts`
+   * and this file each already make twice.
+   */
+  {
+    role: 'protection',
+    test: new RegExp(
+      `(?<!${OPPONENT_SUBJECT}\\bcreates\\b[^.\\n]{0,140})\\b(hexproof|shroud|indestructible|protection from)\\b`,
+      'i',
+    ),
+  },
   { role: 'protection', test: /gains? (hexproof|indestructible|protection)/i },
   { role: 'protection', test: /counter target spell that targets/i },
 
