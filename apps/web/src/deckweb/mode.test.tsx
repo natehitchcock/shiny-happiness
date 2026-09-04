@@ -52,6 +52,7 @@ const card = (over: Partial<api.Card> & { oracleId: string; name: string }): api
   manaValue: 2,
   typeLine: 'Creature — Human',
   types: ['creature'],
+  colors: ['B'],
   oracleText: 'Sacrifice a creature: draw a card.',
   power: '1',
   toughness: '1',

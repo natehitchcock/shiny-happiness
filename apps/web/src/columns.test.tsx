@@ -141,6 +141,7 @@ beforeEach(() => {
           manaValue: 4,
           typeLine: 'Legendary Creature — Goblin Warrior',
           types: ['creature'],
+          colors: ['R'],
           oracleText: '',
           colorIdentity: ['R'],
           primaryRole: 'wincon',

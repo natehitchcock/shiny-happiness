@@ -83,6 +83,7 @@ const wrath = (over: Partial<api.Card> = {}): api.Card => ({
   manaValue: 4,
   typeLine: 'Sorcery',
   types: ['sorcery'],
+  colors: ['W'],
   oracleText: WRATH_TEXT,
   power: null,
   toughness: null,
@@ -294,6 +295,7 @@ describe('the preview panel draws both metrics', () => {
       manaValue: 1,
       typeLine: 'Artifact',
       types: ['artifact'],
+      colors: [],
       oracleText: '{T}: Add {C}{C}.',
       primaryRole: 'ramp',
     })

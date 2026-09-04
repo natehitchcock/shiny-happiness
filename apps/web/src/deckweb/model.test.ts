@@ -76,6 +76,103 @@ describe('nodes', () => {
   })
 })
 
+/*
+ * THE QUALIFIER, ON THE SURFACE THAT STATES THE CLAIM MOST EXPLICITLY.
+ *
+ * ADR-0057 §11 said "both production callers pass it" and there were four. This
+ * one intersected the tag arrays by hand, so the table printed, verbatim:
+ *
+ *   "Pongify causes casting spells; Y'shtola, Night's Blessed benefits from it."
+ *
+ * Pongify is mana value 1 and Y'shtola needs a noncreature spell costing three
+ * or more. 8 false edges into her on the real deck, and 21 into Brinelin, out
+ * of 26 in-deck suppliers.
+ *
+ * Real oracle text on both sides, because the qualifier is READ from it: a
+ * hand-written tag array cannot exercise this and that is exactly how it got
+ * shipped.
+ */
+describe('benefits edges honour a want qualifier', () => {
+  const YSHTOLA: WebCard = {
+    oracleId: 'yshtola',
+    name: "Y'shtola, Night's Blessed",
+    synergyProduces: [],
+    synergyWants: ['spell-cast'],
+    manaValue: 3,
+    types: ['creature'],
+    colors: ['W', 'B'],
+    oracleText:
+      'Vigilance\nWhenever you cast a noncreature spell with mana value 3 or greater, ' +
+      "Y'shtola deals 2 damage to each opponent and you gain 2 life.",
+  }
+  const spell = (id: string, name: string, manaValue: number): WebCard => ({
+    oracleId: id,
+    name,
+    synergyProduces: ['spell-cast'],
+    synergyWants: [],
+    manaValue,
+    types: ['instant'],
+    colors: ['U'],
+    oracleText: 'Destroy target creature. Its controller creates a 3/3 green Ape creature token.',
+  })
+
+  it('draws no edge from a spell the wanter cannot be turned on by', () => {
+    const web = build({ cards: [spell('pongify', 'Pongify', 1), YSHTOLA] })
+    expect(web.edges).toEqual([])
+    expect(web.isolated).toContain('yshtola')
+  })
+
+  it('still draws the edge from a spell that does satisfy the qualifier', () => {
+    const web = build({ cards: [spell('storm', 'Comet Storm', 4), YSHTOLA] })
+    expect(web.edges).toHaveLength(1)
+    expect(web.edges[0]).toMatchObject({ kind: 'benefits', from: 'storm', to: 'yshtola' })
+  })
+
+  /*
+   * The fallback ADR-0057 states and this caller must keep: a card built
+   * without the facts is answered unqualified, which is over-inclusive and
+   * never wrongly silent. Every other test in this file builds cards that way.
+   */
+  it('answers unqualified when the supplier carries no facts', () => {
+    const web = build({ cards: [card('bare', ['spell-cast']), YSHTOLA] })
+    expect(web.edges).toHaveLength(1)
+  })
+
+  /*
+   * ALL THREE OR NONE, which is the degenerate input the fallback is for.
+   * A supplier carrying `manaValue` and `types` but no `colors` must be
+   * answered unqualified: reading the missing array as `[]` claims the card is
+   * colourless, and a colourless card fails every colour qualifier there is.
+   * The edge into Quirion Dryad would vanish rather than be over-drawn, which
+   * is the one direction ADR-0057 says this may never fail in.
+   */
+  it('does not read a missing colors array as colourless', () => {
+    const dryad: WebCard = {
+      oracleId: 'dryad',
+      name: 'Quirion Dryad',
+      synergyProduces: [],
+      synergyWants: ['spell-cast'],
+      manaValue: 2,
+      types: ['creature'],
+      colors: ['G'],
+      oracleText:
+        "Whenever you cast a spell that's white, blue, black, or red, " +
+        'put a +1/+1 counter on this creature.',
+    }
+    const halfKnown: WebCard = {
+      oracleId: 'half',
+      name: 'Half-known Spell',
+      synergyProduces: ['spell-cast'],
+      synergyWants: [],
+      manaValue: 2,
+      types: ['instant'],
+    }
+    expect(build({ cards: [halfKnown, dryad] }).edges).toHaveLength(1)
+    // And the control: known to be green, so it genuinely cannot fire her.
+    expect(build({ cards: [{ ...halfKnown, colors: ['G'] }, dryad] }).edges).toEqual([])
+  })
+})
+
 describe('benefits edges', () => {
   it('points from the card that causes the event to the card that gains', () => {
     const web = build({

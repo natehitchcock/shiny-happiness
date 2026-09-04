@@ -63,6 +63,7 @@ const sculptor: api.Card = {
   manaValue: 2,
   typeLine: 'Artifact Creature — Vedalken Artificer',
   types: ['artifact', 'creature'],
+  colors: ['U'],
   oracleText: 'Artifact spells you cast cost {1} less to cast.',
   power: '1',
   toughness: '2',

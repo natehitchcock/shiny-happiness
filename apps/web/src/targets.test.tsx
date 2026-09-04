@@ -343,6 +343,7 @@ describe('the archetype customiser', () => {
             manaValue: 2,
             typeLine: 'Artifact',
             types: ['artifact'],
+            colors: [],
             oracleText: '',
             colorIdentity: [],
             primaryRole: 'ramp',

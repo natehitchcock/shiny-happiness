@@ -55,6 +55,7 @@ const card = (oracleId: string, name: string): api.Card => ({
   manaValue: 4,
   typeLine: 'Legendary Creature — Goblin Warrior',
   types: ['creature'],
+  colors: ['R'],
   oracleText: '',
   power: '3',
   toughness: '3',

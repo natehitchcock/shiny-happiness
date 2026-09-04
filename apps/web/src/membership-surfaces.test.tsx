@@ -64,6 +64,7 @@ const card = (over: Partial<api.Card> & Pick<api.Card, 'oracleId' | 'name'>): ap
   manaValue: 2,
   typeLine: 'Creature — Elf Druid',
   types: ['creature'],
+  colors: ['G'],
   oracleText: '',
   power: '1',
   toughness: '1',
@@ -138,6 +139,63 @@ const quirion = card({
   synergyHas: ['subtype:elf'],
 })
 
+/*
+ * The qualifier, on the panel that names one card against another (ADR-0057).
+ *
+ * Real oracle text on all three, because the qualifier is READ from it and a
+ * hand-written tag array cannot exercise it. That is exactly how this shipped:
+ * the panel intersected `synergyProduces` against `synergyWants` and listed
+ * "Pongify — benefits from casting spells" under a trigger Pongify cannot fire.
+ */
+const yshtola = card({
+  oracleId: 'yshtola',
+  name: "Y'shtola, Night's Blessed",
+  typeLine: 'Legendary Creature — Cat Warlock',
+  manaCost: '{1}{W}{B}',
+  manaValue: 3,
+  colors: ['W', 'B'],
+  colorIdentity: ['B', 'G'],
+  oracleText:
+    'Vigilance\nWhenever you cast a noncreature spell with mana value 3 or greater, ' +
+    "Y'shtola deals 2 damage to each opponent and you gain 2 life.",
+  synergyProduces: [],
+  synergyWants: ['spell-cast'],
+})
+
+/** Mana value 1. Her trigger needs three, so this pairing is false. */
+const pongify = card({
+  oracleId: 'pongify',
+  name: 'Pongify',
+  typeLine: 'Instant',
+  manaCost: '{U}',
+  manaValue: 1,
+  types: ['instant'],
+  colors: ['U'],
+  oracleText:
+    "Destroy target creature. It can't be regenerated. That creature's controller creates a 3/3 green Ape creature token.",
+  primaryRole: 'removal',
+  synergyProduces: ['spell-cast'],
+  // Quirion Ranger produces `untap`, so previewing Pongify has a partner
+  // whatever the qualifier decides. Without it an empty panel would pass the
+  // supplier-side test for any reason at all, including the panel not rendering.
+  synergyWants: ['untap'],
+})
+
+/** Mana value 4, and the control: the same tag, and this one is true. */
+const kodamasReach = card({
+  oracleId: 'reach',
+  name: "Kodama's Reach",
+  typeLine: 'Sorcery',
+  manaCost: '{2}{G}',
+  manaValue: 4,
+  types: ['sorcery'],
+  colors: ['G'],
+  oracleText: 'Search your library for up to two basic land cards.',
+  primaryRole: 'ramp',
+  synergyProduces: ['spell-cast'],
+  synergyWants: [],
+})
+
 const deck: api.Deck = {
   id: 'd1',
   name: 'Elf tribal',
@@ -157,6 +215,9 @@ const deck: api.Deck = {
     // Last in accepted order on purpose: without the diversity sort it is the
     // last row, and it is the one row worth reading.
     { oracleId: 'quirion', zone: 'accepted', locked: false },
+    { oracleId: 'yshtola', zone: 'accepted', locked: false },
+    { oracleId: 'pongify', zone: 'accepted', locked: false },
+    { oracleId: 'reach', zone: 'accepted', locked: false },
   ],
 }
 
@@ -166,6 +227,9 @@ const hydrated = new Map([
   ['mystic', mystic],
   ['llanowar', llanowar],
   ['quirion', quirion],
+  ['yshtola', yshtola],
+  ['pongify', pongify],
+  ['reach', kodamasReach],
 ])
 
 const recommendations = (over: Partial<api.Recommendations> = {}): api.Recommendations =>
@@ -295,6 +359,62 @@ describe('the commander prompt reads all three directions', () => {
     const note = screen.getByText(/whether or not it relates to your focus/)
     expect(note.textContent).toMatch(/type line/i)
     expect(note.textContent).not.toMatch(/^Everything else we derive from rules text,/)
+  })
+})
+
+/*
+ * THE FOURTH CALLER (ADR-0057 §11).
+ *
+ * The ADR said the qualifier had two production callers. This panel was one of
+ * the two it missed, and it makes the claim twice — once for what the previewed
+ * card supplies to a partner, once for what a partner supplies to it. Raw, both
+ * read the tag arrays and nothing else, so a one-mana instant was listed as
+ * turning on a trigger that needs three.
+ */
+describe('"Synergises with" honours a want qualifier', () => {
+  // `getCardDetail` is mocked file-wide to answer with the Archdruid; the
+  // panel reads the PREVIEWED card's own text, so each case supplies its own.
+  const open = async (subject: api.Card): Promise<HTMLElement | null | undefined> => {
+    mocked.getCardDetail.mockResolvedValue({
+      ...subject,
+      printings: [],
+      combos: [],
+    } as unknown as api.CardDetail)
+    render(<Workspace deck={deck} />)
+    await waitFor(() => expect(screen.getByLabelText(`Preview ${subject.name}`)).toBeTruthy())
+    await act(async () => screen.getByLabelText(`Preview ${subject.name}`).click())
+    await waitFor(() => expect(screen.getByText('Works with your deck')).toBeTruthy())
+    return screen.getByText('Synergises with').parentElement
+  }
+
+  it('does not list a spell the previewed card cannot be turned on by', async () => {
+    const partners = await open(yshtola)
+    expect(partners?.textContent).not.toContain('Pongify')
+  })
+
+  it('still lists the spell that does satisfy the qualifier', async () => {
+    const partners = await open(yshtola)
+    expect(partners?.textContent).toMatch(/Kodama's Reach — causes/)
+  })
+
+  /*
+   * The other direction, which is a separate call and was separately wrong.
+   * Previewing Pongify asks "who benefits from what I supply", and Y'shtola is
+   * the answer only if Pongify can fire her.
+   *
+   * Pongify's `untap` want is what keeps the section on screen at all, so the
+   * assertion is about her ABSENCE from a list that exists rather than about an
+   * empty panel — which would pass for any reason the panel failed to render.
+   */
+  it('does not name the wanter from the supplier’s side either', async () => {
+    const partners = await open(pongify)
+    expect(partners?.textContent).toContain('Quirion Ranger')
+    expect(partners?.textContent ?? '').not.toContain("Y'shtola")
+  })
+
+  it('does name it from the side that is true', async () => {
+    const partners = await open(kodamasReach)
+    expect(partners?.textContent).toMatch(/Y'shtola, Night's Blessed — benefits from/)
   })
 })
 

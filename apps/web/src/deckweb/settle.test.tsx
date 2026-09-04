@@ -55,6 +55,8 @@ const card = (over: Partial<DeckWebCard> & { oracleId: string; name: string }): 
   typeLine: 'Creature — Human',
   oracleText: '',
   colorIdentity: ['B'],
+  types: ['creature'],
+  colors: ['B'],
   primaryRole: 'engine',
   synergyProduces: [],
   synergyWants: [],

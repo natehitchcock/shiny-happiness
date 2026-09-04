@@ -5,6 +5,7 @@ import {
   deriveWantQualifiers,
   qualifierWords,
   satisfiesQualifiers,
+  suppliedWants,
 } from './qualifiers.js'
 
 /** Oracle text as Scryfall prints it, for the cards named in the ADR. */
@@ -477,6 +478,60 @@ describe('satisfiesQualifiers', () => {
     expect(qualifiers).toHaveLength(2)
     // mana value passes, type fails.
     expect(satisfiesQualifiers(candidate(6, ['creature']), qualifiers)).toBe(false)
+  })
+})
+
+/*
+ * ONE PAIR, ONE ANSWER (ADR-0057 s11, corrected).
+ *
+ * The ADR claimed two production callers and there were four: `recommend.ts`
+ * and `cut.ts` go through `synergyMatches`, but the deck web and the card
+ * panel's "Synergises with" list each intersected the raw arrays themselves and
+ * printed "Pongify causes casting spells; Y'shtola benefits from it" for a
+ * one-mana spell. `synergyMatches` cannot serve them -- it reads a deck-level
+ * WEIGHT per tag and they need the answer for one PAIR -- so the shared thing
+ * is this, and a lint rule bans the raw intersection that would make a fifth.
+ */
+describe('suppliedWants', () => {
+  const PONGIFY = candidate(1, ['instant'], ['U'])
+  const wanter = {
+    wants: ['spell-cast', 'token'] as const,
+    qualifiers: deriveWantQualifiers(YSHTOLA),
+  }
+
+  it('drops a tag the wanter cannot actually be turned on by', () => {
+    expect(suppliedWants(['spell-cast'], wanter, { candidate: PONGIFY })).toEqual([])
+  })
+
+  it('keeps the same tag from a supplier that does satisfy the qualifier', () => {
+    expect(
+      suppliedWants(['spell-cast'], wanter, { candidate: candidate(3, ['sorcery'], ['B']) }),
+    ).toEqual(['spell-cast'])
+  })
+
+  it('leaves an unqualified tag alone whatever the supplier costs', () => {
+    expect(suppliedWants(['token'], wanter, { candidate: PONGIFY })).toEqual(['token'])
+  })
+
+  it('intersects: a tag the wanter does not want is not supplied to it', () => {
+    expect(suppliedWants(['landfall'], wanter, { candidate: PONGIFY })).toEqual([])
+  })
+
+  /*
+   * ABSENT MEANS "THE CALLER DID NOT ASK", never "this supplier satisfies the
+   * qualifier" -- the same fallback `synergyMatches` states, and the same
+   * direction: over-inclusive, which can waste a row and can never report a
+   * real payoff as no use. Pinned so it cannot go quiet.
+   */
+  it('falls back to the unqualified answer when the caller passes no facts', () => {
+    expect(suppliedWants(['spell-cast'], wanter)).toEqual(['spell-cast'])
+    expect(
+      suppliedWants(['spell-cast'], { wants: ['spell-cast'] }, { candidate: PONGIFY }),
+    ).toEqual(['spell-cast'])
+  })
+
+  it('reports each tag once, however often it is supplied', () => {
+    expect(suppliedWants(['token', 'token'], wanter, { candidate: PONGIFY })).toEqual(['token'])
   })
 })
 

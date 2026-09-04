@@ -60,6 +60,11 @@ import {
   // the server ran to decide which names are references at all (doc 09 §9.4), so
   // the panel cannot link a span the server did not resolve.
   splitOracleText,
+  // ADR-0057, and the pair-level answer the "Synergises with" list needs.
+  // `synergyMatches` cannot serve it: that reads a deck-level weight per tag
+  // and this names one card against one other.
+  deriveWantQualifiers,
+  suppliedWants,
 } from '@roundtable/domain'
 // Aliased: `oracleId` is a parameter name a dozen times in this file, and a
 // brander shadowed by a local of the same name reads as a bug even when it is
@@ -2501,19 +2506,35 @@ const Works = ({
    * both only because they literally CREATE Elf tokens. An ordinary Elf
    * supplies its Elf-ness through `has` and could not be a partner at all.
    */
-  const supplies = new Set([...detail.synergyProduces, ...(detail.synergyHas ?? [])])
-  const wants = new Set(detail.synergyWants)
+  /*
+   * AND THE QUALIFIER, IN BOTH DIRECTIONS (ADR-0057 §11).
+   *
+   * This was the fourth caller of a claim the ADR said had two, and the only
+   * one that makes it twice: `benefits` reads the OTHER card's qualifiers
+   * against this card's columns, `causes` and `membership` read this card's
+   * against the other's. Raw, both of them named Pongify as a partner for
+   * Y'shtola — a one-mana instant against a trigger that needs three.
+   *
+   * `suppliedWants` is the one place that answer is computed; the raw
+   * intersection it replaces is now a lint error in `apps/web`.
+   */
+  const supplies = [...detail.synergyProduces, ...(detail.synergyHas ?? [])]
+  const selfWants = { wants: detail.synergyWants, qualifiers: deriveWantQualifiers(detail) }
   const synergy: { readonly partner: Partner; readonly tag: string }[] = []
   for (const oracleId of accepted) {
     if (oracleId === self) continue
     const other = cards.get(oracleId)
     if (other === undefined) continue
-    const benefits = other.synergyWants.filter((t) => supplies.has(t))
-    const causes = other.synergyProduces.filter((t) => wants.has(t))
+    const benefits = suppliedWants(
+      supplies,
+      { wants: other.synergyWants, qualifiers: deriveWantQualifiers(other) },
+      { candidate: detail },
+    )
+    const causes = suppliedWants(other.synergyProduces, selfWants, { candidate: other })
     // `produces` before `has` on the supply side: "causes Elves" is the more
     // specific claim about a card that is both, the same precedence the deck
     // web's rule 2 gives a combo edge over a benefits edge.
-    const membership = (other.synergyHas ?? []).filter((t) => wants.has(t))
+    const membership = suppliedWants(other.synergyHas ?? [], selfWants, { candidate: other })
     const tag = benefits[0] ?? causes[0] ?? membership[0]
     if (tag === undefined) continue
     /*

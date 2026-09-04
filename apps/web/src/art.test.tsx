@@ -63,6 +63,7 @@ const card = (over: Partial<api.Card> = {}): api.Card => ({
   manaValue: 4,
   typeLine: 'Legendary Creature — Goblin Warrior',
   types: ['creature'],
+  colors: ['R'],
   oracleText: KRENKO_TEXT,
   power: '3',
   toughness: '3',

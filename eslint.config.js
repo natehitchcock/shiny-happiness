@@ -145,6 +145,53 @@ export default tseslint.config(
     },
   },
 
+  // ---- ADR-0057: one pair, one answer ----
+  //
+  // A want says WHICH EVENT a card pays off, not which cards can cause it, and
+  // `synergyWants` alone cannot answer the second question. ADR-0057 §11 said
+  // the qualifier had two production callers; it had four. The two that went
+  // through `synergyMatches` were right. The two that wrote the intersection
+  // out by hand —
+  //
+  //   fromSupplies.filter((t) => to.synergyWants.includes(t))
+  //
+  // — were the deck web and the card panel's "Synergises with" list, and both
+  // printed "Pongify causes casting spells; Y'shtola, Night's Blessed benefits
+  // from it" for a one-mana instant against a trigger that needs three.
+  //
+  // `apps/web` only, because it is the only place that holds two cards and no
+  // deck: the domain's own callers reach the qualifier through `synergyMatches`,
+  // and `packages/domain` is where `suppliedWants` lives. Test files included
+  // deliberately — a fixture that hand-rolls the intersection is a test that
+  // proves the old answer.
+  //
+  // A NEW BLOCK rather than an addition to the R1 one, and that is not a style
+  // choice: flat config REPLACES a rule rather than merging it, so extending
+  // R1's `no-restricted-syntax` to cover `apps/web` would delete the `new Date()`
+  // selector for `packages/domain`. That exact trap is documented twenty lines
+  // up, where it had already happened once to `no-restricted-globals`.
+  {
+    files: ['apps/web/**/*.ts', 'apps/web/**/*.tsx'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'CallExpression > MemberExpression[property.name=/^(includes|filter|some|every)$/][object.property.name=/^synergy(Wants|Produces|Has)$/]',
+          message:
+            'Intersecting the synergy tag arrays by hand ignores the want qualifier (ADR-0057). Use suppliedWants from @roundtable/domain.',
+        },
+        {
+          // The same thing written `(card.synergyHas ?? []).filter(...)`.
+          selector:
+            'CallExpression > MemberExpression[property.name=/^(includes|filter|some|every)$/][object.left.property.name=/^synergy(Wants|Produces|Has)$/]',
+          message:
+            'Intersecting the synergy tag arrays by hand ignores the want qualifier (ADR-0057). Use suppliedWants from @roundtable/domain.',
+        },
+      ],
+    },
+  },
+
   { files: ['**/*.test.ts'], rules: { 'no-console': 'off' } },
 
   // A CLI's stdout is its product, not a stray debug statement. Only entry

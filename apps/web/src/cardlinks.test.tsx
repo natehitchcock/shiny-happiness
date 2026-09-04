@@ -64,6 +64,7 @@ const base = (over: Partial<api.Card>): api.Card => ({
   manaValue: 1,
   typeLine: 'Artifact',
   types: ['artifact'],
+  colors: [],
   oracleText: '',
   power: null,
   toughness: null,

@@ -76,6 +76,7 @@ const fireIce: api.Card = {
   manaValue: 4,
   typeLine: 'Instant // Instant',
   types: ['instant'],
+  colors: ['U', 'R'],
   oracleText: `${FIRE}\n${ICE}`,
   oracleTextFaces: [FIRE, ICE],
   power: null,

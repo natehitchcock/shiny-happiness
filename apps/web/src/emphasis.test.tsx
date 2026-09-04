@@ -53,6 +53,7 @@ const card = (over: Partial<api.Card> & { oracleId: string; name: string }): api
   manaValue: 3,
   typeLine: 'Legendary Creature — Human',
   types: ['creature'],
+  colors: ['B'],
   oracleText: '',
   colorIdentity: ['B'],
   primaryRole: 'synergy',

@@ -420,6 +420,57 @@ export const satisfiesQualifiers = (
     }
   })
 
+/**
+ * The tags one supplier actually supplies to one wanter (ADR-0057 §11).
+ *
+ * ONE PAIR, ONE ANSWER, and it exists because the ADR's caller count was wrong.
+ * It said "both production callers pass it" and there were four. `recommend.ts`
+ * and `cut.ts` go through `synergyMatches` and were right; `deckweb/model.ts`
+ * and the card panel's "Synergises with" list each wrote the intersection out
+ * by hand —
+ *
+ *   fromSupplies.filter((t) => to.synergyWants.includes(t))
+ *
+ * — and printed "Pongify causes casting spells; Y'shtola, Night's Blessed
+ * benefits from it" on the deck web's own table, for a one-mana instant, on the
+ * commander the ADR is named after.
+ *
+ * `synergyMatches` cannot serve those two. It answers about a DECK: `deck.wants`
+ * is a weight per tag, deliberately, and both surfaces need the answer for a
+ * named pair of cards. So the shared thing is this, which is the smallest claim
+ * both can be built from, and `eslint.config.js` bans the raw intersection in
+ * `apps/web` so a fifth caller is a lint error rather than a fifth report.
+ *
+ * Generic over the tag type because the two callers hold different ones: the
+ * domain has `SynergyTag`, and `apps/web` carries `string[]` off the wire.
+ *
+ * ABSENT `candidate` MEANS "THE CALLER DID NOT ASK", never "this supplier
+ * satisfies the qualifier" — the same fallback and the same direction as
+ * `synergyMatches`: over-inclusive, which can waste a row and can never report a
+ * real payoff as no use.
+ */
+export const suppliedWants = <Tag extends string>(
+  supplied: readonly Tag[],
+  wanter: {
+    readonly wants: readonly Tag[]
+    readonly qualifiers?: readonly QualifiedWant[]
+  },
+  options: { readonly candidate?: Pick<Card, 'manaValue' | 'types' | 'colors'> } = {},
+): readonly Tag[] => {
+  const wanted = new Set<string>(wanter.wants)
+  const out: Tag[] = []
+  for (const tag of new Set(supplied)) {
+    if (!wanted.has(tag)) continue
+    const qualified = wanter.qualifiers?.find((q) => (q.tag as string) === tag)
+    const facts = options.candidate
+    if (qualified !== undefined && facts !== undefined) {
+      if (!satisfiesQualifiers(facts, qualified.qualifiers)) continue
+    }
+    out.push(tag)
+  }
+  return out
+}
+
 const LIST = (words: readonly string[], joiner: string): string =>
   words.length <= 1
     ? (words[0] ?? '')

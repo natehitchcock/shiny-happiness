@@ -92,6 +92,7 @@ const asCard = (input: EfficiencyInput, oracleId: string): api.Card => ({
   manaValue: input.manaValue,
   typeLine: input.typeLine,
   types: [...input.types],
+  colors: [],
   oracleText: input.oracleText,
   power: input.power,
   toughness: input.toughness,

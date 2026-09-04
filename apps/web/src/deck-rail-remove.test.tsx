@@ -57,6 +57,7 @@ const card = (oracleId: string, name: string): api.Card => ({
   manaValue: 2,
   typeLine: 'Instant',
   types: ['instant'],
+  colors: ['R'],
   oracleText: '',
   colorIdentity: ['R'],
   primaryRole: 'spot-removal',

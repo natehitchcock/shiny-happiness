@@ -8,6 +8,8 @@ import type {
   BracketFlag,
   CardEfficiency,
   CardImpact,
+  CardType,
+  Color,
   DeckColumn,
   DeckCommand,
   DeckCommandBatch,
@@ -19,7 +21,7 @@ export interface Card {
   manaCost: string | null
   manaValue: number
   typeLine: string
-  types: string[]
+  types: CardType[]
   oracleText: string
   /**
    * The rules text of each face, for a multi-faced card. Absent for a card with
@@ -33,6 +35,19 @@ export interface Card {
   toughness: string | null
   loyalty: string | null
   colorIdentity: string[]
+  /**
+   * The card's OWN colours, which are not its colour identity (ADR-0057).
+   *
+   * They agree for most cards and disagree for exactly the ones a colour
+   * qualifier is about: a card with a coloured mana symbol only in its rules
+   * text is colourless and carries that colour's identity. `colorIdentity`
+   * governs deck legality; this is what "whenever you cast a red spell" asks.
+   *
+   * On the wire since the batch route existed — it sends the whole domain card
+   * and applies no response schema — and simply never declared, which is why
+   * the deck web could not honour a qualifier it already had the data for.
+   */
+  colors: Color[]
   /**
    * Whether this card may lead a deck.
    *

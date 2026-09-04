@@ -21,6 +21,8 @@ const card = (over: Partial<DeckWebCard> & { oracleId: string; name: string }): 
   typeLine: 'Creature — Human',
   oracleText: 'Sacrifice a creature: Draw a card.',
   colorIdentity: ['B'],
+  types: ['creature'],
+  colors: ['B'],
   primaryRole: 'engine',
   synergyProduces: [],
   synergyWants: [],

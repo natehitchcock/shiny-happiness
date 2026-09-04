@@ -50,6 +50,7 @@ const card = (over: Partial<api.Card> & { oracleId: string; name: string }): api
   manaValue: 3,
   typeLine: 'Creature — Goblin',
   types: ['creature'],
+  colors: ['R'],
   oracleText: '',
   colorIdentity: ['R'],
   primaryRole: 'synergy',

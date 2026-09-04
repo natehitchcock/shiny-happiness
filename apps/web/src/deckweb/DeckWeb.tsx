@@ -24,6 +24,7 @@ import type {
   RefObject,
   WheelEvent as ReactWheelEvent,
 } from 'react'
+import type { CardType, Color } from '@roundtable/domain'
 import { CardFace, ART_CROP_ASPECT, imageFor, levelSpec } from '@roundtable/ui'
 import type { CardView } from '@roundtable/ui'
 import { buildDeckWeb, edgesAt, otherEnd, strokeWidth } from './model'
@@ -162,6 +163,18 @@ export interface DeckWebCard {
   readonly oracleText: string
   readonly oracleTextFaces?: string[] | undefined
   readonly colorIdentity: string[]
+  /*
+   * The two columns a want qualifier is evaluated against (ADR-0057), beside
+   * `manaValue` above. Declared here so `model.ts` can honour a qualifier at
+   * all: without them a benefits edge is drawn on the raw tag arrays and the
+   * table says "Pongify causes casting spells; Y'shtola benefits from it".
+   *
+   * Both have been on the wire since the batch route existed — it sends the
+   * whole domain card and applies no response schema — and only this
+   * declaration was missing.
+   */
+  readonly types: CardType[]
+  readonly colors: Color[]
   readonly primaryRole: string
   readonly synergyProduces: string[]
   readonly synergyWants: string[]
