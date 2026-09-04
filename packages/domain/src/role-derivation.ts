@@ -239,7 +239,7 @@ const HEURISTICS: readonly Heuristic[] = [
   {
     role: 'ramp',
     test: new RegExp(
-      `${NOT_LANDCYCLING}[Ss]earch(?:es)? your library for [^.]{0,60}\\b(?:${LAND_TYPE})\\b[^.]{0,120}?into (?:your|their) hand`,
+      `${NOT_LANDCYCLING}[Ss]earch(?:es)? your library for [^.]{0,60}\\b(?:${LAND_TYPE})\\b[^.]{0,120}?(?:into (?:your|their) hand|, exile (?:them|it))`,
     ),
   },
   { role: 'ramp', test: /\bTreasure token/ },

@@ -978,6 +978,12 @@ describe('a land search names a type as often as it says "land" (ADR-0060 §2)',
       'Gift of Estates',
       'Search your library for up to three Plains cards, reveal them, put them into your hand, then shuffle.',
     ],
+    [
+      // The lands go to exile and reach hand from a later sentence. Two cards
+      // in the corpus, both real ramp: this and Roads Go Ever, Ever On.
+      'Endless Horizons',
+      'When this enchantment enters, search your library for any number of Plains cards, exile them, then shuffle.',
+    ],
   ])('%s is ramp', (_name, text) => {
     expect(rolesOf('Enchantment', text)).toContain('ramp')
   })
