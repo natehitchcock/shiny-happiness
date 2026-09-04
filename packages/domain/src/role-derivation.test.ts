@@ -1204,3 +1204,63 @@ describe('protection asks whose keyword it is (ADR-0060 §6)', () => {
     ).toContain('protection')
   })
 })
+
+describe('an Equipment is an Equipment (ADR-0060 §4)', () => {
+  it('counts an Equipment that also ramps as an Equipment', () => {
+    // Sword of the Animist. Quickbuild's answer to "5 more ramp" in a mono-white
+    // deck was three Equipment; the whole `fills-ramp` group held eight of them
+    // and no rocks.
+    expect(primaryRole(['ramp', 'equipment'])).toBe('equipment')
+  })
+
+  it('counts an Equipment that also makes a token as an Equipment', () => {
+    // Batterskull.
+    expect(primaryRole(['token-maker', 'equipment'])).toBe('equipment')
+  })
+
+  it('counts an Equipment that also protects as an Equipment', () => {
+    // Lightning Greaves, Kaldra Compleat, Shadowspear, Sword of Feast and Famine.
+    expect(primaryRole(['protection', 'equipment'])).toBe('equipment')
+  })
+
+  it('counts an Equipment that also pings as an Equipment', () => {
+    // Sword of Fire and Ice, Viridian Longbow, Heartseeker, Mortarpod — 40
+    // cards, and every one is a package that needs a creature, an equip cost
+    // and a turn. Nobody plays a Longbow as their removal.
+    expect(primaryRole(['spot-removal', 'equipment'])).toBe('equipment')
+    expect(primaryRole(['board-wipe', 'equipment'])).toBe('equipment')
+  })
+
+  it('leaves a sac outlet an outlet, which ADR-0054 argued and this does not reopen', () => {
+    // Rakdos Riteknife, Junk Jet.
+    expect(primaryRole(['equipment', 'sac-outlet'])).toBe('sac-outlet')
+  })
+})
+
+describe('an Aura that answers a permanent is an answer (ADR-0060 §4)', () => {
+  it('keeps the removal Aura under removal', () => {
+    // Frogify, Song of the Dryads, Chained to the Rocks, Ossification. The
+    // measured half of the 42 that matters: mono-blue keeps its removal in Aura
+    // form, and `aura` above the answer block hides 70 cards including every
+    // one this ADR just found.
+    expect(primaryRole(['spot-removal', 'aura'])).toBe('spot-removal')
+    expect(primaryRole(['bounce', 'aura'])).toBe('bounce')
+    // And the whole answer band, not just removal: Curse of Exhaustion is a
+    // prison piece that happens to be an Aura.
+    expect(primaryRole(['stax', 'aura'])).toBe('stax')
+  })
+
+  it('counts an Aura that ramps or protects as an Aura', () => {
+    expect(primaryRole(['ramp', 'aura'])).toBe('aura')
+    expect(primaryRole(['protection', 'aura'])).toBe('aura')
+    expect(primaryRole(['token-maker', 'aura'])).toBe('aura')
+    expect(primaryRole(['recursion', 'aura'])).toBe('aura')
+  })
+
+  it('orders the two type roles differently on purpose', () => {
+    // The whole ruling in one line: the 39 Equipment that also answer are
+    // unanimous pingers, and the 42 Auras are not.
+    expect(primaryRole(['spot-removal', 'equipment'])).toBe('equipment')
+    expect(primaryRole(['spot-removal', 'aura'])).toBe('spot-removal')
+  })
+})
