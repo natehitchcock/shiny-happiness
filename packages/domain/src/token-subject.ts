@@ -8,9 +8,14 @@
  * "whose" for itself is a rule table that will answer it differently from the
  * next one. The two halves are:
  *
- *   1. `CREATES_FOR_YOU` / `CREATES_ANYONE` — the token verb, below.
+ *   1. `OPPONENT_SUBJECT` / `CREATES_FOR_YOU` / `CREATES_ANYONE` — the token
+ *      verb and the WINDOWED subject list it needs, below.
  *   2. `forYou` / `addressedToYou` — the general subject refusal, at the foot
  *      of this file, composable in front of ANY verb.
+ *
+ * The two lists of determiners are deliberately NOT shared, which is the one
+ * place this file breaks its own rule and the reason is measured. See the
+ * paragraph below.
  *
  * THE TWO HALVES HAVE DIFFERENT WINDOWS AND THAT IS THE INTERESTING PART.
  * `creates` can afford a fifty-character reach back to the word "opponent"
@@ -266,6 +271,15 @@ export const forYou = (between = ''): string =>
  * The punisher clause is the same one ADR-0022 found on `discard`: "loses 3
  * life UNLESS THEY sacrifice a permanent" puts the infinitive in the sentence
  * because its subject is "they", and an adjacency test reads right past it.
+ *
+ * `OPPONENT_SUBJECT` is deliberately NOT reused by either of these two, and
+ * that is the one exception this file makes to its own rule against a second
+ * list of the same determiners. That fragment carries a fifty-character window
+ * because `creates` needs one and can afford one; sharing it would put the same
+ * reach in front of `draws`, which is the 118-card mistake the module comment
+ * opens with. Two lists in one file with the measurement beside each is still
+ * the thing ADR-0054 was asking for — what it forbade was two lists in two
+ * files, where nobody can see them disagree.
  */
 export const addressedToYou = (between = ''): string =>
   forYou(between) +

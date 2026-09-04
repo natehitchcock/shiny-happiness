@@ -3859,6 +3859,67 @@ describe('a land that taps for mana does not want untapping (ADR-0059)', () => {
     expect(lighthouse.wants).toContain('untap')
   })
 
+  it('does not read a card that is merely named after a storm', () => {
+    /*
+     * `spell-cast` read the bare word `storm`, and Scryfall spells a card's own
+     * name out in its oracle text — so "Storm's Wrath deals 4 damage to each
+     * creature" claimed to be a spellslinger payoff. 24 cards match on the word
+     * alone and 20 of them are named after weather: Cinder Storm, Lightning
+     * Storm, Comet Storm, Arrow Storm, Storm Seeker, Storm of Souls.
+     *
+     * The instrument is the one the `ritual` payoff rule two rules down already
+     * uses, and using it twice is the point: read the KEYWORD by its reminder
+     * text. Every one of the 33 commander-legal cards with the storm keyword
+     * prints it — checked, zero exceptions — so the narrowing costs nothing.
+     */
+    const wrath = derive('Storm’s Wrath', 'Sorcery', 'Storm’s Wrath deals 4 damage to each creature and each planeswalker.')
+    const cinder = derive('Cinder Storm', 'Sorcery', 'Cinder Storm deals 7 damage to any target.')
+    const real = derive(
+      'Weather the Storm',
+      'Instant',
+      'You gain 3 life.\nStorm (When you cast this spell, copy it for each spell cast before it this turn.)',
+    )
+
+    expect(wrath.wants).not.toContain('spell-cast')
+    expect(cinder.wants).not.toContain('spell-cast')
+    expect(real.wants).toContain('spell-cast')
+  })
+
+  it('counts the spells instead of naming one', () => {
+    /*
+     * Found by the storm narrowing, which is the reason to do the corpus diff:
+     * two of the 22 cards that lost the tag were matching on the word inside a
+     * TOKEN'S name — "create a 1/2 blue Bird creature token with flying named
+     * STORM CROW" — and one of them, Murmuration, is a real spellslinger payoff
+     * that no correct rule could reach.
+     *
+     * The template it uses is its own: a card that COUNTS the spells you have
+     * cast this turn rather than triggering on one. 12 commander-legal cards,
+     * read one by one — Gnostro, Narset Jeskai Waymaster, Surge of Brilliance,
+     * and the "second spell you cast each turn costs less" cycle, which is the
+     * same deck asking the same question from the cost side.
+     */
+    const murmuration = derive(
+      'Murmuration',
+      'Enchantment',
+      "Birds you control get +1/+1 and have vigilance.\nAt the beginning of your end step, for each spell you've cast this turn, create a 1/2 blue Bird creature token with flying named Storm Crow.",
+    )
+    const gnostro = derive(
+      'Gnostro, Voice of the Crags',
+      'Legendary Creature — Elemental',
+      "{T}: Choose one. X is the number of spells you've cast this turn.\n• Scry X.",
+    )
+    const ringer = derive(
+      'Highspire Bell-Ringer',
+      'Creature — Human Monk',
+      'Flying\nThe second spell you cast each turn costs {1} less to cast.',
+    )
+
+    expect(murmuration.wants).toContain('spell-cast')
+    expect(gnostro.wants).toContain('spell-cast')
+    expect(ringer.wants).toContain('spell-cast')
+  })
+
   it('still produces untap where it always did', () => {
     // The producer side is untouched: this change is about who WANTS it.
     const muse = derive(

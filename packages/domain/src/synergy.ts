@@ -1822,7 +1822,23 @@ const WANTS: readonly Rule[] = [
 
   {
     tag: 'spell-cast',
-    test: /\bprowess\b|\bmagecraft\b|\bstorm\b|\bwhenever you cast (an instant|a sorcery|your first|an? noncreature)|\binstant and sorcery spells you (cast|control)\b|\bwhenever you copy an instant\b/i,
+    /*
+     * STORM IS READ BY ITS REMINDER TEXT, not by the word (ADR-0059), which is
+     * the instrument the `ritual` payoff rule below already uses — and using it
+     * in both places is the whole point, because both rules are asking the same
+     * question about the same keyword.
+     *
+     * The bare word claimed 24 commander-legal cards on the strength of their
+     * own NAMES, which Scryfall spells out in oracle text: "Storm's Wrath deals
+     * 4 damage to each creature" is a board wipe, and Cinder Storm, Lightning
+     * Storm, Comet Storm, Arrow Storm, Storm Seeker and Storm of Souls are
+     * burn. 20 of the 24 are weather. The other 4 carry the real keyword and
+     * keep the tag through the reminder text.
+     *
+     * Measured to cost nothing: all 33 commander-legal cards with the storm
+     * keyword print the reminder, zero exceptions.
+     */
+    test: /\bprowess\b|\bmagecraft\b|\bcopy it for each spell cast before it this turn\b|\bwhenever you cast (an instant|a sorcery|your first|an? noncreature)|\binstant and sorcery spells you (cast|control)\b|\bwhenever you copy an instant\b/i,
   },
   /*
    * The trigger that names no card type at all (ADR-0038).
@@ -1839,6 +1855,26 @@ const WANTS: readonly Rule[] = [
    * no test could fail on — the same trade the file makes on `itself` above.
    */
   { tag: 'spell-cast', test: /\bwhenever you cast a spell\b/i },
+  /*
+   * The payoff that COUNTS spells rather than triggering on one (ADR-0059).
+   *
+   * Found by diffing the corpus after the storm narrowing above, which is the
+   * reason the diff is done at all: two of the 22 cards that lost the tag were
+   * matching on the word inside a TOKEN'S name — "create a 1/2 blue Bird
+   * creature token with flying named STORM CROW" — and Murmuration, which makes
+   * one Bird for every spell you cast that turn, is a real spellslinger payoff
+   * that no correct rule in this file could reach.
+   *
+   * 12 commander-legal cards, read one by one. Gnostro, Narset Jeskai
+   * Waymaster, Surge of Brilliance and Outlaw Stitcher count; Highspire
+   * Bell-Ringer, Monk Class, Uthros Psionicist and Raging Battle Mouse discount
+   * the second one, which is the same deck asking the same question from the
+   * cost side rather than the trigger side.
+   */
+  {
+    tag: 'spell-cast',
+    test: /\bfor each spell you(?:'|’)ve cast this turn\b|\bnumber of spells you(?:'|’)ve cast this turn\b|\bsecond spell you cast each turn\b/i,
+  },
   /*
    * The trigger that counts spells instead of naming one (ADR-0054).
    *
