@@ -1,8 +1,15 @@
 # ADR-0057 — A want says which event; a qualifier says which cards
 
-**Status:** accepted
+**Status:** accepted, **amended 2026-09-03** — see §12 and §13.
 **Date:** 2026-09-03
 **Supersedes:** nothing. **Extends:** ADR-0011 (mechanical synergy), ADR-0046 (subtypes and keywords), ADR-0048 (membership is a third direction).
+**Amends:** ADR-0038, whose price for refusing name-substitution is corrected in §13.
+
+> **Two claims below are wrong and are corrected in place.** §5's "everything
+> refused here is refused by being over-inclusive" has an exception, and it is
+> half of everything the qualifier removed — §12. §11's "both production
+> callers pass it" undercounted by two — §12.3. Both were found by playtest
+> within hours of shipping.
 
 ---
 
@@ -149,6 +156,13 @@ candidate. That asymmetry is what makes this affordable.
 
 **Deferred:** power/toughness (28) and counter-threshold (4). Evaluable, but the
 populations are too small to earn the machinery.
+
+> **AMENDED.** This section said, of the refusals: *"everything refused here is
+> refused by being over-inclusive, so no candidate is ever excluded on a
+> qualifier the model only half understands."* **That is false for one family**,
+> and the exception was 54% of everything the qualifier removed. See §12. The
+> claim holds for every kind listed above; it does not hold for words the
+> capture picked up that were never about the spell in the first place.
 
 ---
 
@@ -319,3 +333,172 @@ or colour in the effect's object.
 - `Reason.qualifier` is a new optional wire field, rendered words rather than
   the structure, because it is a modifier on a phrase from `tags.ts`.
 - Nothing to re-ingest and nothing to migrate.
+
+> **AMENDED.** "Both production callers pass it" undercounted by two. There were
+> four, and the two that were missed are the two that do not go through
+> `synergyMatches` at all. See §12.3. The re-ingest line is also no longer true
+> of the branch as a whole — §13 changes a stored column.
+
+---
+
+## 12. Amendment: the capture was wrong in the exclusionary direction
+
+Two playtests, hours after this shipped. Three defects, of which the first makes
+the model **worse than before the qualifier existed**.
+
+### 12.1 The target clause, and the claim in §5 that is false
+
+`parseObject` read the whole captured trigger-object phrase. In
+
+> "Whenever you cast a spell **that targets this creature**"
+
+the word `creature` describes the **target**, not the spell — and it became
+`card-type: include ['creature']`. Every `spell-cast` supplier is an instant or
+a sorcery by construction (§4), so the surviving set is exactly the 186
+adventure and MDFC creature-halves: **the only suppliers that cannot trigger a
+Heroic creature.** The filter was perfectly inverted.
+
+Measured over the 31,782 commander-legal cards against the 7,211 `spell-cast`
+suppliers:
+
+| | before | after |
+| --- | ---: | ---: |
+| cards deriving a qualifier | 493 | 437 |
+| pairs removed | 710,860 | 311,059 |
+| of which contributed by the target clause | **383,446** | **0** |
+| cards left with zero surviving suppliers | 0 | 0 |
+
+Zero, not fewer. Striking the target clause and everything after it out of the
+text by hand and re-deriving now gives the **identical** answer for all 86 cards
+in the family, which is the check that says the words are not reaching the
+qualifier at all rather than merely reaching it less often.
+
+`Phalanx Leader` 186 → 7,211. `Battlewise Hoplite` 186 → 7,211.
+`Vesuvan Duplimancy` 195 → 7,211, whose chip had read "creature or artifact"
+about a card that cares about neither.
+
+**Why §5's safety argument does not cover this.** The refusals in §5 are refusals
+of a *stated* qualifier that cannot be evaluated, and dropping one always widens
+the answer. This was not a refusal at all — it was **surplus words**, and surplus
+words in a conjunction are exclusionary. The general form of the corrected rule:
+*the qualifier may only read words that describe the spell that was cast.*
+
+### 12.2 The other two boundaries in the same capture
+
+- **A SECOND EVENT.** `Faldorn, Dread Wolf Herald` — "Whenever you cast a spell
+  from exile **or a land you control enters from exile**" — is two triggers, and
+  the capture ran to the first comma and swallowed both, deriving `land`. On a
+  fresh Faldorn deck the API offered 1,797 candidates and **eleven** enabler
+  rows, all MDFCs with a land back face, chipped *"enables your casting spells
+  (land)"*; Reiterate, Comet Storm, Reverberate and Chaos Warp got no chip.
+  Three cards in the corpus state one. The marker is a **verb**: a disjunct
+  naming another kind of spell is a bare noun phrase, where a disjunct that is
+  its own event has to say what happens. Scanned per disjunct, because "an
+  instant or sorcery spell or activate an ability" (Unbound Flourishing) must
+  end at the SECOND `or` — a search over everything after the first would find
+  `activate` and cost the card its `sorcery`. `Appa, Steadfast Guardian` is the
+  control: the same "from exile" trigger with the comma in the right place,
+  deriving nothing before and nothing after.
+- **A SERIAL COMMA.** `[^,.)\n]` ended the phrase inside "a spell that's white,
+  blue, black, or red", so `Quirion Dryad` and `Questing Druid` derived `white`
+  alone and were the only two cards the qualifier silenced to **zero** candidates
+  on a real deck. The comma that ends a trigger is followed by a clause; a list's
+  comma is followed by another item, and the difference read is the serial comma
+  itself — at least one interior `word,`. That `+` is load-bearing: with `*` the
+  phrase "a noncreature spell, and create a 1/1 white Spirit creature token"
+  continues through the effect and the card claims to want white creature spells.
+
+76 cards change in total and every one is in those three families. Y'shtola,
+Kalamax (keeps `instant`, drops the ordinal), Mizzix (keeps `instant or
+sorcery`) and Appa are untouched.
+
+### 12.3 §11's caller count was wrong: there were four
+
+The claim was "both production callers pass it; a test pins the fallback so it
+cannot go quiet." `recommend.ts` and `cut.ts` go through `synergyMatches` and
+were right. Two more make the same claim without it:
+
+- **`apps/web/src/deckweb/model.ts`**, which built its Benefits edges with a raw
+  string intersection and printed, verbatim: *"Pongify causes casting spells;
+  Y'shtola, Night's Blessed benefits from it."* Pongify is mana value 1. Eight
+  false edges into her and twenty-one into Brinelin ("costing 6 or more") out of
+  26 in-deck suppliers — on the surface that states the claim most explicitly.
+- **`App.tsx`'s "Synergises with" panel**, which makes it **twice**: once for
+  what the previewed card supplies to a partner, once for what a partner
+  supplies to it.
+
+`synergyMatches` cannot serve either, and that is why they were written by hand:
+it answers about a DECK, where `deck.wants` is a weight per tag, and both
+surfaces need the answer for one named PAIR. The shared thing is therefore
+smaller than the matcher — **`suppliedWants(supplied, wanter, { candidate })`**
+in `qualifiers.ts`, generic over the tag type because the web carries `string[]`
+off the wire. It keeps the same fallback: absent `candidate` means "the caller
+did not ask", never "this supplier satisfies the qualifier".
+
+**How a fifth is prevented.** A `no-restricted-syntax` block for `apps/web` bans
+`.includes` / `.filter` / `.some` / `.every` over `synergyWants|Produces|Has`,
+both spellings including `(card.synergyHas ?? []).filter(...)`. Verified by
+writing all three shapes and watching eslint reject each — a rule that never
+fires is not a guard. It is a NEW config block rather than an addition to the R1
+one: flat config REPLACES a rule, so extending R1's `no-restricted-syntax` would
+have deleted its `new Date()` selector, which is the trap that file already
+documents for `no-restricted-globals`.
+
+`Card.colors` is declared on the client type for the first time as part of this.
+It has been on the wire since the batch route existed — that route sends the
+whole domain card and applies no response schema — and only the declaration was
+missing, which is the same class of error as the bug.
+
+---
+
+## 13. Amendment: one bogus wanter turns the qualifier off deck-wide
+
+§9's rule is that a qualifier applies only when **every** wanter of a tag is
+qualified, and that rule is right — a deck with Y'shtola *and* Jori En genuinely
+wants any spell. What it means is that a single false wanter is not a rounding
+error; it disables the feature for the whole deck. `Storm of Souls` entering a
+Y'shtola deck took enablers costing under 3 from 0 back to **238**.
+
+`Storm of Souls` wants `spell-cast` because the `WANTS` rule matched `\bstorm\b`
+against **its own name**, spelled out in its own rules text by pre-2024
+templating. 22 commander-legal cards matched on the bare word and **not one of
+them carries the STORM keyword**: Cinder Storm, Command the Storm, Hail Storm,
+Storm's Wrath, Tropical Storm, Comet Storm, Arrow Storm, Needle Storm, Wing
+Storm, Storm Seeker, Storm of Steel, Lava Storm, Pigment Storm, Yamabushi's
+Storm, Lightning Storm, Captain Lannery Storm, Storm the Vault, Storm Queen of
+Wakanda, Storm Shaker of Skies, Storm of Souls — and two that are the same trap
+one step out, Murmuration and Attempted Murder, which create "a 1/1 blue Bird
+creature token with flying **named Storm Crow**".
+
+**This corrects ADR-0038's price rather than contradicting its ruling.** That ADR
+refused to substitute a card's own name out of the text and costed the refusal
+at "twelve missed is cheaper than thirty broken", where twenty of the thirty were
+"all cards named '… Storm' lose `spell-cast`". **Those twenty never wanted it.**
+The loss was the bug, not the cost, and ADR-0038's ruling survives intact: the
+fix here is narrower than the substitution it rejected — one alternative in one
+rule — so the other thirty cards it protects are untouched.
+
+The replacement is the one `ritual` already uses two hundred lines down in the
+same file, and for the reason stated there: STORM is read by its reminder text,
+`copy it for each spell cast before it this turn`. All 33 STORM-keyword cards in
+the corpus still match; the reminder is printed on every one of them.
+
+**Corpus effect: 22 cards lose the want, 0 gain it, 0 other tags move.**
+
+The one true payoff the narrower rule no longer reaches is **Murmuration**, whose
+other clause — "at the beginning of your end step, for each spell you've cast
+this turn" — is a count rather than a trigger and is read by no rule in the
+table. One card, named here so the next person does not have to find it twice.
+
+**`synergy_wants` is a STORED column, computed at ingest in
+`packages/clients/src/scryfall.ts`. This one needs a re-ingest**, unlike
+everything in §7 and §12, which is derived at read time and live at deploy. Per
+DEPLOYING.md, with the DIRECT (unpooled) connection string:
+
+```
+DATABASE_URL="$DATABASE_URL_UNPOOLED" pnpm --filter @roundtable/ingest start cards
+```
+
+**It was not run as part of this change.** Until it is, the 22 cards keep the
+stored `spell-cast` want and §9's all-wanters rule keeps the qualifier switched
+off in any deck holding one of them.

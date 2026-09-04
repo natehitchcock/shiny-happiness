@@ -152,6 +152,19 @@ card's name is also ordinary English. All twenty cards named "… Storm" lose
 `spell-cast`, since the keyword STORM is what that rule reads and substitution
 eats the word. Twelve missed is cheaper than thirty broken.
 
+> **CORRECTED 2026-09-03 by ADR-0057 §13.** The ruling stands; the price does
+> not. **Those twenty cards never wanted `spell-cast`** — the rule was matching
+> the word in their own names, which is the very bug this paragraph is about,
+> read from the wrong side. Cinder Storm's whole text is "Cinder Storm deals 7
+> damage to any target." Of the 22 cards that matched on the bare word, **none
+> carries the STORM keyword**. So the refusal was thirty broken minus twenty
+> that were already broken, and the real trade was twelve missed against ten.
+>
+> The ruling survives because the fix that was actually shipped is narrower than
+> the substitution rejected here: `spell-cast` now reads STORM by its reminder
+> text, the way `ritual` already did, which leaves the other ten and the raw-text
+> convention untouched.
+
 Rule 1 instead asks for a capitalised subject and no `i` flag, and requires the
 type line to say `Creature` first. Audited rather than trusted: over all 527
 matches the capitalised subject traces back to the card's own name in 527 cases

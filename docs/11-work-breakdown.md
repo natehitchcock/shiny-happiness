@@ -503,6 +503,37 @@ is stored: the input is the wanter's own `oracle_text`, already in the eligible
 read, so `synergy_wants` is untouched and `wants:spell-cast` still matches a
 qualified want. **No migration, no re-ingest for this half.**
 
+**Then two playtests found three defects in it, all now fixed — ADR-0057 §12 and
+§13, which amend that ADR in place rather than sitting beside it.** Read the
+first before trusting any qualifier number above it:
+
+- **The capture read words that were never about the spell**, and that was worse
+  than having no qualifier at all. "Whenever you cast a spell **that targets this
+  creature**" derived `card-type: creature`, and since every `spell-cast`
+  supplier is an instant or sorcery by construction, the filter was **perfectly
+  inverted** — Phalanx Leader's payoff set became the 186 cards that cannot
+  trigger it. 383,446 of the 710,860 pairs the qualifier removed were this, and
+  they are now **0, not fewer**: striking the target clause out by hand and
+  re-deriving gives the identical answer on all 86 cards in the family. Two more
+  boundaries in the same capture: a second trigger event behind an `or`
+  (Faldorn derived `land`) and a serial comma (Quirion Dryad and Questing Druid
+  derived `white` alone and were silenced to zero). ADR-0057 §5's claim that
+  everything refused is refused by being over-inclusive **is false for this
+  family** and is corrected in place.
+- **There were four callers of the claim, not the two §11 named.** The deck web
+  and the card panel's "Synergises with" list each intersected the tag arrays by
+  hand, so the web's table printed "Pongify causes casting spells; Y'shtola,
+  Night's Blessed benefits from it" about a one-mana instant. Both now go
+  through `suppliedWants` in the domain, and an eslint `no-restricted-syntax`
+  rule for `apps/web` makes a fifth a lint error.
+- **One bogus wanter turns the qualifier off deck-wide**, because §9 applies it
+  only when every wanter of a tag is qualified. 22 cards wanted `spell-cast`
+  because `\bstorm\b` matched **their own names** — Cinder Storm, Storm's Wrath,
+  Command the Storm — and none of them carries the keyword. Now read by the
+  reminder text, as `ritual` already did. This corrects ADR-0038's price for
+  refusing name-substitution: twenty of the "thirty broken" it costed were
+  already broken.
+
 The surprise changed what was built. Every `spell-cast` producer is an instant
 or a sorcery by type line, so 97.4% of her suppliers are already noncreature —
 her type clause removes 2.6% and her mana-value floor removes 41.2%. The brief
@@ -532,7 +563,12 @@ source, and inventing twenty of them is what ADR-0006 forbids. Fractional
 counting is refused on two live strings: "5.5 / 6" to a screen reader and "1.5
 cards short" in Quickbuild.
 
-**⚠️ A CARDS RE-INGEST IS DUE**, for ADR-0058 §8 only. The `ramp` rule demanded
+**⚠️ A CARDS RE-INGEST IS DUE**, now for two reasons. The second is ADR-0057
+§13: 22 cards must LOSE the `spell-cast` want they hold only because "Storm" is
+in their own names. Until the run, §9's all-wanters rule leaves the qualifier
+switched off in any deck holding one of them — `Storm of Souls` in a Y'shtola
+deck took enablers costing under 3 from 0 back to 238. 22 cards lose the want, 0
+gain it, 0 other tags move. The first is ADR-0058 §8. The `ramp` rule demanded
 the literal phrase "basic land card", so Nature's Lore, Three Visits, Farseek
 and Scapeshift all derived to the `synergy` catch-all — the app could not tell
 what three of the format's most-played green ramp spells do. 54 cards gain
