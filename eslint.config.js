@@ -165,6 +165,12 @@ export default tseslint.config(
   // deliberately — a fixture that hand-rolls the intersection is a test that
   // proves the old answer.
   //
+  // What this is NOT about: a card's own tags tested against a module constant.
+  // `model.ts`'s `wantsAQualifiableTag` is that, and it is written as a loop
+  // over an array parameter rather than `card.synergyWants.some(...)` so the
+  // difference reads at the call site. A disable comment there would have been
+  // the first crack in a rule one commit old.
+  //
   // A NEW BLOCK rather than an addition to the R1 one, and that is not a style
   // choice: flat config REPLACES a rule rather than merging it, so extending
   // R1's `no-restricted-syntax` to cover `apps/web` would delete the `new Date()`
