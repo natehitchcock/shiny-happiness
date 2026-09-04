@@ -454,14 +454,14 @@ than beside it.
 
 ## 7. Corpus effect, whole branch
 
-31,782 commander-legal cards. **1,048 change primary role.**
+31,782 commander-legal cards. **1,050 change primary role.**
 
 | role | primaries before | after |
 |---|---:|---:|
 | spot-removal | 2,563 | **2,873** |
 | token-maker | 2,358 | 2,166 |
 | draw | 2,035 | 2,048 |
-| ramp | 1,431 | 1,384 |
+| ramp | 1,431 | 1,386 |
 | aura | 1,019 | **1,151** |
 | protection | 993 | 886 |
 | equipment | 427 | **617** |
@@ -469,9 +469,9 @@ than beside it.
 | sac-outlet | 464 | 482 |
 | stax | 80 | **178** |
 | tutor | 166 | 170 |
-| synergy | 11,568 | **11,233** |
+| synergy | 11,568 | **11,231** |
 
-`synergy` — the honest catch-all, and the number to watch — falls by 335.
+`synergy` — the honest catch-all, and the number to watch — falls by 337.
 `tutor`'s primaries barely move but its MEMBERSHIP turns over completely: 45
 real tutors in, 71 landcycling and land-fetch cards out, 11 of those to `ramp`
 where the product owner's ruling puts them.
@@ -485,5 +485,19 @@ where the product owner's ruling puts them.
   additive and the existing `CREATES_FOR_YOU` semantics are unchanged.
 - `CURATED_OVERRIDES` is still empty, and §3 names nine cards that now have a
   reason to be its first entries.
-- Every assertion added here was mutation-checked: 30 mutations, 30 killed, and
-  the harness aborts rather than scoring when a mutation changes no bytes.
+- Every assertion added here was mutation-checked: **31 mutations, 31 killed**,
+  and the harness aborts with a distinct exit code rather than scoring when a
+  mutation changes no bytes — proven by feeding it a search string that is not
+  in the file and an LF-vs-CRLF near-miss, which is the exact way a Windows tree
+  lies about a mutation having run.
+
+## 9. Re-ingest
+
+```
+pnpm --filter @roundtable/ingest build
+DATABASE_URL=… pnpm --filter @roundtable/ingest start cards
+```
+
+Not run here. `roles` and `primary_role` are recomputed by
+`packages/clients/src/scryfall.ts`, which calls `deriveRoles`; nothing else
+needs to change and there is no migration.
