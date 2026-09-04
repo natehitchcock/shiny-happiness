@@ -560,10 +560,127 @@ const HEURISTICS: readonly Heuristic[] = [
   { role: 'evasion', test: /can't be blocked\b/i },
   { role: 'evasion', test: /gains? (flying|menace|trample)/i },
 
-  { role: 'stax', test: /\b(spells? cost|abilities? cost) \{\d+\} more to (cast|activate)/i },
+  /*
+   * A TAX NAMES WHOSE SPELLS IT TAXES (ADR-0060 §3).
+   *
+   * The rule was `\b(spells? cost|abilities? cost) \{\d+\} more`, which demands
+   * that the noun and the verb be ADJACENT. Thalia says "Noncreature spells
+   * cost {1} more to cast" and matched. Grand Arbiter Augustin IV says "Spells
+   * YOUR OPPONENTS CAST cost {1} more to cast" — he names the subject, the
+   * subject sits between the noun and the verb, and the most famous stax
+   * commander in the format derived `role=synergy, produces=[], wants=[]`. His
+   * commander prompt offered two semantics, "Humans" and "Advisors".
+   *
+   * That is ADR-0022's subject question arriving on roles, and it needs no
+   * machinery from `token-subject.ts`: that file answers "whose TOKENS are
+   * these", which is a possession test over a creation verb and is spelled as a
+   * refusal. This asks "whose SPELLS", where the answer is not a refusal at all
+   * — a tax on your opponents and a symmetric tax on everyone are BOTH stax,
+   * and the rule only has to let the subject clause exist. A window, not a
+   * subject test.
+   *
+   * 48 cards carry a `cost {N} more` clause. 37 are taxes and this reaches all
+   * 37; the 11 refusals are the argument:
+   *
+   *   - THE WARD SHAPE, 12 cards. "Spells your opponents cast THAT TARGET this
+   *     creature cost {2} more" is a pseudo-ward stapled to a fatty — Icefall
+   *     Regent, Sphinx of New Prahv, Boreal Elemental, Elderwood Scion, Esior,
+   *     Pursued Whale. That is protection, and a deck told it holds six prison
+   *     pieces it does not have will cut a real one to make room.
+   *   - THE CARD TAXING ITSELF. Fireball, Launch the Fleet and Vanish into
+   *     Eternity say "This spell costs {1} more to cast for each target"; that
+   *     is a printed cost, not a tax on anybody.
+   *   - "CAST THIS WAY", 3 cards, where the tax rides on the card's own
+   *     impulse-draw clause rather than on a class of spells.
+   *   - `spells you cast cost` — Geist-Fueled Scarecrow taxes its controller.
+   *     A drawback is not a prison.
+   */
+  {
+    role: 'stax',
+    test: /(?<!\bthis )(?<!\bthat )\b(?:spells?|abilities)\b(?<! you cast)(?![^.\n]{0,60}?\bthat targets?\b[^.\n]{0,60}?\bcosts? \{)(?![^.\n]{0,60}?\bcast this way\b)(?![^.\n]{0,20}?\byou cast cost)[^.\n]{0,60}?\bcosts? \{\d+\} more to (?:cast|activate)\b/i,
+  },
   { role: 'stax', test: /don't untap during (their|your) untap step/i },
-  { role: 'stax', test: /players can't\b/i },
+  /*
+   * The same clause in its SYMMETRIC, STATIC voice. The rule above wants "their
+   * untap step" and the format's prison pieces say "their controllerS' untap
+   * stepS" — a plural possessive over a whole class of permanents rather than
+   * over one tapped creature. 26 cards, every one read by hand and every one a
+   * lock: Back to Basics, Meekstone, Hokori, Rising Waters, Choke, Winter Moon,
+   * Embargo, Mist of Stagnation, Marble Titan, Crackdown, Arena of the Ancients.
+   *
+   * A SEPARATE RULE rather than an `s?` on the one above, because the two
+   * claims are different: that one is a card tapping something down, this is a
+   * card that stops a class of permanents untapping at all. Folding them would
+   * also swallow the 38 combat tappers — Sleep, Icy Blast, Frost Breath — whose
+   * "doesn't untap during its controller's next untap step" is tempo, not a
+   * prison, and which a bare `don't untap` reaches.
+   */
+  { role: 'stax', test: /don't untap during their controllers' untap steps/ },
+  { role: 'stax', test: /[Pp]layers skip their\b/ },
+  /*
+   * SPLIT SECOND IS A NOTE ABOUT THE STACK (ADR-0060 §3).
+   *
+   * `players can't` matched the REMINDER TEXT of split second — "(As long as
+   * this spell is on the stack, players can't cast spells or activate abilities
+   * that aren't mana abilities.)" — and 23 cards read as prison pieces because
+   * of it, 16 of them with `stax` as their primary role. That was a fifth of
+   * the entire stax-primary pool, and the cards are fogs and instants: Angel's
+   * Grace, Krosan Grip, Sudden Death, Wipe Away, Extirpate, Trickbind.
+   *
+   * The guard is the four words the templating always puts in front. Measured:
+   * it drops 23 cards, all 23 are split second, and it lets no split-second
+   * card through — the separation is exact, which is why it is a lookbehind on
+   * the phrase rather than a search for the words "split second" (Molten
+   * Disaster and Shadow the Hedgehog carry the reminder without the keyword).
+   */
+  { role: 'stax', test: /(?<!on the stack, )players can't\b/i },
   { role: 'stax', test: /each player can('t| not) cast/i },
+  /*
+   * The SPELL-COUNT lock, which the rule above reaches only when the subject is
+   * the bare words "each player". Ethersworn Canonist says "Each player WHO HAS
+   * CAST a nonartifact spell this turn can't cast additional nonartifact
+   * spells" and Curse of Exhaustion says "Enchanted player"; both are prison
+   * pieces and both fell to `synergy`.
+   *
+   * THE SUBJECT IS THE WHOLE GUARD, and it earns its place: a bare "can't cast
+   * additional / more than one" also reads Yawgmoth's Agenda, Colfenor's Plans,
+   * Moderation, Hedonist's Trove and Conduit of Worlds, every one of which says
+   * "YOU can't cast more than one spell" — a drawback the card's own controller
+   * pays for an engine, which is the opposite of a lock on the table.
+   */
+  {
+    role: 'stax',
+    test: /(?:each player|players|enchanted player)[^.\n]{0,70}can't cast (?:additional|more than one)/i,
+  },
+  /*
+   * The rest of the prison, which the role simply had no rule for. The playtest
+   * found 39 canonical pieces and the role held 8. Each of these was swept over
+   * the corpus and every match read by hand.
+   *
+   * `Activated abilities of X can't be activated` — 18 cards, all real: Null
+   * Rod, Cursed Totem, Collector Ouphe, Stony Silence, Pithing Needle,
+   * Phyrexian Revoker, Karn the Great Creator, Linvala, Damping Matrix. The
+   * anchor on "Activated abilities of" is load-bearing: a bare `can't be
+   * activated` is 74 cards and 42 of them are Pacifism-shaped AURAS, which
+   * answer one creature and are already `spot-removal` or `aura`.
+   */
+  { role: 'stax', test: /[Aa]ctivated abilities of [^.\n]{0,40}can't be activated/ },
+  /*
+   * The attack tax — 16 cards and not one false positive. Propaganda, Ghostly
+   * Prison, Windborn Muse, Sphere of Safety, Norn's Annex, Collective
+   * Restraint, Baird, Archangel of Tithes, Koskun Falls, Elephant Grass.
+   *
+   * `unless their controller pays` is what keeps it exact. Widening to a bare
+   * "can't attack … unless … pays" adds six and four of them are Auras on one
+   * creature (Brainwash, Cowed by Wisdom), which is removal, not a prison.
+   */
+  {
+    role: 'stax',
+    test: /can't attack (?:you|unless)[^.\n]{0,80}?unless (?:its|their) controller pays/i,
+  },
+  { role: 'stax', test: /\b(?:your opponents|each opponent|opponents) can't cast\b/i },
+  { role: 'stax', test: /[Nn]o more than one creature can (?:attack|block)/ },
+  { role: 'stax', test: /don't cause abilities to trigger/i },
 
   { role: 'wincon', test: /wins? the game\b/i },
   { role: 'wincon', test: /loses? the game\b/i },

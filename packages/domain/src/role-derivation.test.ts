@@ -1002,3 +1002,83 @@ describe('a land search names a type as often as it says "land" (ADR-0060 §2)',
     ).toContain('ramp')
   })
 })
+
+describe('stax names whose spells it taxes (ADR-0060 §3)', () => {
+  describe('the tax rule reads a subject', () => {
+    it.each([
+      [
+        'Grand Arbiter Augustin IV',
+        'White spells you cast cost {1} less to cast.\nBlue spells you cast cost {1} less to cast.\nSpells your opponents cast cost {1} more to cast.',
+      ],
+      ['God-Pharaoh’s Statue', 'Spells your opponents cast cost {2} more to cast.'],
+      [
+        'Reidane, God of the Worthy',
+        'Noncreature spells your opponents cast with mana value 4 or greater cost {2} more to cast.',
+      ],
+      ['Defense Grid', 'Each spell costs {3} more to cast except during its caster’s own turn.'],
+      [
+        'Eidolon of Obstruction',
+        'Loyalty abilities of planeswalkers your opponents control cost {1} more to activate.',
+      ],
+    ])('%s holds stax', (_name, text) => {
+      expect(rolesOf('Creature', text)).toContain('stax')
+    })
+
+    it('keeps Thalia, whose subject is nobody in particular', () => {
+      expect(rolesOf('Creature — Human Soldier', 'First strike\nNoncreature spells cost {1} more to cast.')).toContain('stax')
+    })
+
+    it('is not a ward — a tax on spells that TARGET this creature is protection', () => {
+      // 12 cards, every one a pseudo-ward stapled to a fatty: Icefall Regent,
+      // Sphinx of New Prahv, Boreal Elemental, Pursued Whale, Esior. A deck
+      // told those are prison pieces will cut a real one to make room.
+      expect(
+        rolesOf(
+          'Creature — Dragon',
+          'Flying\nSpells your opponents cast that target this creature cost {2} more to cast.',
+        ),
+      ).not.toContain('stax')
+    })
+
+    it('is not a card taxing ITSELF', () => {
+      expect(
+        rolesOf('Sorcery', 'This spell costs {1} more to cast for each target beyond the first.'),
+      ).not.toContain('stax')
+      expect(rolesOf('Artifact', 'This ability costs {1} more to activate for each card in your hand.')).not.toContain('stax')
+    })
+  })
+
+  describe('split second is a reminder about the stack, not a prison', () => {
+    const SPLIT_SECOND =
+      "Split second (As long as this spell is on the stack, players can't cast spells or activate abilities that aren't mana abilities.)\nYou can't lose the game this turn."
+
+    it('does not make Angel’s Grace a stax piece', () => {
+      expect(rolesOf('Instant', SPLIT_SECOND)).not.toContain('stax')
+    })
+
+    it('still reads a real "players can\'t" clause', () => {
+      expect(rolesOf('Enchantment', "Players can't play lands.")).toContain('stax')
+      expect(rolesOf('Artifact', "Players can't search libraries.")).toContain('stax')
+    })
+  })
+
+  describe('the prison pieces the role could not see', () => {
+    it.each([
+      ['Back to Basics', 'Enchantment', "Nonbasic lands don't untap during their controllers' untap steps."],
+      ['Meekstone', 'Artifact', "Creatures with power 3 or greater don't untap during their controllers' untap steps."],
+      ['Stasis', 'Enchantment', 'Players skip their untap steps.'],
+      [
+        'Ghostly Prison',
+        'Enchantment',
+        "Creatures can't attack you unless their controller pays {2} for each creature they control that's attacking you.",
+      ],
+      ['Null Rod', 'Artifact', "Activated abilities of artifacts can't be activated."],
+      ['Cursed Totem', 'Artifact', "Activated abilities of creatures can't be activated."],
+      ['Drannith Magistrate', 'Creature — Human Wizard', "Your opponents can't cast spells from anywhere other than their hands."],
+      ['Torpor Orb', 'Artifact', "Creatures entering don't cause abilities to trigger."],
+      ['Silent Arbiter', 'Artifact Creature — Construct', 'No more than one creature can attack each combat.\nNo more than one creature can block each combat.'],
+    ])('%s holds stax', (_name, typeLine, text) => {
+      expect(rolesOf(typeLine, text)).toContain('stax')
+    })
+  })
+})
