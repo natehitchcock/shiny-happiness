@@ -104,6 +104,41 @@ export type EventTag =
    * that refused the producer side.
    */
   | 'creature-cast'
+  /**
+   * YOUR OWN life, going down (ADR-0059, amending ADR-0023).
+   *
+   * Dark Confidant, Necropotence, Grim Tutor, Bellowing Saddlebrute and Feed
+   * the Swarm on the producer side; Vilis, Transcendence and the two Liches on
+   * the payoff side.
+   *
+   * `lifeloss` had no subject test, and 257 of its 1,062 commander-legal
+   * producers lose the life THEMSELVES while the panel renders the tag as
+   * "opponents losing life". ADR-0023 saw the payoff half of this and left it —
+   * "that leaves 12 self-life payoffs on `lifeloss` alone, which is correct" —
+   * and never measured the producers. With both sides subject-agnostic the tag
+   * matched in BOTH wrong directions at once: 257 self-producers against 7
+   * opponent payoffs, and 805 opponent-producers against 10 self ones.
+   *
+   * A SUBJECT TEST ALONE COULD NOT FIX IT, which is why this is a tag and not a
+   * regex, and it is the one place in ADR-0059 where the answer was a new name
+   * rather than a narrower rule. Narrowing only the producer leaves Vilis
+   * wanting an event nothing emits. Narrowing both sides deletes the Vilis deck
+   * — which is the mistake ADR-0016 records against itself, "narrowed it to
+   * here and stopped, which deleted the opponent side rather than modelling
+   * it". An event with two subjects needs two names, which is ADR-0022's whole
+   * finding.
+   *
+   * 317 producers and 12 payoffs, the same order as `land-creature`'s 185 and
+   * 12 — the count ADR-0047 admitted a tag on.
+   *
+   * NAMED FOR THE SELF SIDE, against the convention that the bare tag is yours
+   * (`discard` / `opponent-discard`). `lifeloss` is a stored value whose label
+   * has said "opponents" since it was written, so renaming it would break every
+   * deck that emphasises it in order to fix a word. The asymmetry is the
+   * cheaper of the two and it is written down here so the next reader does not
+   * quietly "correct" it.
+   */
+  | 'self-lifeloss'
 
 export type SynergyTag = EventTag | SemanticTag
 
@@ -137,6 +172,9 @@ export const EVENT_TAGS: readonly EventTag[] = [
   // stored against decks that already exist.
   'ritual',
   'creature-cast',
+  // ADR-0059, appended for the reason the two above were: the ORDER is the
+  // persisted contract, so a new event goes on the end and never in the middle.
+  'self-lifeloss',
 ]
 
 /**
@@ -411,6 +449,29 @@ const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
   ['extra-turns', 'attack-trigger'],
 
   /*
+   * Life as a resource you spend (ADR-0059).
+   *
+   * `self-lifeloss` ↔ `card-draw` because that is what the deck is: Necropotence,
+   * Bolas's Citadel, Vilis, Griselbrand and Ad Nauseam all turn life into
+   * cards, and it reads true in both directions — a deck that pays life wants
+   * something to buy, and a card that draws off life loss wants a way to lose
+   * it on purpose.
+   *
+   * `self-lifeloss` ↔ `lifegain` because gaining it back is how the deck
+   * survives doing that, which is the mirror of the `lifegain` ↔ `lifeloss`
+   * pair already above and true for the same reason.
+   *
+   * `self-lifeloss` ↔ `lifeloss` is REFUSED, and refusing it is the whole point
+   * of the split. They are one verb with two subjects, and a tag does not feed
+   * itself — ADR-0022's `discard` ↔ `opponent-discard` refusal, one event over.
+   * `self-lifeloss` ↔ `player-damage` is refused for ADR-0023's reason: damage
+   * aimed at YOU is a cost no producer rule emits, so the bridge would claim a
+   * burn spell fires Vilis when nothing in the model says it touches your total.
+   */
+  ['self-lifeloss', 'card-draw'],
+  ['self-lifeloss', 'lifegain'],
+
+  /*
    * A ritual and the deck that spends it (ADR-0054).
    *
    * `ritual` ↔ `spell-cast` because it reads true in both directions, which is
@@ -511,6 +572,22 @@ const ADDS_TWO_OR_MORE = String.raw`\bAdd (?:\{[WUBRGCX0-9/]+\}\s*){2,}|\bAdd (?
  * machinery.
  */
 const TOKEN_DESCRIPTION = String.raw`.{0,49}`
+
+/**
+ * Refuses a verb whose subject is YOU (ADR-0059).
+ *
+ * The mirror of `token-subject.ts`'s `forYou`, and it lives here rather than
+ * there because it is the answer to a different question. That file refuses the
+ * clauses that are somebody ELSE's, for tags whose events are yours; this
+ * refuses the clauses that are YOURS, for the one tag whose event is theirs.
+ * One subject test cannot be both, and pretending otherwise is how the
+ * fifty-character window got shared in the first place.
+ *
+ * Zero-width and adjacent, for the reason the general refusal is: "whenever an
+ * opponent loses life, YOU gain that much" is one sentence with two subjects.
+ */
+const NOT_YOUR_OWN =
+  String.raw`(?<!\byou )(?<!\byou may )(?<!\byou'd )(?<!\byou would )(?<!\byou’d )`
 
 /**
  * Written against Scryfall oracle conventions: the card's own name is spelled
@@ -800,9 +877,39 @@ const PRODUCES: readonly Rule[] = [
       'i',
     ),
   },
+  /*
+   * WHOSE LIFE (ADR-0059). "You lose life equal to its mana value" is Dark
+   * Confidant, and this tag's label is "opponents losing life" — so a Vito deck
+   * was offered a card that takes life off its own total as an enabler for
+   * taking it off theirs. 257 of the 1,062 producers, and their life loss is a
+   * COST rather than a plan, which is the refusal ADR-0023 §6 already made one
+   * tag over on "deals 2 damage to you".
+   *
+   * The self side is not deleted, it is MOVED — see `self-lifeloss` below and
+   * the tag's own docblock for why a subject test alone could not do this.
+   *
+   * `you'd` and `you would` are in the refusal because the replacement-effect
+   * templating writes them: "if you would lose life, you lose that much life
+   * plus 1 instead".
+   */
   {
     tag: 'lifeloss',
-    test: /\bloses? (\d+|X) life\b|\bloses? life equal to\b|\bloses? that much life\b/i,
+    test: new RegExp(
+      `${NOT_YOUR_OWN}\\bloses? (\\d+|X) life\\b|${NOT_YOUR_OWN}\\bloses? life equal to\\b|${NOT_YOUR_OWN}\\bloses? that much life\\b`,
+      'i',
+    ),
+  },
+  /*
+   * The same verb, the other subject (ADR-0059). 317 commander-legal cards.
+   *
+   * "Each player loses" deliberately matches this AND `lifeloss`, which is
+   * ADR-0022's ruling about "each player discards": a symmetric drain takes
+   * life off your total and theirs, and claiming one side and not the other
+   * would be false whichever side you picked.
+   */
+  {
+    tag: 'self-lifeloss',
+    test: /\byou (?:may |would |'d )?lose (?:\d+|X) life\b|\byou (?:may |would )?lose life equal to\b|\byou (?:may |would )?lose that much life\b|\beach player loses\b/i,
   },
   /*
    * Damage to a player is its own event (ADR-0023).
@@ -1381,7 +1488,39 @@ const WANTS: readonly Rule[] = [
    * subject: "whenever YOU LOSE life" is Vilis and Transcendence, and the old
    * rule reached 7 of the 19 real payoffs.
    */
-  { tag: 'lifeloss', test: /\bwhenever [^.,\n]{0,40}\blos[et]s? life\b/i },
+  /*
+   * WHOSE LIFE, on the payoff side (ADR-0059).
+   *
+   * This rule used to read `los[et]s?` with no subject at all, and its own
+   * comment said why: "'whenever YOU LOSE life' is Vilis and Transcendence, and
+   * the old rule reached 7 of the 19 real payoffs". That was the right fix for
+   * the gap it found and the wrong tag to put the answer on — Vilis pays off
+   * YOUR life going down, and every producer this tag has is a card that takes
+   * life off somebody else's total. Under one tag Vilis was offered a Vito.
+   *
+   * So the subject list is spelled out, and it is the same one the
+   * `player-damage` bridge two rules down already uses — which is the point:
+   * the bridge holds for exactly the subjects that are not you, and now the two
+   * rules say so in the same words instead of one saying it and one not.
+   *
+   * `its controller` is in, and is the one subject `forYou` refuses for the
+   * other tags: after "destroy target creature" its controller is somebody
+   * else, and somebody else losing life is exactly what this tag means.
+   */
+  {
+    tag: 'lifeloss',
+    test: /\bwhenever [^.,\n]{0,40}\b(?:an opponent|a player|that player|its controller|one or more (?:opponents|players)|opponents|players) los[et]s? life\b/i,
+  },
+  /*
+   * The payoff for your own life going down (ADR-0059). 12 cards: Vilis,
+   * Transcendence, Lich's Mastery, Lich's Tomb, Oath of Lim-Dûl, Vengeful
+   * Warchief, Gonti's Machinations, Vampire Scrivener.
+   *
+   * "Gain or lose" is in because two of the twelve are written that way — Wax-
+   * Wane Witness and Moonstone Harbinger read "whenever you gain OR LOSE life
+   * during your turn" — and an adjacency test reads straight past them.
+   */
+  { tag: 'self-lifeloss', test: /\bwhenever you (?:would |gain or )?los[et]s? life\b/i },
   /*
    * The same payoff, claimed for damage as well — this is the ADR-0023 bridge.
    *

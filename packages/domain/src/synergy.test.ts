@@ -1450,17 +1450,27 @@ describe('deriveSynergy — damage is not life loss (ADR-0023)', () => {
     })
 
     it('keeps the bridge off payoffs about your own life', () => {
-      // The producer rules tag damage aimed at opponents and players, never
-      // "deals 2 damage to you", so offering Vilis a burn spell would be a
-      // match on a life total the spell never touches. 12 cards sit on
-      // `lifeloss` alone for this reason.
+      /*
+       * The producer rules tag damage aimed at opponents and players, never
+       * "deals 2 damage to you", so offering Vilis a burn spell would be a
+       * match on a life total the spell never touches. That refusal is what
+       * this test is for and it is unchanged.
+       *
+       * The TAG the payoff sits on changed in ADR-0059, and the assertion moved
+       * with it rather than being relaxed. ADR-0023 wrote "12 cards sit on
+       * `lifeloss` alone for this reason" as a consequence, not as a claim: the
+       * 12 were on that tag because there was nowhere else, and every producer
+       * `lifeloss` has takes life off somebody ELSE's total. Vilis now wants
+       * `self-lifeloss`, which is the event she actually pays off, and the
+       * bridge refusal below is the same assertion it always was.
+       */
       const vilis = derive(
         'Vilis, Broker of Blood',
         'Legendary Creature — Demon',
         'Flying\n{B}, Pay 2 life: Target creature gets -1/-1 until end of turn.\nWhenever you lose life, draw that many cards. (Damage causes loss of life.)',
       )
 
-      expect(vilis.wants).toContain('lifeloss')
+      expect(vilis.wants).toContain('self-lifeloss')
       expect(vilis.wants).not.toContain('player-damage')
     })
 
@@ -1628,7 +1638,8 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
       // count rather than softened to `toContain`: a vocabulary that grows
       // without anyone noticing is how two tags come to mean the same event.
       expect(SYNERGY_TAGS).toContain('damage')
-      // The count is 26 since ADR-0054 added `ritual` and `creature-cast`;
+      // The count is 27 since ADR-0059 added `self-lifeloss` to ADR-0054's
+      // `ritual` and `creature-cast`;
       // this card was the twenty-first and still is, because the list is
       // append-only (the ORDER is a persisted contract — see `semantic-emphasis`).
       // `EVENT_TAGS` rather than `SYNERGY_TAGS` since ADR-0046, and the reason
@@ -1637,7 +1648,7 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
       // this is what keeps anyone from adding a twenty-third without saying so.
       // `SYNERGY_TAGS` is that list plus the generated families, whose length is
       // a fact about the corpus rather than a decision anyone made here.
-      expect(EVENT_TAGS).toHaveLength(26)
+      expect(EVENT_TAGS).toHaveLength(27)
     })
 
     it('is spelled as an event, not as an archetype', () => {
@@ -2743,7 +2754,7 @@ describe('deriveSynergy — a land that is also a creature (ADR-0047)', () => {
   describe('the tag', () => {
     it('is in the vocabulary, and is the twenty-second', () => {
       expect(SYNERGY_TAGS).toContain('land-creature')
-      expect(EVENT_TAGS).toHaveLength(26)
+      expect(EVENT_TAGS).toHaveLength(27)
     })
 
     it('is spelled as an event rather than as the deck that plays it', () => {
@@ -3929,5 +3940,118 @@ describe('a land that taps for mana does not want untapping (ADR-0059)', () => {
     )
 
     expect(muse.produces).toContain('untap')
+  })
+})
+
+/**
+ * Losing life yourself is a different event from making somebody else lose it
+ * (ADR-0059, amending ADR-0023).
+ *
+ * `lifeloss` had no subject test at all. 257 of its 1,062 commander-legal
+ * producers lose the life THEMSELVES — Dark Confidant, Grim Tutor, Foul Imp,
+ * Bellowing Saddlebrute, Feed the Swarm — and the panel renders the tag as
+ * "opponents losing life", so a Vito deck was offered a card that takes life
+ * off its own total as an enabler for taking it off theirs.
+ *
+ * ADR-0023 saw half of this and left it: "that leaves 12 self-life payoffs on
+ * `lifeloss` alone, which is correct". It was correct about the payoffs and it
+ * never measured the producers, and with both sides subject-agnostic the tag
+ * matched in BOTH wrong directions — 257 self-producers against 7 opponent
+ * payoffs, and 805 opponent-producers against 10 self ones.
+ *
+ * A SUBJECT TEST ALONE CANNOT FIX IT, which is why this is a tag and not a
+ * regex. Narrowing only the producer leaves Vilis wanting an event nothing
+ * emits; narrowing both sides deletes the Vilis deck, which is precisely the
+ * mistake ADR-0016 records against itself ("narrowed it to here and stopped,
+ * which deleted the opponent side rather than modelling it"). The event has two
+ * subjects and needs two names.
+ *
+ * 317 producers and 12 payoffs, which is the same order as `land-creature`'s
+ * 185 and 12 — the count ADR-0047 admitted a tag on.
+ */
+describe('losing life yourself is its own event (ADR-0059)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  const CONFIDANT = derive(
+    'Dark Confidant',
+    'Creature — Human Wizard',
+    'At the beginning of your upkeep, reveal the top card of your library and put that card into your hand. You lose life equal to its mana value.',
+  )
+  const VITO = derive(
+    'Vito, Thorn of the Dusk Rose',
+    'Legendary Creature — Vampire Cleric',
+    'Lifelink\nWhenever you gain life, each opponent loses that much life.',
+  )
+  const VILIS = derive(
+    'Vilis, Broker of Blood',
+    'Legendary Creature — Demon',
+    '{B}, Pay 2 life: Target creature gets -1/-1 until end of turn.\nWhenever you lose life, draw that many cards.',
+  )
+
+  it('is in the vocabulary, and appended rather than inserted', () => {
+    // The ORDER is a persisted contract (`semantic-emphasis`), so the events
+    // keep the indices they had and this one goes on the end.
+    expect(SYNERGY_TAGS).toContain('self-lifeloss')
+    expect(EVENT_TAGS).toHaveLength(27)
+    expect(EVENT_TAGS[EVENT_TAGS.length - 1]).toBe('self-lifeloss')
+  })
+
+  it('does not call a card that pays its own life an opponent drain', () => {
+    expect(CONFIDANT.produces).not.toContain('lifeloss')
+    expect(CONFIDANT.produces).toContain('self-lifeloss')
+  })
+
+  it('keeps the drain on the tag whose label says drain', () => {
+    expect(VITO.produces).toContain('lifeloss')
+    expect(VITO.produces).not.toContain('self-lifeloss')
+  })
+
+  it('gives the payoff for your own life loss somewhere to live', () => {
+    // The 12 cards ADR-0023 named and left mislabelled. Under one tag Vilis was
+    // offered a Vito, which never touches your total.
+    expect(VILIS.wants).toContain('self-lifeloss')
+    expect(VILIS.wants).not.toContain('lifeloss')
+  })
+
+  it('reads the disjunction the payoffs are written with', () => {
+    // "Whenever you gain OR LOSE life" — two of the twelve, and an adjacency
+    // test reads straight past them.
+    const witness = derive(
+      'Wax-Wane Witness',
+      'Creature — Spirit',
+      'Flying, vigilance\nWhenever you gain or lose life during your turn, this creature gets +1/+0 until end of turn.',
+    )
+
+    expect(witness.wants).toContain('self-lifeloss')
+  })
+
+  it('reads a symmetric clause as BOTH, because it is', () => {
+    // ADR-0022's ruling about "each player discards", one event over.
+    const syphon = derive(
+      'Syphon Life',
+      'Sorcery',
+      'Each player loses 2 life. You gain life equal to the life lost this way.',
+    )
+
+    expect(syphon.produces).toContain('lifeloss')
+    expect(syphon.produces).toContain('self-lifeloss')
+  })
+
+  it('does not extend the damage bridge to your own total', () => {
+    /*
+     * ADR-0023's ruling, kept: "whenever an opponent loses life" fires off a
+     * Lightning Bolt and "whenever YOU lose life" does not, because no producer
+     * rule ever emits `lifeloss` for damage aimed at you. Splitting the tag
+     * must not quietly rebuild that bridge on the new side.
+     */
+    expect(VILIS.wants).not.toContain('player-damage')
+  })
+
+  it('pairs the new tag with what a deck that pays life is actually for', () => {
+    // Necropotence, Bolas's Citadel, Vilis: life is the resource you spend on
+    // cards, and gaining it back is how the deck survives doing so.
+    expect(interactsWith('self-lifeloss')).toContain('card-draw')
+    expect(interactsWith('self-lifeloss')).toContain('lifegain')
   })
 })

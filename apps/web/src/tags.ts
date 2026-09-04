@@ -67,6 +67,14 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   // Beast Whisperer and "causes creature spells" is a sentence no card says.
   // The producer side was measured at 55.9% of the format and refused.
   'creature-cast': 'casting creature spells',
+  // ADR-0059, and the label is why the tag exists. `lifeloss` has said
+  // "opponents losing life" since it was written, and a quarter of its
+  // producers were cards that take the life off YOUR total — so a Vito deck was
+  // offered a Dark Confidant as an enabler for draining the table. The two
+  // sentences the split makes possible are "causes you to lose life" for
+  // Necropotence and "benefits from you losing life" for Vilis, and neither one
+  // could be said before.
+  'self-lifeloss': 'losing your own life',
 }
 
 /**
