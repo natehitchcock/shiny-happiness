@@ -26,6 +26,92 @@ interface Heuristic {
   readonly onTypeLine?: boolean
 }
 
+/*
+ * ONE LIST OF QUANTIFIERS, ONE LIST OF LAND TYPES (ADR-0060 §1).
+ *
+ * The missing article has now been the reported defect three times — ADR-0047's
+ * `sacrifice (a|another)` with no `an`, ADR-0058's ramp rule that demanded the
+ * word "basic", and the tutor rule below that read `(a|any)` and so could not
+ * see "an Equipment card". Each was fixed where it was found, and each time the
+ * NEXT closed list of the same words was left standing one rule over.
+ *
+ * An audit of every determiner list in this file found four more, and they are
+ * fixed together rather than one report at a time:
+ *
+ *   | rule | shipped list | reached by widening |
+ *   | --- | --- | ---: |
+ *   | `tutor` | `(a\|any)` | 55 cards taking `an`, 24 more taking `up to N`/`three` |
+ *   | `draw` | `(a\|two\|three\|four\|X\|that many)` | 48 — every Wheel and Timetwister in the format |
+ *   | `sac-outlet` (noun) | `(a\|an\|another)` | 19 — Kuldotha Forgemaster, Time Sieve, Breya |
+ *   | `ramp` (basic land) | `(a\|up to N)` | 3 — "any number of", "a number of", a bare numeral |
+ *
+ * The `sac-outlet` row is the sharpest of the four, because the fix was already
+ * written: the TRIBAL outlet rule two hundred lines down carries
+ * `(?:a|an|another|two|three|X|\d+)` and the noun rule beside it carries
+ * `(a|an|another)`. Two lists of the same quantifiers, in the same file, for the
+ * same verb, disagreeing — which is the failure this file's own tribal-rule
+ * comment warns about one noun over ("two lists of the same nouns that disagree
+ * is how the next one goes wrong"). So there is now ONE list, and a rule that
+ * wants a quantifier reads it from here.
+ *
+ * `this` IS DELIBERATELY ABSENT, and it is the entry that does the most work:
+ * 702 cards say "Sacrifice this creature:", which is a card spending itself
+ * once, not a repeatable outlet you can feed. The list is of quantifiers over
+ * OTHER permanents; the demonstrative is a different word doing a different job.
+ */
+const QUANTIFIER = String.raw`a|an|another|any|two|three|four|five|six|seven|eight|nine|ten|X|\d+|up to \w+|any number of|a number of|that many`
+
+/**
+ * The five basic land types.
+ *
+ * NO `i` FLAG wherever this is used, and the capital carries the whole
+ * distinction — the same rule `semantic-tokens.ts` relies on and the same one
+ * the ramp rules below already relied on. "a Mountain card" is a land; "a
+ * mountain of cards" is not.
+ */
+const LAND_TYPE = 'Plains|Island|Swamp|Mountain|Forest'
+
+/**
+ * The object of a search that is a LAND, however the card spells it.
+ *
+ * The tutor rule's guard used to be the literal `\bland card`, which is why
+ * "search your library for an Island card" was a tutor: nine landcycling
+ * Islands and Jhessian Zombies were counted as cards that find a threat. A land
+ * search is ramp (the product owner's ruling, ADR-0058 §8), and this is the one
+ * place that says what a land search looks like, so the rule that AWARDS ramp
+ * for one and the rule that REFUSES tutor for one cannot drift apart.
+ *
+ * `\bland` rather than `land`, so "nonland card" (Night Dealings) is still a
+ * tutor — the guard the two ramp rules already carried, for the same reason.
+ */
+const LAND_OBJECT = String.raw`[^.]{0,60}\b(?:lands?|${LAND_TYPE}) cards?`
+
+/*
+ * THE REMINDER TEXT OF A CYCLING ABILITY IS NOT THE CARD'S OWN SENTENCE.
+ *
+ * ADR-0058 §8 measured this and left it standing with its name on it:
+ * "landcycling still derives `tutor`, because the tutor heuristic reads 'search
+ * your library for a Forest card' out of the reminder text." That was
+ * survivable while the tutor rule could not see "an Island card" at all;
+ * widening the article above would have shipped ten more of them, so the two
+ * are fixed together.
+ *
+ * Measured over the corpus: 89 cards search out a NAMED land type and put it in
+ * hand. 54 are landcycling and 35 are real, and the split is exact — every one
+ * of the 54 has its clause inside reminder-text parentheses and not one of the
+ * 35 does. Timeless Dragon counted as ramp would be ADR-0031's defect pointed
+ * the other way, and this is what keeps it out.
+ *
+ * A GLOBAL REMINDER-TEXT STRIP WAS WRITTEN, MEASURED AND REFUSED. Deleting
+ * every `(...)` before the rules read the text changes 1,322 cards' roles and
+ * the change is not one-directional: 363 creatures correctly stop being
+ * `evasion` (reach's reminder text names flying), but 522 correctly stop being
+ * `draw` — cycling really does draw a card, and its reminder text is the only
+ * place the card says so. A guard that fixes one rule and breaks another is not
+ * a shared guard, so this is targeted at the two rules whose object is a land.
+ */
+const NOT_LANDCYCLING = String.raw`(?<!Discard this card: )`
+
 /**
  * Patterns are written against Scryfall oracle text conventions: `~` is not used
  * (Scryfall spells the card's own name out), reminder text is present, and
@@ -42,7 +128,10 @@ const HEURISTICS: readonly Heuristic[] = [
   },
   {
     role: 'ramp',
-    test: /search your library for (a|up to \w+) basic land card[^.]*onto the battlefield/i,
+    test: new RegExp(
+      `search your library for (?:${QUANTIFIER}) basic land cards?[^.]*onto the battlefield`,
+      'i',
+    ),
   },
   /*
    * THE WORD "BASIC" WAS THE WHOLE GAP (ADR-0058).
@@ -99,7 +188,10 @@ const HEURISTICS: readonly Heuristic[] = [
    */
   {
     role: 'ramp',
-    test: /search your library for (a|up to \w+) \bland card[^.]*onto the battlefield/i,
+    test: new RegExp(
+      `search your library for (?:${QUANTIFIER}) \\bland cards?[^.]*onto the battlefield`,
+      'i',
+    ),
   },
   /*
    * A land tutor is ramp (report 4). The rule above only caught a land put ONTO
@@ -114,12 +206,48 @@ const HEURISTICS: readonly Heuristic[] = [
    */
   {
     role: 'ramp',
-    test: /search your library for [^.]{0,60}\bland card[^.]{0,100}?into your hand/i,
+    test: new RegExp(
+      `${NOT_LANDCYCLING}search your library for [^.]{0,60}\\bland cards?[^.]{0,100}?into your hand`,
+      'i',
+    ),
+  },
+  /*
+   * THE SAME CARD, ONE NOUN OVER (ADR-0060 §2).
+   *
+   * ADR-0058 §8 widened `ramp` past the literal "basic land card" for a land
+   * put ONTO THE BATTLEFIELD, and left the hand rule alone. So two cards with
+   * one shape derived opposite roles:
+   *
+   *   Land Tax             "basic LAND cards … into your hand"    → ramp
+   *   Archaeomancer's Map  "basic PLAINS cards … into your hand"  → synergy
+   *   Endless Horizons     "any number of PLAINS cards"           → synergy
+   *
+   * ADR-0058 refused this rule and the refusal was correct AS THE RULE WAS THEN
+   * WRITABLE: 89 cards match and 54 of them are landcycling, a discard ability
+   * on a Dragon. `NOT_LANDCYCLING` is what changed — the split is exact, so the
+   * 35 real cards can be admitted without the 54. Every one of the 35 was read
+   * by hand: the five Monuments, Kayla's Command, Nissa's Pilgrimage, Land
+   * Grant, Gift of Estates, Boreas Charger, Sunblade Samurai, Safewright Quest,
+   * Flower // Flourish, The Birth of Meletis. There is no false positive to
+   * report.
+   *
+   * THIRTEEN OF THE 35 HELD `tutor`, which is the same defect seen from the
+   * other side and is fixed by the same shared `LAND_OBJECT`: Land Grant and
+   * Liliana's Shade were offered to a deck that asked for a way to find its
+   * combo piece.
+   */
+  {
+    role: 'ramp',
+    test: new RegExp(
+      `${NOT_LANDCYCLING}[Ss]earch(?:es)? your library for [^.]{0,60}\\b(?:${LAND_TYPE})\\b[^.]{0,120}?into (?:your|their) hand`,
+    ),
   },
   { role: 'ramp', test: /\bTreasure token/ },
 
-  // Card advantage.
-  { role: 'draw', test: /\bdraws? (a|two|three|four|X|that many) cards?\b/i },
+  // Card advantage. The numeral list used to stop at four, which excluded every
+  // Wheel and every Timetwister in the format — 48 cards, and the best draw
+  // spells among them (ADR-0060 §1).
+  { role: 'draw', test: new RegExp(`\\bdraws? (?:${QUANTIFIER}) cards?\\b`, 'i') },
   { role: 'draw', test: /\bdraw a card\b/i },
 
   /*
@@ -127,13 +255,42 @@ const HEURISTICS: readonly Heuristic[] = [
    * are the worst kind of tutors. Usually people want tutors that enforce their
    * combos or wincons... land tutors are really ramp cards, not tutors."
    *
-   * The lookahead rejects any search whose object is a land card, where the old
-   * `(?!basic land)` only rejected the word "basic". `\bland card` rather than
-   * `land card` so "nonland card" (Night Dealings) is still a tutor.
+   * THREE THINGS WERE WRONG WITH ONE RULE (ADR-0060 §1, §2).
+   *
+   * The ARTICLE list was `(a|any)`, and English's indefinite article has two
+   * members. 55 commander-legal cards say "an" — and the whole Equipment tutor
+   * package is among them, so a voltron deck asking for five tutors was offered
+   * none of Stoneforge Mystic, Steelshaper's Gift or Open the Armory. Idyllic
+   * Tutor, Fabricate, Spellseeker, the four Mage cycle and Heliod's Pilgrim are
+   * the same card in other colours. This is the third report of the same bug;
+   * `QUANTIFIER` above is why there is no fourth.
+   *
+   * The QUANTIFIER was missing entirely: a tutor that fetches two is still a
+   * tutor, and Tooth and Nail, Diabolic Revelation, Ranger of Eos, Three
+   * Dreams, Shared Summons, Plea for Guidance and Uncage the Menagerie all fell
+   * to `synergy`. The two ramp rules above already read `up to \w+` for the
+   * same verb in the same sentence shape, so the tutor rule was the odd one out.
+   *
+   * The LAND GUARD was the literal `\bland card`, so it refused "a basic land
+   * card" and admitted "an Island card". That is what makes the article fix and
+   * the ramp fix one change rather than two: widening the article alone would
+   * have shipped ten more landcycling Islands as tutors. `LAND_OBJECT` is the
+   * shared answer.
+   *
+   * NO `NOT_LANDCYCLING` HERE, and the omission is deliberate and measured.
+   * Landcycling's object is a land, so `LAND_OBJECT` already refuses all 54 of
+   * them — and the discard guard would cost real cards on top: TRANSMUTE is the
+   * same "{cost}, Discard this card: Search your library for…" shape (Muddle the
+   * Mixture, Dimir Machinations, Dizzy Spell, Drift of Phantasms) and is a tutor
+   * that people play as one. 23 cards, found by diffing the corpus after the
+   * guard was added here, and removed again.
    */
   {
     role: 'tutor',
-    test: /search your library for (a|any) (?![^.]{0,60}\bland card)[^.]*(card|creature|artifact|enchantment|instant|sorcery)[^.]*(your hand|the top of your library)/i,
+    test: new RegExp(
+      `search your library for (?:${QUANTIFIER}) (?!${LAND_OBJECT})[^.]*(card|creature|artifact|enchantment|instant|sorcery)[^.]*(your hand|the top of your library)`,
+      'i',
+    ),
   },
 
   /*
@@ -340,7 +497,10 @@ const HEURISTICS: readonly Heuristic[] = [
    * other way round — the same closed-list defect as the tribal rule below,
    * one article wide instead of one noun wide.
    */
-  { role: 'sac-outlet', test: /sacrifice (a|an|another) (creature|permanent|artifact)[^.]*:/i },
+  {
+    role: 'sac-outlet',
+    test: new RegExp(`sacrifice (?:${QUANTIFIER}) (creature|permanent|artifact)[^.]*:`, 'i'),
+  },
   { role: 'sac-outlet', test: /\bSacrifice a creature:/i },
   /*
    * The outlet that names a creature TYPE (ADR-0047).

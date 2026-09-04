@@ -835,3 +835,170 @@ describe('token-maker asks whose tokens they are (ADR-0054)', () => {
     ).toContain('token-maker')
   })
 })
+
+/* ---------------------------------------------------------------- ADR-0060 */
+
+describe('the article audit (ADR-0060 §1)', () => {
+  describe('a tutor whose object takes "an"', () => {
+    it.each([
+      [
+        'Idyllic Tutor',
+        'Search your library for an enchantment card, reveal it, put it into your hand, then shuffle.',
+      ],
+      [
+        'Stoneforge Mystic',
+        'When this creature enters, you may search your library for an Equipment card, reveal it, put it into your hand, then shuffle.',
+      ],
+      [
+        'Fabricate',
+        'Search your library for an artifact card, reveal it, put it into your hand, then shuffle.',
+      ],
+      [
+        'Spellseeker',
+        'When this creature enters, search your library for an instant or sorcery card with mana value 2 or less, reveal it, put it into your hand, then shuffle.',
+      ],
+      [
+        'Open the Armory',
+        'Search your library for an Aura or Equipment card, reveal it, put it into your hand, then shuffle.',
+      ],
+      [
+        "Heliod's Pilgrim",
+        'When this creature enters, you may search your library for an Aura card, reveal it, put it into your hand, then shuffle.',
+      ],
+    ])('%s is a tutor', (_name, text) => {
+      expect(rolesOf('Creature', text)).toContain('tutor')
+    })
+
+    it('still reads "a" and "any", which the list already had', () => {
+      expect(
+        rolesOf(
+          'Sorcery',
+          'Search your library for a creature card, reveal it, put it into your hand, then shuffle.',
+        ),
+      ).toContain('tutor')
+      expect(
+        rolesOf('Sorcery', 'Search your library for any card, put it into your hand, then shuffle.'),
+      ).toContain('tutor')
+    })
+  })
+
+  describe('a tutor that fetches SEVERAL', () => {
+    it.each([
+      [
+        'Tooth and Nail',
+        'Search your library for up to two creature cards, reveal them, put them into your hand, then shuffle.',
+      ],
+      [
+        'Diabolic Revelation',
+        'Search your library for up to X cards, put those cards into your hand, then shuffle.',
+      ],
+      [
+        'Behold the Beyond',
+        'Search your library for three cards, put them into your hand, then discard your hand.',
+      ],
+    ])('%s is a tutor', (_name, text) => {
+      expect(rolesOf('Sorcery', text)).toContain('tutor')
+    })
+  })
+
+  describe('a draw spell whose numeral the list stopped short of', () => {
+    it.each([
+      ['Wheel of Fortune', 'Each player discards their hand, then draws seven cards.'],
+      [
+        'Timetwister',
+        'Each player shuffles their hand and graveyard into their library, then draws seven cards.',
+      ],
+      ['Covenant of Minds', 'Reveal the top five cards of your library. Draw five cards.'],
+    ])('%s draws', (_name, text) => {
+      expect(rolesOf('Sorcery', text)).toContain('draw')
+    })
+  })
+
+  describe('a sacrifice outlet that eats MORE THAN ONE', () => {
+    it.each([
+      [
+        'Kuldotha Forgemaster',
+        '{T}, Sacrifice three artifacts: Search your library for an artifact card and put it onto the battlefield.',
+      ],
+      [
+        'Time Sieve',
+        '{T}, Sacrifice five artifacts: Take an extra turn after this one.',
+      ],
+      [
+        'Whisper, Blood Liturgist',
+        '{T}, Sacrifice two creatures: Return target creature card from your graveyard to the battlefield.',
+      ],
+    ])('%s is a sac outlet', (_name, text) => {
+      expect(rolesOf('Artifact', text)).toContain('sac-outlet')
+    })
+
+    it('leaves a card sacrificing ITSELF out, which is not an outlet', () => {
+      // "Sacrifice this creature:" is a one-shot, not a repeatable engine, and
+      // 702 cards in the corpus say it. The quantifier list keeps them out.
+      expect(rolesOf('Creature', 'Sacrifice this creature: Draw a card.')).not.toContain(
+        'sac-outlet',
+      )
+    })
+  })
+})
+
+describe('landcycling is a discard ability, not a search (ADR-0060 §2)', () => {
+  const PLAINSCYCLING =
+    'Flying\nPlainscycling {2} ({2}, Discard this card: Search your library for a Plains card, reveal it, put it into your hand, then shuffle.)'
+
+  it('does not make a Dragon a tutor', () => {
+    expect(rolesOf('Creature — Dragon', PLAINSCYCLING)).not.toContain('tutor')
+  })
+
+  it('does not make a Dragon ramp', () => {
+    expect(rolesOf('Creature — Dragon', PLAINSCYCLING)).not.toContain('ramp')
+  })
+
+  it('reads the same clause as ramp when it is the card and not the reminder', () => {
+    expect(
+      rolesOf(
+        'Sorcery',
+        'Search your library for a basic Plains card, reveal it, put it into your hand, then shuffle.',
+      ),
+    ).toContain('ramp')
+  })
+})
+
+describe('a land search names a type as often as it says "land" (ADR-0060 §2)', () => {
+  it.each([
+    [
+      "Archaeomancer's Map",
+      'When this artifact enters, search your library for up to two basic Plains cards, reveal them, put them into your hand, then shuffle.',
+    ],
+    [
+      "Kayla's Command",
+      'Search your library for a basic Plains card, reveal it, put it into your hand, then shuffle.',
+    ],
+    [
+      'Gift of Estates',
+      'Search your library for up to three Plains cards, reveal them, put them into your hand, then shuffle.',
+    ],
+  ])('%s is ramp', (_name, text) => {
+    expect(rolesOf('Enchantment', text)).toContain('ramp')
+  })
+
+  it('is not also a tutor, because a land tutor is ramp', () => {
+    // The product owner's ruling, and the guard that enforced it read the
+    // literal words "land card" — so "a Plains card" walked straight past it.
+    expect(
+      rolesOf(
+        'Creature',
+        'When this creature enters, search your library for a basic Plains card, reveal it, put it into your hand, then shuffle.',
+      ),
+    ).not.toContain('tutor')
+  })
+
+  it('keeps Land Tax, which says "land" and always worked', () => {
+    expect(
+      rolesOf(
+        'Enchantment',
+        "At the beginning of each opponent's upkeep, if that player controls more lands than you, you may search your library for up to three basic land cards, reveal them, put them into your hand, then shuffle.",
+      ),
+    ).toContain('ramp')
+  })
+})
