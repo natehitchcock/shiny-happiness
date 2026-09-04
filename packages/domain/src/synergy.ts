@@ -1589,9 +1589,37 @@ const WANTS: readonly Rule[] = [
     test: /^[^\n]*\bCreature\b[\s\S]*\b[Ww]hen(?:ever)? [A-Z][^,.\n]{0,28} enters\b/,
   },
 
+  /*
+   * STORM, READ BY ITS REMINDER TEXT rather than by the word (ADR-0038).
+   *
+   * `\bstorm\b` was reading a card's OWN NAME. Pre-2024 templating spells the
+   * name out in the rules text, so "Cinder Storm deals 7 damage to any target"
+   * asked to be paired with a spellslinger deck, and so did Command the Storm,
+   * Hail Storm, Storm's Wrath, Tropical Storm and Storm of Souls. 22
+   * commander-legal cards matched on the bare word and NOT ONE of them carries
+   * the keyword; two of the 22 are stranger still, naming a TOKEN after another
+   * card — Murmuration and Attempted Murder both make a Bird "named Storm
+   * Crow".
+   *
+   * This is the correction to the rule three above, which refused to substitute
+   * the name out of the text and priced that refusal partly at "all twenty
+   * cards named '… Storm' lose `spell-cast`". Those twenty never wanted it. The
+   * loss was the bug and not the cost, and the fix is narrower than the
+   * substitution ADR-0038 rejected: it costs the other 30 cards nothing,
+   * because it changes one alternative rather than the text every rule reads.
+   *
+   * `ritual` already does exactly this, two hundred lines down, and says why in
+   * the same words. All 33 STORM-keyword cards in the corpus still match — the
+   * reminder is printed on every one of them.
+   *
+   * The one true payoff this no longer reaches is Murmuration, whose OTHER
+   * clause ("for each spell you've cast this turn") is a count at end of step
+   * rather than a trigger and is read by no rule in this table. One card, named
+   * so the next person does not have to find it twice.
+   */
   {
     tag: 'spell-cast',
-    test: /\bprowess\b|\bmagecraft\b|\bstorm\b|\bwhenever you cast (an instant|a sorcery|your first|an? noncreature)|\binstant and sorcery spells you (cast|control)\b|\bwhenever you copy an instant\b/i,
+    test: /\bprowess\b|\bmagecraft\b|\bcopy it for each spell cast before it this turn\b|\bwhenever you cast (an instant|a sorcery|your first|an? noncreature)|\binstant and sorcery spells you (cast|control)\b|\bwhenever you copy an instant\b/i,
   },
   /*
    * The trigger that names no card type at all (ADR-0038).

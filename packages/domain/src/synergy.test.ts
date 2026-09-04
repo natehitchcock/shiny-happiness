@@ -127,6 +127,62 @@ describe('deriveSynergy — the events the regexes used to miss', () => {
     expect(profile.produces).not.toContain('spell-cast')
   })
 
+  /*
+   * STORM IS READ BY ITS REMINDER TEXT, not by the word (ADR-0038, ADR-0054).
+   *
+   * `\bstorm\b` matched a card's OWN NAME, spelled out in its own rules text by
+   * pre-2024 templating: Cinder Storm reads "Cinder Storm deals 7 damage to any
+   * target" and wanted `spell-cast` for it. 22 commander-legal cards matched on
+   * the bare word and NOT ONE of them carries the STORM keyword.
+   *
+   * ADR-0038 priced substituting the name out of the text and refused it partly
+   * because "all twenty cards named '… Storm' lose `spell-cast`" -- but that
+   * loss was the bug, not the cost, and this is the correction. The rule is
+   * `ritual`'s, two hundred lines down, which already reads STORM this way and
+   * says why: "storm" is also a noun 20 cards have in their names.
+   *
+   * All 33 STORM-keyword cards in the corpus still match, because the reminder
+   * text is printed on every one of them.
+   */
+  it('does not let a card want spell casts because "Storm" is its own name', () => {
+    const cinder = card('Cinder Storm', 'Sorcery', 'Cinder Storm deals 7 damage to any target.')
+    expect(deriveSynergy(cinder).wants).not.toContain('spell-cast')
+
+    const wrath = card(
+      "Storm's Wrath",
+      'Sorcery',
+      "Storm's Wrath deals 4 damage to each creature and each planeswalker.",
+    )
+    expect(deriveSynergy(wrath).wants).not.toContain('spell-cast')
+  })
+
+  it('still reads a real STORM card, which states the keyword in reminder text', () => {
+    const warrens = card(
+      'Empty the Warrens',
+      'Sorcery',
+      'Create two 1/1 green Goblin creature tokens.\n' +
+        'Storm (When you cast this spell, copy it for each spell cast before it this turn. ' +
+        'The copies become tokens.)',
+    )
+    expect(deriveSynergy(warrens).wants).toContain('spell-cast')
+  })
+
+  /*
+   * The same trap one step out: a card that names a TOKEN after another card.
+   * Murmuration and Attempted Murder both create "a 1/1 blue Bird creature
+   * token with flying named Storm Crow", and both wanted `spell-cast` for it.
+   */
+  it('does not read a token’s name as a keyword either', () => {
+    const murder = card(
+      'Attempted Murder',
+      'Sorcery',
+      'Choose target creature. Roll X six-sided dice. For each even result, put two -1/-1 ' +
+        'counters on that creature. For each odd result, create a 1/2 blue Bird creature token ' +
+        'with flying named Storm Crow.',
+    )
+    expect(deriveSynergy(murder).wants).not.toContain('spell-cast')
+  })
+
   it('reads an enters-the-battlefield trigger as wanting creatures to enter', () => {
     const slime = card(
       'Acidic Slime',
@@ -564,7 +620,7 @@ describe('synergyMatches — a qualified want (ADR-0057)', () => {
     expect(deck.wants.get('spell-cast')).toBe(COMMANDER_WEIGHT)
   })
 
-  it("drops Counterspell, which does not cost enough to fire her", () => {
+  it('drops Counterspell, which does not cost enough to fire her', () => {
     const matches = synergyMatches(supplier, deck, { candidate: facts(2, ['instant']) })
 
     expect(matches.find((m) => m.tag === 'spell-cast')).toBeUndefined()
