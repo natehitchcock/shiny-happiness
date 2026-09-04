@@ -5,6 +5,28 @@
 **Extends:** ADR-0031 (a card is offered under the role it is counted as), ADR-0037 (interaction is two leaf roles), ADR-0054 (whose event is it, and what is a card counted as).
 **Companion:** ADR-0057, which makes the OPPOSITE ruling one level up. Read both.
 
+> **AMENDED BY [ADR-0060](0060-the-list-is-the-defect-and-a-role-has-a-subject.md).**
+> §8 of this ADR widened `ramp` past the literal "basic land card" for a land put
+> ONTO THE BATTLEFIELD, and recorded two things it left standing. Both are now
+> closed, and the second is why the first could be:
+>
+> - *"Landcycling still derives `tutor`, because the tutor heuristic reads
+>   'search your library for a Forest card' out of the reminder text."* The tutor
+>   rule's land guard was the literal `\bland card`; ADR-0060 §2 replaces it with
+>   a shared `LAND_OBJECT` that the ramp rules read too, so the rule that awards
+>   `ramp` for a land search and the rule that refuses `tutor` for one cannot
+>   drift apart.
+> - The refusal of "a named land type … **into your hand**" — 84 cards, 51 of
+>   them landcycling — was correct as the rule was then writable. Re-measured:
+>   89 cards, 54 landcycling and 35 real, and **the parenthesis splits them
+>   exactly**. So Archaeomancer's Map and Gift of Estates are admitted and
+>   Timeless Dragon is still refused. §2 also records the global reminder-text
+>   strip that was written, measured at 1,322 changed cards, and refused.
+>
+> ADR-0060 §6 also answers a question this ADR's `board-wipe` reasoning left
+> implicit: the mass `-X/-X` rule refused the letter X that its own comment said
+> it had to admit, so Toxic Deluge was `synergy`.
+
 ---
 
 ## 1. The report

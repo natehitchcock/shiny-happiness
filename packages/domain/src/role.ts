@@ -96,25 +96,83 @@ export type Role =
  *     one that does not.
  *
  * `stax` closes the answer band, where it already sat relative to `bounce`.
+ *
+ * ---------------------------------------------------------------------------
+ *
+ * `equipment` MOVES ABOVE THE ANSWER BLOCK AND `aura` DOES NOT (ADR-0060 §4).
+ *
+ * ADR-0054 argued `ramp`, `token-maker` and `tutor` down past the answers and
+ * never looked at the two roles left sitting below `protection`. Read against
+ * its own question, 193 of the corpus's 620 Equipment were counted as something
+ * else — Batterskull as `token-maker`, Sword of the Animist as `ramp`, Kaldra
+ * Compleat and Lightning Greaves and Sword of Feast and Famine as `protection`.
+ * A playtest asked Quickbuild for "5 more ramp" in a mono-white deck and was
+ * offered Orcrist, Bitterthorn and Sword of Wealth and Power: the whole
+ * `fills-ramp` group held eight Equipment and one Aura, no rocks and no lands.
+ *
+ * Cut Sword of the Animist and the deck replaces an Equipment. The Landfall
+ * trigger is compensation the card pays for costing a card and three mana, in
+ * exactly the sense Pongify's Ape is — which is the sentence ADR-0054 already
+ * wrote, applied one role over.
+ *
+ * THE TWO ARE NOT ORDERED TOGETHER, and the corpus is why. 81 cards hold one of
+ * these type roles AND an answer role, and the question "which job would the
+ * deck replace?" has one answer for the Equipment and two for the Auras:
+ *
+ *   - THE 39 EQUIPMENT ARE UNANIMOUS. Every one is a pinger or a package
+ *     stapled to a creature: Viridian Longbow, Heartseeker, Mortarpod, Arc
+ *     Spitter, Heavy Arbalest, Thornbite Staff, Sword of Fire and Ice, Blazing
+ *     Torch, Argentum Armor. Nobody plays a Longbow as their removal; it is an
+ *     Equipment whose removal needs a creature, an equip cost and a turn. Cut
+ *     it and the deck replaces an Equipment.
+ *
+ *   - THE 42 AURAS SPLIT ROUGHLY IN HALF, and the half that answers is the half
+ *     that matters. Chained to the Rocks, Ossification, On Thin Ice, Faith
+ *     Unbroken, Sheltered by Ghosts, Buried in the Garden and Dimensional Exile
+ *     are Oblivion Ring wearing a different type line — the card's whole
+ *     function is that a permanent is gone. Against them sit the pinger Auras
+ *     (Hermetic Study, Quicksilver Dagger, Fire Whip, Lavamancer's Skill),
+ *     which read like the Equipment. One order cannot describe both, and where
+ *     a list cannot be right it should keep the SCARCER, MORE SPECIFIC claim —
+ *     ADR-0037's reason for putting `graveyard-hate` above `spot-removal`, and
+ *     the reason blue's answers had to be found at all: mono-blue holds 84
+ *     spot-removal primaries against mono-red's 960, so an Aura is where blue
+ *     keeps its removal and `aura` above the block would hide it again.
+ *
+ * Measured directly: `aura` above the answer block moves Frogify,
+ * Ichthyomorphosis, Kasmina's Transmutation, Song of the Dryads and 66 more
+ * OUT of `spot-removal`, which is the defect this same ADR is fixing.
+ *
+ * `sac-outlet` still leads both, untouched, for ADR-0054's stated reason:
+ * Rakdos Riteknife and Junk Jet are outlets whose body happens to be an
+ * Equipment, and a deck has few repeatable ways to make its own creature die.
+ *
+ * 356 commander-legal cards change primary role. By class:
+ * token-maker→equipment 93, protection→aura 59, token-maker→aura 54,
+ * spot-removal→equipment 40, protection→equipment 39, recursion→aura 26,
+ * ramp→aura 22, ramp→equipment 14, recursion→equipment 3, board-wipe→equipment
+ * 2 (Worldslayer, Mjölnir), stax→equipment 2 (Conqueror's Flail, Godsend),
+ * tutor→aura 1.
+ *
  * Below the band the order is unchanged: ramp, then the engines it feeds, then
  * the roles that describe a card's shape rather than its job.
  */
 export const ROLE_PRECEDENCE: readonly Role[] = [
   'land',
   'sac-outlet',
+  'equipment',
   'board-wipe',
   'graveyard-hate',
   'counterspell',
   'spot-removal',
   'bounce',
   'stax',
+  'aura',
   'ramp',
   'token-maker',
   'tutor',
   'recursion',
   'protection',
-  'equipment',
-  'aura',
   'anthem',
   'evasion',
   'draw',

@@ -1,7 +1,7 @@
 import type { Card } from './card.js'
 import type { OracleId } from './ids.js'
 import { primaryRole, type Role } from './role.js'
-import { CREATES_FOR_YOU } from './token-subject.js'
+import { CREATES_FOR_YOU, OPPONENT_SUBJECT } from './token-subject.js'
 
 /**
  * Role derivation (doc 02 §2.4, DOM-04).
@@ -26,6 +26,92 @@ interface Heuristic {
   readonly onTypeLine?: boolean
 }
 
+/*
+ * ONE LIST OF QUANTIFIERS, ONE LIST OF LAND TYPES (ADR-0060 §1).
+ *
+ * The missing article has now been the reported defect three times — ADR-0047's
+ * `sacrifice (a|another)` with no `an`, ADR-0058's ramp rule that demanded the
+ * word "basic", and the tutor rule below that read `(a|any)` and so could not
+ * see "an Equipment card". Each was fixed where it was found, and each time the
+ * NEXT closed list of the same words was left standing one rule over.
+ *
+ * An audit of every determiner list in this file found four more, and they are
+ * fixed together rather than one report at a time:
+ *
+ *   | rule | shipped list | reached by widening |
+ *   | --- | --- | ---: |
+ *   | `tutor` | `(a\|any)` | 55 cards taking `an`, 24 more taking `up to N`/`three` |
+ *   | `draw` | `(a\|two\|three\|four\|X\|that many)` | 48 — every Wheel and Timetwister in the format |
+ *   | `sac-outlet` (noun) | `(a\|an\|another)` | 19 — Kuldotha Forgemaster, Time Sieve, Breya |
+ *   | `ramp` (basic land) | `(a\|up to N)` | 3 — "any number of", "a number of", a bare numeral |
+ *
+ * The `sac-outlet` row is the sharpest of the four, because the fix was already
+ * written: the TRIBAL outlet rule two hundred lines down carries
+ * `(?:a|an|another|two|three|X|\d+)` and the noun rule beside it carries
+ * `(a|an|another)`. Two lists of the same quantifiers, in the same file, for the
+ * same verb, disagreeing — which is the failure this file's own tribal-rule
+ * comment warns about one noun over ("two lists of the same nouns that disagree
+ * is how the next one goes wrong"). So there is now ONE list, and a rule that
+ * wants a quantifier reads it from here.
+ *
+ * `this` IS DELIBERATELY ABSENT, and it is the entry that does the most work:
+ * 702 cards say "Sacrifice this creature:", which is a card spending itself
+ * once, not a repeatable outlet you can feed. The list is of quantifiers over
+ * OTHER permanents; the demonstrative is a different word doing a different job.
+ */
+const QUANTIFIER = String.raw`a|an|another|any|two|three|four|five|six|seven|eight|nine|ten|X|\d+|up to \w+|any number of|a number of|that many`
+
+/**
+ * The five basic land types.
+ *
+ * NO `i` FLAG wherever this is used, and the capital carries the whole
+ * distinction — the same rule `semantic-tokens.ts` relies on and the same one
+ * the ramp rules below already relied on. "a Mountain card" is a land; "a
+ * mountain of cards" is not.
+ */
+const LAND_TYPE = 'Plains|Island|Swamp|Mountain|Forest'
+
+/**
+ * The object of a search that is a LAND, however the card spells it.
+ *
+ * The tutor rule's guard used to be the literal `\bland card`, which is why
+ * "search your library for an Island card" was a tutor: nine landcycling
+ * Islands and Jhessian Zombies were counted as cards that find a threat. A land
+ * search is ramp (the product owner's ruling, ADR-0058 §8), and this is the one
+ * place that says what a land search looks like, so the rule that AWARDS ramp
+ * for one and the rule that REFUSES tutor for one cannot drift apart.
+ *
+ * `\bland` rather than `land`, so "nonland card" (Night Dealings) is still a
+ * tutor — the guard the two ramp rules already carried, for the same reason.
+ */
+const LAND_OBJECT = String.raw`[^.]{0,60}\b(?:lands?|${LAND_TYPE}) cards?`
+
+/*
+ * THE REMINDER TEXT OF A CYCLING ABILITY IS NOT THE CARD'S OWN SENTENCE.
+ *
+ * ADR-0058 §8 measured this and left it standing with its name on it:
+ * "landcycling still derives `tutor`, because the tutor heuristic reads 'search
+ * your library for a Forest card' out of the reminder text." That was
+ * survivable while the tutor rule could not see "an Island card" at all;
+ * widening the article above would have shipped ten more of them, so the two
+ * are fixed together.
+ *
+ * Measured over the corpus: 89 cards search out a NAMED land type and put it in
+ * hand. 54 are landcycling and 35 are real, and the split is exact — every one
+ * of the 54 has its clause inside reminder-text parentheses and not one of the
+ * 35 does. Timeless Dragon counted as ramp would be ADR-0031's defect pointed
+ * the other way, and this is what keeps it out.
+ *
+ * A GLOBAL REMINDER-TEXT STRIP WAS WRITTEN, MEASURED AND REFUSED. Deleting
+ * every `(...)` before the rules read the text changes 1,322 cards' roles and
+ * the change is not one-directional: 363 creatures correctly stop being
+ * `evasion` (reach's reminder text names flying), but 522 correctly stop being
+ * `draw` — cycling really does draw a card, and its reminder text is the only
+ * place the card says so. A guard that fixes one rule and breaks another is not
+ * a shared guard, so this is targeted at the two rules whose object is a land.
+ */
+const NOT_LANDCYCLING = String.raw`(?<!Discard this card: )`
+
 /**
  * Patterns are written against Scryfall oracle text conventions: `~` is not used
  * (Scryfall spells the card's own name out), reminder text is present, and
@@ -42,7 +128,10 @@ const HEURISTICS: readonly Heuristic[] = [
   },
   {
     role: 'ramp',
-    test: /search your library for (a|up to \w+) basic land card[^.]*onto the battlefield/i,
+    test: new RegExp(
+      `search your library for (?:${QUANTIFIER}) basic land cards?[^.]*onto the battlefield`,
+      'i',
+    ),
   },
   /*
    * THE WORD "BASIC" WAS THE WHOLE GAP (ADR-0058).
@@ -99,7 +188,10 @@ const HEURISTICS: readonly Heuristic[] = [
    */
   {
     role: 'ramp',
-    test: /search your library for (a|up to \w+) \bland card[^.]*onto the battlefield/i,
+    test: new RegExp(
+      `search your library for (?:${QUANTIFIER}) \\bland cards?[^.]*onto the battlefield`,
+      'i',
+    ),
   },
   /*
    * A land tutor is ramp (report 4). The rule above only caught a land put ONTO
@@ -114,12 +206,48 @@ const HEURISTICS: readonly Heuristic[] = [
    */
   {
     role: 'ramp',
-    test: /search your library for [^.]{0,60}\bland card[^.]{0,100}?into your hand/i,
+    test: new RegExp(
+      `${NOT_LANDCYCLING}search your library for [^.]{0,60}\\bland cards?[^.]{0,100}?into your hand`,
+      'i',
+    ),
+  },
+  /*
+   * THE SAME CARD, ONE NOUN OVER (ADR-0060 §2).
+   *
+   * ADR-0058 §8 widened `ramp` past the literal "basic land card" for a land
+   * put ONTO THE BATTLEFIELD, and left the hand rule alone. So two cards with
+   * one shape derived opposite roles:
+   *
+   *   Land Tax             "basic LAND cards … into your hand"    → ramp
+   *   Archaeomancer's Map  "basic PLAINS cards … into your hand"  → synergy
+   *   Endless Horizons     "any number of PLAINS cards"           → synergy
+   *
+   * ADR-0058 refused this rule and the refusal was correct AS THE RULE WAS THEN
+   * WRITABLE: 89 cards match and 54 of them are landcycling, a discard ability
+   * on a Dragon. `NOT_LANDCYCLING` is what changed — the split is exact, so the
+   * 35 real cards can be admitted without the 54. Every one of the 35 was read
+   * by hand: the five Monuments, Kayla's Command, Nissa's Pilgrimage, Land
+   * Grant, Gift of Estates, Boreas Charger, Sunblade Samurai, Safewright Quest,
+   * Flower // Flourish, The Birth of Meletis. There is no false positive to
+   * report.
+   *
+   * THIRTEEN OF THE 35 HELD `tutor`, which is the same defect seen from the
+   * other side and is fixed by the same shared `LAND_OBJECT`: Land Grant and
+   * Liliana's Shade were offered to a deck that asked for a way to find its
+   * combo piece.
+   */
+  {
+    role: 'ramp',
+    test: new RegExp(
+      `${NOT_LANDCYCLING}[Ss]earch(?:es)? your library for [^.]{0,60}\\b(?:${LAND_TYPE})\\b[^.]{0,120}?(?:into (?:your|their) hand|, exile (?:them|it))`,
+    ),
   },
   { role: 'ramp', test: /\bTreasure token/ },
 
-  // Card advantage.
-  { role: 'draw', test: /\bdraws? (a|two|three|four|X|that many) cards?\b/i },
+  // Card advantage. The numeral list used to stop at four, which excluded every
+  // Wheel and every Timetwister in the format — 48 cards, and the best draw
+  // spells among them (ADR-0060 §1).
+  { role: 'draw', test: new RegExp(`\\bdraws? (?:${QUANTIFIER}) cards?\\b`, 'i') },
   { role: 'draw', test: /\bdraw a card\b/i },
 
   /*
@@ -127,13 +255,42 @@ const HEURISTICS: readonly Heuristic[] = [
    * are the worst kind of tutors. Usually people want tutors that enforce their
    * combos or wincons... land tutors are really ramp cards, not tutors."
    *
-   * The lookahead rejects any search whose object is a land card, where the old
-   * `(?!basic land)` only rejected the word "basic". `\bland card` rather than
-   * `land card` so "nonland card" (Night Dealings) is still a tutor.
+   * THREE THINGS WERE WRONG WITH ONE RULE (ADR-0060 §1, §2).
+   *
+   * The ARTICLE list was `(a|any)`, and English's indefinite article has two
+   * members. 55 commander-legal cards say "an" — and the whole Equipment tutor
+   * package is among them, so a voltron deck asking for five tutors was offered
+   * none of Stoneforge Mystic, Steelshaper's Gift or Open the Armory. Idyllic
+   * Tutor, Fabricate, Spellseeker, the four Mage cycle and Heliod's Pilgrim are
+   * the same card in other colours. This is the third report of the same bug;
+   * `QUANTIFIER` above is why there is no fourth.
+   *
+   * The QUANTIFIER was missing entirely: a tutor that fetches two is still a
+   * tutor, and Tooth and Nail, Diabolic Revelation, Ranger of Eos, Three
+   * Dreams, Shared Summons, Plea for Guidance and Uncage the Menagerie all fell
+   * to `synergy`. The two ramp rules above already read `up to \w+` for the
+   * same verb in the same sentence shape, so the tutor rule was the odd one out.
+   *
+   * The LAND GUARD was the literal `\bland card`, so it refused "a basic land
+   * card" and admitted "an Island card". That is what makes the article fix and
+   * the ramp fix one change rather than two: widening the article alone would
+   * have shipped ten more landcycling Islands as tutors. `LAND_OBJECT` is the
+   * shared answer.
+   *
+   * NO `NOT_LANDCYCLING` HERE, and the omission is deliberate and measured.
+   * Landcycling's object is a land, so `LAND_OBJECT` already refuses all 54 of
+   * them — and the discard guard would cost real cards on top: TRANSMUTE is the
+   * same "{cost}, Discard this card: Search your library for…" shape (Muddle the
+   * Mixture, Dimir Machinations, Dizzy Spell, Drift of Phantasms) and is a tutor
+   * that people play as one. 23 cards, found by diffing the corpus after the
+   * guard was added here, and removed again.
    */
   {
     role: 'tutor',
-    test: /search your library for (a|any) (?![^.]{0,60}\bland card)[^.]*(card|creature|artifact|enchantment|instant|sorcery)[^.]*(your hand|the top of your library)/i,
+    test: new RegExp(
+      `search your library for (?:${QUANTIFIER}) (?!${LAND_OBJECT})[^.]*(card|creature|artifact|enchantment|instant|sorcery)[^.]*(your hand|the top of your library)`,
+      'i',
+    ),
   },
 
   /*
@@ -215,7 +372,25 @@ const HEURISTICS: readonly Heuristic[] = [
    * old `-\d+` also matched `-0` — five cards that reduce power only and kill
    * nothing at all.
    */
-  { role: 'board-wipe', test: /all creatures get -\d+\/-([2-9]|\d{2,})/i },
+  /*
+   * X, HERE TOO (ADR-0060 §6). The rule read `-\d+/-\d+` and Toxic Deluge says
+   * `-X/-X`, so the format's best black sweeper derived `roles: [synergy]` and
+   * Quickbuild offered it under "WHY THIS IS HERE: synergy".
+   *
+   * The playtest asked whether X was excluded deliberately. It was not: the
+   * mass-DAMAGE rule twelve lines up admits X and says why — "X is included
+   * because it has no cap" — and the comment on this rule says the two must
+   * agree ("a mass -X/-X is a number against toughness exactly as damage is, so
+   * it cannot have a different threshold"). The reasoning covered X and the
+   * regex did not.
+   *
+   * 8 cards, every one a real wipe: Toxic Deluge, Bane of the Living, Kagemaro,
+   * Cloudkill, Terror Tide, Deluge of Doom, Ichor Explosion, Tip the Scales.
+   * The threshold is untouched, so the 19 cards printing -1/-1 or -X/-0 —
+   * Shrivel, Night of Souls' Betrayal, Meishin — stay out for the reason they
+   * were already out.
+   */
+  { role: 'board-wipe', test: /all creatures get -[X\d]+\/-(X|[2-9]|\d{2,})/i },
   /*
    * "Making each opponent sac one creature is not a board wipe." The old rule
    * was `sacrifices (all|\w+) creatures?` and `\w+` matched "a", so 70 of its 86
@@ -250,7 +425,23 @@ const HEURISTICS: readonly Heuristic[] = [
   },
   { role: 'bounce', test: /return all [^.\n]{0,60}?to (its|their) owners'? hands?/i },
 
-  { role: 'spot-removal', test: /destroy target\b/i },
+  /*
+   * REMOVAL THAT ANSWERS MORE THAN ONE THING IS STILL REMOVAL (ADR-0060 §5).
+   *
+   * `destroy target` and `exile target` demanded that the verb and the word
+   * "target" be adjacent, so every quantified answer in the format fell to the
+   * catch-all: "Destroy X target artifacts" (By Force, Heliod's Intervention,
+   * Vandalblast's overload), "Destroy up to two target permanents" (Force of
+   * Vigor), "Exile X target creatures" (Curse of the Swine), "destroy up to one
+   * target" (Noxious Gearhulk, Skyclave Apparition, Cavalier of Dawn).
+   *
+   * This is the article audit's finding in the file's most consequential rule,
+   * and it reads the same shared `QUANTIFIER`. The guards are untouched — the
+   * graveyard guard and the `you control` blink guard both still apply, so
+   * "exile up to one target creature you control" is still a blink and ADR-0048's
+   * measured refusal of the symmetric flickers is unchanged.
+   */
+  { role: 'spot-removal', test: new RegExp(`destroy (?:(?:${QUANTIFIER}) )?target\\b`, 'i') },
   /*
    * The graveyard guard is report 5: `exile target` matched "exile target
    * player's graveyard" and "exile target card from a graveyard", which is how
@@ -282,9 +473,59 @@ const HEURISTICS: readonly Heuristic[] = [
    */
   {
     role: 'spot-removal',
-    test: /exile target\b(?![^.\n]{0,50}\bgraveyard\b)(?![^.\n]{0,60}\byou control\b)/i,
+    test: new RegExp(
+      `exile (?:(?:${QUANTIFIER}) )?target\\b(?![^.\\n]{0,50}\\bgraveyard\\b)(?![^.\\n]{0,60}\\byou control\\b)`,
+      'i',
+    ),
   },
-  { role: 'spot-removal', test: /deals? \d+ damage to (target|any target)/i },
+  /*
+   * X IS A NUMBER WITH NO CAP, AND THIS FILE ALREADY SAID SO (ADR-0060 §5).
+   *
+   * The mass-damage rule below reads `(X|[2-9]|\d{2,})` and its comment states
+   * the reason in one sentence: "X is included because it has no cap." The
+   * single-target rule read a bare `\d+` and so could not see the same letter —
+   * so Blaze, Lava Burst, Devil's Play, Fireball, Volcanic Geyser,
+   * Electrodominance, Bonfire of the Damned and 164 more derived to `synergy`,
+   * which told a red deck the app could not tell what Blaze does.
+   *
+   * Two rules in one file disagreeing about one token, with an argument written
+   * beside only one of them. There is no second argument to make; the first one
+   * covers both.
+   */
+  { role: 'spot-removal', test: /deals? [X\d]+ damage to (target|any target)/i },
+  /*
+   * BLUE'S REAL REMOVAL, FILED UNDER ITS CARD TYPE (ADR-0060 §5).
+   *
+   * Mono-blue holds 46 `spot-removal` cards against mono-red's 853, and the
+   * gap is mostly bookkeeping: blue does not destroy a creature, it turns it
+   * into a Frog. Frogify, Ichthyomorphosis, Kasmina's Transmutation, Witness
+   * Protection, Kenrith's Transformation, Reprobation and Utter Insignificance
+   * were `aura` and nothing else, and Song of the Dryads and Imprisoned in the
+   * Moon — the format's premier catch-all answers to a permanent of ANY type —
+   * were `aura` and `ramp`, the second because the ramp rule read the "{T}: Add
+   * {C}" the card grants to the permanent it is imprisoning.
+   *
+   * 34 cards, all read by hand. Two shapes, because they are two claims: an
+   * enchanted permanent that LOSES ALL ITS ABILITIES is answered, and one that
+   * IS A LAND now is answered more completely still.
+   *
+   * ANCHORED TO THE START OF A LINE, which is what separates the Aura's own
+   * static ability from a clause it quotes. Bronzehide Lion returns as an Aura
+   * granting `"{G}{W}: Enchanted creature gains indestructible"` and then "loses
+   * all other abilities" — its own abilities, not the enchanted creature's — and
+   * the anchor is the only thing that reads the difference.
+   *
+   * THE ONE-SHOT VERSION IS REFUSED, 40 cards. "Until end of turn, target
+   * creature loses all abilities and becomes a green Elk" (Turn to Frog,
+   * Snakeform, Humble, Ovinize, Gift of Tusks) is a combat trick: the creature
+   * is back next turn, which is the same reason ADR-0037 puts `bounce` below
+   * `spot-removal`. Oko's +1 is the one real loss in that 40 and it is left,
+   * named, rather than admitted with 39 tricks behind it.
+   */
+  {
+    role: 'spot-removal',
+    test: /^Enchanted (?:creature|permanent)[^.\n]{0,110}?(?:loses all (?:other )?(?:card types and )?abilities|is an? [^.\n]{0,40}\bland\b)/m,
+  },
   { role: 'spot-removal', test: /target (player|opponent) sacrifices a creature/i },
 
   /*
@@ -326,7 +567,33 @@ const HEURISTICS: readonly Heuristic[] = [
     test: /if an? [^.]{0,30}(card|token|permanent) would be put into (a|an opponent's|their|your) graveyard from anywhere, exile it instead/i,
   },
 
-  { role: 'protection', test: /\b(hexproof|shroud|indestructible|protection from)\b/i },
+  /*
+   * WHOSE KEYWORD IS IT (ADR-0060 §6) — the subject question's fifth table.
+   *
+   * The rule was the bare keyword with no subject at all, so Hunted Horror —
+   * "target opponent creates two 3/3 green Centaur creature tokens WITH
+   * PROTECTION FROM BLACK" — held `protection` as its PRIMARY role and was
+   * offered to a mono-black-heavy deck under "fills protection gap". The
+   * protection is on the two bodies the opponent just got.
+   *
+   * ADR-0054 fixed this shape in three files and built `token-subject.ts` so it
+   * could not recur; `role-derivation.ts`'s own `token-maker` rule already reads
+   * from it. This reads the SAME list — `OPPONENT_SUBJECT`, exported from that
+   * file rather than written out again here, which is the whole point of the
+   * file existing.
+   *
+   * The refusal is scoped to a creation clause, not to the keyword: a card that
+   * gives an opponent a token AND has hexproof itself keeps `protection`,
+   * because the clause is the unit, never the card — the ruling `synergy.ts`
+   * and this file each already make twice.
+   */
+  {
+    role: 'protection',
+    test: new RegExp(
+      `(?<!${OPPONENT_SUBJECT}\\bcreates\\b[^.\\n]{0,140})\\b(hexproof|shroud|indestructible|protection from)\\b`,
+      'i',
+    ),
+  },
   { role: 'protection', test: /gains? (hexproof|indestructible|protection)/i },
   { role: 'protection', test: /counter target spell that targets/i },
 
@@ -340,7 +607,10 @@ const HEURISTICS: readonly Heuristic[] = [
    * other way round — the same closed-list defect as the tribal rule below,
    * one article wide instead of one noun wide.
    */
-  { role: 'sac-outlet', test: /sacrifice (a|an|another) (creature|permanent|artifact)[^.]*:/i },
+  {
+    role: 'sac-outlet',
+    test: new RegExp(`sacrifice (?:${QUANTIFIER}) (creature|permanent|artifact)[^.]*:`, 'i'),
+  },
   { role: 'sac-outlet', test: /\bSacrifice a creature:/i },
   /*
    * The outlet that names a creature TYPE (ADR-0047).
@@ -400,10 +670,127 @@ const HEURISTICS: readonly Heuristic[] = [
   { role: 'evasion', test: /can't be blocked\b/i },
   { role: 'evasion', test: /gains? (flying|menace|trample)/i },
 
-  { role: 'stax', test: /\b(spells? cost|abilities? cost) \{\d+\} more to (cast|activate)/i },
+  /*
+   * A TAX NAMES WHOSE SPELLS IT TAXES (ADR-0060 §3).
+   *
+   * The rule was `\b(spells? cost|abilities? cost) \{\d+\} more`, which demands
+   * that the noun and the verb be ADJACENT. Thalia says "Noncreature spells
+   * cost {1} more to cast" and matched. Grand Arbiter Augustin IV says "Spells
+   * YOUR OPPONENTS CAST cost {1} more to cast" — he names the subject, the
+   * subject sits between the noun and the verb, and the most famous stax
+   * commander in the format derived `role=synergy, produces=[], wants=[]`. His
+   * commander prompt offered two semantics, "Humans" and "Advisors".
+   *
+   * That is ADR-0022's subject question arriving on roles, and it needs no
+   * machinery from `token-subject.ts`: that file answers "whose TOKENS are
+   * these", which is a possession test over a creation verb and is spelled as a
+   * refusal. This asks "whose SPELLS", where the answer is not a refusal at all
+   * — a tax on your opponents and a symmetric tax on everyone are BOTH stax,
+   * and the rule only has to let the subject clause exist. A window, not a
+   * subject test.
+   *
+   * 48 cards carry a `cost {N} more` clause. 37 are taxes and this reaches all
+   * 37; the 11 refusals are the argument:
+   *
+   *   - THE WARD SHAPE, 12 cards. "Spells your opponents cast THAT TARGET this
+   *     creature cost {2} more" is a pseudo-ward stapled to a fatty — Icefall
+   *     Regent, Sphinx of New Prahv, Boreal Elemental, Elderwood Scion, Esior,
+   *     Pursued Whale. That is protection, and a deck told it holds six prison
+   *     pieces it does not have will cut a real one to make room.
+   *   - THE CARD TAXING ITSELF. Fireball, Launch the Fleet and Vanish into
+   *     Eternity say "This spell costs {1} more to cast for each target"; that
+   *     is a printed cost, not a tax on anybody.
+   *   - "CAST THIS WAY", 3 cards, where the tax rides on the card's own
+   *     impulse-draw clause rather than on a class of spells.
+   *   - `spells you cast cost` — Geist-Fueled Scarecrow taxes its controller.
+   *     A drawback is not a prison.
+   */
+  {
+    role: 'stax',
+    test: /(?<!\bthis )(?<!\bthat )\b(?:spells?|abilities)\b(?<! you cast)(?![^.\n]{0,60}?\bthat targets?\b[^.\n]{0,60}?\bcosts? \{)(?![^.\n]{0,60}?\bcast this way\b)(?![^.\n]{0,20}?\byou cast cost)[^.\n]{0,60}?\bcosts? \{\d+\} more to (?:cast|activate)\b/i,
+  },
   { role: 'stax', test: /don't untap during (their|your) untap step/i },
-  { role: 'stax', test: /players can't\b/i },
+  /*
+   * The same clause in its SYMMETRIC, STATIC voice. The rule above wants "their
+   * untap step" and the format's prison pieces say "their controllerS' untap
+   * stepS" — a plural possessive over a whole class of permanents rather than
+   * over one tapped creature. 26 cards, every one read by hand and every one a
+   * lock: Back to Basics, Meekstone, Hokori, Rising Waters, Choke, Winter Moon,
+   * Embargo, Mist of Stagnation, Marble Titan, Crackdown, Arena of the Ancients.
+   *
+   * A SEPARATE RULE rather than an `s?` on the one above, because the two
+   * claims are different: that one is a card tapping something down, this is a
+   * card that stops a class of permanents untapping at all. Folding them would
+   * also swallow the 38 combat tappers — Sleep, Icy Blast, Frost Breath — whose
+   * "doesn't untap during its controller's next untap step" is tempo, not a
+   * prison, and which a bare `don't untap` reaches.
+   */
+  { role: 'stax', test: /don't untap during their controllers' untap steps/ },
+  { role: 'stax', test: /[Pp]layers skip their\b/ },
+  /*
+   * SPLIT SECOND IS A NOTE ABOUT THE STACK (ADR-0060 §3).
+   *
+   * `players can't` matched the REMINDER TEXT of split second — "(As long as
+   * this spell is on the stack, players can't cast spells or activate abilities
+   * that aren't mana abilities.)" — and 23 cards read as prison pieces because
+   * of it, 16 of them with `stax` as their primary role. That was a fifth of
+   * the entire stax-primary pool, and the cards are fogs and instants: Angel's
+   * Grace, Krosan Grip, Sudden Death, Wipe Away, Extirpate, Trickbind.
+   *
+   * The guard is the four words the templating always puts in front. Measured:
+   * it drops 23 cards, all 23 are split second, and it lets no split-second
+   * card through — the separation is exact, which is why it is a lookbehind on
+   * the phrase rather than a search for the words "split second" (Molten
+   * Disaster and Shadow the Hedgehog carry the reminder without the keyword).
+   */
+  { role: 'stax', test: /(?<!on the stack, )players can't\b/i },
   { role: 'stax', test: /each player can('t| not) cast/i },
+  /*
+   * The SPELL-COUNT lock, which the rule above reaches only when the subject is
+   * the bare words "each player". Ethersworn Canonist says "Each player WHO HAS
+   * CAST a nonartifact spell this turn can't cast additional nonartifact
+   * spells" and Curse of Exhaustion says "Enchanted player"; both are prison
+   * pieces and both fell to `synergy`.
+   *
+   * THE SUBJECT IS THE WHOLE GUARD, and it earns its place: a bare "can't cast
+   * additional / more than one" also reads Yawgmoth's Agenda, Colfenor's Plans,
+   * Moderation, Hedonist's Trove and Conduit of Worlds, every one of which says
+   * "YOU can't cast more than one spell" — a drawback the card's own controller
+   * pays for an engine, which is the opposite of a lock on the table.
+   */
+  {
+    role: 'stax',
+    test: /(?:each player|players|enchanted player)[^.\n]{0,70}can't cast (?:additional|more than one)/i,
+  },
+  /*
+   * The rest of the prison, which the role simply had no rule for. The playtest
+   * found 39 canonical pieces and the role held 8. Each of these was swept over
+   * the corpus and every match read by hand.
+   *
+   * `Activated abilities of X can't be activated` — 18 cards, all real: Null
+   * Rod, Cursed Totem, Collector Ouphe, Stony Silence, Pithing Needle,
+   * Phyrexian Revoker, Karn the Great Creator, Linvala, Damping Matrix. The
+   * anchor on "Activated abilities of" is load-bearing: a bare `can't be
+   * activated` is 74 cards and 42 of them are Pacifism-shaped AURAS, which
+   * answer one creature and are already `spot-removal` or `aura`.
+   */
+  { role: 'stax', test: /[Aa]ctivated abilities of [^.\n]{0,40}can't be activated/ },
+  /*
+   * The attack tax — 16 cards and not one false positive. Propaganda, Ghostly
+   * Prison, Windborn Muse, Sphere of Safety, Norn's Annex, Collective
+   * Restraint, Baird, Archangel of Tithes, Koskun Falls, Elephant Grass.
+   *
+   * `unless their controller pays` is what keeps it exact. Widening to a bare
+   * "can't attack … unless … pays" adds six and four of them are Auras on one
+   * creature (Brainwash, Cowed by Wisdom), which is removal, not a prison.
+   */
+  {
+    role: 'stax',
+    test: /can't attack (?:you|unless)[^.\n]{0,80}?unless (?:its|their) controller pays/i,
+  },
+  { role: 'stax', test: /\b(?:your opponents|each opponent|opponents) can't cast\b/i },
+  { role: 'stax', test: /[Nn]o more than one creature can (?:attack|block)/ },
+  { role: 'stax', test: /don't cause abilities to trigger/i },
 
   { role: 'wincon', test: /wins? the game\b/i },
   { role: 'wincon', test: /loses? the game\b/i },

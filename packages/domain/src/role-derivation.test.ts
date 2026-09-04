@@ -835,3 +835,452 @@ describe('token-maker asks whose tokens they are (ADR-0054)', () => {
     ).toContain('token-maker')
   })
 })
+
+/* ---------------------------------------------------------------- ADR-0060 */
+
+describe('the article audit (ADR-0060 §1)', () => {
+  describe('a tutor whose object takes "an"', () => {
+    it.each([
+      [
+        'Idyllic Tutor',
+        'Search your library for an enchantment card, reveal it, put it into your hand, then shuffle.',
+      ],
+      [
+        'Stoneforge Mystic',
+        'When this creature enters, you may search your library for an Equipment card, reveal it, put it into your hand, then shuffle.',
+      ],
+      [
+        'Fabricate',
+        'Search your library for an artifact card, reveal it, put it into your hand, then shuffle.',
+      ],
+      [
+        'Spellseeker',
+        'When this creature enters, search your library for an instant or sorcery card with mana value 2 or less, reveal it, put it into your hand, then shuffle.',
+      ],
+      [
+        'Open the Armory',
+        'Search your library for an Aura or Equipment card, reveal it, put it into your hand, then shuffle.',
+      ],
+      [
+        "Heliod's Pilgrim",
+        'When this creature enters, you may search your library for an Aura card, reveal it, put it into your hand, then shuffle.',
+      ],
+    ])('%s is a tutor', (_name, text) => {
+      expect(rolesOf('Creature', text)).toContain('tutor')
+    })
+
+    it('still reads "a" and "any", which the list already had', () => {
+      expect(
+        rolesOf(
+          'Sorcery',
+          'Search your library for a creature card, reveal it, put it into your hand, then shuffle.',
+        ),
+      ).toContain('tutor')
+      expect(
+        rolesOf('Sorcery', 'Search your library for any card, put it into your hand, then shuffle.'),
+      ).toContain('tutor')
+    })
+  })
+
+  describe('a tutor that fetches SEVERAL', () => {
+    it.each([
+      [
+        'Tooth and Nail',
+        'Search your library for up to two creature cards, reveal them, put them into your hand, then shuffle.',
+      ],
+      [
+        'Diabolic Revelation',
+        'Search your library for up to X cards, put those cards into your hand, then shuffle.',
+      ],
+      [
+        'Behold the Beyond',
+        'Search your library for three cards, put them into your hand, then discard your hand.',
+      ],
+    ])('%s is a tutor', (_name, text) => {
+      expect(rolesOf('Sorcery', text)).toContain('tutor')
+    })
+  })
+
+  describe('a draw spell whose numeral the list stopped short of', () => {
+    it.each([
+      ['Wheel of Fortune', 'Each player discards their hand, then draws seven cards.'],
+      [
+        'Timetwister',
+        'Each player shuffles their hand and graveyard into their library, then draws seven cards.',
+      ],
+      ['Covenant of Minds', 'Reveal the top five cards of your library. Draw five cards.'],
+    ])('%s draws', (_name, text) => {
+      expect(rolesOf('Sorcery', text)).toContain('draw')
+    })
+  })
+
+  describe('a sacrifice outlet that eats MORE THAN ONE', () => {
+    it.each([
+      [
+        'Kuldotha Forgemaster',
+        '{T}, Sacrifice three artifacts: Search your library for an artifact card and put it onto the battlefield.',
+      ],
+      [
+        'Time Sieve',
+        '{T}, Sacrifice five artifacts: Take an extra turn after this one.',
+      ],
+      [
+        'Whisper, Blood Liturgist',
+        '{T}, Sacrifice two creatures: Return target creature card from your graveyard to the battlefield.',
+      ],
+    ])('%s is a sac outlet', (_name, text) => {
+      expect(rolesOf('Artifact', text)).toContain('sac-outlet')
+    })
+
+    it('leaves a card sacrificing ITSELF out, which is not an outlet', () => {
+      // "Sacrifice this creature:" is a one-shot, not a repeatable engine, and
+      // 702 cards in the corpus say it. The quantifier list keeps them out.
+      expect(rolesOf('Creature', 'Sacrifice this creature: Draw a card.')).not.toContain(
+        'sac-outlet',
+      )
+    })
+  })
+})
+
+describe('landcycling is a discard ability, not a search (ADR-0060 §2)', () => {
+  const PLAINSCYCLING =
+    'Flying\nPlainscycling {2} ({2}, Discard this card: Search your library for a Plains card, reveal it, put it into your hand, then shuffle.)'
+
+  it('does not make a Dragon a tutor', () => {
+    expect(rolesOf('Creature — Dragon', PLAINSCYCLING)).not.toContain('tutor')
+  })
+
+  it('does not make a Dragon ramp', () => {
+    expect(rolesOf('Creature — Dragon', PLAINSCYCLING)).not.toContain('ramp')
+  })
+
+  it('reads the same clause as ramp when it is the card and not the reminder', () => {
+    expect(
+      rolesOf(
+        'Sorcery',
+        'Search your library for a basic Plains card, reveal it, put it into your hand, then shuffle.',
+      ),
+    ).toContain('ramp')
+  })
+})
+
+describe('a land search names a type as often as it says "land" (ADR-0060 §2)', () => {
+  it.each([
+    [
+      "Archaeomancer's Map",
+      'When this artifact enters, search your library for up to two basic Plains cards, reveal them, put them into your hand, then shuffle.',
+    ],
+    [
+      "Kayla's Command",
+      'Search your library for a basic Plains card, reveal it, put it into your hand, then shuffle.',
+    ],
+    [
+      'Gift of Estates',
+      'Search your library for up to three Plains cards, reveal them, put them into your hand, then shuffle.',
+    ],
+    [
+      // The lands go to exile and reach hand from a later sentence. Two cards
+      // in the corpus, both real ramp: this and Roads Go Ever, Ever On.
+      'Endless Horizons',
+      'When this enchantment enters, search your library for any number of Plains cards, exile them, then shuffle.',
+    ],
+  ])('%s is ramp', (_name, text) => {
+    expect(rolesOf('Enchantment', text)).toContain('ramp')
+  })
+
+  it('is not also a tutor, because a land tutor is ramp', () => {
+    // The product owner's ruling, and the guard that enforced it read the
+    // literal words "land card" — so "a Plains card" walked straight past it.
+    expect(
+      rolesOf(
+        'Creature',
+        'When this creature enters, search your library for a basic Plains card, reveal it, put it into your hand, then shuffle.',
+      ),
+    ).not.toContain('tutor')
+  })
+
+  it('keeps Land Tax, which says "land" and always worked', () => {
+    expect(
+      rolesOf(
+        'Enchantment',
+        "At the beginning of each opponent's upkeep, if that player controls more lands than you, you may search your library for up to three basic land cards, reveal them, put them into your hand, then shuffle.",
+      ),
+    ).toContain('ramp')
+  })
+})
+
+describe('stax names whose spells it taxes (ADR-0060 §3)', () => {
+  describe('the tax rule reads a subject', () => {
+    it.each([
+      [
+        'Grand Arbiter Augustin IV',
+        'White spells you cast cost {1} less to cast.\nBlue spells you cast cost {1} less to cast.\nSpells your opponents cast cost {1} more to cast.',
+      ],
+      ['God-Pharaoh’s Statue', 'Spells your opponents cast cost {2} more to cast.'],
+      [
+        'Reidane, God of the Worthy',
+        'Noncreature spells your opponents cast with mana value 4 or greater cost {2} more to cast.',
+      ],
+      ['Defense Grid', 'Each spell costs {3} more to cast except during its caster’s own turn.'],
+      [
+        'Eidolon of Obstruction',
+        'Loyalty abilities of planeswalkers your opponents control cost {1} more to activate.',
+      ],
+    ])('%s holds stax', (_name, text) => {
+      expect(rolesOf('Creature', text)).toContain('stax')
+    })
+
+    it('keeps Thalia, whose subject is nobody in particular', () => {
+      expect(rolesOf('Creature — Human Soldier', 'First strike\nNoncreature spells cost {1} more to cast.')).toContain('stax')
+    })
+
+    it('is not a ward — a tax on spells that TARGET this creature is protection', () => {
+      // 12 cards, every one a pseudo-ward stapled to a fatty: Icefall Regent,
+      // Sphinx of New Prahv, Boreal Elemental, Pursued Whale, Esior. A deck
+      // told those are prison pieces will cut a real one to make room.
+      expect(
+        rolesOf(
+          'Creature — Dragon',
+          'Flying\nSpells your opponents cast that target this creature cost {2} more to cast.',
+        ),
+      ).not.toContain('stax')
+    })
+
+    it('is not a card taxing ITSELF', () => {
+      expect(
+        rolesOf('Sorcery', 'This spell costs {1} more to cast for each target beyond the first.'),
+      ).not.toContain('stax')
+      expect(rolesOf('Artifact', 'This ability costs {1} more to activate for each card in your hand.')).not.toContain('stax')
+    })
+  })
+
+  describe('split second is a reminder about the stack, not a prison', () => {
+    const SPLIT_SECOND =
+      "Split second (As long as this spell is on the stack, players can't cast spells or activate abilities that aren't mana abilities.)\nYou can't lose the game this turn."
+
+    it('does not make Angel’s Grace a stax piece', () => {
+      expect(rolesOf('Instant', SPLIT_SECOND)).not.toContain('stax')
+    })
+
+    it('still reads a real "players can\'t" clause', () => {
+      expect(rolesOf('Enchantment', "Players can't play lands.")).toContain('stax')
+      expect(rolesOf('Artifact', "Players can't search libraries.")).toContain('stax')
+    })
+  })
+
+  describe('the prison pieces the role could not see', () => {
+    it.each([
+      ['Back to Basics', 'Enchantment', "Nonbasic lands don't untap during their controllers' untap steps."],
+      ['Meekstone', 'Artifact', "Creatures with power 3 or greater don't untap during their controllers' untap steps."],
+      ['Stasis', 'Enchantment', 'Players skip their untap steps.'],
+      [
+        'Ghostly Prison',
+        'Enchantment',
+        "Creatures can't attack you unless their controller pays {2} for each creature they control that's attacking you.",
+      ],
+      ['Null Rod', 'Artifact', "Activated abilities of artifacts can't be activated."],
+      ['Cursed Totem', 'Artifact', "Activated abilities of creatures can't be activated."],
+      ['Drannith Magistrate', 'Creature — Human Wizard', "Your opponents can't cast spells from anywhere other than their hands."],
+      ['Torpor Orb', 'Artifact', "Creatures entering don't cause abilities to trigger."],
+      ['Silent Arbiter', 'Artifact Creature — Construct', 'No more than one creature can attack each combat.\nNo more than one creature can block each combat.'],
+      [
+        'Ethersworn Canonist',
+        'Creature — Human Cleric',
+        "Each player who has cast a nonartifact spell this turn can't cast additional nonartifact spells.",
+      ],
+      ['Curse of Exhaustion', 'Enchantment — Aura Curse', "Enchant player\nEnchanted player can't cast more than one spell each turn."],
+    ])('%s holds stax', (_name, typeLine, text) => {
+      expect(rolesOf(typeLine, text)).toContain('stax')
+    })
+
+    it('leaves a card that taxes ITS OWN controller alone', () => {
+      // Yawgmoth's Agenda, Colfenor's Plans, Moderation, Hedonist's Trove,
+      // Conduit of Worlds. A drawback paid for an engine is not a lock.
+      expect(
+        rolesOf('Enchantment', "You can't cast more than one spell each turn."),
+      ).not.toContain('stax')
+    })
+  })
+})
+
+describe('an answer that answers several is still an answer (ADR-0060 §5)', () => {
+  it.each([
+    ['By Force', 'Destroy X target artifacts.'],
+    ['Force of Vigor', 'Destroy up to two target artifacts and/or enchantments.'],
+    ['Curse of the Swine', 'Exile X target creatures.'],
+    ['Noxious Gearhulk', 'When this creature enters, you may destroy another target creature.'],
+    ['Violent Ultimatum', 'Destroy three target permanents.'],
+  ])('%s is removal', (_name, text) => {
+    expect(rolesOf('Sorcery', text)).toContain('spot-removal')
+  })
+
+  it('keeps the graveyard guard', () => {
+    expect(rolesOf('Instant', "Exile two target cards from a graveyard.")).not.toContain(
+      'spot-removal',
+    )
+  })
+
+  it('keeps the blink guard', () => {
+    expect(
+      rolesOf(
+        'Instant',
+        'Exile up to two target creatures you control, then return them to the battlefield.',
+      ),
+    ).not.toContain('spot-removal')
+  })
+
+  it('reads X damage, which the mass rule already read', () => {
+    expect(rolesOf('Sorcery', 'Blaze deals X damage to any target.')).toContain('spot-removal')
+  })
+})
+
+describe("blue answers a creature by turning it into a Frog (ADR-0060 §5)", () => {
+  it.each([
+    [
+      'Frogify',
+      'Enchant creature\nEnchanted creature loses all abilities and is a blue Frog creature with base power and toughness 1/1.',
+    ],
+    [
+      'Ichthyomorphosis',
+      'Enchant creature\nEnchanted creature loses all abilities and is a blue Fish with base power and toughness 0/1.',
+    ],
+    ['Song of the Dryads', 'Enchant permanent\nEnchanted permanent is a colorless Forest land.'],
+    [
+      'Imprisoned in the Moon',
+      'Enchant creature, land, or planeswalker\nEnchanted permanent is a colorless land with "{T}: Add {C}" and loses all other card types and abilities.',
+    ],
+  ])('%s is removal', (_name, text) => {
+    expect(rolesOf('Enchantment — Aura', text)).toContain('spot-removal')
+  })
+
+  it('leaves the combat trick alone, because the creature comes back', () => {
+    expect(
+      rolesOf(
+        'Instant',
+        'Until end of turn, target creature loses all abilities and becomes a blue Frog creature with base power and toughness 1/1.',
+      ),
+    ).not.toContain('spot-removal')
+  })
+
+  it('does not read an ability the Aura QUOTES as one it grants away', () => {
+    // Bronzehide Lion returns as an Aura and then loses ITS OWN abilities. The
+    // anchor to the start of a line is the only thing that reads the difference.
+    expect(
+      rolesOf(
+        'Creature — Cat',
+        '{G}{W}: This creature gains indestructible until end of turn.\nWhen this creature dies, return it to the battlefield. It\'s an Aura enchantment with enchant creature you control and "{G}{W}: Enchanted creature gains indestructible until end of turn," and it loses all other abilities.',
+      ),
+    ).not.toContain('spot-removal')
+  })
+})
+
+describe('a sweeper measured in X is still a sweeper (ADR-0060 §6)', () => {
+  it('reads Toxic Deluge', () => {
+    expect(
+      rolesOf(
+        'Sorcery',
+        'As an additional cost to cast this spell, pay X life.\nAll creatures get -X/-X until end of turn.',
+      ),
+    ).toContain('board-wipe')
+  })
+
+  it('holds the threshold, which is about toughness and not about X', () => {
+    expect(rolesOf('Sorcery', 'All creatures get -1/-1 until end of turn.')).not.toContain(
+      'board-wipe',
+    )
+    expect(rolesOf('Sorcery', 'All creatures get -X/-0 until end of turn.')).not.toContain(
+      'board-wipe',
+    )
+  })
+})
+
+describe('protection asks whose keyword it is (ADR-0060 §6)', () => {
+  it('does not claim protection given to an opponent’s tokens', () => {
+    // Hunted Horror. Offered to a mono-black deck under "fills protection gap".
+    expect(
+      rolesOf(
+        'Creature — Horror',
+        'Trample\nWhen this creature enters, target opponent creates two 3/3 green Centaur creature tokens with protection from black.',
+      ),
+    ).not.toContain('protection')
+  })
+
+  it('still claims a keyword on a token that is yours', () => {
+    expect(
+      rolesOf(
+        'Creature — Merfolk',
+        'When this creature enters, create a 1/1 blue Merfolk creature token with hexproof.',
+      ),
+    ).toContain('protection')
+  })
+
+  it('still claims the card’s own keyword when it also donates a token', () => {
+    // The clause is the unit, never the card.
+    expect(
+      rolesOf(
+        'Creature — Troll',
+        'Hexproof\nWhen this creature enters, target opponent creates two 1/1 green Faerie creature tokens with flying.',
+      ),
+    ).toContain('protection')
+  })
+})
+
+describe('an Equipment is an Equipment (ADR-0060 §4)', () => {
+  it('counts an Equipment that also ramps as an Equipment', () => {
+    // Sword of the Animist. Quickbuild's answer to "5 more ramp" in a mono-white
+    // deck was three Equipment; the whole `fills-ramp` group held eight of them
+    // and no rocks.
+    expect(primaryRole(['ramp', 'equipment'])).toBe('equipment')
+  })
+
+  it('counts an Equipment that also makes a token as an Equipment', () => {
+    // Batterskull.
+    expect(primaryRole(['token-maker', 'equipment'])).toBe('equipment')
+  })
+
+  it('counts an Equipment that also protects as an Equipment', () => {
+    // Lightning Greaves, Kaldra Compleat, Shadowspear, Sword of Feast and Famine.
+    expect(primaryRole(['protection', 'equipment'])).toBe('equipment')
+  })
+
+  it('counts an Equipment that also pings as an Equipment', () => {
+    // Sword of Fire and Ice, Viridian Longbow, Heartseeker, Mortarpod — 40
+    // cards, and every one is a package that needs a creature, an equip cost
+    // and a turn. Nobody plays a Longbow as their removal.
+    expect(primaryRole(['spot-removal', 'equipment'])).toBe('equipment')
+    expect(primaryRole(['board-wipe', 'equipment'])).toBe('equipment')
+  })
+
+  it('leaves a sac outlet an outlet, which ADR-0054 argued and this does not reopen', () => {
+    // Rakdos Riteknife, Junk Jet.
+    expect(primaryRole(['equipment', 'sac-outlet'])).toBe('sac-outlet')
+  })
+})
+
+describe('an Aura that answers a permanent is an answer (ADR-0060 §4)', () => {
+  it('keeps the removal Aura under removal', () => {
+    // Frogify, Song of the Dryads, Chained to the Rocks, Ossification. The
+    // measured half of the 42 that matters: mono-blue keeps its removal in Aura
+    // form, and `aura` above the answer block hides 70 cards including every
+    // one this ADR just found.
+    expect(primaryRole(['spot-removal', 'aura'])).toBe('spot-removal')
+    expect(primaryRole(['bounce', 'aura'])).toBe('bounce')
+    // And the whole answer band, not just removal: Curse of Exhaustion is a
+    // prison piece that happens to be an Aura.
+    expect(primaryRole(['stax', 'aura'])).toBe('stax')
+  })
+
+  it('counts an Aura that ramps or protects as an Aura', () => {
+    expect(primaryRole(['ramp', 'aura'])).toBe('aura')
+    expect(primaryRole(['protection', 'aura'])).toBe('aura')
+    expect(primaryRole(['token-maker', 'aura'])).toBe('aura')
+    expect(primaryRole(['recursion', 'aura'])).toBe('aura')
+  })
+
+  it('orders the two type roles differently on purpose', () => {
+    // The whole ruling in one line: the 39 Equipment that also answer are
+    // unanimous pingers, and the 42 Auras are not.
+    expect(primaryRole(['spot-removal', 'equipment'])).toBe('equipment')
+    expect(primaryRole(['spot-removal', 'aura'])).toBe('spot-removal')
+  })
+})

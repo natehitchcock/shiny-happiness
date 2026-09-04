@@ -13,6 +13,23 @@ Accepted.
 Amends [ADR-0031](0031-a-card-is-offered-under-the-role-it-is-counted-as.md)
 (§3 below) and extends [ADR-0022](0022-synergy-events-have-a-subject.md) (§1).
 
+> **AMENDED BY [ADR-0060](0060-the-list-is-the-defect-and-a-role-has-a-subject.md).**
+> Two of this ADR's rulings were extended by applying its own arguments where it
+> had not looked:
+>
+> - **§2 (`ROLE_PRECEDENCE`)** re-derived `ramp`, `token-maker` and `tutor`
+>   against the question "if this card were cut, which of its jobs would the
+>   deck have to replace?" and never asked it of `equipment` or `aura`. 193 of
+>   the corpus's 620 Equipment were counted as something else — Batterskull as
+>   `token-maker`, Sword of the Animist as `ramp`. ADR-0060 §4 moves `equipment`
+>   ABOVE the answer block and `aura` BELOW it, splitting them on measured
+>   evidence, and re-checks this ADR's "named and unmoved" list (all still
+>   unmoved, Skullclamp included). 356 further cards move.
+> - **§1 (whose event is it)** built `token-subject.ts` so a fourth rule table
+>   could not write the subject test out privately. A fifth did: `protection`
+>   read a bare keyword and claimed Hunted Horror's donated Centaurs. ADR-0060
+>   §6 fixes it by exporting this file's list rather than copying it.
+
 ## Context
 
 A playtest found five domain-side defects and left one open question. Two

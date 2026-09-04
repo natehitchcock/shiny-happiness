@@ -109,10 +109,32 @@
  * "opponent": a defending player is by definition not you on your own attack,
  * and "each other player" is everyone but the one the sentence just named.
  */
-const NOT_AN_OPPONENT =
-  String.raw`(?<!\b(?:target|each|an|another|enchanted|that|the) opponents?\b[^.\n]{0,50})` +
-  String.raw`(?<!\bdefending player )` +
-  String.raw`(?<!\beach other player )`
+/**
+ * The subject clauses that name somebody who is not you, as a POSITIVE
+ * fragment.
+ *
+ * Exported because `role-derivation.ts` needs the same question asked about a
+ * different verb, and asking it from a second list of the same determiners is
+ * exactly the failure this file was created to end. ADR-0054 found four rule
+ * tables in three files that had each written the token-subject test out
+ * privately; ADR-0060 found a fifth, on `protection`:
+ *
+ *   Hunted Horror  "target opponent creates two 3/3 green Centaur creature
+ *                   tokens WITH PROTECTION FROM BLACK"
+ *     → roles [protection, evasion], primary `protection`
+ *
+ * and it was offered to a mono-black deck under "fills protection gap". The
+ * protection belongs to the two Centaurs the opponent just got.
+ *
+ * `NOT_AN_OPPONENT` below is this same fragment as a refusal, so the two can
+ * never drift: a determiner added here is added to both at once.
+ */
+export const OPPONENT_SUBJECT =
+  String.raw`(?:\b(?:target|each|an|another|enchanted|that|the) opponents?\b[^.\n]{0,50}` +
+  String.raw`|\bdefending player ` +
+  String.raw`|\beach other player )`
+
+const NOT_AN_OPPONENT = `(?<!${OPPONENT_SUBJECT})`
 
 /**
  * The creation verb, restricted to clauses whose tokens are yours.
