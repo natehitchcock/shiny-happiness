@@ -1734,7 +1734,47 @@ const WANTS: readonly Rule[] = [
   // only ever fires because the creature attacked. It wants the same evasion,
   // the same pump and the same extra combats.
   { tag: 'attack-trigger', test: /\bwhenever .{0,45}deals combat damage to a player\b/i },
-  { tag: 'untap', test: /\{T\}:/ },
+  /*
+   * A tap ability worth using twice (ADR-0059).
+   *
+   * This rule used to be `/\{T\}:/` — does this permanent have a tap ability at
+   * all — and 1,129 of the 1,247 commander-legal lands have one. 94.5%. Since
+   * every deck runs about thirty-six lands, `untap` was the single largest want
+   * in every deck in the product, and it was the mana base saying it: with nine
+   * Forests in a green deck every top-eight row in two different groups was
+   * chipped "shares your untapping theme", and removing the Forests made the
+   * chips vanish.
+   *
+   * WHAT THE RULE IS FOR was measured before it was narrowed. The 324 producers
+   * are Seedborn Muse, Wilderness Reclamation, Voltaic Key, Kiora and Thornbite
+   * Staff, and what they are worth is a SECOND ACTIVATION of an ability that
+   * does something. Two guards follow from that, and no more than two:
+   *
+   *   1. The effect is not "Add". A land tapping for mana is the mana base —
+   *      the user's own line, already load-bearing for `ritual` two rules up.
+   *      1,129 lands become 442.
+   *   2. The cost does not eat the permanent. "{T}, Sacrifice this land:
+   *      Destroy target nonbasic land" is Wasteland, and untapping Wasteland is
+   *      worth nothing because it is not there. 442 become 294.
+   *
+   * 3,538 wanters become 2,518 and the share of lands carrying it falls from
+   * 94.5% to 24.6% — the utility lands, which is the part of a mana base an
+   * untap deck is actually built to abuse. Krenko, Arcanis, Staff of
+   * Domination, Voltaic Key, Mikokoro, Deserted Temple and Arcane Lighthouse
+   * all keep it.
+   *
+   * THE COST IS STATED RATHER THAN HIDDEN: Sol Ring, Gilded Lotus, Gaea's
+   * Cradle and every mana dork lose the want, and untapping those is a real
+   * thing decks do. It is a thing they do to make MANA, which `ramp` and
+   * `ritual` already name, and saying it here as well is not worth 94.5% of the
+   * mana base.
+   *
+   * `\s+` and not `\s*`, which is the whole rule in one character: a star lets
+   * the engine match zero whitespace and hand the space itself to the
+   * lookahead, so `(?!Add\b)` succeeds against " Add" and every basic land
+   * comes straight back. Found by measuring, not by reading.
+   */
+  { tag: 'untap', test: /\{T\}(?![^:\n]{0,40}\bSacrifice this\b)[^:\n]{0,40}:\s+(?!Add\b)/ },
 
   // An enters-the-battlefield trigger is a card asking to be blinked, and a
   // "whenever another creature enters" trigger is the same deck's payoff. Both

@@ -3746,3 +3746,127 @@ describe('deriveSynergy — whose life, whose card, whose land (ADR-0059)', () =
     expect(sawInHalf.produces).toContain('token')
   })
 })
+
+/**
+ * A land that taps for mana does not want untapping (ADR-0059).
+ *
+ * `{ tag: 'untap', test: /\{T\}:/ }` asked whether a permanent has a tap
+ * ability at all, and 1,129 of the 1,247 commander-legal lands have one —
+ * 94.5%. Every deck runs about thirty-six lands, so `untap` was the largest
+ * single want in every deck in the product, and it was the mana base saying it.
+ *
+ * The playtest demonstrated it rather than inferring it: with nine Forests in a
+ * green deck, every top-eight row in both the ramp and spot-removal groups was
+ * chipped "shares your untapping theme" — Thornbite Staff, Lux Cannon, Crooked
+ * Scales, Acorn Catapult. Remove the Forests and the chips vanish; re-add them
+ * and they return. It buried green's real cards and hid two other changes.
+ *
+ * WHAT THE RULE IS FOR, measured before narrowing it. There are 324 producers
+ * and they are Seedborn Muse, Wilderness Reclamation, Voltaic Key, Kiora and
+ * Thornbite Staff, and what they are worth is a second activation of an ability
+ * that DOES something. Two guards follow from that and no more:
+ *
+ *   1. The effect is not "Add". A land tapping for mana is the mana base, which
+ *      is the line the user drew for `ritual` one tag over and the same line
+ *      here. 1,129 lands become 442.
+ *   2. The cost does not eat the permanent. "{T}, Sacrifice this land: Destroy
+ *      target nonbasic land" is Wasteland, and untapping Wasteland is worth
+ *      nothing, because it is not there. 442 lands become 294.
+ *
+ * The tag survives for the cards it was for: Krenko, Arcanis, Staff of
+ * Domination, Thornbite Staff, Voltaic Key, Mikokoro, Deserted Temple, Arcane
+ * Lighthouse, Slayers' Stronghold. 3,538 wanters become 2,518, and the share of
+ * lands carrying it goes from 94.5% to 24.6% — the utility lands, which is what
+ * an untap deck is actually built to abuse.
+ *
+ * THE COST IS STATED: Sol Ring, Gilded Lotus, Gaea's Cradle and every mana dork
+ * lose the want, and untapping those is a real thing decks do. It is a thing
+ * they do to make MANA, which `ramp` and `ritual` already name, and it is not
+ * worth 94.5% of the mana base to say it here as well.
+ */
+describe('a land that taps for mana does not want untapping (ADR-0059)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  it('refuses the mana base, which was 94.5% of it', () => {
+    expect(derive('Forest', 'Basic Land — Forest', '({T}: Add {G}.)').wants).not.toContain('untap')
+    expect(derive('Sol Ring', 'Artifact', '{T}: Add {C}{C}.').wants).not.toContain('untap')
+    expect(
+      derive('Llanowar Elves', 'Creature — Elf Druid', '{T}: Add {G}.').wants,
+    ).not.toContain('untap')
+  })
+
+  it('refuses an ability that eats the permanent it is on', () => {
+    // Untapping Wasteland is worth nothing, because it is not there.
+    const wasteland = derive(
+      'Wasteland',
+      'Land',
+      '{T}: Add {C}.\n{T}, Sacrifice this land: Destroy target nonbasic land.',
+    )
+
+    expect(wasteland.wants).not.toContain('untap')
+  })
+
+  it('keeps the permanents the tag was for', () => {
+    const krenko = derive(
+      'Krenko, Mob Boss',
+      'Legendary Creature — Goblin Warrior',
+      '{T}: Create X 1/1 red Goblin creature tokens, where X is the number of Goblins you control.',
+    )
+    const arcanis = derive(
+      'Arcanis the Omnipotent',
+      'Legendary Creature — Wizard',
+      '{T}: Draw three cards.\n{2}{U}{U}: Return this creature to its owner’s hand.',
+    )
+    const key = derive('Voltaic Key', 'Artifact', '{1}, {T}: Untap target artifact.')
+
+    expect(krenko.wants).toContain('untap')
+    expect(arcanis.wants).toContain('untap')
+    expect(key.wants).toContain('untap')
+  })
+
+  it('reads a tap ability whose cost is more than the tap', () => {
+    /*
+     * Found by the same narrowing, in the opposite direction. `/\{T\}:/`
+     * required the tap to be the WHOLE cost, so 399 commander-legal cards whose
+     * only tap ability is a compound one wanted nothing at all: Hell's
+     * Caretaker, Cryptbreaker, Krovikan Sorcerer, Balloon Peddler. They are
+     * exactly the abilities an untapper is played to use twice.
+     */
+    const caretaker = derive(
+      "Hell's Caretaker",
+      'Creature — Human Cleric',
+      '{T}, Sacrifice a creature: Return target creature card from your graveyard to the battlefield. Activate only during your upkeep.',
+    )
+
+    expect(caretaker.wants).toContain('untap')
+  })
+
+  it('keeps a utility land, which is the quarter of the mana base that survives', () => {
+    // The clause is the unit, not the card: these tap for mana AND do something.
+    const mikokoro = derive(
+      'Mikokoro, Center of the Sea',
+      'Legendary Land',
+      '{T}: Add {C}.\n{2}, {T}: Each player draws a card.',
+    )
+    const lighthouse = derive(
+      'Arcane Lighthouse',
+      'Land',
+      "{T}: Add {C}.\n{1}, {T}: Until end of turn, creatures your opponents control lose hexproof and shroud and can't have hexproof or shroud.",
+    )
+
+    expect(mikokoro.wants).toContain('untap')
+    expect(lighthouse.wants).toContain('untap')
+  })
+
+  it('still produces untap where it always did', () => {
+    // The producer side is untouched: this change is about who WANTS it.
+    const muse = derive(
+      'Seedborn Muse',
+      'Creature — Fungus',
+      "Untap all permanents you control during each other player's untap step.",
+    )
+
+    expect(muse.produces).toContain('untap')
+  })
+})
