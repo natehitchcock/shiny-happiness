@@ -9,6 +9,15 @@ Accepted.
 > Number 0022 is taken by this ADR. 0021 is card art; another agent may take
 > 0023.
 
+> **EXTENDED BY [ADR-0059](0059-a-window-has-an-anchor-and-an-event-has-a-subject.md).**
+> This ADR's finding — that an event has a subject and that one tag cannot
+> name two of them without lying about one — was applied to five further
+> families that had never been asked the question. `lifegain`, `landfall`,
+> `card-draw` and the `sacrifice-fodder` WANT lost their subject to the phrase
+> "its controller" (ADR-0059 §3, 84 cards); `lifeloss` needed the harder
+> answer this ADR gave `discard` — a second tag rather than a narrower rule
+> (§4, `self-lifeloss`).
+
 ## Context
 
 A user reported three things about Tergrid, God of Fright:

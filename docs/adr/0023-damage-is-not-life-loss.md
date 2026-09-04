@@ -9,6 +9,14 @@ Accepted.
 > **Number 0023 is taken by this ADR.** 0022 is the synergy subject split, dated
 > the same day; 0021 is card art. The next agent should take 0024.
 
+> **AMENDED BY [ADR-0059](0059-a-window-has-an-anchor-and-an-event-has-a-subject.md)
+> §4.** §6 of this ADR wrote "that leaves 12 self-life payoffs on `lifeloss`
+> alone, which is correct". It was correct about the payoffs and it never
+> measured the PRODUCERS: 257 of `lifeloss`'s 1,062 producers lose the life
+> themselves, so with both sides subject-agnostic the tag matched in both wrong
+> directions at once. ADR-0059 splits the self side onto `self-lifeloss`. The
+> damage bridge this ADR exists to place is unchanged and is re-pinned there.
+
 ## Context
 
 A user reported one sentence:

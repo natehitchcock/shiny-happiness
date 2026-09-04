@@ -8,7 +8,7 @@ import {
   type WantQualifier,
 } from './qualifiers.js'
 import { SEMANTIC_TAGS, deriveSemanticTokens, type SemanticTag } from './semantic-tokens.js'
-import { CREATES_FOR_YOU } from './token-subject.js'
+import { CREATES_FOR_YOU, addressedToYou, forYou } from './token-subject.js'
 
 /**
  * Mechanical synergy (ADR-0011).
@@ -104,6 +104,41 @@ export type EventTag =
    * that refused the producer side.
    */
   | 'creature-cast'
+  /**
+   * YOUR OWN life, going down (ADR-0059, amending ADR-0023).
+   *
+   * Dark Confidant, Necropotence, Grim Tutor, Bellowing Saddlebrute and Feed
+   * the Swarm on the producer side; Vilis, Transcendence and the two Liches on
+   * the payoff side.
+   *
+   * `lifeloss` had no subject test, and 257 of its 1,062 commander-legal
+   * producers lose the life THEMSELVES while the panel renders the tag as
+   * "opponents losing life". ADR-0023 saw the payoff half of this and left it —
+   * "that leaves 12 self-life payoffs on `lifeloss` alone, which is correct" —
+   * and never measured the producers. With both sides subject-agnostic the tag
+   * matched in BOTH wrong directions at once: 257 self-producers against 7
+   * opponent payoffs, and 805 opponent-producers against 10 self ones.
+   *
+   * A SUBJECT TEST ALONE COULD NOT FIX IT, which is why this is a tag and not a
+   * regex, and it is the one place in ADR-0059 where the answer was a new name
+   * rather than a narrower rule. Narrowing only the producer leaves Vilis
+   * wanting an event nothing emits. Narrowing both sides deletes the Vilis deck
+   * — which is the mistake ADR-0016 records against itself, "narrowed it to
+   * here and stopped, which deleted the opponent side rather than modelling
+   * it". An event with two subjects needs two names, which is ADR-0022's whole
+   * finding.
+   *
+   * 317 producers and 12 payoffs, the same order as `land-creature`'s 185 and
+   * 12 — the count ADR-0047 admitted a tag on.
+   *
+   * NAMED FOR THE SELF SIDE, against the convention that the bare tag is yours
+   * (`discard` / `opponent-discard`). `lifeloss` is a stored value whose label
+   * has said "opponents" since it was written, so renaming it would break every
+   * deck that emphasises it in order to fix a word. The asymmetry is the
+   * cheaper of the two and it is written down here so the next reader does not
+   * quietly "correct" it.
+   */
+  | 'self-lifeloss'
 
 export type SynergyTag = EventTag | SemanticTag
 
@@ -137,6 +172,9 @@ export const EVENT_TAGS: readonly EventTag[] = [
   // stored against decks that already exist.
   'ritual',
   'creature-cast',
+  // ADR-0059, appended for the reason the two above were: the ORDER is the
+  // persisted contract, so a new event goes on the end and never in the middle.
+  'self-lifeloss',
 ]
 
 /**
@@ -411,6 +449,29 @@ const INTERACTION_PAIRS: readonly (readonly [SynergyTag, SynergyTag])[] = [
   ['extra-turns', 'attack-trigger'],
 
   /*
+   * Life as a resource you spend (ADR-0059).
+   *
+   * `self-lifeloss` ↔ `card-draw` because that is what the deck is: Necropotence,
+   * Bolas's Citadel, Vilis, Griselbrand and Ad Nauseam all turn life into
+   * cards, and it reads true in both directions — a deck that pays life wants
+   * something to buy, and a card that draws off life loss wants a way to lose
+   * it on purpose.
+   *
+   * `self-lifeloss` ↔ `lifegain` because gaining it back is how the deck
+   * survives doing that, which is the mirror of the `lifegain` ↔ `lifeloss`
+   * pair already above and true for the same reason.
+   *
+   * `self-lifeloss` ↔ `lifeloss` is REFUSED, and refusing it is the whole point
+   * of the split. They are one verb with two subjects, and a tag does not feed
+   * itself — ADR-0022's `discard` ↔ `opponent-discard` refusal, one event over.
+   * `self-lifeloss` ↔ `player-damage` is refused for ADR-0023's reason: damage
+   * aimed at YOU is a cost no producer rule emits, so the bridge would claim a
+   * burn spell fires Vilis when nothing in the model says it touches your total.
+   */
+  ['self-lifeloss', 'card-draw'],
+  ['self-lifeloss', 'lifegain'],
+
+  /*
    * A ritual and the deck that spends it (ADR-0054).
    *
    * `ritual` ↔ `spell-cast` because it reads true in both directions, which is
@@ -471,6 +532,62 @@ interface Rule {
  * the word forms read "Add two mana of any one color" and "Add X mana".
  */
 const ADDS_TWO_OR_MORE = String.raw`\bAdd (?:\{[WUBRGCX0-9/]+\}\s*){2,}|\bAdd (?:two|three|four|five|six|seven|X) mana\b`
+
+/**
+ * How far a token's description may run, MEASURED TO THE WORD `token`
+ * (ADR-0059).
+ *
+ * Three rules read one clause — "create a 1/1 colorless Thopter artifact
+ * creature token with flying" — and each wants a different thing out of it:
+ * that a token was made, that it was a creature, that it was an artifact. They
+ * used to spell the window out three times, each in front of a different noun
+ * phrase, and that is the defect:
+ *
+ *   token            `.{0,40}\btoken`
+ *   sacrifice-fodder `.{0,40}\bcreature token`
+ *
+ * `creature token` STARTS nine characters earlier than the bare word `token`
+ * does, so at the same window size the NARROWER rule is the EASIER one to
+ * match. Every token described in 32 to 40 characters was fodder that was not a
+ * token: 277 commander-legal cards, reported on Aviation Pioneer, whose row
+ * said `primary_role: token-maker` beside tags claiming it makes no tokens.
+ *
+ * So all three windows now END AT THE SAME WORD and the difference between the
+ * rules is a zero-width lookbehind. `sacrifice-fodder ⊆ token` is then true by
+ * construction rather than by arithmetic, which is what the property test in
+ * the suite pins — a number chosen by measurement can be un-chosen, and an
+ * invariant cannot.
+ *
+ * 49 IS THE VALUE THAT CHANGES NOTHING ELSE, and that is why it is 49 rather
+ * than a round number: it is the old 40 plus the nine characters of
+ * "creature ", so `sacrifice-fodder` reads exactly the 2,536 cards it read
+ * before and `token` gains the 277 it should always have had. Widening further
+ * keeps paying a little (50 adds 22, 60 adds 59) and every extra card is one
+ * `sacrifice-fodder` was already claiming, which is a second change and not
+ * this one.
+ *
+ * The gap stays `.` rather than becoming `[^.\n]`: measured over the corpus, a
+ * sentence-crossing gap matches ZERO cards that the sentence-bounded one
+ * refuses, and this file's own ruling is that a branch a test cannot fail on is
+ * machinery.
+ */
+const TOKEN_DESCRIPTION = String.raw`.{0,49}`
+
+/**
+ * Refuses a verb whose subject is YOU (ADR-0059).
+ *
+ * The mirror of `token-subject.ts`'s `forYou`, and it lives here rather than
+ * there because it is the answer to a different question. That file refuses the
+ * clauses that are somebody ELSE's, for tags whose events are yours; this
+ * refuses the clauses that are YOURS, for the one tag whose event is theirs.
+ * One subject test cannot be both, and pretending otherwise is how the
+ * fifty-character window got shared in the first place.
+ *
+ * Zero-width and adjacent, for the reason the general refusal is: "whenever an
+ * opponent loses life, YOU gain that much" is one sentence with two subjects.
+ */
+const NOT_YOUR_OWN =
+  String.raw`(?<!\byou )(?<!\byou may )(?<!\byou'd )(?<!\byou would )(?<!\byou’d )`
 
 /**
  * Written against Scryfall oracle conventions: the card's own name is spelled
@@ -668,8 +785,11 @@ const PRODUCES: readonly Rule[] = [
    *
    * The subject test is `token-subject.ts`, shared with `semantic-tokens.ts`
    * and `role-derivation.ts` because all three made this mistake separately.
+   *
+   * The WINDOW is `TOKEN_DESCRIPTION` and the anchor is the word `token`, which
+   * is ADR-0059 and is the reason these three rules now read the way they do.
    */
-  { tag: 'token', test: new RegExp(`${CREATES_FOR_YOU} .{0,40}\\btoken`, 'i') },
+  { tag: 'token', test: new RegExp(`${CREATES_FOR_YOU} ${TOKEN_DESCRIPTION}\\btoken`, 'i') },
   /*
    * The doublers, which never say "create" in the active voice (ADR-0048, found
    * by the commander sweep).
@@ -694,7 +814,14 @@ const PRODUCES: readonly Rule[] = [
   // Same subject test, and this is the tag the report was written about: an
   // aristocrats deck reads `sacrifice-fodder` as bodies it may eat, and these
   // bodies are the opponent's.
-  { tag: 'sacrifice-fodder', test: new RegExp(`${CREATES_FOR_YOU} .{0,40}\\bcreature token`, 'i') },
+  //
+  // The `creature` is a ZERO-WIDTH lookbehind rather than part of the noun
+  // phrase, which is what makes this rule's matches a subset of `token`'s by
+  // construction rather than by arithmetic (ADR-0059).
+  {
+    tag: 'sacrifice-fodder',
+    test: new RegExp(`${CREATES_FOR_YOU} ${TOKEN_DESCRIPTION}(?<=\\bcreature )\\btoken`, 'i'),
+  },
 
   { tag: 'treasure', test: /\bTreasure token/i },
   // Any artifact card entering IS an artifact entering the battlefield, which is
@@ -706,25 +833,83 @@ const PRODUCES: readonly Rule[] = [
   // enchantments against ~200 payoffs — the same lopsided shape as the artifact
   // pair above, which is the precedent this follows rather than a fresh claim.
   { tag: 'enchantment-etb', test: /^[^\n]*\bEnchantment\b/ },
-  // The same subject test as the two rules above (ADR-0054). An artifact token
-  // handed to an opponent does not put an artifact onto YOUR battlefield, which
-  // is the whole of what the payoff asks for.
+  /*
+   * The same subject test as the two rules above (ADR-0054). An artifact token
+   * handed to an opponent does not put an artifact onto YOUR battlefield, which
+   * is the whole of what the payoff asks for.
+   *
+   * Same anchor as the two rules above, and one adjective wider (ADR-0059). The
+   * rule wanted `artifact token` adjacent and the game writes the whole type
+   * line out: "create a 1/1 colorless Thopter ARTIFACT CREATURE token with
+   * flying". 133 commander-legal cards — Foundry of the Consuls, Sram's
+   * Expertise, Tezzeret, every Servo and Thopter and Mite maker that is not
+   * itself an artifact — and a Thopter is an artifact entering the battlefield
+   * whatever else it also is.
+   */
   {
     tag: 'artifact-etb',
     test: new RegExp(
-      `${CREATES_FOR_YOU} .{0,40}\\b(artifact|Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment) token`,
+      `${CREATES_FOR_YOU} ${TOKEN_DESCRIPTION}(?<=\\b(?:artifact|Clue|Food|Blood|Treasure|Powerstone|Junk|Map|Gold|Incubator|Equipment) (?:creature )?)\\btoken`,
       'i',
     ),
   },
 
-  // The numbers were a closed list of one, so "gain 4 life" read as nothing.
+  /*
+   * The numbers were a closed list of one, so "gain 4 life" read as nothing.
+   *
+   * WHOSE LIFE (ADR-0059). Swords to Plowshares — "Exile target creature. ITS
+   * CONTROLLER gains life equal to its power" — ranked #1 in Staples for a
+   * Heliod deck on the reason "enables your emphasised gaining life", and
+   * Heliod triggers on YOU gaining life. 24 commander-legal cards, every one
+   * read by hand, every one a card that hands the life across the table:
+   * Illumination, Nature's Claim, Condemn, Oust, Last Breath, both
+   * Phelddagrifs, Grove of the Burnwillows, the free-spell cycle that pays an
+   * opponent life for its own cost.
+   *
+   * `lifelink` keeps no subject test, and does not need one: it is a keyword on
+   * a permanent, and the permanent is on the battlefield of whoever controls
+   * it, which in a deck of yours is you.
+   */
   {
     tag: 'lifegain',
-    test: /\bgains? (\d+|X) life\b|\bgains? life equal to\b|\bgains? that much life\b|\blifelink\b/i,
+    test: new RegExp(
+      `${forYou()}\\bgains? (\\d+|X) life\\b|${forYou()}\\bgains? life equal to\\b|${forYou()}\\bgains? that much life\\b|\\blifelink\\b`,
+      'i',
+    ),
   },
+  /*
+   * WHOSE LIFE (ADR-0059). "You lose life equal to its mana value" is Dark
+   * Confidant, and this tag's label is "opponents losing life" — so a Vito deck
+   * was offered a card that takes life off its own total as an enabler for
+   * taking it off theirs. 257 of the 1,062 producers, and their life loss is a
+   * COST rather than a plan, which is the refusal ADR-0023 §6 already made one
+   * tag over on "deals 2 damage to you".
+   *
+   * The self side is not deleted, it is MOVED — see `self-lifeloss` below and
+   * the tag's own docblock for why a subject test alone could not do this.
+   *
+   * `you'd` and `you would` are in the refusal because the replacement-effect
+   * templating writes them: "if you would lose life, you lose that much life
+   * plus 1 instead".
+   */
   {
     tag: 'lifeloss',
-    test: /\bloses? (\d+|X) life\b|\bloses? life equal to\b|\bloses? that much life\b/i,
+    test: new RegExp(
+      `${NOT_YOUR_OWN}\\bloses? (\\d+|X) life\\b|${NOT_YOUR_OWN}\\bloses? life equal to\\b|${NOT_YOUR_OWN}\\bloses? that much life\\b`,
+      'i',
+    ),
+  },
+  /*
+   * The same verb, the other subject (ADR-0059). 317 commander-legal cards.
+   *
+   * "Each player loses" deliberately matches this AND `lifeloss`, which is
+   * ADR-0022's ruling about "each player discards": a symmetric drain takes
+   * life off your total and theirs, and claiming one side and not the other
+   * would be false whichever side you picked.
+   */
+  {
+    tag: 'self-lifeloss',
+    test: /\byou (?:may |would |'d )?lose (?:\d+|X) life\b|\byou (?:may |would )?lose life equal to\b|\byou (?:may |would )?lose that much life\b|\beach player loses\b/i,
   },
   /*
    * Damage to a player is its own event (ADR-0023).
@@ -784,9 +969,31 @@ const PRODUCES: readonly Rule[] = [
     test: /\bdamage divided [^.\n]{0,40}among (?:any number of targets|one, two, or three targets)\b/i,
   },
 
+  /*
+   * WHOSE CARD (ADR-0059). "Target opponent draws a card" is Bargain, and every
+   * rule here read the verb and not the subject — so a card whose whole text is
+   * a gift to an opponent came back as a draw engine, with `draw` as its
+   * primary role. 37 commander-legal cards, all read by hand: Bargain, Lord of
+   * Tresserhorn, Master of the Feast, Forced Fruition, Thought-Knot Seer, Call
+   * to Heel, Introduction to Annihilation, both Phelddagrifs.
+   *
+   * Half of them are not gifts at all but TRIGGER CONDITIONS — "whenever an
+   * opponent draws a card, this deals 1 damage to that player" is Underworld
+   * Dreams, Fate Unraveler, Razorkin Needlehead, Orcish Bowmasters and
+   * Smothering Tithe. Those cards draw nobody anything; the words are the
+   * clause the card is waiting for. An adjacency test is what tells them from
+   * a gift, and it is why the general refusal in `token-subject.ts` asks for
+   * the subject to sit against the verb rather than within a window: the same
+   * fifty-character reach that `creates` can afford took `card-draw` off 118
+   * cards here, and most of those were the payoffs — Consecrated Sphinx draws
+   * two BECAUSE an opponent drew one.
+   */
   {
     tag: 'card-draw',
-    test: /\bdraws? (a|two|three|four|five|six|seven|X|that many|\d+) cards?\b|\bdraws? cards equal to\b/i,
+    test: new RegExp(
+      `${forYou()}\\bdraws? (a|two|three|four|five|six|seven|X|that many|\\d+) cards?\\b|${forYou()}\\bdraws? cards equal to\\b`,
+      'i',
+    ),
   },
   // Whose discard. "Target opponent discards two cards" is a hand attack, not a
   // loot engine, and this tag's payoffs are madness and "whenever you discard" —
@@ -1015,7 +1222,27 @@ const PRODUCES: readonly Rule[] = [
     tag: 'landfall',
     test: /\bplay (?:an|one|two|three|X|another|any number of) additional lands?\b|\bput(s)? .{0,30}land .{0,20}battlefield/i,
   },
-  { tag: 'landfall', test: /\bland cards?\b[^.]{0,60}\bonto the battlefield\b/i },
+  /*
+   * WHOSE LAND (ADR-0059). Path to Exile — "Its controller may search their
+   * library for a basic land card, put that card onto the battlefield" — is the
+   * opponent's landfall, and a landfall deck was being offered it as an
+   * enabler. 14 commander-legal cards, all read by hand: Path, Ghost Quarter,
+   * Assassin's Trophy, Cleansing Wildfire, Erode, Sandworm, Old-Growth Dryads.
+   *
+   * This is the only caller that passes a `between` to the refusal, and the
+   * reason is that this rule is anchored on a NOUN. The subject of the clause
+   * is the subject of "search", four words to the left of "land card", so the
+   * search phrase is spelled out rather than covered by a window — a window
+   * wide enough to reach the subject would also reach into the previous
+   * sentence, which is where "you gain 3 life" and "you draw a card" live.
+   */
+  {
+    tag: 'landfall',
+    test: new RegExp(
+      `${forYou(String.raw`search(?:es)? (?:your|their) library for [^.\n]{0,40}`)}\\bland cards?\\b[^.]{0,60}\\bonto the battlefield\\b`,
+      'i',
+    ),
+  },
   /*
    * The fetch that never says "land" (ADR-0038).
    *
@@ -1036,7 +1263,10 @@ const PRODUCES: readonly Rule[] = [
    */
   {
     tag: 'landfall',
-    test: /\bsearch(?:es)? (?:your|their) library for [^.\n]{0,80}\b(?:Plains|Island|Swamp|Mountain|Forest)\b[^.\n]{0,60}\bonto the battlefield\b/i,
+    test: new RegExp(
+      `${forYou()}\\bsearch(?:es)? (?:your|their) library for [^.\\n]{0,80}\\b(?:Plains|Island|Swamp|Mountain|Forest)\\b[^.\\n]{0,60}\\bonto the battlefield\\b`,
+      'i',
+    ),
   },
 
   // Nothing produced `attack-trigger` at all, so 1,848 cards wanted an event no
@@ -1175,7 +1405,37 @@ const PRODUCES: readonly Rule[] = [
 const WANTS: readonly Rule[] = [
   // The user's example: a death trigger on the commander wants creatures to die.
   { tag: 'creature-death', test: /\bwhenever (a|another) .{0,40}creature .{0,20}dies\b/i },
-  { tag: 'creature-death', test: /\bwhenever .{0,40}\bdies\b/i },
+  /*
+   * The window is the trigger's SUBJECT, and forty characters is not a subject
+   * (ADR-0059).
+   *
+   * 430 commander-legal cards carry a "whenever … dies" trigger and this rule
+   * reached 308 of them. Blood Artist's subject — "Blood Artist or another
+   * creature " — is 33 characters and matched; Zulaport Cutthroat prints the
+   * same sentence plus "you control", which runs to 46, and matched nothing at
+   * all. So the two cards an aristocrats deck is built out of disagreed about
+   * whether a death was worth anything, and the one at EDHREC 234 was the one
+   * that said no. Cruel Celebrant, Butcher of Malakir, Kalastria Highborn,
+   * Xathrid Necromancer and Headless Rider are the same sentence again.
+   *
+   * EIGHTY is where the measurement stops paying, and the ceiling was found by
+   * reading the cards each widening admits rather than by picking a round
+   * number. 60 reaches 413, 80 reaches 423 and every one of the 91 cards it
+   * adds is a real death trigger. The FIRST match at 90 is Rivaz of the Claw,
+   * where the words inside the window have stopped being a subject — which is
+   * the signal that the window has left the grammar it was measuring.
+   *
+   * The gap is `[^.\n]` rather than `.`, which is this file's own instrument
+   * for staying inside one sentence and one face. Measured to cost NOTHING at
+   * eighty characters — the two produce identical sets — and taken anyway,
+   * because widening a gap that can leave its own sentence is how a trigger
+   * condition finds its verb in the next ability. A `[^.,\n]` gap was measured
+   * too and refused: the comma costs three real cards whose subject contains
+   * one ("Whenever a nontoken, non-Angel creature you control dies" is
+   * Valkyrie's Call), and the comma boundary that ADR-0022 relies on elsewhere
+   * is about where an EFFECT begins, which is past the verb this rule ends at.
+   */
+  { tag: 'creature-death', test: /\bwhenever [^.\n]{0,80}\bdies\b/i },
   { tag: 'creature-death', test: /\bwhenever you sacrifice\b/i },
   // "When this creature dies…" — the one-shot form.
   //
@@ -1187,8 +1447,27 @@ const WANTS: readonly Rule[] = [
   // exception being Alabaster Dragon, whose death trigger is a drawback.
   { tag: 'creature-death', test: /\bwhen\b[^.]{0,40}\bdies\b/i },
 
-  // A sacrifice outlet wants fodder as much as fodder wants an outlet.
-  { tag: 'sacrifice-fodder', test: /\bsacrifice (a|another|an) creature\b/i },
+  /*
+   * A sacrifice outlet wants fodder as much as fodder wants an outlet.
+   *
+   * WHOSE SACRIFICE (ADR-0059). The producer side has told an outlet from an
+   * edict since ADR-0022 and this side never did, so "any opponent may
+   * sacrifice a creature of their choice" read as a payoff for your own tokens.
+   * Clackbridge Troll was offered to an aristocrats deck as "benefits from your
+   * expendable bodies", and the Goats it eats are the ones it gave away. Nine
+   * commander-legal cards, all read by hand, all edicts or punishers:
+   * Clackbridge Troll, Desecration Demon, Predatory Nightstalker, Pillar Tombs
+   * of Aku, Brain Gorgers, Innocent Traveler, Mogis, Tomb Blade, Unnatural
+   * Hunger.
+   *
+   * `addressedToYou` rather than `forYou`, because the verb is a bare
+   * infinitive and having NO named subject is what makes the clause yours —
+   * ADR-0022's device, one verb over.
+   */
+  {
+    tag: 'sacrifice-fodder',
+    test: new RegExp(`${addressedToYou()}\\bsacrifice (a|another|an) creature\\b`, 'i'),
+  },
   { tag: 'token', test: /\bfor each creature you control\b|\bcreatures you control get\b/i },
   { tag: 'token', test: /\bwhenever .{0,30}token .{0,20}enters\b/i },
 
@@ -1209,7 +1488,39 @@ const WANTS: readonly Rule[] = [
    * subject: "whenever YOU LOSE life" is Vilis and Transcendence, and the old
    * rule reached 7 of the 19 real payoffs.
    */
-  { tag: 'lifeloss', test: /\bwhenever [^.,\n]{0,40}\blos[et]s? life\b/i },
+  /*
+   * WHOSE LIFE, on the payoff side (ADR-0059).
+   *
+   * This rule used to read `los[et]s?` with no subject at all, and its own
+   * comment said why: "'whenever YOU LOSE life' is Vilis and Transcendence, and
+   * the old rule reached 7 of the 19 real payoffs". That was the right fix for
+   * the gap it found and the wrong tag to put the answer on — Vilis pays off
+   * YOUR life going down, and every producer this tag has is a card that takes
+   * life off somebody else's total. Under one tag Vilis was offered a Vito.
+   *
+   * So the subject list is spelled out, and it is the same one the
+   * `player-damage` bridge two rules down already uses — which is the point:
+   * the bridge holds for exactly the subjects that are not you, and now the two
+   * rules say so in the same words instead of one saying it and one not.
+   *
+   * `its controller` is in, and is the one subject `forYou` refuses for the
+   * other tags: after "destroy target creature" its controller is somebody
+   * else, and somebody else losing life is exactly what this tag means.
+   */
+  {
+    tag: 'lifeloss',
+    test: /\bwhenever [^.,\n]{0,40}\b(?:an opponent|a player|that player|its controller|one or more (?:opponents|players)|opponents|players) los[et]s? life\b/i,
+  },
+  /*
+   * The payoff for your own life going down (ADR-0059). 12 cards: Vilis,
+   * Transcendence, Lich's Mastery, Lich's Tomb, Oath of Lim-Dûl, Vengeful
+   * Warchief, Gonti's Machinations, Vampire Scrivener.
+   *
+   * "Gain or lose" is in because two of the twelve are written that way — Wax-
+   * Wane Witness and Moonstone Harbinger read "whenever you gain OR LOSE life
+   * during your turn" — and an adjacency test reads straight past them.
+   */
+  { tag: 'self-lifeloss', test: /\bwhenever you (?:would |gain or )?los[et]s? life\b/i },
   /*
    * The same payoff, claimed for damage as well — this is the ADR-0023 bridge.
    *
@@ -1524,7 +1835,26 @@ const WANTS: readonly Rule[] = [
     tag: 'plus1-counter',
     test: /\b(?:each|another|other|all|target|attacking) creatures?[a-z' ]{0,25} with (?:a |one or more )?\+1\/\+1 counters? on (?:them|it)\b/i,
   },
-  { tag: 'attack-trigger', test: /\bwhenever .{0,30}attacks\b/i },
+  /*
+   * The same window, one trigger over (ADR-0059).
+   *
+   * Thirty characters holds a NAME — "Whenever Adeline attacks" — and not a
+   * described subject. 1,764 commander-legal cards carry a "whenever … attacks"
+   * trigger and this reached 1,694; the 69 it could not see are Winota, Joiner
+   * of Forces ("whenever a non-Human creature you control attacks"), Kindred
+   * Discovery, Nahiri, Forged in Fury, Hooded Blightfang and every Samurai that
+   * cares about attacking alone. Sixty reaches 1,763 and the one beyond it is
+   * not an attack trigger.
+   *
+   * The gap stays `.` here where the `dies` rule above took `[^.\n]`, and the
+   * difference is measured rather than an oversight. `.` is already bounded by
+   * the face — it cannot cross a newline — and the extra sentence boundary buys
+   * nothing at sixty characters and costs exactly one card: Mr. Foxglove, whose
+   * own NAME carries a full stop. That is the honorific trap `creature-etb`
+   * documents below on "J. Jonah Jameson" and "Ms. Marvel", and it is worth a
+   * card here and nothing there.
+   */
+  { tag: 'attack-trigger', test: /\bwhenever .{0,60}attacks\b/i },
   /*
    * The attack trigger Magic stopped writing as "attacks" (ADR-0038).
    *
@@ -1543,7 +1873,47 @@ const WANTS: readonly Rule[] = [
   // only ever fires because the creature attacked. It wants the same evasion,
   // the same pump and the same extra combats.
   { tag: 'attack-trigger', test: /\bwhenever .{0,45}deals combat damage to a player\b/i },
-  { tag: 'untap', test: /\{T\}:/ },
+  /*
+   * A tap ability worth using twice (ADR-0059).
+   *
+   * This rule used to be `/\{T\}:/` — does this permanent have a tap ability at
+   * all — and 1,129 of the 1,247 commander-legal lands have one. 94.5%. Since
+   * every deck runs about thirty-six lands, `untap` was the single largest want
+   * in every deck in the product, and it was the mana base saying it: with nine
+   * Forests in a green deck every top-eight row in two different groups was
+   * chipped "shares your untapping theme", and removing the Forests made the
+   * chips vanish.
+   *
+   * WHAT THE RULE IS FOR was measured before it was narrowed. The 324 producers
+   * are Seedborn Muse, Wilderness Reclamation, Voltaic Key, Kiora and Thornbite
+   * Staff, and what they are worth is a SECOND ACTIVATION of an ability that
+   * does something. Two guards follow from that, and no more than two:
+   *
+   *   1. The effect is not "Add". A land tapping for mana is the mana base —
+   *      the user's own line, already load-bearing for `ritual` two rules up.
+   *      1,129 lands become 442.
+   *   2. The cost does not eat the permanent. "{T}, Sacrifice this land:
+   *      Destroy target nonbasic land" is Wasteland, and untapping Wasteland is
+   *      worth nothing because it is not there. 442 become 294.
+   *
+   * 3,538 wanters become 2,518 and the share of lands carrying it falls from
+   * 94.5% to 24.6% — the utility lands, which is the part of a mana base an
+   * untap deck is actually built to abuse. Krenko, Arcanis, Staff of
+   * Domination, Voltaic Key, Mikokoro, Deserted Temple and Arcane Lighthouse
+   * all keep it.
+   *
+   * THE COST IS STATED RATHER THAN HIDDEN: Sol Ring, Gilded Lotus, Gaea's
+   * Cradle and every mana dork lose the want, and untapping those is a real
+   * thing decks do. It is a thing they do to make MANA, which `ramp` and
+   * `ritual` already name, and saying it here as well is not worth 94.5% of the
+   * mana base.
+   *
+   * `\s+` and not `\s*`, which is the whole rule in one character: a star lets
+   * the engine match zero whitespace and hand the space itself to the
+   * lookahead, so `(?!Add\b)` succeeds against " Add" and every basic land
+   * comes straight back. Found by measuring, not by reading.
+   */
+  { tag: 'untap', test: /\{T\}(?![^:\n]{0,40}\bSacrifice this\b)[^:\n]{0,40}:\s+(?!Add\b)/ },
 
   // An enters-the-battlefield trigger is a card asking to be blinked, and a
   // "whenever another creature enters" trigger is the same deck's payoff. Both
@@ -1619,6 +1989,22 @@ const WANTS: readonly Rule[] = [
    */
   {
     tag: 'spell-cast',
+    /*
+     * STORM IS READ BY ITS REMINDER TEXT, not by the word (ADR-0059), which is
+     * the instrument the `ritual` payoff rule below already uses — and using it
+     * in both places is the whole point, because both rules are asking the same
+     * question about the same keyword.
+     *
+     * The bare word claimed 24 commander-legal cards on the strength of their
+     * own NAMES, which Scryfall spells out in oracle text: "Storm's Wrath deals
+     * 4 damage to each creature" is a board wipe, and Cinder Storm, Lightning
+     * Storm, Comet Storm, Arrow Storm, Storm Seeker and Storm of Souls are
+     * burn. 20 of the 24 are weather. The other 4 carry the real keyword and
+     * keep the tag through the reminder text.
+     *
+     * Measured to cost nothing: all 33 commander-legal cards with the storm
+     * keyword print the reminder, zero exceptions.
+     */
     test: /\bprowess\b|\bmagecraft\b|\bcopy it for each spell cast before it this turn\b|\bwhenever you cast (an instant|a sorcery|your first|an? noncreature)|\binstant and sorcery spells you (cast|control)\b|\bwhenever you copy an instant\b/i,
   },
   /*
@@ -1636,6 +2022,26 @@ const WANTS: readonly Rule[] = [
    * no test could fail on — the same trade the file makes on `itself` above.
    */
   { tag: 'spell-cast', test: /\bwhenever you cast a spell\b/i },
+  /*
+   * The payoff that COUNTS spells rather than triggering on one (ADR-0059).
+   *
+   * Found by diffing the corpus after the storm narrowing above, which is the
+   * reason the diff is done at all: two of the 22 cards that lost the tag were
+   * matching on the word inside a TOKEN'S name — "create a 1/2 blue Bird
+   * creature token with flying named STORM CROW" — and Murmuration, which makes
+   * one Bird for every spell you cast that turn, is a real spellslinger payoff
+   * that no correct rule in this file could reach.
+   *
+   * 12 commander-legal cards, read one by one. Gnostro, Narset Jeskai
+   * Waymaster, Surge of Brilliance and Outlaw Stitcher count; Highspire
+   * Bell-Ringer, Monk Class, Uthros Psionicist and Raging Battle Mouse discount
+   * the second one, which is the same deck asking the same question from the
+   * cost side rather than the trigger side.
+   */
+  {
+    tag: 'spell-cast',
+    test: /\bfor each spell you(?:'|’)ve cast this turn\b|\bnumber of spells you(?:'|’)ve cast this turn\b|\bsecond spell you cast each turn\b/i,
+  },
   /*
    * The trigger that counts spells instead of naming one (ADR-0054).
    *

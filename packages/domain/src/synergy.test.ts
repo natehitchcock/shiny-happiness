@@ -1506,17 +1506,27 @@ describe('deriveSynergy — damage is not life loss (ADR-0023)', () => {
     })
 
     it('keeps the bridge off payoffs about your own life', () => {
-      // The producer rules tag damage aimed at opponents and players, never
-      // "deals 2 damage to you", so offering Vilis a burn spell would be a
-      // match on a life total the spell never touches. 12 cards sit on
-      // `lifeloss` alone for this reason.
+      /*
+       * The producer rules tag damage aimed at opponents and players, never
+       * "deals 2 damage to you", so offering Vilis a burn spell would be a
+       * match on a life total the spell never touches. That refusal is what
+       * this test is for and it is unchanged.
+       *
+       * The TAG the payoff sits on changed in ADR-0059, and the assertion moved
+       * with it rather than being relaxed. ADR-0023 wrote "12 cards sit on
+       * `lifeloss` alone for this reason" as a consequence, not as a claim: the
+       * 12 were on that tag because there was nowhere else, and every producer
+       * `lifeloss` has takes life off somebody ELSE's total. Vilis now wants
+       * `self-lifeloss`, which is the event she actually pays off, and the
+       * bridge refusal below is the same assertion it always was.
+       */
       const vilis = derive(
         'Vilis, Broker of Blood',
         'Legendary Creature — Demon',
         'Flying\n{B}, Pay 2 life: Target creature gets -1/-1 until end of turn.\nWhenever you lose life, draw that many cards. (Damage causes loss of life.)',
       )
 
-      expect(vilis.wants).toContain('lifeloss')
+      expect(vilis.wants).toContain('self-lifeloss')
       expect(vilis.wants).not.toContain('player-damage')
     })
 
@@ -1684,7 +1694,8 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
       // count rather than softened to `toContain`: a vocabulary that grows
       // without anyone noticing is how two tags come to mean the same event.
       expect(SYNERGY_TAGS).toContain('damage')
-      // The count is 26 since ADR-0054 added `ritual` and `creature-cast`;
+      // The count is 27 since ADR-0059 added `self-lifeloss` to ADR-0054's
+      // `ritual` and `creature-cast`;
       // this card was the twenty-first and still is, because the list is
       // append-only (the ORDER is a persisted contract — see `semantic-emphasis`).
       // `EVENT_TAGS` rather than `SYNERGY_TAGS` since ADR-0046, and the reason
@@ -1693,7 +1704,7 @@ describe('deriveSynergy — dealing damage is its own event (ADR-0029)', () => {
       // this is what keeps anyone from adding a twenty-third without saying so.
       // `SYNERGY_TAGS` is that list plus the generated families, whose length is
       // a fact about the corpus rather than a decision anyone made here.
-      expect(EVENT_TAGS).toHaveLength(26)
+      expect(EVENT_TAGS).toHaveLength(27)
     })
 
     it('is spelled as an event, not as an archetype', () => {
@@ -2799,7 +2810,7 @@ describe('deriveSynergy — a land that is also a creature (ADR-0047)', () => {
   describe('the tag', () => {
     it('is in the vocabulary, and is the twenty-second', () => {
       expect(SYNERGY_TAGS).toContain('land-creature')
-      expect(EVENT_TAGS).toHaveLength(26)
+      expect(EVENT_TAGS).toHaveLength(27)
     })
 
     it('is spelled as an event rather than as the deck that plays it', () => {
@@ -3430,5 +3441,673 @@ describe('a ritual is not the mana base (ADR-0054)', () => {
     expect(
       derive('Blood Vassal', 'Creature — Thrull', 'Sacrifice this creature: Add {B}{B}.').produces,
     ).toContain('ritual')
+  })
+})
+
+/**
+ * A window measured from the wrong anchor (ADR-0059).
+ *
+ * Two rules read the same clause and differ by nine characters:
+ *
+ *   token            `${CREATES_FOR_YOU} .{0,40}\btoken`
+ *   sacrifice-fodder `${CREATES_FOR_YOU} .{0,40}\bcreature token`
+ *
+ * `creature token` STARTS nine characters earlier than the bare word `token`,
+ * so inside a window of the same size the NARROWER rule is the easier one to
+ * match. Any token whose description runs 32 to 40 characters got
+ * `sacrifice-fodder` and lost `token` — 277 commander-legal cards — and the
+ * card that reported it says `primary_role: token-maker` on the same row as
+ * tags claiming it makes no tokens.
+ *
+ * The fix is the anchor, not the number: both windows now end at the word
+ * `token`, and the difference between the rules is a zero-width lookbehind
+ * rather than a longer noun phrase. That makes the containment STRUCTURAL —
+ * fodder cannot match where token does not — which is what the property test
+ * below pins, because a number chosen by measurement can be un-chosen and an
+ * invariant cannot.
+ */
+describe('a token description is measured to the word `token` (ADR-0059)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  // The reported card. Its description runs 38 characters from `create` to the
+  // word `token`, which is inside the old fodder window and outside the old
+  // token window.
+  const AVIATION_PIONEER = derive(
+    'Aviation Pioneer',
+    'Creature — Human Artificer',
+    'When this creature enters, create a 1/1 colorless Thopter artifact creature token with flying.',
+  )
+  // The card the playtest watched it happen to, in a token deck, on screen.
+  const FOUNDRY = derive(
+    'Foundry of the Consuls',
+    'Land',
+    '{T}: Add {C}.\n{5}, {T}, Sacrifice this land: Create two 1/1 colorless Thopter artifact creature tokens with flying.',
+  )
+
+  it('reads the token a long description describes', () => {
+    expect(AVIATION_PIONEER.produces).toContain('token')
+    expect(FOUNDRY.produces).toContain('token')
+  })
+
+  it('still reads the fodder it always read', () => {
+    expect(AVIATION_PIONEER.produces).toContain('sacrifice-fodder')
+    expect(FOUNDRY.produces).toContain('sacrifice-fodder')
+  })
+
+  it('reads an artifact creature token as an artifact entering', () => {
+    // The same anchor defect one adjective over: the rule wanted `artifact
+    // token` adjacent and the game writes `Thopter ARTIFACT CREATURE token`.
+    // 133 commander-legal cards, and a Thopter is an artifact entering the
+    // battlefield whatever else it is.
+    expect(AVIATION_PIONEER.produces).toContain('artifact-etb')
+    expect(FOUNDRY.produces).toContain('artifact-etb')
+  })
+
+  it('never claims the fodder without claiming the token', () => {
+    /*
+     * The invariant, over every description length the window can hold. This is
+     * the test the numbers cannot drift past: `sacrifice-fodder` is `token`
+     * plus a condition, so a card carrying the first and not the second is a
+     * contradiction rather than a missing card.
+     */
+    for (let length = 0; length <= 80; length += 1) {
+      const filler = 'x'.repeat(length)
+      const profile = derive(
+        'Filler',
+        'Sorcery',
+        `Create a ${filler} 1/1 white Soldier creature token.`,
+      )
+      if (profile.produces.includes('sacrifice-fodder')) {
+        expect(profile.produces).toContain('token')
+      }
+    }
+  })
+
+  it('keeps the subject test the window sits in front of', () => {
+    // Widening the window must not widen whose tokens they are (ADR-0054).
+    const hunted = derive(
+      'Hunted Horror',
+      'Creature — Horror',
+      'Trample\nWhen this creature enters, target opponent creates two 3/3 green Centaur creature tokens.',
+    )
+
+    expect(hunted.produces).not.toContain('token')
+    expect(hunted.produces).not.toContain('sacrifice-fodder')
+  })
+})
+
+/**
+ * The same defect on the trigger side: a window sized for a short subject
+ * (ADR-0059).
+ *
+ * `whenever .{0,40}\bdies\b` reaches 308 of the 430 commander-legal cards that
+ * carry a "whenever … dies" trigger. Blood Artist's subject is 33 characters
+ * and matches; Zulaport Cutthroat's is the same sentence plus "you control",
+ * runs to 46, and matched nothing at all — so the two halves of one aristocrats
+ * deck disagreed about whether deaths were worth anything.
+ *
+ * 80 is where the measurement stops paying: it reaches 423 of the 430, every
+ * one of the cards it adds is a real death trigger, and the first match at 90
+ * is Rivaz of the Claw, where the words in the window are no longer a subject
+ * at all.
+ */
+describe('a trigger subject is longer than forty characters (ADR-0059)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  it('reads the aristocrats drain that was reachable by nothing', () => {
+    const zulaport = derive(
+      'Zulaport Cutthroat',
+      'Creature — Human Rogue Ally',
+      'Whenever this creature or another creature you control dies, each opponent loses 1 life and you gain 1 life.',
+    )
+    const butcher = derive(
+      'Butcher of Malakir',
+      'Creature — Vampire Warrior',
+      'Flying\nWhenever this creature or another creature you control dies, each opponent sacrifices a creature of their choice.',
+    )
+    const celebrant = derive(
+      'Cruel Celebrant',
+      'Creature — Vampire Soldier',
+      'Whenever this creature or another creature or planeswalker you control dies, each opponent loses 1 life and you gain 1 life.',
+    )
+
+    expect(zulaport.wants).toContain('creature-death')
+    expect(butcher.wants).toContain('creature-death')
+    expect(celebrant.wants).toContain('creature-death')
+  })
+
+  it('reads the attack triggers the thirty-character window could not', () => {
+    // 69 cards, all the same shape: the subject is a qualified creature rather
+    // than a name. Winota, Kindred Discovery, Nahiri, Hooded Blightfang.
+    const winota = derive(
+      'Winota, Joiner of Forces',
+      'Legendary Creature — Human Soldier',
+      'Whenever a non-Human creature you control attacks, look at the top six cards of your library.',
+    )
+    const blightfang = derive(
+      'Hooded Blightfang',
+      'Creature — Snake',
+      'Deathtouch\nWhenever a creature you control with deathtouch attacks, each opponent loses 1 life and you gain 1 life.',
+    )
+
+    expect(winota.wants).toContain('attack-trigger')
+    expect(blightfang.wants).toContain('attack-trigger')
+  })
+
+  it('keeps the subject whose own name carries a full stop', () => {
+    /*
+     * Why the attack rule's gap stays `.` where the death rule's became
+     * `[^.\n]`. The sentence boundary costs exactly one card in the corpus and
+     * it is this one — the honorific trap `creature-etb` documents on "J. Jonah
+     * Jameson" and "Ms. Marvel" — and it buys nothing measurable at sixty
+     * characters. `.` is already bounded by the face, which is the guarantee
+     * that mattered.
+     */
+    const foxglove = derive(
+      'Mr. Foxglove',
+      'Legendary Creature — Fox Noble',
+      "Lifelink\nWhenever Mr. Foxglove attacks, draw cards equal to the number of cards in defending player's hand minus the number of cards in your hand.",
+    )
+
+    expect(foxglove.wants).toContain('attack-trigger')
+  })
+
+  it('does not let the wider window leave the sentence it started in', () => {
+    /*
+     * The window was `.{0,40}`, which crosses a full stop. Widening a gap that
+     * can leave its own sentence is how a trigger condition finds its verb in
+     * the next ability — so the gap became `[^.\n]`, which is this file's own
+     * instrument. Measured to cost nothing at eighty characters, and pinned
+     * here so a later widening cannot quietly restore it.
+     */
+    const unrelated = derive(
+      'Unrelated Clauses',
+      'Enchantment',
+      'Whenever you cast a spell, draw a card. Something in the next sentence dies.',
+    )
+
+    expect(unrelated.wants).not.toContain('creature-death')
+  })
+})
+
+/**
+ * "Its controller" is two different people (ADR-0059).
+ *
+ * ADR-0022 gave the model a subject and ADR-0054 gave the token family one.
+ * Four more families never got the question, and the phrase they all lose it to
+ * is the same: `lifegain`, `landfall`, `card-draw` and the `sacrifice-fodder`
+ * WANT all read a verb whose subject was somebody across the table.
+ *
+ * The reported case is the sharpest. Swords to Plowshares — "Exile target
+ * creature. ITS CONTROLLER gains life equal to its power" — ranked #1 in
+ * Staples for a Heliod deck, whose reason read "enables your emphasised gaining
+ * life". Heliod triggers on YOU gaining life. The card never triggers him.
+ *
+ * The test lives beside the other subject tests and the refusal itself lives in
+ * `token-subject.ts`, which is now the one place the question is decided —
+ * ADR-0054 put it there because four rule tables had made the mistake
+ * independently, and this is the fifth through eighth.
+ */
+describe('deriveSynergy — whose life, whose card, whose land (ADR-0059)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  const SWORDS = derive(
+    'Swords to Plowshares',
+    'Instant',
+    "Exile target creature. Its controller gains life equal to its power.",
+  )
+  const PATH = derive(
+    'Path to Exile',
+    'Instant',
+    'Exile target creature. Its controller may search their library for a basic land card, put that card onto the battlefield tapped, then shuffle.',
+  )
+
+  it('refuses the life the card gives away', () => {
+    // 24 cards, every one read by hand: Swords, Path, Illumination, Nature's
+    // Claim, Condemn, Oust, Last Breath, Lay Down Arms, the Phelddagrifs.
+    expect(SWORDS.produces).not.toContain('lifegain')
+    expect(derive('Illumination', 'Instant', 'Counter target artifact or enchantment spell. Its controller gains life equal to its mana value.').produces).not.toContain('lifegain')
+    expect(derive("Nature's Claim", 'Instant', 'Destroy target artifact or enchantment. Its controller gains 4 life.').produces).not.toContain('lifegain')
+  })
+
+  it('refuses the land the opponent fetches', () => {
+    expect(PATH.produces).not.toContain('landfall')
+    expect(derive('Ghost Quarter', 'Land', '{T}: Add {C}.\n{T}, Sacrifice this land: Destroy target land. Its controller may search their library for a basic land card, put it onto the battlefield, then shuffle.').produces).not.toContain('landfall')
+  })
+
+  it('refuses the card the opponent draws', () => {
+    expect(derive('Bargain', 'Sorcery', 'Target opponent draws a card.\nYou gain 7 life.').produces).not.toContain('card-draw')
+    expect(derive('Master of the Feast', 'Creature — Demon', 'Flying\nAt the beginning of your upkeep, each opponent draws a card.').produces).not.toContain('card-draw')
+    expect(derive('Introduction to Annihilation', 'Sorcery', 'Exile target nonland permanent. Its controller draws a card.').produces).not.toContain('card-draw')
+  })
+
+  it('still reads the same phrase when the antecedent is yours', () => {
+    /*
+     * The half the refusal must NOT take, and the reason the antecedent test is
+     * `target` rather than a list of removal verbs. In a trigger the "it" is a
+     * permanent that fired an ability, which in your own deck is yours — and
+     * Edric is played precisely because YOU draw.
+     */
+    const sliver = derive(
+      'Essence Sliver',
+      'Creature — Sliver',
+      'Whenever a Sliver deals damage, its controller gains that much life.',
+    )
+    const edric = derive(
+      'Edric, Spymaster of Trest',
+      'Legendary Creature — Elf Rogue',
+      'Whenever a creature deals combat damage to one of your opponents, its controller may draw a card.',
+    )
+
+    expect(sliver.produces).toContain('lifegain')
+    expect(edric.produces).toContain('card-draw')
+  })
+
+  it('leaves a symmetric clause alone, because you get one too', () => {
+    /*
+     * ADR-0022's ruling about "each player discards", in a pronoun. "That
+     * player" refers back to "each player" and therefore includes you, so the
+     * pronoun is only refused when its own sentence names an opponent. Nine
+     * cards turn on this, and Horn of Greed is the clearest: it is a card you
+     * play to draw off your own lands.
+     */
+    const horn = derive(
+      'Horn of Greed',
+      'Artifact',
+      'Whenever a player plays a land, that player draws a card.',
+    )
+    const ashes = derive(
+      'From the Ashes',
+      'Sorcery',
+      'Destroy all nonbasic lands. For each land destroyed this way, its controller may search their library for a basic land card and put it onto the battlefield.',
+    )
+
+    expect(horn.produces).toContain('card-draw')
+    // A wipe names no target, so the antecedent test refuses it for free —
+    // which is why `target` was chosen over a list of removal verbs.
+    expect(ashes.produces).toContain('landfall')
+  })
+
+  it('still refuses the pronoun when its own sentence names an opponent', () => {
+    const fruition = derive(
+      'Forced Fruition',
+      'Enchantment',
+      'Whenever an opponent casts a spell, that player draws seven cards.',
+    )
+
+    expect(fruition.produces).not.toContain('card-draw')
+  })
+
+  it('reads the clause and not the card', () => {
+    // Armistice draws YOU a card in the same sentence that gives an opponent
+    // life. The refusal has to take one and leave the other.
+    const armistice = derive(
+      'Armistice',
+      'Enchantment',
+      '{3}{W}{W}: You draw a card and target opponent gains 3 life.',
+    )
+
+    expect(armistice.produces).toContain('card-draw')
+    expect(armistice.produces).not.toContain('lifegain')
+  })
+
+  it('does not read an edict as a payoff for your own tokens', () => {
+    /*
+     * The WANT side of `sacrifice-fodder` had no subject test at all, so
+     * Clackbridge Troll was offered to an aristocrats deck as "benefits from
+     * your expendable bodies". Your bodies are the one thing that does not turn
+     * it on: the Goats are the opponent's, and so is the choice.
+     */
+    const troll = derive(
+      'Clackbridge Troll',
+      'Creature — Troll',
+      'Trample, haste\nWhen this creature enters, target opponent creates three 0/1 white Goat creature tokens.\nAt the beginning of combat on your turn, any opponent may sacrifice a creature of their choice. If a player does, tap this creature and you lose 3 life.',
+    )
+    const demon = derive(
+      'Desecration Demon',
+      'Creature — Demon',
+      'Flying\nAt the beginning of each combat, any opponent may sacrifice a creature of their choice. If a player does, tap this creature and put a +1/+1 counter on it.',
+    )
+
+    // "Any PLAYER may sacrifice" is the same clause without the word opponent,
+    // and it is why this rule takes `addressedToYou` rather than `forYou`.
+    const gorgers = derive(
+      'Brain Gorgers',
+      'Creature — Zombie',
+      'When you cast this spell, any player may sacrifice a creature of their choice. If a player does, counter Brain Gorgers.',
+    )
+
+    expect(troll.wants).not.toContain('sacrifice-fodder')
+    expect(demon.wants).not.toContain('sacrifice-fodder')
+    expect(gorgers.wants).not.toContain('sacrifice-fodder')
+  })
+
+  it('still reads a sacrifice outlet, which is the imperative addressed to you', () => {
+    expect(deriveSynergy(ASHNODS_ALTAR).wants).toContain('sacrifice-fodder')
+    const viscera = derive(
+      'Viscera Seer',
+      'Creature — Vampire Wizard',
+      'Sacrifice a creature: Scry 1.',
+    )
+
+    expect(viscera.wants).toContain('sacrifice-fodder')
+  })
+
+  it('leaves the token family refused, which was re-measured and not assumed', () => {
+    /*
+     * ADR-0054 rejected "its controller creates" at ~74% precision and this
+     * change does not rescue it. Restricting the phrase to a TARGETED
+     * antecedent is what makes it safe for life, cards and lands; the cards
+     * that broke it for tokens name a target too. Descent of the Dragons and
+     * Saw in Half are pointed at your own board on purpose.
+     */
+    const sawInHalf = derive(
+      'Saw in Half',
+      'Instant',
+      "Destroy target creature. If that creature dies this way, its controller creates two tokens that are copies of that creature, except they're 1/1.",
+    )
+
+    expect(sawInHalf.produces).toContain('token')
+  })
+})
+
+/**
+ * A land that taps for mana does not want untapping (ADR-0059).
+ *
+ * `{ tag: 'untap', test: /\{T\}:/ }` asked whether a permanent has a tap
+ * ability at all, and 1,129 of the 1,247 commander-legal lands have one —
+ * 94.5%. Every deck runs about thirty-six lands, so `untap` was the largest
+ * single want in every deck in the product, and it was the mana base saying it.
+ *
+ * The playtest demonstrated it rather than inferring it: with nine Forests in a
+ * green deck, every top-eight row in both the ramp and spot-removal groups was
+ * chipped "shares your untapping theme" — Thornbite Staff, Lux Cannon, Crooked
+ * Scales, Acorn Catapult. Remove the Forests and the chips vanish; re-add them
+ * and they return. It buried green's real cards and hid two other changes.
+ *
+ * WHAT THE RULE IS FOR, measured before narrowing it. There are 324 producers
+ * and they are Seedborn Muse, Wilderness Reclamation, Voltaic Key, Kiora and
+ * Thornbite Staff, and what they are worth is a second activation of an ability
+ * that DOES something. Two guards follow from that and no more:
+ *
+ *   1. The effect is not "Add". A land tapping for mana is the mana base, which
+ *      is the line the user drew for `ritual` one tag over and the same line
+ *      here. 1,129 lands become 442.
+ *   2. The cost does not eat the permanent. "{T}, Sacrifice this land: Destroy
+ *      target nonbasic land" is Wasteland, and untapping Wasteland is worth
+ *      nothing, because it is not there. 442 lands become 294.
+ *
+ * The tag survives for the cards it was for: Krenko, Arcanis, Staff of
+ * Domination, Thornbite Staff, Voltaic Key, Mikokoro, Deserted Temple, Arcane
+ * Lighthouse, Slayers' Stronghold. 3,538 wanters become 2,518, and the share of
+ * lands carrying it goes from 94.5% to 24.6% — the utility lands, which is what
+ * an untap deck is actually built to abuse.
+ *
+ * THE COST IS STATED: Sol Ring, Gilded Lotus, Gaea's Cradle and every mana dork
+ * lose the want, and untapping those is a real thing decks do. It is a thing
+ * they do to make MANA, which `ramp` and `ritual` already name, and it is not
+ * worth 94.5% of the mana base to say it here as well.
+ */
+describe('a land that taps for mana does not want untapping (ADR-0059)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  it('refuses the mana base, which was 94.5% of it', () => {
+    expect(derive('Forest', 'Basic Land — Forest', '({T}: Add {G}.)').wants).not.toContain('untap')
+    expect(derive('Sol Ring', 'Artifact', '{T}: Add {C}{C}.').wants).not.toContain('untap')
+    expect(
+      derive('Llanowar Elves', 'Creature — Elf Druid', '{T}: Add {G}.').wants,
+    ).not.toContain('untap')
+  })
+
+  it('refuses an ability that eats the permanent it is on', () => {
+    // Untapping Wasteland is worth nothing, because it is not there.
+    const wasteland = derive(
+      'Wasteland',
+      'Land',
+      '{T}: Add {C}.\n{T}, Sacrifice this land: Destroy target nonbasic land.',
+    )
+
+    expect(wasteland.wants).not.toContain('untap')
+  })
+
+  it('keeps the permanents the tag was for', () => {
+    const krenko = derive(
+      'Krenko, Mob Boss',
+      'Legendary Creature — Goblin Warrior',
+      '{T}: Create X 1/1 red Goblin creature tokens, where X is the number of Goblins you control.',
+    )
+    const arcanis = derive(
+      'Arcanis the Omnipotent',
+      'Legendary Creature — Wizard',
+      '{T}: Draw three cards.\n{2}{U}{U}: Return this creature to its owner’s hand.',
+    )
+    const key = derive('Voltaic Key', 'Artifact', '{1}, {T}: Untap target artifact.')
+
+    expect(krenko.wants).toContain('untap')
+    expect(arcanis.wants).toContain('untap')
+    expect(key.wants).toContain('untap')
+  })
+
+  it('reads a tap ability whose cost is more than the tap', () => {
+    /*
+     * Found by the same narrowing, in the opposite direction. `/\{T\}:/`
+     * required the tap to be the WHOLE cost, so 399 commander-legal cards whose
+     * only tap ability is a compound one wanted nothing at all: Hell's
+     * Caretaker, Cryptbreaker, Krovikan Sorcerer, Balloon Peddler. They are
+     * exactly the abilities an untapper is played to use twice.
+     */
+    const caretaker = derive(
+      "Hell's Caretaker",
+      'Creature — Human Cleric',
+      '{T}, Sacrifice a creature: Return target creature card from your graveyard to the battlefield. Activate only during your upkeep.',
+    )
+
+    expect(caretaker.wants).toContain('untap')
+  })
+
+  it('keeps a utility land, which is the quarter of the mana base that survives', () => {
+    // The clause is the unit, not the card: these tap for mana AND do something.
+    const mikokoro = derive(
+      'Mikokoro, Center of the Sea',
+      'Legendary Land',
+      '{T}: Add {C}.\n{2}, {T}: Each player draws a card.',
+    )
+    const lighthouse = derive(
+      'Arcane Lighthouse',
+      'Land',
+      "{T}: Add {C}.\n{1}, {T}: Until end of turn, creatures your opponents control lose hexproof and shroud and can't have hexproof or shroud.",
+    )
+
+    expect(mikokoro.wants).toContain('untap')
+    expect(lighthouse.wants).toContain('untap')
+  })
+
+  it('does not read a card that is merely named after a storm', () => {
+    /*
+     * `spell-cast` read the bare word `storm`, and Scryfall spells a card's own
+     * name out in its oracle text — so "Storm's Wrath deals 4 damage to each
+     * creature" claimed to be a spellslinger payoff. 24 cards match on the word
+     * alone and 20 of them are named after weather: Cinder Storm, Lightning
+     * Storm, Comet Storm, Arrow Storm, Storm Seeker, Storm of Souls.
+     *
+     * The instrument is the one the `ritual` payoff rule two rules down already
+     * uses, and using it twice is the point: read the KEYWORD by its reminder
+     * text. Every one of the 33 commander-legal cards with the storm keyword
+     * prints it — checked, zero exceptions — so the narrowing costs nothing.
+     */
+    const wrath = derive('Storm’s Wrath', 'Sorcery', 'Storm’s Wrath deals 4 damage to each creature and each planeswalker.')
+    const cinder = derive('Cinder Storm', 'Sorcery', 'Cinder Storm deals 7 damage to any target.')
+    const real = derive(
+      'Weather the Storm',
+      'Instant',
+      'You gain 3 life.\nStorm (When you cast this spell, copy it for each spell cast before it this turn.)',
+    )
+
+    expect(wrath.wants).not.toContain('spell-cast')
+    expect(cinder.wants).not.toContain('spell-cast')
+    expect(real.wants).toContain('spell-cast')
+  })
+
+  it('counts the spells instead of naming one', () => {
+    /*
+     * Found by the storm narrowing, which is the reason to do the corpus diff:
+     * two of the 22 cards that lost the tag were matching on the word inside a
+     * TOKEN'S name — "create a 1/2 blue Bird creature token with flying named
+     * STORM CROW" — and one of them, Murmuration, is a real spellslinger payoff
+     * that no correct rule could reach.
+     *
+     * The template it uses is its own: a card that COUNTS the spells you have
+     * cast this turn rather than triggering on one. 12 commander-legal cards,
+     * read one by one — Gnostro, Narset Jeskai Waymaster, Surge of Brilliance,
+     * and the "second spell you cast each turn costs less" cycle, which is the
+     * same deck asking the same question from the cost side.
+     */
+    const murmuration = derive(
+      'Murmuration',
+      'Enchantment',
+      "Birds you control get +1/+1 and have vigilance.\nAt the beginning of your end step, for each spell you've cast this turn, create a 1/2 blue Bird creature token with flying named Storm Crow.",
+    )
+    const gnostro = derive(
+      'Gnostro, Voice of the Crags',
+      'Legendary Creature — Elemental',
+      "{T}: Choose one. X is the number of spells you've cast this turn.\n• Scry X.",
+    )
+    const ringer = derive(
+      'Highspire Bell-Ringer',
+      'Creature — Human Monk',
+      'Flying\nThe second spell you cast each turn costs {1} less to cast.',
+    )
+
+    expect(murmuration.wants).toContain('spell-cast')
+    expect(gnostro.wants).toContain('spell-cast')
+    expect(ringer.wants).toContain('spell-cast')
+  })
+
+  it('still produces untap where it always did', () => {
+    // The producer side is untouched: this change is about who WANTS it.
+    const muse = derive(
+      'Seedborn Muse',
+      'Creature — Fungus',
+      "Untap all permanents you control during each other player's untap step.",
+    )
+
+    expect(muse.produces).toContain('untap')
+  })
+})
+
+/**
+ * Losing life yourself is a different event from making somebody else lose it
+ * (ADR-0059, amending ADR-0023).
+ *
+ * `lifeloss` had no subject test at all. 257 of its 1,062 commander-legal
+ * producers lose the life THEMSELVES — Dark Confidant, Grim Tutor, Foul Imp,
+ * Bellowing Saddlebrute, Feed the Swarm — and the panel renders the tag as
+ * "opponents losing life", so a Vito deck was offered a card that takes life
+ * off its own total as an enabler for taking it off theirs.
+ *
+ * ADR-0023 saw half of this and left it: "that leaves 12 self-life payoffs on
+ * `lifeloss` alone, which is correct". It was correct about the payoffs and it
+ * never measured the producers, and with both sides subject-agnostic the tag
+ * matched in BOTH wrong directions — 257 self-producers against 7 opponent
+ * payoffs, and 805 opponent-producers against 10 self ones.
+ *
+ * A SUBJECT TEST ALONE CANNOT FIX IT, which is why this is a tag and not a
+ * regex. Narrowing only the producer leaves Vilis wanting an event nothing
+ * emits; narrowing both sides deletes the Vilis deck, which is precisely the
+ * mistake ADR-0016 records against itself ("narrowed it to here and stopped,
+ * which deleted the opponent side rather than modelling it"). The event has two
+ * subjects and needs two names.
+ *
+ * 317 producers and 12 payoffs, which is the same order as `land-creature`'s
+ * 185 and 12 — the count ADR-0047 admitted a tag on.
+ */
+describe('losing life yourself is its own event (ADR-0059)', () => {
+  const derive = (name: string, typeLine: string, oracleText: string): SynergyProfile =>
+    deriveSynergy({ oracleId: oracleId(name), name, typeLine, oracleText, keywords: [] })
+
+  const CONFIDANT = derive(
+    'Dark Confidant',
+    'Creature — Human Wizard',
+    'At the beginning of your upkeep, reveal the top card of your library and put that card into your hand. You lose life equal to its mana value.',
+  )
+  const VITO = derive(
+    'Vito, Thorn of the Dusk Rose',
+    'Legendary Creature — Vampire Cleric',
+    'Lifelink\nWhenever you gain life, each opponent loses that much life.',
+  )
+  const VILIS = derive(
+    'Vilis, Broker of Blood',
+    'Legendary Creature — Demon',
+    '{B}, Pay 2 life: Target creature gets -1/-1 until end of turn.\nWhenever you lose life, draw that many cards.',
+  )
+
+  it('is in the vocabulary, and appended rather than inserted', () => {
+    // The ORDER is a persisted contract (`semantic-emphasis`), so the events
+    // keep the indices they had and this one goes on the end.
+    expect(SYNERGY_TAGS).toContain('self-lifeloss')
+    expect(EVENT_TAGS).toHaveLength(27)
+    expect(EVENT_TAGS[EVENT_TAGS.length - 1]).toBe('self-lifeloss')
+  })
+
+  it('does not call a card that pays its own life an opponent drain', () => {
+    expect(CONFIDANT.produces).not.toContain('lifeloss')
+    expect(CONFIDANT.produces).toContain('self-lifeloss')
+  })
+
+  it('keeps the drain on the tag whose label says drain', () => {
+    expect(VITO.produces).toContain('lifeloss')
+    expect(VITO.produces).not.toContain('self-lifeloss')
+  })
+
+  it('gives the payoff for your own life loss somewhere to live', () => {
+    // The 12 cards ADR-0023 named and left mislabelled. Under one tag Vilis was
+    // offered a Vito, which never touches your total.
+    expect(VILIS.wants).toContain('self-lifeloss')
+    expect(VILIS.wants).not.toContain('lifeloss')
+  })
+
+  it('reads the disjunction the payoffs are written with', () => {
+    // "Whenever you gain OR LOSE life" — two of the twelve, and an adjacency
+    // test reads straight past them.
+    const witness = derive(
+      'Wax-Wane Witness',
+      'Creature — Spirit',
+      'Flying, vigilance\nWhenever you gain or lose life during your turn, this creature gets +1/+0 until end of turn.',
+    )
+
+    expect(witness.wants).toContain('self-lifeloss')
+  })
+
+  it('reads a symmetric clause as BOTH, because it is', () => {
+    // ADR-0022's ruling about "each player discards", one event over.
+    const syphon = derive(
+      'Syphon Life',
+      'Sorcery',
+      'Each player loses 2 life. You gain life equal to the life lost this way.',
+    )
+
+    expect(syphon.produces).toContain('lifeloss')
+    expect(syphon.produces).toContain('self-lifeloss')
+  })
+
+  it('does not extend the damage bridge to your own total', () => {
+    /*
+     * ADR-0023's ruling, kept: "whenever an opponent loses life" fires off a
+     * Lightning Bolt and "whenever YOU lose life" does not, because no producer
+     * rule ever emits `lifeloss` for damage aimed at you. Splitting the tag
+     * must not quietly rebuild that bridge on the new side.
+     */
+    expect(VILIS.wants).not.toContain('player-damage')
+  })
+
+  it('pairs the new tag with what a deck that pays life is actually for', () => {
+    // Necropotence, Bolas's Citadel, Vilis: life is the resource you spend on
+    // cards, and gaining it back is how the deck survives doing so.
+    expect(interactsWith('self-lifeloss')).toContain('card-draw')
+    expect(interactsWith('self-lifeloss')).toContain('lifegain')
   })
 })

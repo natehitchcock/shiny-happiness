@@ -30,6 +30,18 @@ Amends [ADR-0031](0031-a-card-is-offered-under-the-role-it-is-counted-as.md)
 >   read a bare keyword and claimed Hunted Horror's donated Centaurs. ADR-0060
 >   §6 fixes it by exporting this file's list rather than copying it.
 
+> **EXTENDED BY [ADR-0059](0059-a-window-has-an-anchor-and-an-event-has-a-subject.md).**
+> §1 built `token-subject.ts` so a fourth rule table could not write the
+> subject test out privately; ADR-0059 §3 is the fifth through ninth, and the
+> general refusal now lives in that same file beside the token verb. Two
+> rulings of this ADR were re-measured and BOTH stand: "its controller
+> creates" is still refused (restricting it to a targeted antecedent does not
+> rescue its precision — Descent of the Dragons, Terastodon and Saw in Half
+> all name a target), and the token rules' subject test is unchanged. What
+> ADR-0059 §1 changes is their WINDOW: `token` and `sacrifice-fodder` were
+> nine characters apart on the same clause, so the narrower rule was the
+> easier one to match and 277 cards were fodder that was not a token.
+
 ## Context
 
 A playtest found five domain-side defects and left one open question. Two

@@ -681,6 +681,142 @@ describe('the committed vocabulary', () => {
     expect(new Set(SEMANTIC_TAGS).size).toBe(SEMANTIC_TAGS.length)
   })
 
+  it('does not let a keyword match inside a longer keyword (ADR-0059)', () => {
+    /*
+     * `Double` and `Double strike` are both in the vocabulary, and
+     * `\bDouble\b` matches inside the second one — so 177 of the 304
+     * commander-legal cards carrying `ability:double` are cards whose text says
+     * "double strike" and nothing else. A focus prompt offered "double" and
+     * "double strike" as adjacent chips meaning the same thing.
+     *
+     * The vocabulary is GENERATED, so the fix cannot be to delete a word: it is
+     * that a keyword pattern must refuse the longer keywords it is a prefix of.
+     * Four pairs in the vocabulary today — Double/Double strike, Hexproof/
+     * Hexproof from, Manifest/Manifest dread, Partner/Partner with — and the
+     * guard is built from the vocabulary rather than listed, so a fifth pair
+     * arrives already handled.
+     */
+    const vocab: SemanticVocabulary = {
+      subtypes: ['Elf'],
+      abilities: ['Double', 'Double strike'],
+    }
+    const anthem = named(
+      'Duelist’s Heritage',
+      'Creature — Angel',
+      'Creatures you control with double strike get +1/+1.',
+      [],
+    )
+    const grant = named(
+      'Kaya’s Onslaught',
+      'Instant',
+      'Target creature gains double strike until end of turn.',
+      [],
+    )
+
+    expect(deriveSemanticTokens(anthem, vocab).wants).toContain('ability:double-strike')
+    expect(deriveSemanticTokens(anthem, vocab).wants).not.toContain('ability:double')
+    expect(deriveSemanticTokens(grant, vocab).produces).toContain('ability:double-strike')
+    expect(deriveSemanticTokens(grant, vocab).produces).not.toContain('ability:double')
+  })
+
+  it('does not read a NEGATED subtype as one the card wants (ADR-0059)', () => {
+    /*
+     * "Exile all permanents. Return each card exiled this way that's a land
+     * card to the battlefield, then each player draws seven cards" — Karn
+     * Liberated's real text is "leaving in exile all NON-AURA permanent cards",
+     * and the capitalised-word scan read `Aura` straight out of it. Mikaeus
+     * "benefits from Humans" off "Other NON-HUMAN creatures you control get
+     * +1/+1", which is the opposite of what he is played for. 184
+     * commander-legal cards.
+     *
+     * The CLAUSE is the unit, not the card, which is what keeps Winota: she
+     * triggers on "a NON-HUMAN creature you control" and then puts a HUMAN
+     * creature card onto the battlefield, and only the first mention is blanked.
+     */
+    const vocab: SemanticVocabulary = {
+      subtypes: ['Elf', 'Aura', 'Zombie', 'Human'],
+      abilities: ['Flying'],
+    }
+    const karn = named(
+      'Karn Liberated',
+      'Legendary Planeswalker — Karn',
+      '−14: Restart the game, leaving in exile all non-Aura permanent cards you own.',
+    )
+    const mikaeus = named(
+      'Mikaeus, the Unhallowed',
+      'Legendary Creature — Zombie Cleric',
+      'Other non-Human creatures you control get +1/+1 and have undying.',
+    )
+    // The card that found the discriminator, and the one already pinned further
+    // up this file: an ELF whose edict spares Elves is an Elf deck's card.
+    const winnower = named(
+      'Ruthless Winnower',
+      'Creature — Elf Warrior',
+      "At the beginning of each player's upkeep, that player sacrifices a non-Elf creature of their choice.",
+    )
+    // And the clause is still the unit even when the type line does not save
+    // the card: Winota names Humans twice and only the negated one is blanked.
+    const winota = named(
+      'Winota, Joiner of Forces',
+      'Legendary Creature — Zombie Soldier',
+      'Whenever a non-Human creature you control attacks, you may put a Human creature card from your hand onto the battlefield.',
+    )
+
+    expect(deriveSemanticTokens(karn, vocab).wants).not.toContain('subtype:aura')
+    expect(deriveSemanticTokens(mikaeus, vocab).wants).not.toContain('subtype:human')
+    expect(deriveSemanticTokens(winnower, vocab).wants).toContain('subtype:elf')
+    expect(deriveSemanticTokens(winota, vocab).wants).toContain('subtype:human')
+  })
+
+  it('does not read an Aura that MAKES a subtype as one that wants it (ADR-0059)', () => {
+    /*
+     * Frogify does not benefit from Frogs; it turns an opponent's creature into
+     * one. 11 commander-legal cards — Ichthyomorphosis, Witness Protection,
+     * Kenrith's Transformation, Lignify, Reprobation — and a direction
+     * inversion is the worst error this model can make (ADR-0016).
+     *
+     * Refused rather than claimed as a `produces`, which was the tempting
+     * symmetry with ADR-0048's "granting a keyword is causing it": the creature
+     * being transformed is the one you just answered, so the Frog is the
+     * opponent's. That is ADR-0054's ruling about a donated token, one clause
+     * over.
+     */
+    const vocab: SemanticVocabulary = { subtypes: ['Frog', 'Elf'], abilities: ['Flying'] }
+    const frogify = named(
+      'Frogify',
+      'Enchantment — Aura',
+      'Enchant creature\nEnchanted creature loses all abilities and is a blue Frog with base power and toughness 1/1.',
+    )
+
+    expect(deriveSemanticTokens(frogify, vocab).wants).not.toContain('subtype:frog')
+    expect(deriveSemanticTokens(frogify, vocab).produces).not.toContain('subtype:frog')
+  })
+
+  it('reads the same words as a WANT when they are a condition (ADR-0059)', () => {
+    /*
+     * "Enchanted creature IS a Knight" is Dub making one. "AS LONG AS equipped
+     * creature IS a Human, it has lifelink" is Butcher's Cleaver asking for
+     * one — the card is worth more in a deck full of Humans, which is the
+     * definition of a want. Found by diffing the corpus: without the guard the
+     * transformation rule took the tag off the whole Human-Equipment cycle,
+     * 12 cards.
+     */
+    const vocab: SemanticVocabulary = { subtypes: ['Human', 'Knight'], abilities: ['Flying'] }
+    const cleaver = named(
+      "Butcher's Cleaver",
+      'Artifact — Equipment',
+      'Equipped creature gets +3/+0.\nAs long as equipped creature is a Human, it has lifelink.\nEquip {3}',
+    )
+    const dub = named(
+      'Dub',
+      'Enchantment — Aura',
+      'Enchant creature\nEnchanted creature gets +2/+2, has first strike, and is a Knight in addition to its other types.',
+    )
+
+    expect(deriveSemanticTokens(cleaver, vocab).wants).toContain('subtype:human')
+    expect(deriveSemanticTokens(dub, vocab).wants).not.toContain('subtype:knight')
+  })
+
   it('is derived from the same words the derivation looks for', () => {
     // The vocabulary file carries the words in Scryfall's own casing, because
     // that is what the text rules match on; the tags are those words normalised.
