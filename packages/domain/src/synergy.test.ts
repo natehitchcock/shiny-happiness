@@ -8,6 +8,7 @@ import {
   deriveSynergy,
   interactsWith,
   EVENT_TAGS,
+  semanticCategory,
   SYNERGY_TAGS,
   synergyMatches,
   synergyScore,
@@ -15,6 +16,7 @@ import {
   type SynergyProfile,
   type SynergyTag,
 } from './synergy.js'
+import { SEMANTIC_VOCABULARY } from './semantic-tokens.js'
 
 const card = (
   name: string,
@@ -3657,7 +3659,7 @@ describe('deriveSynergy — whose life, whose card, whose land (ADR-0059)', () =
   const SWORDS = derive(
     'Swords to Plowshares',
     'Instant',
-    "Exile target creature. Its controller gains life equal to its power.",
+    'Exile target creature. Its controller gains life equal to its power.',
   )
   const PATH = derive(
     'Path to Exile',
@@ -3669,19 +3671,51 @@ describe('deriveSynergy — whose life, whose card, whose land (ADR-0059)', () =
     // 24 cards, every one read by hand: Swords, Path, Illumination, Nature's
     // Claim, Condemn, Oust, Last Breath, Lay Down Arms, the Phelddagrifs.
     expect(SWORDS.produces).not.toContain('lifegain')
-    expect(derive('Illumination', 'Instant', 'Counter target artifact or enchantment spell. Its controller gains life equal to its mana value.').produces).not.toContain('lifegain')
-    expect(derive("Nature's Claim", 'Instant', 'Destroy target artifact or enchantment. Its controller gains 4 life.').produces).not.toContain('lifegain')
+    expect(
+      derive(
+        'Illumination',
+        'Instant',
+        'Counter target artifact or enchantment spell. Its controller gains life equal to its mana value.',
+      ).produces,
+    ).not.toContain('lifegain')
+    expect(
+      derive(
+        "Nature's Claim",
+        'Instant',
+        'Destroy target artifact or enchantment. Its controller gains 4 life.',
+      ).produces,
+    ).not.toContain('lifegain')
   })
 
   it('refuses the land the opponent fetches', () => {
     expect(PATH.produces).not.toContain('landfall')
-    expect(derive('Ghost Quarter', 'Land', '{T}: Add {C}.\n{T}, Sacrifice this land: Destroy target land. Its controller may search their library for a basic land card, put it onto the battlefield, then shuffle.').produces).not.toContain('landfall')
+    expect(
+      derive(
+        'Ghost Quarter',
+        'Land',
+        '{T}: Add {C}.\n{T}, Sacrifice this land: Destroy target land. Its controller may search their library for a basic land card, put it onto the battlefield, then shuffle.',
+      ).produces,
+    ).not.toContain('landfall')
   })
 
   it('refuses the card the opponent draws', () => {
-    expect(derive('Bargain', 'Sorcery', 'Target opponent draws a card.\nYou gain 7 life.').produces).not.toContain('card-draw')
-    expect(derive('Master of the Feast', 'Creature — Demon', 'Flying\nAt the beginning of your upkeep, each opponent draws a card.').produces).not.toContain('card-draw')
-    expect(derive('Introduction to Annihilation', 'Sorcery', 'Exile target nonland permanent. Its controller draws a card.').produces).not.toContain('card-draw')
+    expect(
+      derive('Bargain', 'Sorcery', 'Target opponent draws a card.\nYou gain 7 life.').produces,
+    ).not.toContain('card-draw')
+    expect(
+      derive(
+        'Master of the Feast',
+        'Creature — Demon',
+        'Flying\nAt the beginning of your upkeep, each opponent draws a card.',
+      ).produces,
+    ).not.toContain('card-draw')
+    expect(
+      derive(
+        'Introduction to Annihilation',
+        'Sorcery',
+        'Exile target nonland permanent. Its controller draws a card.',
+      ).produces,
+    ).not.toContain('card-draw')
   })
 
   it('still reads the same phrase when the antecedent is yours', () => {
@@ -3858,9 +3892,9 @@ describe('a land that taps for mana does not want untapping (ADR-0059)', () => {
   it('refuses the mana base, which was 94.5% of it', () => {
     expect(derive('Forest', 'Basic Land — Forest', '({T}: Add {G}.)').wants).not.toContain('untap')
     expect(derive('Sol Ring', 'Artifact', '{T}: Add {C}{C}.').wants).not.toContain('untap')
-    expect(
-      derive('Llanowar Elves', 'Creature — Elf Druid', '{T}: Add {G}.').wants,
-    ).not.toContain('untap')
+    expect(derive('Llanowar Elves', 'Creature — Elf Druid', '{T}: Add {G}.').wants).not.toContain(
+      'untap',
+    )
   })
 
   it('refuses an ability that eats the permanent it is on', () => {
@@ -3939,7 +3973,11 @@ describe('a land that taps for mana does not want untapping (ADR-0059)', () => {
      * text. Every one of the 33 commander-legal cards with the storm keyword
      * prints it — checked, zero exceptions — so the narrowing costs nothing.
      */
-    const wrath = derive('Storm’s Wrath', 'Sorcery', 'Storm’s Wrath deals 4 damage to each creature and each planeswalker.')
+    const wrath = derive(
+      'Storm’s Wrath',
+      'Sorcery',
+      'Storm’s Wrath deals 4 damage to each creature and each planeswalker.',
+    )
     const cinder = derive('Cinder Storm', 'Sorcery', 'Cinder Storm deals 7 damage to any target.')
     const real = derive(
       'Weather the Storm',
@@ -4109,5 +4147,57 @@ describe('losing life yourself is its own event (ADR-0059)', () => {
     // cards, and gaining it back is how the deck survives doing so.
     expect(interactsWith('self-lifeloss')).toContain('card-draw')
     expect(interactsWith('self-lifeloss')).toContain('lifegain')
+  })
+})
+
+/**
+ * The vocabulary has three KINDS in it, and until now nothing said so out loud
+ * (ADR-0065).
+ *
+ * `SYNERGY_TAGS` is one flat array of 613 entries assembled from three sources
+ * with three different provenances — 27 hand-curated events, 317 keywords and
+ * 269 subtypes read off the corpus. The UI that offers them had to re-derive
+ * that split from the wire spelling of a prefix, which is the domain's own
+ * taxonomy leaking into a component that cannot be told when it changes.
+ *
+ * TOTALITY IS THE WHOLE POINT of the first test. A fourth generated family
+ * added to `SEMANTIC_TAGS` would otherwise be classified as `mechanics` by
+ * fall-through and appear under a heading that is a lie, and nothing would
+ * fail.
+ */
+describe('which kind of thing a tag is (ADR-0065)', () => {
+  it('answers for every tag in the vocabulary, and puts each in exactly one kind', () => {
+    const seen = new Map<SynergyTag, string>()
+    for (const tag of SYNERGY_TAGS) seen.set(tag, semanticCategory(tag))
+    // Every tag answered, and no tag answered twice — `SYNERGY_TAGS` is
+    // append-only and deduplicated, so the map size is the array length.
+    expect(seen.size).toBe(SYNERGY_TAGS.length)
+    for (const [tag, category] of seen) {
+      expect(['mechanics', 'keyword', 'type'], `${tag} fell outside the three kinds`).toContain(
+        category,
+      )
+    }
+  })
+
+  it('counts each kind at the size of the source it came from', () => {
+    // The measurement ADR-0065 records. If a family grows, this is the test
+    // that says so rather than the UI quietly showing a longer list.
+    const count = (kind: string): number =>
+      SYNERGY_TAGS.filter((tag) => semanticCategory(tag) === kind).length
+    expect(count('mechanics')).toBe(EVENT_TAGS.length)
+    expect(count('keyword')).toBe(SEMANTIC_VOCABULARY.abilities.length)
+    expect(count('type')).toBe(SEMANTIC_VOCABULARY.subtypes.length)
+  })
+
+  it('calls a curated event a mechanic, whichever end of the append-only list it is on', () => {
+    expect(semanticCategory('landfall')).toBe('mechanics')
+    expect(semanticCategory('creature-death')).toBe('mechanics')
+    // The three appended after ADR-0046 took the array past the events.
+    expect(semanticCategory('self-lifeloss')).toBe('mechanics')
+  })
+
+  it('splits the two generated families, which share a prefix shape but not a kind', () => {
+    expect(semanticCategory('subtype:elf')).toBe('type')
+    expect(semanticCategory('ability:flying')).toBe('keyword')
   })
 })
