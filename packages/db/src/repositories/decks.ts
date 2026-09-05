@@ -48,24 +48,63 @@ interface DeckRow {
   readonly last_opened_at: Date
 }
 
-interface EntryRow {
-  readonly oracle_id: string
-  readonly zone: string
-  readonly origin: string
-  readonly locked: boolean
-  readonly role_override: string[] | null
-  readonly tags: string[]
-  readonly added_at: Date
+/**
+ * The `deck_entries` half of `getDeck`'s joined row.
+ *
+ * Every column carries an `entry_` prefix, and that prefix is load-bearing
+ * rather than decorative. `decks` and `deck_entries` BOTH have an `id`, so
+ * `SELECT d.*, e.*` would hand back one `id` key for the pair and pg resolves a
+ * duplicate key to the LAST column of that name — the deck's own id would
+ * silently become an entry's bigserial. Nothing downstream could catch that:
+ * `Deck.id` is a branded string, an entry id is a string, and the corrupted
+ * deck would be returned to the route looking entirely well-formed.
+ *
+ * `entry_id` is a `bigserial`, which the driver returns as a string. It is
+ * never read as a value — only as the "did this row match an entry" sentinel
+ * below — but it must be SELECTed, because `ORDER BY` alone would not tell the
+ * empty deck from a real one.
+ */
+interface EntryColumns {
+  readonly entry_id: string
+  readonly entry_oracle_id: string
+  readonly entry_zone: string
+  readonly entry_origin: string
+  readonly entry_locked: boolean
+  readonly entry_role_override: string[] | null
+  readonly entry_tags: string[]
+  readonly entry_added_at: Date
 }
 
-const toEntry = (row: EntryRow): DeckEntry => ({
-  oracleId: row.oracle_id as OracleId,
-  zone: row.zone as Zone,
-  origin: row.origin as Origin,
-  locked: row.locked,
-  roleOverride: row.role_override === null ? null : (row.role_override as Role[]),
-  tags: row.tags,
-  addedAt: row.added_at.toISOString(),
+/**
+ * A deck column set, plus the entry columns as a LEFT JOIN may produce them.
+ *
+ * A deck with no entries still matches — as ONE row whose every entry column is
+ * NULL — so the entry half is nullable here and narrowed by `isEntry`.
+ */
+type DeckWithEntryRow = DeckRow & {
+  readonly [K in keyof EntryColumns]: EntryColumns[K] | null
+}
+
+/**
+ * Did this joined row match a real entry, or is it the all-NULL row a LEFT JOIN
+ * gives a deck with none?
+ *
+ * Tested on `entry_id`, the entries' primary key: it is NOT NULL in the table,
+ * so NULL there can only mean "no row on the right". `entry_role_override` is
+ * genuinely nullable and `entry_tags` genuinely defaults to `{}`, so neither
+ * could carry this distinction.
+ */
+const isEntry = (row: DeckWithEntryRow): row is DeckWithEntryRow & EntryColumns =>
+  row.entry_id !== null
+
+const toEntry = (row: EntryColumns): DeckEntry => ({
+  oracleId: row.entry_oracle_id as OracleId,
+  zone: row.entry_zone as Zone,
+  origin: row.entry_origin as Origin,
+  locked: row.entry_locked,
+  roleOverride: row.entry_role_override === null ? null : (row.entry_role_override as Role[]),
+  tags: row.entry_tags,
+  addedAt: row.entry_added_at.toISOString(),
 })
 
 const toDeck = (row: DeckRow, entries: readonly DeckEntry[]): Deck => ({
@@ -129,27 +168,59 @@ const toDeck = (row: DeckRow, entries: readonly DeckEntry[]): Deck => ({
 })
 
 /**
- * Read a deck.
+ * Read a deck and its entries.
  *
- * Both queries run in ONE transaction. Read separately, `version` can be fetched
+ * ONE statement, and the read consistency that matters here is why the shape is
+ * worth the aliasing. Read as two separate queries, `version` can be fetched
  * before a concurrent batch commits and `entries` after it, producing a deck
  * whose version does not describe its own contents — and version is exactly what
- * the client sends back for optimistic concurrency.
+ * the client sends back for optimistic concurrency. A single statement runs
+ * against a single snapshot, so it is at least as consistent as the transaction
+ * this replaced.
+ *
+ * It replaced a `withTransaction` wrapping two SELECTs, which put four round
+ * trips on the wire — BEGIN, SELECT, SELECT, COMMIT — for two reads. Measured
+ * against the real database, ten runs each: 152 ms median for the transaction
+ * against 38 ms for this query (ADR-0063). One round trip is ~36 ms from a
+ * developer machine, and `getDeck` is on the path of every deck route, so those
+ * three saved trips were the single largest line in a 381 ms recommendations
+ * request — larger than the scoring the request exists to do.
+ *
+ * `withTransaction` is untouched and still used: every write path needs it, and
+ * this was its only read-only caller.
+ *
+ * The entry columns are aliased one by one rather than taken as `e.*` — see
+ * `EntryColumns` for the id collision that would otherwise corrupt the deck.
+ * `d.*` is safe on the left of the join because the prefix keeps the right side
+ * out of its namespace, and it keeps this query's deck half exactly as wide as
+ * the `SELECT *` it replaced.
  */
-export const getDeck = async (pool: Pool, id: DeckId): Promise<Deck | null> =>
-  withTransaction(pool, async (client) => {
-    const { rows } = await client.query<DeckRow>(
-      'SELECT * FROM decks WHERE id = $1 AND deleted_at IS NULL',
-      [id],
-    )
-    const row = rows[0]
-    if (row === undefined) return null
-    const { rows: entryRows } = await client.query<EntryRow>(
-      'SELECT * FROM deck_entries WHERE deck_id = $1 ORDER BY id',
-      [id],
-    )
-    return toDeck(row, entryRows.map(toEntry))
-  })
+export const getDeck = async (pool: Pool, id: DeckId): Promise<Deck | null> => {
+  const { rows } = await pool.query<DeckWithEntryRow>(
+    `SELECT d.*,
+            e.id            AS entry_id,
+            e.oracle_id     AS entry_oracle_id,
+            e.zone          AS entry_zone,
+            e.origin        AS entry_origin,
+            e.locked        AS entry_locked,
+            e.role_override AS entry_role_override,
+            e.tags          AS entry_tags,
+            e.added_at      AS entry_added_at
+       FROM decks d
+       LEFT JOIN deck_entries e ON e.deck_id = d.id
+      WHERE d.id = $1 AND d.deleted_at IS NULL
+      ORDER BY e.id`,
+    [id],
+  )
+  const row = rows[0]
+  // No rows at all: no such deck, or it is soft-deleted. Both are `null`, and
+  // the caller turns that into a 404 — unchanged from the two-query version.
+  if (row === undefined) return null
+  // A deck with no entries matches as one all-NULL row, NOT as zero rows, so
+  // the entries are filtered rather than mapped. Mapping would give that deck a
+  // single entry built entirely out of NULLs.
+  return toDeck(row, rows.filter(isEntry).map(toEntry))
+}
 
 export interface CreateDeckInput {
   readonly id: DeckId

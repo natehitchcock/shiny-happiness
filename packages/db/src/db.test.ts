@@ -1795,6 +1795,177 @@ describeDb('packages/db against real PostgreSQL', () => {
         expect((await getDeck(db.pool, id))?.columns).toBeNull()
       })
     })
+
+    /**
+     * `getDeck` reads the deck and its entries in ONE statement (ADR-0063).
+     *
+     * It used to be two SELECTs inside `withTransaction`, which put four round
+     * trips on the wire for two reads and cost 152 ms against this query's
+     * 38 ms. The join it became has two ways to be silently wrong, and both are
+     * invisible to every test that only checks a deck's name:
+     *
+     *   - `decks` and `deck_entries` both have an `id`. Selected unaliased, pg
+     *     hands back the LAST column of that name, so the deck's own id would
+     *     become an entry's bigserial and every route would 404 the deck it had
+     *     just read.
+     *   - A LEFT JOIN gives a deck with no entries ONE row of NULLs, not zero
+     *     rows. Mapped rather than filtered, an empty deck gains one entry whose
+     *     every field is null.
+     *
+     * So these tests assert the deck's identity columns as well as its entries,
+     * which is the part a "round-trips a deck" test does not reach.
+     */
+    describe('reading the deck and its entries in one query', () => {
+      /** A deck of its own, so entry ordering is not shared with other tests. */
+      const freshDeck = async (name: string): Promise<DeckId> => {
+        const fresh = deckId(randomUUID())
+        await createDeck(db.pool, {
+          id: fresh,
+          ownerId: owner,
+          name,
+          commanders: [krenko],
+          targetBracket: 3,
+          archetype: 'tokens',
+          colorIdentity: ['R'],
+        })
+        return fresh
+      }
+
+      it('keeps the deck’s own id, not an entry’s, when entries are joined on', async () => {
+        // The whole point of aliasing. `deck_entries.id` is a bigserial, so a
+        // collapsed `id` key would be a small integer as a string — which is
+        // still a string, and `DeckId` is a branded string, so nothing but this
+        // assertion stands between that bug and production.
+        const fresh = await freshDeck('Aliased')
+        await setEntryStandalone(db.pool, fresh, {
+          oracleId: uuid(),
+          zone: 'accepted',
+          origin: 'manual',
+          locked: false,
+          tags: [],
+        })
+
+        const deck = await getDeck(db.pool, fresh)
+        expect(deck!.id).toBe(fresh)
+        expect(deck!.entries).toHaveLength(1)
+      })
+
+      it('round-trips every entry column through its alias', async () => {
+        const fresh = await freshDeck('Every column')
+        const oracle = uuid()
+        // Written directly, because `setEntry` never sets `role_override` and
+        // that column is the one whose own NULL must not be mistaken for the
+        // join's NULL.
+        await db.pool.query(
+          `INSERT INTO deck_entries (deck_id, oracle_id, zone, origin, locked, role_override, tags)
+           VALUES ($1, $2, 'accepted', 'recommended', true, $3::text[], $4::text[])`,
+          [fresh, oracle, ['ramp', 'draw'], ['tag-a', 'tag-b']],
+        )
+
+        const deck = await getDeck(db.pool, fresh)
+        expect(deck!.entries).toHaveLength(1)
+        const entry = deck!.entries[0]!
+        expect(entry.oracleId).toBe(oracle)
+        expect(entry.zone).toBe('accepted')
+        expect(entry.origin).toBe('recommended')
+        expect(entry.locked).toBe(true)
+        expect(entry.roleOverride).toEqual(['ramp', 'draw'])
+        expect(entry.tags).toEqual(['tag-a', 'tag-b'])
+        // A real timestamp off the row, not the epoch a NULL would coerce to.
+        expect(Date.parse(entry.addedAt)).toBeGreaterThan(Date.parse('2020-01-01T00:00:00.000Z'))
+      })
+
+      it('reads a NULL role_override as null, distinct from an empty list', async () => {
+        const fresh = await freshDeck('No override')
+        await setEntryStandalone(db.pool, fresh, {
+          oracleId: uuid(),
+          zone: 'accepted',
+          origin: 'manual',
+          locked: false,
+          tags: [],
+        })
+
+        const entry = (await getDeck(db.pool, fresh))!.entries[0]!
+        expect(entry.roleOverride).toBeNull()
+        expect(entry.tags).toEqual([])
+      })
+
+      it('gives a deck with no entries an EMPTY list, not one row of nulls', async () => {
+        // The LEFT JOIN's trap. This deck matches as one all-NULL row.
+        const fresh = await freshDeck('Empty')
+
+        const deck = await getDeck(db.pool, fresh)
+        expect(deck).not.toBeNull()
+        expect(deck!.name).toBe('Empty')
+        expect(deck!.id).toBe(fresh)
+        expect(deck!.version).toBe(1)
+        expect(deck!.entries).toEqual([])
+      })
+
+      it('preserves entry order — insertion order, by entry id', async () => {
+        const fresh = await freshDeck('Ordered')
+        const order: OracleId[] = []
+        for (let n = 0; n < 12; n += 1) {
+          const oracle = uuid()
+          order.push(oracle)
+          await setEntryStandalone(db.pool, fresh, {
+            oracleId: oracle,
+            zone: 'accepted',
+            origin: 'manual',
+            locked: false,
+            tags: [],
+          })
+        }
+
+        const deck = await getDeck(db.pool, fresh)
+        expect(deck!.entries.map((e) => e.oracleId)).toEqual(order)
+      })
+
+      it('keeps duplicate copies as separate entries under the join', async () => {
+        // 34 Mountains are 34 rows, and the join must not collapse or reorder
+        // them — the deck half of every one of those rows is identical.
+        const fresh = await freshDeck('Mountains')
+        const mountain = uuid()
+        for (let n = 0; n < 34; n += 1) {
+          await setEntryStandalone(db.pool, fresh, {
+            oracleId: mountain,
+            zone: 'accepted',
+            origin: 'manual',
+            locked: false,
+            tags: [],
+          })
+        }
+
+        const deck = await getDeck(db.pool, fresh)
+        expect(deck!.entries).toHaveLength(34)
+        expect(deck!.entries.every((e) => e.oracleId === mountain)).toBe(true)
+      })
+
+      it('answers null for a deck that does not exist', async () => {
+        expect(await getDeck(db.pool, deckId(randomUUID()))).toBeNull()
+      })
+
+      it('answers null for a soft-deleted deck, entries or not', async () => {
+        // Both halves: a soft-deleted deck still HAS its entry rows, so the
+        // `deleted_at IS NULL` filter has to sit on the deck side of the join.
+        const fresh = await freshDeck('Doomed')
+        await setEntryStandalone(db.pool, fresh, {
+          oracleId: uuid(),
+          zone: 'accepted',
+          origin: 'manual',
+          locked: false,
+          tags: [],
+        })
+        expect((await getDeck(db.pool, fresh))!.entries).toHaveLength(1)
+
+        expect(await softDeleteDeck(db.pool, fresh)).toBe(true)
+        expect(await getDeck(db.pool, fresh)).toBeNull()
+
+        // And it comes back whole, entries included.
+        expect(await restoreDeck(db.pool, fresh)).toBe(true)
+        expect((await getDeck(db.pool, fresh))!.entries).toHaveLength(1)
+      })
+    })
   })
 
   describe('optimistic concurrency (doc 12 §12.7)', () => {
