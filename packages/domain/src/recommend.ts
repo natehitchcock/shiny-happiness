@@ -12,7 +12,7 @@ import {
 } from './composition.js'
 import type { CompositionCounts, Deficit } from './composition-analysis.js'
 import { findDeficits, shortfalls } from './composition-analysis.js'
-import { qualifierWords } from './qualifiers.js'
+import { agreedRestriction } from './qualifiers.js'
 import {
   synergyMatches,
   synergyScore,
@@ -438,31 +438,14 @@ const deficitFor = (pooled: PoolCard, deficits: readonly Deficit[]): Deficit | n
 /**
  * What the deck's want of `tag` is restricted to, in words, or `null` (ADR-0057).
  *
- * Pillar P4 bounds the sentence by the check behind it. A reason may say
- * "enables your casting spells (noncreature, costing 3 or more)" only when that
- * is what the deck's want actually is, and there are two ways it is not:
- *
- *   - SOME WANTER IS UNQUALIFIED. Y'shtola and Guttersnipe in one deck: the
- *     deck genuinely wants any spell, because Guttersnipe takes any instant.
- *     The qualified weight is less than the total, and printing Y'shtola's
- *     restriction would describe half the deck as the whole of it.
- *   - THE QUALIFIED WANTERS DISAGREE. Two commanders with different floors have
- *     no one restriction, and picking either would be a claim about a card the
- *     reader is not looking at.
- *
- * Both come back `null`, which prints the existing unqualified sentence — the
- * true-but-wider one, which is the safe direction for a claim.
+ * The rule itself is `agreedRestriction` (ADR-0062) and lives beside
+ * `qualifierWords`, because the chips on the commander's own semantics ask the
+ * identical question over the deck's commanders and a second copy of it in
+ * `apps/web` is how the feed's sentence and the chip's come to disagree about
+ * the same card. This is the deck-shaped reading of it and nothing more.
  */
-const restrictionWords = (deck: DeckSynergy, tag: SynergyTag): string | null => {
-  const qualified = deck.qualifiedWants?.get(tag) ?? []
-  if (qualified.length === 0) return null
-  const total = deck.wants.get(tag) ?? 0
-  const covered = qualified.reduce((sum, want) => sum + want.weight, 0)
-  if (covered < total) return null
-  const distinct = new Set(qualified.map((want) => qualifierWords(want.qualifiers)))
-  const only = [...distinct]
-  return distinct.size === 1 && only[0] !== undefined && only[0] !== '' ? only[0] : null
-}
+const restrictionWords = (deck: DeckSynergy, tag: SynergyTag): string | null =>
+  agreedRestriction(deck.wants.get(tag) ?? 0, deck.qualifiedWants?.get(tag) ?? [])
 
 /**
  * Which staples group this card may LEAD with, if any (ADR-0044).

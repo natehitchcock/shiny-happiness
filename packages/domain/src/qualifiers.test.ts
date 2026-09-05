@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Card } from './card.js'
 import {
   QUALIFIABLE_TAGS,
+  agreedRestriction,
   deriveWantQualifiers,
   qualifierWords,
   satisfiesQualifiers,
@@ -563,5 +564,64 @@ describe('qualifierWords', () => {
 
   it('names a colour', () => {
     expect(qualifierWords([{ kind: 'colour', colors: ['R'] }])).toBe('red')
+  })
+})
+
+/**
+ * The agreement rule, which is what a surface is allowed to PRINT (ADR-0062).
+ *
+ * `qualifierWords` says what one wanter's restriction is. This says whether a
+ * restriction is true of the whole thing being described — a deck, or a pair of
+ * partner commanders — and the two ways it is not are the reason the function
+ * exists rather than the caller reading the first entry.
+ */
+describe('agreedRestriction', () => {
+  const NONCREATURE: ReturnType<typeof deriveWantQualifiers>[number]['qualifiers'] = [
+    { kind: 'card-type', include: [], exclude: ['creature'] },
+  ]
+  const INSTANT_OR_SORCERY: ReturnType<typeof deriveWantQualifiers>[number]['qualifiers'] = [
+    { kind: 'card-type', include: ['instant', 'sorcery'], exclude: [] },
+  ]
+
+  it('prints the restriction when it is the whole of the want', () => {
+    expect(agreedRestriction(4, [{ weight: 4, qualifiers: forTag(YSHTOLA, 'spell-cast') }])).toBe(
+      'noncreature, costing 3 or more',
+    )
+  })
+
+  it('agrees with itself when two wanters state the same restriction', () => {
+    expect(
+      agreedRestriction(2, [
+        { weight: 1, qualifiers: NONCREATURE },
+        { weight: 1, qualifiers: NONCREATURE },
+      ]),
+    ).toBe('noncreature')
+  })
+
+  it('drops the restriction when two qualified wanters disagree', () => {
+    // Two partner commanders with different restrictions have no ONE
+    // restriction, and printing either would describe the other's card wrongly.
+    expect(
+      agreedRestriction(2, [
+        { weight: 1, qualifiers: NONCREATURE },
+        { weight: 1, qualifiers: INSTANT_OR_SORCERY },
+      ]),
+    ).toBeNull()
+  })
+
+  it('drops the restriction when a wanter is unqualified', () => {
+    // One qualified partner and one that takes any spell: the pair genuinely
+    // wants any spell, so the narrower claim is false of the pair.
+    expect(agreedRestriction(2, [{ weight: 1, qualifiers: NONCREATURE }])).toBeNull()
+  })
+
+  it('is null when nothing is qualified at all', () => {
+    expect(agreedRestriction(4, [])).toBeNull()
+  })
+
+  it('is null for a qualified entry whose words are empty', () => {
+    // `qualifierWords([])` is the empty string, which is not a sentence a
+    // surface can put in brackets.
+    expect(agreedRestriction(1, [{ weight: 1, qualifiers: [] }])).toBeNull()
   })
 })

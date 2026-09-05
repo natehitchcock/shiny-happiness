@@ -549,3 +549,49 @@ export const qualifierWords = (qualifiers: readonly WantQualifier[]): string => 
   }
   return parts.join(', ')
 }
+
+/**
+ * The restriction a SURFACE may print over a set of wanters, or `null` (ADR-0062).
+ *
+ * `qualifierWords` says what one wanter's restriction is. This says whether a
+ * restriction is true of the whole of the thing being described — the deck, or
+ * the pair of partner commanders whose semantics a chip is offering — and
+ * pillar P4 makes that a different question, because the sentence is bounded by
+ * the check behind it. There are two ways one wanter's restriction is not the
+ * set's:
+ *
+ *   - SOME WANTER IS UNQUALIFIED. Y'shtola and Guttersnipe in one deck: the
+ *     deck genuinely wants any spell, because Guttersnipe takes any instant.
+ *     The qualified weight is less than the total, and printing Y'shtola's
+ *     restriction would describe half the deck as the whole of it.
+ *   - THE QUALIFIED WANTERS DISAGREE. Two partners with different floors have
+ *     no one restriction, and picking either would be a claim about a card the
+ *     reader is not looking at.
+ *
+ * Both come back `null`, which leaves the caller printing the bare, WIDER,
+ * true claim — the safe direction, and the same direction every other refusal
+ * in this file takes.
+ *
+ * The weights are a COMPARISON and never a display, which is what lets the two
+ * callers hold different units: `recommend.ts` passes ADR-0057's per-wanter
+ * deck weights, and `apps/web` passes one per commander, because "did every
+ * wanter carry a qualifier" has the same answer either way.
+ *
+ * Structurally typed rather than taking `QualifiedDeckWant`, so `synergy.ts`
+ * does not have to be imported to call it — the shape IS that interface, and
+ * the import would be a cycle back into the module that imports this one.
+ */
+export const agreedRestriction = (
+  totalWeight: number,
+  qualified: readonly {
+    readonly weight: number
+    readonly qualifiers: readonly WantQualifier[]
+  }[],
+): string | null => {
+  if (qualified.length === 0) return null
+  const covered = qualified.reduce((sum, want) => sum + want.weight, 0)
+  if (covered < totalWeight) return null
+  const distinct = new Set(qualified.map((want) => qualifierWords(want.qualifiers)))
+  const only = [...distinct]
+  return distinct.size === 1 && only[0] !== undefined && only[0] !== '' ? only[0] : null
+}

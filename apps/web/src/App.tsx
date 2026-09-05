@@ -65,6 +65,11 @@ import {
   // and this names one card against one other.
   deriveWantQualifiers,
   suppliedWants,
+  // ADR-0062: the qualifier on the commander's own semantic, under the same
+  // agreement rule the feed's reason sentence is bounded by.
+  agreedRestriction,
+  qualifierWords,
+  type WantQualifier,
 } from '@roundtable/domain'
 // Aliased: `oracleId` is a parameter name a dozen times in this file, and a
 // brander shadowed by a local of the same name reads as a bug even when it is
@@ -1206,6 +1211,83 @@ const ARCHETYPES = [
   'stax',
 ]
 
+/**
+ * The restriction the COMMANDERS' want of each tag is under, in words (ADR-0062).
+ *
+ * ADR-0057 derives the qualifier and the feed prints it inside a suggestion's
+ * reason, which is the wrong moment: the reader picks a semantic focus BEFORE
+ * any suggestion exists, and "casting spells" and "casting spells (instant or
+ * sorcery)" are different decks. This is what the chip on that prompt is
+ * allowed to say.
+ *
+ * The rule is the domain's `agreedRestriction` and deliberately not a second
+ * copy of it — the same function `recommend.ts` bounds its reason sentence
+ * with, so the chip and the feed cannot come to disagree about one card. A
+ * commander that wants the tag and derives NO qualifier counts toward the total
+ * and never toward the covered weight, which is how a qualified partner beside
+ * an unqualified one comes back bare: the pair really does want any spell.
+ *
+ * One unit of weight per commander, because the rule is a COMPARISON. ADR-0057
+ * weights a deck's wanters so a commander outweighs a spell; here every wanter
+ * on the screen is a commander, and "did every one of them carry a qualifier"
+ * has the same answer whatever the unit.
+ *
+ * The `synergyWants` guard is not decoration. `deriveWantQualifiers` reads the
+ * card's own oracle text and the wants come off the wire, so a card whose text
+ * states a cast trigger the server did not turn into a want would otherwise get
+ * a restriction on a tag it is not offering.
+ */
+const commanderQualifierWords = (
+  commanders: readonly Pick<api.Card, 'oracleText' | 'synergyWants'>[],
+): ReadonlyMap<string, string> => {
+  const total = new Map<string, number>()
+  const qualified = new Map<string, { weight: number; qualifiers: readonly WantQualifier[] }[]>()
+  for (const commander of commanders) {
+    /*
+     * A SET, and per commander rather than over all of them.
+     *
+     * It is the deduplication that matters: a tag listed twice on one card
+     * would otherwise count twice toward the total and no commander could ever
+     * cover its own want. And it has to be this commander's own wants — a
+     * qualifier derived from A's text may only be attributed to a want A
+     * states, never to one B states.
+     *
+     * This is not the intersection `eslint.config.js` restricts. That rule is
+     * about pairing one card's SUPPLY against another's want, where dropping
+     * the qualifier is the ADR-0057 bug; this asks one card about itself.
+     */
+    const wanted = new Set<string>(commander.synergyWants)
+    for (const tag of wanted) total.set(tag, (total.get(tag) ?? 0) + 1)
+    for (const want of deriveWantQualifiers(commander)) {
+      if (!wanted.has(want.tag)) continue
+      const found = qualified.get(want.tag) ?? []
+      found.push({ weight: 1, qualifiers: want.qualifiers })
+      qualified.set(want.tag, found)
+    }
+  }
+  const out = new Map<string, string>()
+  for (const [tag, wants] of qualified) {
+    const words = agreedRestriction(total.get(tag) ?? 0, wants)
+    if (words !== null) out.set(tag, words)
+  }
+  return out
+}
+
+/** Shared empty map, so a screen with no commander allocates nothing per render. */
+const NO_QUALIFIERS: ReadonlyMap<string, string> = new Map<string, string>()
+
+/**
+ * A tag's words, with its restriction after them where there is one.
+ *
+ * The same shape the suggestion reason prints — `readable(tag)` then the
+ * qualifier in brackets — so the two surfaces read as one claim about one card.
+ * The brackets are punctuation and nothing more: the restriction is TEXT inside
+ * the chip, so it is part of the chip's accessible name and a screen reader
+ * reads it without anything being labelled twice (R4).
+ */
+const withQualifier = (tag: string, qualifier: string | undefined): string =>
+  qualifier === undefined || qualifier === '' ? readable(tag) : `${readable(tag)} (${qualifier})`
+
 const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JSX.Element => {
   const [term, setTerm] = useState('')
   /**
@@ -1310,6 +1392,16 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
             ...chosen.synergyWants,
           ]),
         ]
+
+  /**
+   * What each of those tags is RESTRICTED to, where the commander says so.
+   *
+   * Built beside the list it annotates and from the same card, for the reason
+   * the comment above gives about the list itself: the workspace asks this
+   * identical question of `deck.commanders`, and two copies of one question is
+   * how the two screens come to describe the same commander differently.
+   */
+  const commanderQualifiers = chosen === null ? NO_QUALIFIERS : commanderQualifierWords([chosen])
 
   /**
    * Add or drop one tag before the deck exists. Local state — there is nothing
@@ -1591,6 +1683,7 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
               </p>
               <EmphasisChoice
                 tags={commanderTags}
+                qualifiers={commanderQualifiers}
                 selected={emphasis}
                 onToggle={toggleStartEmphasis}
               />
@@ -1760,11 +1853,25 @@ const EmphasisChoice = ({
   selected,
   onToggle,
   busy = false,
+  qualifiers = NO_QUALIFIERS,
 }: {
   tags: readonly string[]
   selected: readonly string[]
   onToggle: (tag: string) => void
   busy?: boolean
+  /**
+   * Tag → the restriction the commanders' want of it is under (ADR-0062).
+   *
+   * Absent means the caller is not making a claim about restrictions, and the
+   * chip renders exactly as it did before — never "there is no restriction",
+   * which is a different sentence and one this component cannot check.
+   *
+   * The map is the COMMANDERS' and only theirs. A tag reached through the
+   * expansion below is corpus vocabulary rather than a want anybody stated, so
+   * `SemanticOffer` is deliberately not given this: a qualifier there would be
+   * a claim about the wrong card.
+   */
+  qualifiers?: ReadonlyMap<string, string>
 }): React.JSX.Element => {
   /*
    * The offered tags PLUS anything already chosen that is not among them.
@@ -1804,8 +1911,11 @@ const EmphasisChoice = ({
             busy={busy}
             className="act emphasise"
           />
+          {/* The restriction rides on the chip's own text, so the reader is
+            told there IS one at the moment they choose — which is the whole
+            of the request, and the moment the reason chip is too late for. */}
           <span className="tag" data-emphasised={selected.includes(tag)}>
-            {readable(tag)}
+            {withQualifier(tag, qualifiers.get(tag))}
           </span>
         </span>
       ))}
@@ -2012,9 +2122,18 @@ const TagChip = ({
   emphasised,
   onToggleEmphasis,
   emphasisBusy = false,
+  qualifier,
 }: {
   tag: string
   direction: 'produces' | 'wants' | 'has'
+  /**
+   * What this card's want of the tag is restricted to, in words (ADR-0062).
+   *
+   * `wants` only. `produces` and `has` are the SUPPLY side and a want qualifier
+   * says nothing about them — it constrains which cards can cause the event for
+   * the wanter, which is a claim about the other half of the pair.
+   */
+  qualifier?: string
   /** Whether the deck currently emphasises this tag. */
   emphasised?: boolean
   /**
@@ -2047,6 +2166,16 @@ const TagChip = ({
                   ? `This card causes it. It pairs with cards that benefit from ${readable(tag)}.`
                   : `This card benefits from ${readable(tag)}. It pairs with cards that cause it.`}
             </span>
+            {/* What the restriction MEANS, which the brackets on the chip only
+              name (ADR-0062). The chip has room for the words and not for the
+              consequence, and the consequence is the reason a reader cares:
+              some of the cards that cause this event do nothing for this one. */}
+            {qualifier === undefined || qualifier === '' ? null : (
+              <span className="hint-line">
+                Only {qualifier} cards count. Anything else causes {readable(tag)} without
+                benefiting this card.
+              </span>
+            )}
             {partners.length === 0 ? null : (
               <span className="hint-line">
                 Benefits, and benefits from: {partners.map(readable).join(', ')}.
@@ -2084,7 +2213,7 @@ const TagChip = ({
           `subtype:elf` — and the hyphen-stripper would print the namespace at
           a reader. */}
         <span className="tag" data-direction={direction}>
-          {readable(tag)}
+          {withQualifier(tag, qualifier)}
         </span>
       </Hint>
       {onToggleEmphasis === undefined ? null : (
@@ -2107,9 +2236,24 @@ const Semantics = ({
   emphasis = [],
   onToggleEmphasis,
   emphasisBusy = false,
+  oracleText = '',
 }: {
   produces: readonly string[]
   wants: readonly string[]
+  /**
+   * The shown card's own rules text, for its want qualifiers (ADR-0062).
+   *
+   * Derived here from THIS card rather than handed down from the commander,
+   * because the pane opens on any card in the pool and the restriction is a
+   * fact about whichever one is in front of the reader. No agreement rule is
+   * needed and none is applied: one card cannot disagree with itself, and
+   * `deriveWantQualifiers` already refuses a card whose triggers disagree
+   * (ADR-0057) by returning nothing for it.
+   *
+   * Defaults to `''`, which derives nothing — so a caller that does not pass it
+   * renders exactly as it did before.
+   */
+  oracleText?: string
   /**
    * What the card IS or HAS (ADR-0048).
    *
@@ -2123,6 +2267,12 @@ const Semantics = ({
   onToggleEmphasis?: (tag: string) => void
   emphasisBusy?: boolean
 }): React.JSX.Element => {
+  /** Tag → restriction, for this card's wants only. Empty for most cards. */
+  const restrictions = new Map<string, string>()
+  for (const want of deriveWantQualifiers({ oracleText })) {
+    const words = qualifierWords(want.qualifiers)
+    if (words !== '') restrictions.set(want.tag, words)
+  }
   const chip = (t: string, direction: 'produces' | 'wants' | 'has'): React.JSX.Element => (
     <TagChip
       key={t}
@@ -2131,6 +2281,7 @@ const Semantics = ({
       emphasised={emphasis.includes(t)}
       emphasisBusy={emphasisBusy}
       {...(onToggleEmphasis === undefined ? {} : { onToggleEmphasis })}
+      {...(direction === 'wants' && restrictions.has(t) ? { qualifier: restrictions.get(t)! } : {})}
     />
   )
   /*
@@ -2229,6 +2380,7 @@ const FocusPanel = ({
   report,
   tagSupport,
   commanderTags,
+  commanderQualifiers,
   busy,
   onToggle,
   adding,
@@ -2249,6 +2401,8 @@ const FocusPanel = ({
   tagSupport: ReadonlyMap<string, number> | undefined
   /** The candidate set, exactly as the start screen offered it. */
   commanderTags: readonly string[]
+  /** Their restrictions, exactly as the start screen annotated them (ADR-0062). */
+  commanderQualifiers: ReadonlyMap<string, string>
   busy: boolean
   onToggle: (tag: string) => void
   adding: boolean
@@ -2326,6 +2480,7 @@ const FocusPanel = ({
             </p>
             <EmphasisChoice
               tags={commanderTags}
+              qualifiers={commanderQualifiers}
               selected={emphasis}
               onToggle={onToggle}
               busy={busy}
@@ -3167,6 +3322,7 @@ const Preview = ({
         produces={shown.synergyProduces}
         wants={shown.synergyWants}
         has={shown.synergyHas ?? []}
+        oracleText={shown.oracleText}
         emphasis={emphasis}
         onToggleEmphasis={onToggleEmphasis}
         emphasisBusy={emphasisBusy}
@@ -7272,6 +7428,26 @@ export const Workspace = ({
   }, [deck.commanders, cards])
 
   /**
+   * What each offered tag is RESTRICTED to, over ALL the commanders.
+   *
+   * Built beside `commanderTags` and from the same hydrated cards, for the
+   * reason the comment above gives about the list itself. The set is what makes
+   * this different from the start screen's copy rather than a duplicate of it:
+   * a partner pair has to AGREE before a restriction can be printed, and
+   * `commanderQualifierWords` is where that rule lives.
+   */
+  const commanderQualifiers = useMemo(
+    () =>
+      commanderQualifierWords(
+        deck.commanders.flatMap((id) => {
+          const commander = cards.get(id)
+          return commander === undefined ? [] : [commander]
+        }),
+      ),
+    [deck.commanders, cards],
+  )
+
+  /**
    * Save a new emphasis. AWAITED, deliberately not optimistic.
    *
    * The rejected alternative was the one the rest of this file uses for card
@@ -8579,6 +8755,7 @@ export const Workspace = ({
             report={emphasisReport}
             tagSupport={tagSupport}
             commanderTags={commanderTags}
+            commanderQualifiers={commanderQualifiers}
             busy={emphasisSaving}
             onToggle={toggleEmphasis}
             adding={addingFocus}

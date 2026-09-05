@@ -1662,3 +1662,64 @@ describe('answer coverage orders the removal gap (ADR-0058)', () => {
     expect(idsIn(result, 'fills-draw')).toEqual([oracleId('Divination')])
   })
 })
+
+/**
+ * The qualifier on a reason (ADR-0057 §10, pinned by ADR-0062).
+ *
+ * Zaffai's shape: one commander, one want, one restriction. The sentence the
+ * feed prints is "enables your casting spells (instant or sorcery)", and until
+ * now nothing asserted that the field behind the brackets is ever populated —
+ * the whole derivation could have stopped reaching the reason and every test in
+ * this file would still have passed.
+ */
+describe('a restricted want reaches the reason', () => {
+  const zaffai: DeckSynergy = {
+    produces: new Map(),
+    wants: new Map([['spell-cast', COMMANDER_WEIGHT]]),
+    has: new Map(),
+    qualifiedWants: new Map([
+      [
+        'spell-cast',
+        [
+          {
+            weight: COMMANDER_WEIGHT,
+            qualifiers: [
+              { kind: 'card-type' as const, include: ['instant', 'sorcery'] as const, exclude: [] },
+            ],
+          },
+        ],
+      ],
+    ]),
+  }
+
+  const reasonFor = (synergy: DeckSynergy) =>
+    recommend(
+      baseInput({
+        deckSynergy: synergy,
+        pool: [pooled('bolt', { card: card('bolt', { synergyProduces: ['spell-cast'] }) })],
+      }),
+    )
+      .groups.flatMap((g) => g.items)
+      .flatMap((i) => i.reasons)
+      .find((r) => r.kind === 'keyword-synergy')
+
+  it('carries the restriction in words', () => {
+    expect(reasonFor(zaffai)).toEqual({
+      kind: 'keyword-synergy',
+      tag: 'spell-cast',
+      direction: 'enables',
+      withOracleIds: [],
+      qualifier: 'instant or sorcery',
+    })
+  })
+
+  it('drops the restriction when part of the deck wants the tag unqualified', () => {
+    // Zaffai and a Guttersnipe: the deck really does want any spell, so the
+    // narrower claim would describe half the deck as the whole of it.
+    const mixed: DeckSynergy = {
+      ...zaffai,
+      wants: new Map([['spell-cast', COMMANDER_WEIGHT * 2]]),
+    }
+    expect(reasonFor(mixed)).not.toHaveProperty('qualifier')
+  })
+})
