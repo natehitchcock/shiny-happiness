@@ -1,6 +1,11 @@
 import type { Pool } from 'pg'
-import { gameChangerOracleIds, getCards, liveSnapshotId, type PrintingFacts } from '@roundtable/db'
-import { cachedCombosInIdentity, cachedEligibleCards, cachedPrintingFacts } from './corpus-cache.js'
+import { getCards, liveSnapshotId, type PrintingFacts } from '@roundtable/db'
+import {
+  cachedCombosInIdentity,
+  cachedEligibleCards,
+  cachedGameChangerOracleIds,
+  cachedPrintingFacts,
+} from './corpus-cache.js'
 import type {
   Card,
   ComboIndex,
@@ -47,9 +52,16 @@ export interface DeckContext {
    * Wizards' Game Changers list, as oracle ids (DATA-05).
    *
    * Loaded here rather than in the analysis route so that the two endpoints see
-   * the same list, for the same reason the rest of this context is shared. Not
-   * cached: it is a few dozen uuids behind a partial index, next to a combo read
-   * that can be 19.6 MB.
+   * the same list, for the same reason the rest of this context is shared.
+   *
+   * Cached per snapshot, like the other three reads beside it (ADR-0064). It
+   * used to say the opposite — that it was too small to be worth caching, being
+   * a few dozen uuids next to a combo read that can be 19.6 MB — and the
+   * comparison stopped meaning anything once the combo read was cached: what is
+   * left of that 19.6 MB on a warm instance is zero round trips, and this was
+   * one. ADR-0063 measured the request and found scoring to be 9-16 ms of
+   * 381 ms, with everything else a multiple of the ~36 ms a round trip costs.
+   * Small is not the same as cheap when the price is per question asked.
    */
   readonly gameChangers: readonly OracleId[]
   /**
@@ -99,14 +111,19 @@ export const loadDeckContext = async (pool: Pool, deck: Deck): Promise<DeckConte
    */
   const snapshotId = await liveSnapshotId(pool)
 
-  // All three are corpus reference data: identical for every request with the
+  // All four are corpus reference data: identical for every request with the
   // same key, and changing only when the ingest runs. See `corpus-cache` — the
   // uncached versions moved ~86 MB per request and took production down.
+  //
+  // Concurrent, and on a warm instance none of them speaks to the database at
+  // all. That is the whole point of the fourth being here: a `Promise.all`
+  // takes as long as its slowest member, so one uncached read among three
+  // cached ones costs exactly what all four used to (ADR-0064).
   const [eligible, combos, printingFacts, gameChangers] = await Promise.all([
     cachedEligibleCards(pool, deck.colorIdentity, deck.excludeUniversesBeyond, snapshotId),
     cachedCombosInIdentity(pool, deck.colorIdentity, snapshotId),
     cachedPrintingFacts(pool, snapshotId),
-    gameChangerOracleIds(pool),
+    cachedGameChangerOracleIds(pool, snapshotId),
   ])
 
   if (combos.length === 0) {

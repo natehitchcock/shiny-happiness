@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Pool } from 'pg'
 import type { Combo } from '@roundtable/domain'
-import { comboId } from '@roundtable/domain'
+import { comboId, oracleId } from '@roundtable/domain'
 import {
   cachedCombosInIdentity,
   cachedEligibleCards,
+  cachedGameChangerOracleIds,
   cachedPrintingFacts,
   clearCorpusCache,
 } from './corpus-cache.js'
@@ -22,11 +23,14 @@ vi.mock('@roundtable/db', () => ({
   combosInIdentity: vi.fn(),
   findEligibleCards: vi.fn(),
   printingFactsForAll: vi.fn(),
+  gameChangerOracleIds: vi.fn(),
 }))
-const { combosInIdentity, findEligibleCards, printingFactsForAll } = await import('@roundtable/db')
+const { combosInIdentity, findEligibleCards, printingFactsForAll, gameChangerOracleIds } =
+  await import('@roundtable/db')
 const fetchCombos = vi.mocked(combosInIdentity)
 const fetchCards = vi.mocked(findEligibleCards)
 const fetchFacts = vi.mocked(printingFactsForAll)
+const fetchGameChangers = vi.mocked(gameChangerOracleIds)
 
 const pool = {} as Pool
 
@@ -44,9 +48,11 @@ beforeEach(() => {
   fetchCombos.mockReset()
   fetchCards.mockReset()
   fetchFacts.mockReset()
+  fetchGameChangers.mockReset()
   fetchCombos.mockResolvedValue([combo('c1')])
   fetchCards.mockResolvedValue([])
   fetchFacts.mockResolvedValue(new Map())
+  fetchGameChangers.mockResolvedValue([oracleId('gc-1')])
 })
 
 describe('reading the combo set', () => {
@@ -229,5 +235,76 @@ describe('printing facts', () => {
     await cachedPrintingFacts(pool, null)
     await cachedPrintingFacts(pool, null)
     expect(fetchFacts).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('the Game Changers list', () => {
+  it('reads once however many times it is asked', async () => {
+    // The smallest of the four reads and the least interesting to transfer, but
+    // it is a round trip, and round trips are what this path costs (ADR-0063).
+    for (let i = 0; i < 20; i += 1) await cachedGameChangerOracleIds(pool, 'snap-1')
+    expect(fetchGameChangers).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns the same ids on a hit as on the read', async () => {
+    const first = await cachedGameChangerOracleIds(pool, 'snap-1')
+    const second = await cachedGameChangerOracleIds(pool, 'snap-1')
+
+    expect(second).toEqual(first)
+    expect(second).toEqual(['gc-1'])
+  })
+
+  it('re-reads once the ingest has written, and serves the new list', async () => {
+    await cachedGameChangerOracleIds(pool, 'snap-1')
+    // Wizards revise the list, so a snapshot really can change it — the ingest
+    // is the only thing that does, which is what makes the snapshot id the key.
+    fetchGameChangers.mockResolvedValue([oracleId('gc-2')])
+
+    const after = await cachedGameChangerOracleIds(pool, 'snap-2')
+
+    expect(fetchGameChangers).toHaveBeenCalledTimes(2)
+    expect(after).toEqual(['gc-2'])
+  })
+
+  it('never caches against an unknown snapshot', async () => {
+    // Same reason as the other three: no snapshot means the corpus has never
+    // been ingested, and there is nothing to key freshness on.
+    await cachedGameChangerOracleIds(pool, null)
+    await cachedGameChangerOracleIds(pool, null)
+
+    expect(fetchGameChangers).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not serve a null-snapshot read to a later real snapshot', async () => {
+    await cachedGameChangerOracleIds(pool, null)
+    fetchGameChangers.mockResolvedValue([oracleId('gc-2')])
+
+    expect(await cachedGameChangerOracleIds(pool, 'snap-1')).toEqual(['gc-2'])
+  })
+
+  it('is emptied by clearCorpusCache', async () => {
+    // The reason this is asserted rather than assumed: every other suite in this
+    // app clears the cache between tests, and a cache left out of `clear` would
+    // hand one test's corpus to the next with nothing to show for it.
+    await cachedGameChangerOracleIds(pool, 'snap-1')
+    fetchGameChangers.mockResolvedValue([oracleId('gc-2')])
+
+    clearCorpusCache()
+
+    expect(await cachedGameChangerOracleIds(pool, 'snap-1')).toEqual(['gc-2'])
+    expect(fetchGameChangers).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not hand out the printing facts cache's entry", async () => {
+    // These two are the pair most likely to collide: neither is scoped by
+    // anything, so both hold a single entry under the same key. Asserted on the
+    // data, because call counts pass either way.
+    fetchFacts.mockResolvedValue(new Map([[oracleId('card-1'), { rarity: 'rare' } as never]]))
+
+    const facts = await cachedPrintingFacts(pool, 'snap-1')
+    const gameChangers = await cachedGameChangerOracleIds(pool, 'snap-1')
+
+    expect([...facts.keys()]).toEqual(['card-1'])
+    expect(gameChangers).toEqual(['gc-1'])
   })
 })

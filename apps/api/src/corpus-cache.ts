@@ -2,6 +2,7 @@ import type { Pool } from 'pg'
 import {
   combosInIdentity,
   findEligibleCards,
+  gameChangerOracleIds,
   printingFactsForAll,
   type PrintingFacts,
 } from '@roundtable/db'
@@ -36,6 +37,17 @@ import { createSnapshotCache, identityKey } from './snapshot-cache.js'
  * at all: the eligible pool for a five-colour deck IS the corpus. For those
  * decks only a cache helps, and none of the three has any reason to be re-read
  * between ingests.
+ *
+ * ## The fourth one is here for a different reason
+ *
+ * `cachedGameChangerOracleIds` moves a few kilobytes and would never have
+ * earned a place on the list above. It is cached because ADR-0063 measured this
+ * path and found the cost was not bytes at all: `recommend()` — the actual
+ * scoring — was 9-16 ms of a 381 ms request, and every other line in that table
+ * was a multiple of the ~36 ms a single round trip costs. Once the other three
+ * reads in `loadDeckContext`'s `Promise.all` are served from memory, an
+ * uncached fourth is the whole wall-clock cost of that wave. Size is what
+ * selected the first three; it is not what selects this one.
  */
 
 /**
@@ -56,6 +68,16 @@ const combos = createSnapshotCache<readonly Combo[]>(MAX_IDENTITIES)
 const eligible = createSnapshotCache<readonly Card[]>(MAX_IDENTITIES)
 /** Not scoped by anything — one map for the whole corpus, so one entry. */
 const facts = createSnapshotCache<ReadonlyMap<OracleId, PrintingFacts>>(1)
+/**
+ * Not scoped by anything either — Wizards publish one list, so one entry.
+ *
+ * The same reasoning as `facts` and for the same reason: the query is
+ * `SELECT oracle_id FROM cards WHERE game_changer` with no parameter to vary.
+ * Nothing about a deck — not its identity, not its Universes Beyond setting —
+ * can select a different answer, so a second slot could only ever hold a
+ * duplicate of the first.
+ */
+const gameChangers = createSnapshotCache<readonly OracleId[]>(1)
 
 /** Combos castable in this identity (ADR-0017). */
 export const cachedCombosInIdentity = async (
@@ -99,9 +121,28 @@ export const cachedPrintingFacts = async (
 ): Promise<ReadonlyMap<OracleId, PrintingFacts>> =>
   facts.get(snapshotId, 'all', () => printingFactsForAll(pool))
 
+/**
+ * Wizards' Game Changers list, as oracle ids (DATA-05).
+ *
+ * The whole list is dozens of uuids behind a partial index — cheap to read and
+ * cheaper to hold. What it is not is free to ASK for, which is the point: it
+ * shares `loadDeckContext`'s `Promise.all` with the three above, so uncached it
+ * set the floor for that whole wave (ADR-0064).
+ *
+ * Returned `readonly`, unlike the `OracleId[]` the repository hands back. The
+ * array is now shared between requests, and `snapshot-cache` only holds what
+ * callers treat as frozen.
+ */
+export const cachedGameChangerOracleIds = async (
+  pool: Pool,
+  snapshotId: string | null,
+): Promise<readonly OracleId[]> =>
+  gameChangers.get(snapshotId, 'all', () => gameChangerOracleIds(pool))
+
 /** Drop everything held. For tests, and for anything that rewrites the corpus. */
 export const clearCorpusCache = (): void => {
   combos.clear()
   eligible.clear()
   facts.clear()
+  gameChangers.clear()
 }
