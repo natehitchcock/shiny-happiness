@@ -777,28 +777,24 @@ const reasonText = (r: api.Reason, item: api.Recommendation): string => {
        * adjective on the deck's property and not a footnote about the row.
        */
       /*
-       * What the deck's want is RESTRICTED to (ADR-0057, pillar P4).
+       * The qualifier is deliberately NOT printed here (amending ADR-0057).
        *
-       * "Enables your casting spells" was a claim about every instant in the
-       * deck. A deck led by Y'shtola only pays off a noncreature spell costing
-       * three or more, and the card offered was chosen against that narrower
-       * test — so the sentence has to carry it or it claims more than the check
-       * behind it.
+       * This row used to read "enables your casting spells (instant or
+       * sorcery)". The restriction is true and the check behind it is real —
+       * but the row is the wrong place to say it, because the card in front of
+       * the reader has ALREADY been tested against it. Satisfying the qualifier
+       * is what being in this list means, so printing it spends the densest
+       * surface in the app restating what the row's presence already claims.
        *
-       * PARENTHETICAL rather than woven into the phrase. "Enables your casting
-       * noncreature spells costing 3 or more" reads as one long noun and buries
-       * the restriction in the middle of it; the bracket marks it as a
-       * narrowing, which is exactly what it is. It also keeps `tags.ts` as the
-       * one place a tag's own words are written — the qualifier is a modifier
-       * the domain renders, not a second phrase for the tag.
+       * It is said once, at the moment the reader is DECIDING rather than
+       * reading a result: on the commander's own semantic where a focus is
+       * chosen, and on the card panel's "Benefits from" row (ADR-0062).
        *
-       * Absent for every direction but `enables`, because that is the only one
-       * the matcher checks (see `synergyMatches`). A qualifier printed on a
-       * direction nothing verified would be the overclaim this is here to stop.
+       * Pillar P4 is unharmed. The bare sentence is the WIDER claim and it is
+       * still true of this card — the same safe direction `agreedRestriction`
+       * takes when it refuses to print a restriction at all.
        */
-      const restricted =
-        r.qualifier === undefined || r.qualifier === '' ? tag : `${tag} (${r.qualifier})`
-      const yours = r.emphasised === true ? `your emphasised ${restricted}` : `your ${restricted}`
+      const yours = r.emphasised === true ? `your emphasised ${tag}` : `your ${tag}`
       /*
        * A row kept by the focus guarantee answers a different question.
        *

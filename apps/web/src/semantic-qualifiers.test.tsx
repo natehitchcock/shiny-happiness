@@ -321,3 +321,82 @@ describe('the card panel reads the restriction off the card in front of you', ()
     expect(screen.getByText('casting spells (instant or sorcery)')).toBeDefined()
   })
 })
+
+/*
+ * And NOT on the suggestion row, which is where it used to be the only place.
+ *
+ * ADR-0057 printed "enables your casting spells (instant or sorcery)" on every
+ * matching row. The restriction is true, but the row is a RESULT: the card in
+ * front of the reader was already tested against the qualifier, so satisfying
+ * it is what being in this list means. Saying so again on the densest surface
+ * in the app restates what the row's presence already claims.
+ *
+ * Pinned rather than merely removed, because the wire still carries
+ * `reason.qualifier` and the next person to read that field will be tempted to
+ * render it.
+ */
+describe('the suggestion row does not repeat the qualifier', () => {
+  const suggestion = (reason: Record<string, unknown>): api.Recommendations =>
+    ({
+      ...recs,
+      groups: [
+        {
+          key: 'high-synergy',
+          label: 'High synergy',
+          rationale: 'Pairs with what the deck already does',
+          total: 1,
+          items: [
+            {
+              oracleId: 'snipe',
+              score: 1,
+              comboDegree: 0,
+              nearCombosAt1: 0,
+              completedCombos: [],
+              combos: [],
+              reasons: [reason],
+            } as unknown as api.Recommendation,
+          ],
+        },
+      ],
+    }) as unknown as api.Recommendations
+
+  it('states the semantic bare, even when the wire carries a restriction', async () => {
+    serve(zaffai, guttersnipe)
+    mocked.getRecommendations.mockResolvedValue(
+      suggestion({
+        kind: 'keyword-synergy',
+        tag: 'spell-cast',
+        direction: 'enables',
+        qualifier: 'instant or sorcery',
+      }),
+    )
+
+    render(<Workspace deck={deck()} />)
+
+    await waitFor(() => expect(screen.getByText(/enables your casting spells/)).toBeDefined())
+    expect(screen.getByText('enables your casting spells')).toBeDefined()
+    expect(screen.queryByText(/instant or sorcery/)).toBeNull()
+  })
+
+  it('still says when the focus is the builder’s own emphasis', async () => {
+    // The word that DID earn its place on the row. Removing the qualifier must
+    // not take the emphasis with it — they were built into one sentence.
+    serve(zaffai, guttersnipe)
+    mocked.getRecommendations.mockResolvedValue(
+      suggestion({
+        kind: 'keyword-synergy',
+        tag: 'spell-cast',
+        direction: 'enables',
+        emphasised: true,
+        qualifier: 'instant or sorcery',
+      }),
+    )
+
+    render(<Workspace deck={deck()} />)
+
+    await waitFor(() =>
+      expect(screen.getByText('enables your emphasised casting spells')).toBeDefined(),
+    )
+    expect(screen.queryByText(/instant or sorcery/)).toBeNull()
+  })
+})
