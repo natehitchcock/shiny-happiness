@@ -23,7 +23,7 @@
     "to affect (`breadth: none`) — the blindness doc 18 §18.2 accepts rather",
     "than patches, measured per role so the interface can state it."
   ],
-  "generatedAt": "2026-09-03",
+  "generatedAt": "2026-09-05",
   "corpus": {
     "commanderLegal": 31782
   },
@@ -38,22 +38,22 @@
     "aura": {
       "n": 1235,
       "q1": 0.425,
-      "median": 0.68,
+      "median": 0.808,
       "q3": 0.935,
       "noCountableEffect": 1023
     },
     "board-wipe": {
-      "n": 519,
+      "n": 518,
       "q1": 4.896,
       "median": 6.12,
-      "q3": 7.2,
-      "noCountableEffect": 71
+      "q3": 7.834,
+      "noCountableEffect": 66
     },
     "bounce": {
       "n": 281,
       "q1": 0.9,
-      "median": 0.9,
-      "q3": 1.44,
+      "median": 1.2,
+      "q3": 1.71,
       "noCountableEffect": 8
     },
     "counterspell": {
@@ -64,108 +64,108 @@
       "noCountableEffect": 0
     },
     "draw": {
-      "n": 3738,
-      "q1": 0.68,
-      "median": 0.935,
-      "q3": 1.584,
-      "noCountableEffect": 2069
+      "n": 3791,
+      "q1": 0.808,
+      "median": 0.95,
+      "q3": 2,
+      "noCountableEffect": 2072
     },
     "equipment": {
       "n": 619,
       "q1": 0.425,
       "median": 0.808,
-      "q3": 1,
+      "q3": 1.792,
       "noCountableEffect": 425
     },
     "evasion": {
       "n": 7335,
-      "q1": 0.425,
-      "median": 0.808,
-      "q3": 1.9,
-      "noCountableEffect": 4340
+      "q1": 0.68,
+      "median": 0.855,
+      "q3": 2.128,
+      "noCountableEffect": 4337
     },
     "graveyard-hate": {
       "n": 112,
-      "q1": 0.85,
+      "q1": 1.2,
       "median": 1.4,
-      "q3": 2.345,
+      "q3": 2.66,
       "noCountableEffect": 12
     },
     "land": {
       "n": 1194,
-      "q1": 0.68,
-      "median": 0.68,
-      "q3": 0.935,
-      "noCountableEffect": 900
+      "q1": 1,
+      "median": 1,
+      "q3": 1.36,
+      "noCountableEffect": 923
     },
     "protection": {
-      "n": 1205,
-      "q1": 0.425,
+      "n": 1204,
+      "q1": 0.488,
       "median": 0.95,
       "q3": 2.28,
       "noCountableEffect": 619
     },
     "ramp": {
-      "n": 1508,
-      "q1": 0.5,
-      "median": 0.68,
-      "q3": 1.2,
-      "noCountableEffect": 1042
+      "n": 1564,
+      "q1": 1,
+      "median": 1,
+      "q3": 2,
+      "noCountableEffect": 1118
     },
     "recursion": {
       "n": 939,
-      "q1": 0.85,
+      "q1": 0.855,
       "median": 1.2,
+      "q3": 2.28,
+      "noCountableEffect": 262
+    },
+    "sac-outlet": {
+      "n": 482,
+      "q1": 0.68,
+      "median": 0.975,
       "q3": 1.92,
       "noCountableEffect": 260
     },
-    "sac-outlet": {
-      "n": 464,
-      "q1": 0.68,
-      "median": 0.808,
-      "q3": 1.92,
-      "noCountableEffect": 251
-    },
     "spot-removal": {
-      "n": 2672,
+      "n": 3036,
       "q1": 1.2,
-      "median": 1.2,
-      "q3": 1.792,
-      "noCountableEffect": 0
+      "median": 1.44,
+      "q3": 2.128,
+      "noCountableEffect": 48
     },
     "stax": {
-      "n": 93,
+      "n": 199,
       "q1": 0.425,
-      "median": 0.6,
-      "q3": 1.44,
-      "noCountableEffect": 54
+      "median": 1.2,
+      "q3": 10.944,
+      "noCountableEffect": 93
     },
     "synergy": {
-      "n": 11594,
-      "q1": 0.5,
-      "median": 0.96,
-      "q3": 1.92,
-      "noCountableEffect": 5613
+      "n": 11231,
+      "q1": 0.68,
+      "median": 0.99,
+      "q3": 2.24,
+      "noCountableEffect": 5496
     },
     "token-maker": {
-      "n": 2799,
-      "q1": 0.5,
-      "median": 0.935,
-      "q3": 1.92,
-      "noCountableEffect": 1684
+      "n": 2776,
+      "q1": 0.808,
+      "median": 0.95,
+      "q3": 2,
+      "noCountableEffect": 1686
     },
     "tutor": {
-      "n": 211,
+      "n": 199,
       "q1": 0.425,
-      "median": 0.5,
+      "median": 0.808,
       "q3": 0.935,
-      "noCountableEffect": 162
+      "noCountableEffect": 159
     },
     "wincon": {
       "n": 116,
-      "q1": 0.7,
+      "q1": 0.808,
       "median": 0.935,
-      "q3": 1.4,
+      "q3": 1.45,
       "noCountableEffect": 82
     }
   }
