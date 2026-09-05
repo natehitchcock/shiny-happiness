@@ -2864,12 +2864,26 @@ select {
   letter-spacing: 0.06em;
   color: var(--parchment-dim);
 }
-/* Breaks the line so the sentence sits UNDER its chip rather than pushing the
-   next chip a paragraph away. It is a whole clause, not a badge — emphasis
-   never filters, so this reports what was counted and is deliberately not an
-   error colour. */
-.offer-unsupported {
-  flex-basis: 100%;
+/* One kind of semantic inside an offer — Mechanics, Keywords, Types, and the
+   ones this deck's colours cannot reach (ADR-0065). Indented under the offer's
+   own heading so the nesting the accessibility tree carries is visible to
+   someone reading rather than listening, and given breathing room above so four
+   runs of chips do not read as one. */
+.offer-category {
+  margin: 8px 0 0;
+}
+.offer-category h5 {
+  margin: 0 0 2px;
+  font: 600 0.66rem/1.4 var(--ui);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--parchment-dim);
+}
+/* Said once, under the fourth heading, where it used to be said under every
+   chip. Deliberately not an error colour: emphasis never filters, so this
+   reports what was counted rather than warning against clicking it. */
+.offer-category > .note {
+  margin: 0 0 4px;
   font-size: 0.62rem;
 }
 

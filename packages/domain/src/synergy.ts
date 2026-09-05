@@ -7,7 +7,13 @@ import {
   type QualifiedWant,
   type WantQualifier,
 } from './qualifiers.js'
-import { SEMANTIC_TAGS, deriveSemanticTokens, type SemanticTag } from './semantic-tokens.js'
+import {
+  ABILITY_PREFIX,
+  SEMANTIC_TAGS,
+  SUBTYPE_PREFIX,
+  deriveSemanticTokens,
+  type SemanticTag,
+} from './semantic-tokens.js'
 import { CREATES_FOR_YOU, addressedToYou, forYou } from './token-subject.js'
 
 /**
@@ -187,6 +193,36 @@ export const EVENT_TAGS: readonly EventTag[] = [
  * first and keep their existing indices; the generated families are appended.
  */
 export const SYNERGY_TAGS: readonly SynergyTag[] = [...EVENT_TAGS, ...SEMANTIC_TAGS]
+
+/**
+ * Which of the three kinds a tag is (ADR-0065).
+ *
+ * `SYNERGY_TAGS` is one flat array assembled from three sources: 27 events
+ * curated by hand here, and the 317 keywords and 269 subtypes `semantic-tokens`
+ * generates from the corpus. That is a real distinction — a curated event is a
+ * BEHAVIOUR somebody wrote a rule for, a keyword is what a card can DO and a
+ * subtype is what it IS — and every consumer that wanted it was re-deriving it
+ * by reading the wire spelling of a prefix.
+ *
+ * HERE AND NOT IN `semantic-tokens.ts`, which is where the prefixes live and
+ * looks like the obvious home. It cannot be: this function must be TOTAL over
+ * `SYNERGY_TAGS`, `SYNERGY_TAGS` is `EventTag | SemanticTag`, and
+ * `semantic-tokens.ts` is imported BY this file and so cannot see `EventTag`
+ * without a cycle. The file that owns the union owns the classifier.
+ *
+ * `mechanics` is the fall-through rather than a membership test against
+ * `EVENT_TAGS`, and the argument type is what makes that sound: a `SynergyTag`
+ * that is neither prefix IS an `EventTag`. A test walks `SYNERGY_TAGS` and
+ * pins the three counts, so a fourth generated family cannot arrive and be
+ * silently filed under a heading that would then be a lie.
+ */
+export type SemanticCategory = 'mechanics' | 'keyword' | 'type'
+
+export const semanticCategory = (tag: SynergyTag): SemanticCategory => {
+  if (tag.startsWith(SUBTYPE_PREFIX)) return 'type'
+  if (tag.startsWith(ABILITY_PREFIX)) return 'keyword'
+  return 'mechanics'
+}
 
 /**
  * Which events feed which other events.
@@ -586,8 +622,7 @@ const TOKEN_DESCRIPTION = String.raw`.{0,49}`
  * Zero-width and adjacent, for the reason the general refusal is: "whenever an
  * opponent loses life, YOU gain that much" is one sentence with two subjects.
  */
-const NOT_YOUR_OWN =
-  String.raw`(?<!\byou )(?<!\byou may )(?<!\byou'd )(?<!\byou would )(?<!\byou’d )`
+const NOT_YOUR_OWN = String.raw`(?<!\byou )(?<!\byou may )(?<!\byou'd )(?<!\byou would )(?<!\byou’d )`
 
 /**
  * Written against Scryfall oracle conventions: the card's own name is spelled

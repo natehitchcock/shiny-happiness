@@ -866,7 +866,20 @@ describe('the semantics offered next to a chosen focus', () => {
     })
   })
 
-  it('leads with the semantic more of the deck’s colours actually supports', async () => {
+  it('orders the offer by the words on the chip, not by how much supports each', async () => {
+    /*
+     * SUPERSEDED BY ADR-0065, and rewritten rather than deleted so the change
+     * is visible where the old claim was made. This read "leads with the
+     * semantic more of the deck's colours actually supports" and asserted
+     * `lifeloss` at 60 ahead of `creature-death` at 2.
+     *
+     * The offer is now grouped by kind and alphabetical inside each group, and
+     * a list can only have one order. What support ranking existed to surface
+     * — that a tag is worth nothing to this deck — is now the fourth category,
+     * which says it in a heading instead of encoding it in a position nobody
+     * can see the reason for. Support ranking is NOT gone from the model:
+     * `bySupport` is untouched and `recommend` still counts.
+     */
     const panel = await focused(
       ['opponent-sacrifice'],
       [
@@ -877,14 +890,18 @@ describe('the semantics offered next to a chosen focus', () => {
     const labels = within(offer(panel))
       .getAllByRole('button')
       .map((b) => b.getAttribute('aria-label'))
-    expect(labels.indexOf('Emphasise opponents losing life')).toBeLessThan(
-      labels.indexOf('Emphasise a creature dying'),
+    // "a creature dying" before "opponents losing life", though it is the one
+    // the pool barely supports.
+    expect(labels.indexOf('Emphasise a creature dying')).toBeLessThan(
+      labels.indexOf('Emphasise opponents losing life'),
     )
   })
 
   it('still offers a semantic nothing supports, and says so rather than dropping it', async () => {
     // Emphasis reorders and never filters, so zero support is a fact about the
-    // pool and not a reason to withhold the choice. It just must not lead.
+    // pool and not a reason to withhold the choice. Since ADR-0065 it is said
+    // once, over a category, rather than under each chip — the claim is the
+    // same one and this asserts it is still made.
     const panel = await focused(
       ['opponent-sacrifice'],
       [

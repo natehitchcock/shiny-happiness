@@ -14,12 +14,13 @@ import { usePipeline, type Phase } from './pipeline'
 import { AUTO_QUERY_MS, useAutoQuery } from './autoquery'
 import {
   archetypeTolerance,
-  // The offer that grows out of a chosen focus, and its ordering. All three are
-  // pure reads of the model, so the client computes them rather than asking:
-  // `interactsWith` is already in this file for the tag hints, and a second
-  // opinion about which semantics are related is exactly the drift the shared
-  // package exists to prevent.
-  bySupport,
+  // The offer that grows out of a chosen focus. Both are pure reads of the
+  // model, so the client computes them rather than asking: `interactsWith` is
+  // already in this file for the tag hints, and a second opinion about which
+  // semantics are related is exactly the drift the shared package exists to
+  // prevent. `bySupport` was the third and is no longer imported (ADR-0065) —
+  // the offer is ordered by category and then alphabetically, and support is
+  // now a heading rather than a position.
   COLORS,
   CURVE_REFERENCE_SPELLS,
   dimensionKeysOf,
@@ -56,6 +57,12 @@ import {
   type QuickbuildReach,
   relatedSemantics,
   remainingSemantics,
+  // Which of the three kinds a tag is (ADR-0065). The domain's own taxonomy,
+  // asked rather than re-derived: this file must not know that a subtype is
+  // spelled `subtype:` — that is a fact about the generated families and it
+  // lives with them, next to the array that is total over all three.
+  semanticCategory,
+  type SemanticCategory,
   // Where a card name sits inside one ability of rules text. The SAME function
   // the server ran to decide which names are references at all (doc 09 §9.4), so
   // the panel cannot link a span the server did not resolve.
@@ -1920,7 +1927,151 @@ const EmphasisChoice = ({
 }
 
 /**
- * One named row of semantics on offer.
+ * The four buckets an offer is split into, in reading order (ADR-0065).
+ *
+ * NOT ALPHABETICAL, and the ordering inside them is — which looks inconsistent
+ * until you notice they are ordering different things. The CONTENTS are a flat
+ * list a reader scans for one word, so alphabetical is the only order they can
+ * predict. The CATEGORIES are four unequal things: 27 curated behaviours that
+ * are what a deck is usually about, then 317 keywords, then 269 subtypes. The
+ * shortest and most useful list leads.
+ *
+ * `unavailable` is last because it is not a kind of tag at all — it is a fact
+ * about THIS deck's colours, and its members are drawn out of the three above.
+ * A tag moves in and out of it as the deck's colours change, which no heading
+ * above it can say about its own members.
+ *
+ * The keys are `semanticCategory`'s, which is the domain's own taxonomy. The
+ * headings are this file's, because what to call a category on screen is a UI
+ * decision and "keyword" is not a heading.
+ */
+const OFFER_CATEGORIES: readonly { readonly key: SemanticCategory; readonly heading: string }[] = [
+  { key: 'mechanics', heading: 'Mechanics' },
+  { key: 'keyword', heading: 'Keywords' },
+  { key: 'type', heading: 'Types' },
+]
+
+const UNAVAILABLE_HEADING = 'Not available in your colours'
+
+/**
+ * The offered tags, bucketed and each bucket sorted by the words on the chip.
+ *
+ * BY `readable(tag)`, NOT BY THE TAG. `subtype:elf` reads "Elves" and belongs
+ * under E; sorting the wire spelling files every subtype under S and every
+ * keyword under A, which is an order a reader cannot see the reason for.
+ *
+ * `localeCompare` and not `<`. Keywords render lowercased and subtypes
+ * capitalised, so a code-point sort puts every capital ahead of every
+ * lowercase — "Goblins" before "flying" — and the mixed fourth category is
+ * where the two families actually meet. The locale is pinned to `en` rather
+ * than left to the host: the vocabulary is Magic's own English and the order
+ * must not depend on which machine drew the page (doc 05).
+ *
+ * A COUNTED ZERO moves a tag; an UNCOUNTED tag does not (ADR-0050). `support`
+ * absent means no pool has been counted at all — the commander prompt runs
+ * before a deck exists — and a tag missing from a map that does have counts is
+ * the absence of an answer rather than the answer nothing. Neither is a claim
+ * that the deck's colours cannot reach it, so neither is filed under a heading
+ * that makes one.
+ */
+const offerCategories = (
+  tags: readonly string[],
+  support: ReadonlyMap<string, number> | undefined,
+): readonly { readonly heading: string; readonly tags: readonly string[] }[] => {
+  const buckets = new Map<string, string[]>([
+    ...OFFER_CATEGORIES.map((c) => [c.heading, [] as string[]] as const),
+    [UNAVAILABLE_HEADING, [] as string[]],
+  ])
+  const headingOf = new Map(OFFER_CATEGORIES.map((c) => [c.key, c.heading]))
+  for (const tag of tags) {
+    const heading =
+      support?.get(tag) === 0
+        ? UNAVAILABLE_HEADING
+        : /*
+           * The cast `TagChip` and `FocusExpansion` both make. `selected` and
+           * the offers are `string[]` all the way down this file because they
+           * round-trip through JSON, and `semanticCategory` is total over
+           * strings — anything outside the two generated prefixes is a
+           * curated event, which is the same fall-through it applies to a
+           * `SynergyTag`.
+           */
+          (headingOf.get(semanticCategory(tag as SynergyTag)) ?? UNAVAILABLE_HEADING)
+    buckets.get(heading)?.push(tag)
+  }
+  return [...buckets].map(([heading, bucket]) => ({
+    heading,
+    tags: [...bucket].sort((a, b) => readable(a).localeCompare(readable(b), 'en')),
+  }))
+}
+
+/**
+ * One category inside an offer, with its own heading and its own group.
+ *
+ * A COMPONENT and not a loop body, because each category needs its own `useId`
+ * and hooks cannot be called in a loop.
+ *
+ * `role="group"` labelled by its `<h5>`, nested inside the offer's own group —
+ * the same treatment `SemanticOffer` gives itself, one level down. Four sibling
+ * groups would name themselves and nothing else, so a reader who tabs onto
+ * "Elves" would hear "Types" with no way to learn they are inside "Every other
+ * semantic"; nesting means both boundaries are crossed on the way in and both
+ * are announced. `<h5>` under the offer's `<h4>` gives heading navigation the
+ * same structure for free, which is the second route in and the one a reader
+ * skimming with a heading list actually uses.
+ *
+ * Returns `null` when empty, for the reason `SemanticOffer` does: a heading
+ * over no chips is a promise of something that is not there.
+ */
+const OfferCategory = ({
+  heading,
+  tags,
+  selected,
+  onToggle,
+  busy,
+}: {
+  heading: string
+  tags: readonly string[]
+  selected: readonly string[]
+  onToggle: (tag: string) => void
+  busy: boolean
+}): React.JSX.Element | null => {
+  const headingId = useId()
+  if (tags.length === 0) return null
+  return (
+    <div className="offer-category" role="group" aria-labelledby={headingId}>
+      <h5 id={headingId}>{heading}</h5>
+      {heading === UNAVAILABLE_HEADING ? (
+        /* Said ONCE, where it used to be said under every chip. Not an error
+           colour and not a warning: emphasis reorders and never filters, so
+           every one of these is still a legal focus and the sentence has to
+           report rather than caution. */
+        <p className="note dim">
+          Nothing in your colours supports these yet. You can still focus one — nothing is hidden
+          either way.
+        </p>
+      ) : null}
+      <p className="tags emphasis-choice">
+        {tags.map((tag) => (
+          <span className="emphasis-option" key={tag}>
+            <EmphasisToggle
+              tag={tag}
+              emphasised={selected.includes(tag)}
+              onToggle={onToggle}
+              busy={busy}
+              className="act emphasise"
+            />
+            <span className="tag" data-emphasised={selected.includes(tag)}>
+              {readable(tag)}
+            </span>
+          </span>
+        ))}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * One named offer of semantics, in categories.
  *
  * Same toggle and the same chip as `EmphasisChoice`, under a heading that says
  * WHY these are being offered — which is the whole difference between the
@@ -1928,12 +2079,24 @@ const EmphasisChoice = ({
  * that heading, so a screen reader reaching a chip can be told which offer it
  * belongs to instead of meeting twenty unexplained toggles in a row.
  *
+ * CATEGORIES, BECAUSE THE FLAT LIST WAS 613 CHIPS (ADR-0065). "Every other
+ * semantic" is nearly the whole vocabulary, and it was one undifferentiated run
+ * ordered by support — an order that answers "which of these will do the most"
+ * and cannot answer "I want a tribe", which is the question a builder opening
+ * this actually has. The three kinds are the domain's own (`semanticCategory`),
+ * so this file does not re-derive a taxonomy by reading prefixes.
+ *
  * `support` is `RecommendResult.tagSupport` as a lookup, or `undefined` where
- * nothing has been counted — the commander prompt runs before a deck exists.
- * Only a counted ZERO is printed. A number beside every chip would be a wall of
- * digits nobody reads, but "nothing in your colours supports this yet" is the
- * one case a builder needs before clicking rather than after, and dropping the
- * chip instead would make the expansion filter, which emphasis never does.
+ * nothing has been counted — the commander prompt runs before a deck exists. A
+ * counted ZERO now moves the chip into a fourth category instead of printing a
+ * sentence beside it. The claim is the same one and it is made once; dropping
+ * the chip instead would make the expansion filter, which emphasis never does.
+ *
+ * `bySupport` is deliberately NOT applied here any more. Ranking by support and
+ * grouping by kind are two orders over one list and only one can be the order;
+ * the count that ranking existed to surface is now a heading, and a category
+ * whose contents are ordered by an invisible number is a list a reader cannot
+ * scan. It keeps its other caller.
  */
 const SemanticOffer = ({
   heading,
@@ -1958,27 +2121,16 @@ const SemanticOffer = ({
     <div className="semantic-offer" role="group" aria-labelledby={headingId}>
       <h4 id={headingId}>{heading}</h4>
       <p className="note">{note}</p>
-      <p className="tags emphasis-choice">
-        {tags.map((tag) => (
-          <span className="emphasis-option" key={tag}>
-            <EmphasisToggle
-              tag={tag}
-              emphasised={selected.includes(tag)}
-              onToggle={onToggle}
-              busy={busy}
-              className="act emphasise"
-            />
-            <span className="tag" data-emphasised={selected.includes(tag)}>
-              {readable(tag)}
-            </span>
-            {support?.get(tag) === 0 ? (
-              <span className="note dim offer-unsupported">
-                nothing in your colours supports this yet
-              </span>
-            ) : null}
-          </span>
-        ))}
-      </p>
+      {offerCategories(tags, support).map((category) => (
+        <OfferCategory
+          key={category.heading}
+          heading={category.heading}
+          tags={category.tags}
+          selected={selected}
+          onToggle={onToggle}
+          busy={busy}
+        />
+      ))}
     </div>
   )
 }
@@ -2050,8 +2202,18 @@ const FocusExpansion = ({
    * rather than throwing.
    */
   const emphasis = selected as readonly SynergyTag[]
-  const related = bySupport(relatedSemantics(emphasis, base), support)
-  const rest = bySupport(remainingSemantics([...base, ...selected, ...related]), support)
+  /*
+   * Canonical order, and `SemanticOffer` reorders it (ADR-0065).
+   *
+   * `bySupport` used to wrap both of these. It is not wrong — a tag nothing
+   * supports should not lead — but its answer and the categories' answer are
+   * two orders over one list, and a list can only have one. The count it
+   * existed to surface is now the fourth heading, which says the same thing
+   * where a reader can see it rather than encoding it in a position. It keeps
+   * its other caller, on the focus panel's own report.
+   */
+  const related = relatedSemantics(emphasis, base)
+  const rest = remainingSemantics([...base, ...selected, ...related])
   return (
     <>
       <SemanticOffer
