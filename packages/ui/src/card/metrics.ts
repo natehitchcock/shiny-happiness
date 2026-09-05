@@ -28,7 +28,12 @@ export interface ImpactView {
   readonly score: number
   readonly breadth: 'none' | 'one' | 'few' | 'several' | 'variable' | 'unbounded'
   readonly persistence: 'one-shot' | 'activated' | 'triggered' | 'upkeep'
-  readonly stakes: 'self' | 'own' | 'opposing' | 'player'
+  readonly stakes:
+    | 'nothing'
+    | 'owning-player'
+    | 'owned-permanent'
+    | 'opposing-permanent'
+    | 'opposing-player'
   readonly symmetry: 'none' | 'symmetric' | 'one-sided'
   readonly severity: 'none' | 'tap' | 'flicker' | 'bounce' | 'damage' | 'destroy' | 'exile'
   readonly scales: boolean
@@ -132,68 +137,80 @@ export const impactFraction = (score: number): number =>
  * would be invented here, in a renderer, and would then be the interface's
  * opinion rather than the model's — and doc 18 §18.9 already declined to give
  * the model bands.
+ *
+ * THE FOUR ROWS ARE NAMED FOR WHAT THEY MEASURE (ADR-0066): Breadth, Rate,
+ * Stakes, Severity. They used to be named for the sentence they completed —
+ * "Reach: everything at once", "Ends up: gone for good" — which reads well and
+ * costs a reader the axis's name, so the row and the model had two different
+ * vocabularies for one thing and neither could be looked up from the other.
  */
-const REACH: Readonly<Record<ImpactView['breadth'], string>> = {
-  none: 'nothing it can count',
-  one: 'one thing',
-  few: 'up to two things',
-  several: 'a few things',
-  variable: 'as many as X pays for',
-  unbounded: 'everything at once',
+const BREADTH: Readonly<Record<ImpactView['breadth'], string>> = {
+  none: 'No targets',
+  one: 'Single targets',
+  few: 'Few targets',
+  several: 'Several targets',
+  variable: 'Variable targets',
+  unbounded: 'Every target',
 }
 
 /**
- * REACH SAYS WHOSE, when the model knows whose.
+ * BREADTH SAYS WHOSE, when the model knows whose.
  *
- * "Everything at once" is exactly right for a wrath and an over-claim on every
- * other unbounded card. Agatha's Soul Cauldron reaches the creatures you
- * control and the graveyards — a real unbounded set, and nothing like
- * everything — and reporting it as "everything at once" is the line the product
- * owner read and disbelieved. Craterhoof Behemoth had carried the same
- * over-claim since this file was written; it was only ever noticed on a card
- * whose other two rows made it obvious.
+ * "Every target" is exactly right for a wrath and an over-claim on every other
+ * unbounded card. Agatha's Soul Cauldron reaches the creatures you control and
+ * the graveyards — a real unbounded set, and nothing like everything — and
+ * reporting it as unqualified is the line the product owner read and
+ * disbelieved. Craterhoof Behemoth had carried the same over-claim since this
+ * file was written; it was only ever noticed on a card whose other two rows
+ * made it obvious.
+ *
+ * KEPT THROUGH THE RENAME (ADR-0066) rather than dropped with the old wording.
+ * The words changed; the over-claim the qualifier was written to stop did not,
+ * so the refinement is re-phrased into the new register instead of deleted.
  *
  * NO NEW FIELD. `symmetry` and `stakes` are already on the wire and already
- * decide the "Falls on" row directly below, so the refinement costs nothing and
+ * decide the Stakes row directly below, so the refinement costs nothing and
  * cannot disagree with the line under it. A `symmetric` effect keeps the
  * unqualified words because it genuinely is everything — that is what the 0.85
  * discount is charged for.
  *
- * `player` stakes keep them too, and deliberately. `unbounded` + `player` is
- * both "each opponent loses 3 life" and "all permanents target player
+ * `opposing-player` stakes keep them too, and deliberately. `unbounded` + a
+ * player is both "each opponent loses 3 life" and "all permanents target player
  * controls", and the payload cannot tell those apart; a phrase that is true of
  * both beats a guess that is wrong for one, which is the rule `efficiencyWorking`
  * already follows for `statSurplus === 0`.
  */
 const reachOf = (impact: ImpactView): string => {
   if (impact.breadth !== 'unbounded' || impact.symmetry !== 'one-sided') {
-    return REACH[impact.breadth]
+    return BREADTH[impact.breadth]
   }
-  if (impact.stakes === 'own' || impact.stakes === 'self') return 'your whole side at once'
-  if (impact.stakes === 'opposing') return "an opponent's whole side at once"
-  return REACH.unbounded
+  if (impact.stakes === 'opposing-player') return BREADTH.unbounded
+  if (impact.stakes === 'opposing-permanent') return "Every target on an opponent's side"
+  return 'Every target on your side'
 }
 
-const REPEATS: Readonly<Record<ImpactView['persistence'], string>> = {
-  'one-shot': 'once, then it is done',
-  activated: 'each time you pay for it',
-  triggered: 'each time it triggers',
-  upkeep: 'every upkeep',
+const RATE: Readonly<Record<ImpactView['persistence'], string>> = {
+  'one-shot': 'Once',
+  activated: 'Activated',
+  triggered: 'Triggered',
+  upkeep: 'Phase-Triggered',
 }
 
 /**
  * What is left of the thing afterwards (doc 18 §18.17).
  *
- * The register is the pane's own — these read as the end of a sentence starting
- * "Ends up", the way "Reach" reads as "everything at once". `none` has no entry
- * because it draws no row at all: 79.5% of the corpus removes nothing, and a
- * row saying so on four cards in five is noise rather than information.
+ * These say where the object ENDS UP, which is what the rung measures, and the
+ * words are unchanged by ADR-0066 — that pass renamed the four axes and
+ * relabelled the tiers of three of them, and severity's rungs were already
+ * named for the outcome rather than for the sentence they completed. `none` has
+ * no entry because it draws no row at all: 79.7% of the corpus removes nothing,
+ * and a row saying so on four cards in five is noise rather than information.
  *
  * `damage` says out loud that it is not always lethal, because that is the one
  * rung whose severity is probabilistic and a reader who is not told will assume
  * otherwise.
  */
-const ENDS_UP: Readonly<Record<Exclude<ImpactView['severity'], 'none'>, string>> = {
+const SEVERITY: Readonly<Record<Exclude<ImpactView['severity'], 'none'>, string>> = {
   tap: 'tapped, and still there',
   flicker: 'right back where it was',
   bounce: "in its owner's hand",
@@ -202,11 +219,19 @@ const ENDS_UP: Readonly<Record<Exclude<ImpactView['severity'], 'none'>, string>>
   exile: 'gone for good',
 }
 
-const FALLS_ON: Readonly<Record<ImpactView['stakes'], string>> = {
-  self: 'itself',
-  own: 'your own side',
-  opposing: "an opponent's side",
-  player: 'a player, not the board',
+/**
+ * The five stakes rungs, in the words the model's own table uses (ADR-0066).
+ *
+ * `nothing` and `owning-player` are the pair the old single `self` floor was
+ * hiding, and printing them differently is the whole point of the split: a card
+ * that drains you and a card that taps for mana used to draw the same row.
+ */
+const STAKES: Readonly<Record<ImpactView['stakes'], string>> = {
+  nothing: 'nothing countable',
+  'owning-player': 'you',
+  'owned-permanent': 'your own permanent',
+  'opposing-permanent': "another player's permanent",
+  'opposing-player': 'another player',
 }
 
 /**
@@ -221,19 +246,22 @@ const FALLS_ON: Readonly<Record<ImpactView['stakes'], string>> = {
  * over real cards rather than by reasoning about the tiers:
  *
  *   - `one-sided` does not mean "not yours". It means "does not hit everyone
- *     equally", and Craterhoof Behemoth is `own` + `one-sided` — the side it
- *     spares is the opponents'. A flat "— never yours" appended to the stakes
- *     produced "your own side — never yours", which is a contradiction printed
- *     under a card's own text. So the qualifier is dropped whenever the stakes
- *     already say the effect is yours.
- *   - `player` stakes are about a person, not a board. "never your board" is
- *     the wrong noun for Torment of Hailfire, which takes life and cards.
+ *     equally", and Craterhoof Behemoth is `owned-permanent` + `one-sided` —
+ *     the side it spares is the opponents'. A flat "— never yours" appended to
+ *     the stakes produced "your own permanent — never yours", which is a
+ *     contradiction printed under a card's own text. So the qualifier is added
+ *     only for the two rungs that name somebody else, which after ADR-0066 is
+ *     what the tier names say outright rather than something a reader has to
+ *     know.
+ *   - `opposing-player` stakes are about a person, not a board. "never your
+ *     board" is the wrong noun for Torment of Hailfire, which takes life and
+ *     cards.
  */
 const qualifier = (stakes: ImpactView['stakes'], symmetry: ImpactView['symmetry']): string => {
   if (symmetry === 'none') return ''
-  const you = stakes === 'player' ? 'you' : 'your board'
+  const you = stakes === 'opposing-player' ? 'you' : 'your board'
   if (symmetry === 'symmetric') return `, ${you} included`
-  if (stakes === 'own' || stakes === 'self') return ''
+  if (stakes !== 'opposing-permanent' && stakes !== 'opposing-player') return ''
   return `, never ${you}`
 }
 
@@ -245,21 +273,21 @@ export interface MetricRow {
 /**
  * The tier rows. Empty for a card with no rules text — see `impactNotes`.
  *
- * "Ends up" is drawn ONLY when the card removes something. It is the one row
- * that does not apply to every card, and printing "Ends up: nothing" on the
- * 79.5% of the corpus with `severity: 'none'` would be a row that never varies
+ * "Severity" is drawn ONLY when the card removes something. It is the one row
+ * that does not apply to every card, and printing "Severity: nothing" on the
+ * 79.7% of the corpus with `severity: 'none'` would be a row that never varies
  * — which is a row that stops being read.
  */
 export const impactRows = (impact: ImpactView): readonly MetricRow[] => {
   if (impact.score === 0) return []
   return [
-    { label: 'Reach', value: reachOf(impact) },
-    { label: 'Repeats', value: REPEATS[impact.persistence] },
+    { label: 'Breadth', value: reachOf(impact) },
+    { label: 'Rate', value: RATE[impact.persistence] },
     {
-      label: 'Falls on',
-      value: FALLS_ON[impact.stakes] + qualifier(impact.stakes, impact.symmetry),
+      label: 'Stakes',
+      value: STAKES[impact.stakes] + qualifier(impact.stakes, impact.symmetry),
     },
-    ...(impact.severity === 'none' ? [] : [{ label: 'Ends up', value: ENDS_UP[impact.severity] }]),
+    ...(impact.severity === 'none' ? [] : [{ label: 'Severity', value: SEVERITY[impact.severity] }]),
   ]
 }
 
@@ -278,12 +306,17 @@ const count = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, 
  * WHERE THIS CARD SITS AMONG THE CARDS THAT SHARE ITS JOB (doc 18 §18.12).
  *
  * THE PROBLEM. Impact is a property of the card and is NOT comparable across
- * roles. Sol Ring scores 0.68 against a ceiling of 18.48, and a reader handed
+ * roles. Sol Ring scores 2.0 against a ceiling of 22.176, and a reader handed
  * that with no comparison concludes the app rates one of the format's defining
- * cards as near-worthless. It is the median ramp card. Wrath of God's 6.12
- * looks enormous next to it and is the BOTTOM of the middle half of board
+ * cards as near-worthless. It is around the median ramp card. Wrath of God's
+ * 6.12 looks enormous next to it and is the BOTTOM of the middle half of board
  * wipes. One bar for all eighteen roles would tell a builder their entire mana
  * base was bad, which is the specific harm this line exists to prevent.
+ *
+ * ADR-0066 narrowed the gap without closing it. Sol Ring reads its two mana
+ * now, so the worst version of this — the format's best rock at 0.68 — is gone;
+ * a ramp card is still nowhere near a wrath, and the comparison is still the
+ * only thing that makes its number legible.
  *
  * DESCRIPTIVE, NOT PRESCRIPTIVE, and the distinction is the reason this is
  * allowed to exist at all. doc 18 §18.9 declined to give the model bands and
@@ -303,8 +336,9 @@ const count = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, 
  * Rejected: the whole eighteen-row table, behind a `Hint` or otherwise. The
  * pane is 21rem and a bottom sheet on a phone, and it does not need the table —
  * it is showing ONE card, so it needs one row of it. That is also why this is
- * plain text with no control: the reader whose Sol Ring reads 0.68 must not
- * have to suspect they need help before the help appears.
+ * plain text with no control: the reader whose Sol Ring reads 2.0 against a
+ * ceiling of 22.176 must not have to suspect they need help before the help
+ * appears.
  */
 export const impactRoleLine = (
   impact: ImpactView,
@@ -334,12 +368,13 @@ const PLACEMENT: Readonly<Record<ImpactRoleView['placement'], string>> = {
 /**
  * What the tiers alone would leave a reader to guess wrong.
  *
- * The blindness note is unconditional and deliberate. `impact.ts`'s own
- * docblock records that the model cannot see a card whose point is a resource
- * or a tax — Sol Ring scores 0.68 — and that this was accepted rather than
- * patched. A reader who is not told will conclude the app thinks Sol Ring is a
- * bad card. Naming the blind spot beside the number is what makes a low score
- * legible instead of insulting.
+ * The blindness note is unconditional and deliberate. It is NARROWER after
+ * ADR-0066, which turned mana and taxes from blind spots into rules — Sol Ring
+ * reads its two mana now — but it is not gone: a card whose point is drawing
+ * cards or filling a graveyard still names nothing the model counts. A reader
+ * who is not told will conclude the app thinks such a card is bad. Naming the
+ * blind spot beside the number is what makes a low score legible instead of
+ * insulting.
  *
  * Rejected: naming Sol Ring and its 0.68 as an anchor. It reads better and it
  * goes stale the first time a regex moves, with nothing to catch it — a UI
@@ -362,7 +397,7 @@ export const impactNotes = (
     notes.push('Scales with X — the real figure is this one times whatever X turns out to be.')
   }
   if (impact.fragile) {
-    // Otherwise "Repeats: once" on a permanent looks like a misclassification.
+    // Otherwise "Rate: Once" on a permanent looks like a misclassification.
     notes.push('It sacrifices itself, so it counts as one-shot whatever its type line says.')
   }
   /*
@@ -390,7 +425,7 @@ export const impactNotes = (
     )
     return notes
   }
-  notes.push('Effects only: a card whose job is mana or a tax reads low here.')
+  notes.push('Effects, mana and taxes: a card whose job is drawing cards reads low here.')
   return notes
 }
 
@@ -436,18 +471,19 @@ export const EFFICIENCY_CAVEAT =
 /**
  * HOW THE NUMBER WAS ARRIVED AT — the explanation behind the `Hint`.
  *
- * NOT THE FORMULA. A reader looking at Sol Ring's 0.68 wants to know why it is
+ * NOT THE FORMULA. A reader looking at a low number wants to know why it is
  * low; `0.5 × 1.6 × 0.85 = 0.68` does not tell them that, it restates the same
  * number in a second notation and leaves them exactly as puzzled. What answers
- * them is that the model reads effects and only effects, that Sol Ring names
- * nothing to affect, and that this is a stated limit rather than a verdict on
- * the card. So these lines explain the METHOD and its blind spot, and the
- * arithmetic appears only as the shape — three readings, multiplied.
+ * them is that the model reads what a card DOES, that a card drawing cards
+ * names nothing to affect, and that this is a stated limit rather than a
+ * verdict on the card. So these lines explain the METHOD and its blind spot,
+ * and the arithmetic appears only as the shape — four readings, multiplied.
  *
- * The register is the pane's own — "Reach: everything at once", "Effects only".
- * Short sentences, the game's words, and the same three labels the tier rows
- * above already use, so the explanation and the thing it explains share a
- * vocabulary instead of introducing a second one.
+ * The register is the pane's own — "Breadth: Every target". Short sentences,
+ * the game's words, and the same four labels the tier rows above already use,
+ * so the explanation and the thing it explains share a vocabulary instead of
+ * introducing a second one. That the labels are now the AXES' names rather than
+ * sentence-openers (ADR-0066) is what lets these lines name them at all.
  *
  * NO CONSTANT IS QUOTED. The tier values live in `impact.ts` and `r` lives in
  * `baseline.data.json`, which is regenerated from the corpus; copy repeating
@@ -469,13 +505,14 @@ export const EFFICIENCY_CAVEAT =
  * sheet on a phone. The pane is unchanged for everyone who does not ask.
  */
 export const impactAlgorithm = (): readonly string[] => [
-  'Three readings of the card’s own text, multiplied together.',
-  'Reach — how much the effect names, from nothing it can count up to everything at once. This is the biggest of the three by far, and it is why a wrath outscores a removal spell rather than doubling it.',
-  'Repeats — once, or every time you pay, or every trigger, or every upkeep. Capped low on purpose: a permanent that repeats is worth about twice a one-shot, and past that what ends the effect is the game ending.',
-  'Falls on — itself, your side, an opponent’s, or a player. A small nudge either way, not a multiplier that decides the number.',
-  'Ends up — only for cards that remove something, and only how hard: tapped, flickered, bounced, damaged, destroyed, exiled. Destroy is the neutral point, so a card that removes nothing is not scored down for it.',
+  'Four readings of the card’s own text, multiplied together.',
+  'Breadth — how much the effect names, from no targets up to every target. This is the biggest of the four by far, and it is why a wrath outscores a removal spell rather than doubling it.',
+  'Rate — once, or activated, or triggered, or phase-triggered. Capped low on purpose: a permanent that repeats is worth about twice a one-shot, and past that what ends the effect is the game ending.',
+  'Stakes — nothing countable, you, your own permanent, another player’s permanent, or another player. A small nudge either way, not a multiplier that decides the number. Where a clause could land on either side, it is read at the better of the two.',
+  'Severity — only for cards that remove something, and only how hard: tapped, flickered, bounced, damaged, destroyed, exiled. Destroy is the neutral point, so a card that removes nothing is not scored down for it.',
   'A mass effect that catches your own board keeps a little less than all of it, because it is pointed at you as well.',
-  'Effects only, and that is the honest limit. A card whose job is mana, or a tax, or a card draw, names nothing the model can count, so it lands near the floor however good it is in play. That is a blind spot, not a verdict — which is what the line about its role is for.',
+  'A clause that makes mana is scored by what it makes — one point per mana — and a clause that taxes what other people pay is read as the standing, board-wide effect it is. Both used to read as nothing at all.',
+  'Effects, mana and taxes, and the limit is still real: a card whose job is drawing cards names nothing the model can count, so it lands near the floor however good it is in play. That is a blind spot, not a verdict — which is what the line about its role is for.',
   'Nothing is special-cased, and the deck is never consulted: this is a fact about the card, the same in every deck.',
 ]
 

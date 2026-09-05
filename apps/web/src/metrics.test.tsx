@@ -211,8 +211,8 @@ describe('the preview panel draws both metrics', () => {
     )
     // Why 6.12 and not 2: it hits everything, and it hits your board too. Both
     // halves are what the 0.85 symmetry discount was charged for.
-    expect(shown.getByText('everything at once')).toBeDefined()
-    expect(shown.getByText("an opponent's side, your board included")).toBeDefined()
+    expect(shown.getByText('Every target')).toBeDefined()
+    expect(shown.getByText("another player's permanent, your board included")).toBeDefined()
   })
 
   it('offers the method behind each number, through the app’s own popover', async () => {
@@ -248,7 +248,7 @@ describe('the preview panel draws both metrics', () => {
     // popover, because the pane prints its own shorter "Effects only" note
     // unconditionally and this must be the explanation, not that.
     const popover = within(await screen.findByRole('tooltip'))
-    expect(popover.getByText(/Effects only/)).toBeDefined()
+    expect(popover.getByText(/Effects, mana and taxes/)).toBeDefined()
     expect(popover.getByText(/same in every deck/)).toBeDefined()
   })
 
@@ -280,7 +280,7 @@ describe('the preview panel draws both metrics', () => {
     // And the caveat stays generic. 70 of 502 board wipes name nothing this
     // model can count, which is a minority, so a "blind spot" sentence here
     // would be a false statement wearing the costume of sourcing.
-    expect(shown.getByText(/a card whose job is mana or a tax reads low here/)).toBeDefined()
+    expect(shown.getByText(/a card whose job is drawing cards reads low here/)).toBeDefined()
     expect(shown.queryByText(/blind spot/)).toBeNull()
   })
 
@@ -314,8 +314,13 @@ describe('the preview panel draws both metrics', () => {
     const shown = within(
       await within(panel).findByRole('region', { name: 'Impact and efficiency' }),
     )
-    expect(impact.score).toBeLessThan(1)
-    expect(shown.getByText(/Middle half of the .* ramp cards in the corpus/)).toBeDefined()
+    // The guard on the fixture, not the point of the test: Sol Ring has to be
+    // a LOW-scoring card for the role line to be the thing that explains it.
+    // ADR-0066 moved it from 0.68 to 2.0 — it taps for two mana and the mana
+    // rule scores a clause at 1.0 per mana — which is still a small fraction of
+    // the 22.176 ceiling and still needs the comparison to be legible.
+    expect(impact.score).toBeLessThan(3)
+    expect(shown.getByText(/of the .* ramp cards in the corpus/)).toBeDefined()
     // And the caveat is quantified rather than generic, because for ramp the
     // blind spot IS the explanation of the number.
     expect(shown.getByText(/it finds nothing to count at all/)).toBeDefined()
@@ -330,7 +335,7 @@ describe('the preview panel draws both metrics', () => {
       await within(panel).findByRole('region', { name: 'Impact and efficiency' }),
     )
     expect(shown.queryByText(/in the corpus; half of them score/)).toBeNull()
-    expect(shown.getByText(/Effects only/)).toBeDefined()
+    expect(shown.getByText(/Effects, mana and taxes/)).toBeDefined()
   })
 
   it('draws nothing when the server answers without the fields', async () => {
