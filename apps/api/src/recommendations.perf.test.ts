@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { createTestDatabase, databaseUrl, type TestDatabase } from '@roundtable/db/testing'
-import { insertCombos, upsertCards } from '@roundtable/db'
+import {
+  createSnapshot,
+  insertCombos,
+  promoteSnapshot,
+  setSnapshotCounts,
+  upsertCards,
+} from '@roundtable/db'
 import type { Card, Combo, OracleId } from '@roundtable/domain'
 import { comboId, oracleId, printingId } from '@roundtable/domain'
 import type { FastifyInstance } from 'fastify'
@@ -94,6 +100,30 @@ describeDb('API-02 performance', () => {
     }
     await insertCombos(db.pool, combos)
 
+    /*
+     * A LIVE dataset snapshot, written the way the ingest writes one.
+     *
+     * Without this the test measured a path production never takes. There was
+     * no `dataset_snapshots` row, so `liveSnapshotId` answered `null`, and
+     * `snapshot-cache.ts` bypasses the cache entirely on a null key —
+     * deliberately, because caching against a null key would be caching "we do
+     * not know when this changes". Every one of the RUNS measured requests
+     * therefore re-read the eligible pool, the combos and the whole
+     * printing-facts map, while production, which always has a live snapshot,
+     * reads all three once per ingest. The budget was being defended against a
+     * request no user issues (ADR-0063).
+     *
+     * Deliberately `createSnapshot` → `setSnapshotCounts` → `promoteSnapshot`,
+     * the exact sequence `ingestScryfall` uses, rather than a hand-rolled
+     * INSERT. A row this test wrote its own way could satisfy `liveSnapshotId`
+     * while differing from a real one — and then the test would go green while
+     * production stayed uncached, which is the failure being fixed here.
+     */
+    const snapshotId = randomUUID()
+    await createSnapshot(db.pool, snapshotId, 'scryfall')
+    await setSnapshotCounts(db.pool, snapshotId, { cards: CORPUS, combos: COMBOS })
+    await promoteSnapshot(db.pool, snapshotId, 'scryfall')
+
     app = await buildServer({ pool: db.pool })
     await app.ready()
 
@@ -132,7 +162,10 @@ describeDb('API-02 performance', () => {
 
   it(`recomputes a 100-card deck under ${BUDGET_MS} ms at p95`, async () => {
     // One warm-up: the first call pays for pool warm-up and JIT, and including
-    // it would measure startup rather than the recompute.
+    // it would measure startup rather than the recompute. Now that the corpus
+    // has a live snapshot, this call also fills the corpus cache — which is the
+    // point. A production instance serves from a filled cache, and the budget is
+    // a claim about THAT request; the cold read is the ingest's cost, paid once.
     await app.inject({
       method: 'POST',
       url: `/api/v1/decks/${deckId}/recommendations`,
