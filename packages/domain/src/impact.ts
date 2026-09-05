@@ -9,13 +9,16 @@ import type { Card } from './card.js'
  * second opinion about the first three. Card-intrinsic also means the number can
  * appear on `/cards/search`, which has no deck at all.
  *
- * The cost of that decision is stated rather than patched. This model is blind
- * to cards whose point is a resource or a tax rather than an effect on
- * something: Sol Ring scores 0.68, Rhystic Study 0.81. That was raised before
- * the model was built and accepted — "sol ring is a lower impact card by this
- * metric, that's fine" — and there is deliberately no fudge factor rescuing
- * named cards, because a correction that exists to fix three cards will be wrong
- * for the fourth.
+ * MANA AND TAXES ARE NO LONGER BLIND SPOTS (ADR-0066). This model used to be
+ * blind to cards whose point is a resource or a tax rather than an effect on
+ * something — Sol Ring scored 0.68 and Rhystic Study 0.808, and that was
+ * accepted rather than patched. Both are now rules rather than exceptions: a
+ * clause that produces mana scores 1.0 per mana it produces, and a clause that
+ * taxes what other people pay reads as the standing, board-wide effect it is.
+ * There is still deliberately no fudge factor rescuing named cards, because a
+ * correction that exists to fix three cards will be wrong for the fourth —
+ * `manaProduced` and the tax patterns name no card and were measured over the
+ * whole corpus.
  *
  * Everything here is derived from `oracleText`, `typeLine` and `manaCost`, all
  * of which the corpus already stores. NOTHING new is derived at ingest and no
@@ -37,8 +40,28 @@ export type BreadthTier = 'none' | 'one' | 'few' | 'several' | 'variable' | 'unb
 /** How many times the effect happens. */
 export type PersistenceTier = 'one-shot' | 'activated' | 'triggered' | 'upkeep'
 
-/** Who is on the wrong end of it. */
-export type StakesTier = 'self' | 'own' | 'opposing' | 'player'
+/**
+ * Who is on the wrong end of it (ADR-0066).
+ *
+ * FIVE TIERS CHOSEN BY MAXIMUM, not a first-match cascade. The question the
+ * axis asks is "what is the best thing this clause could land on", so a clause
+ * that may hit either side takes the better of the two rather than whichever
+ * pattern happened to be tested first. `any target` reaches a player, so it is
+ * `opposing-player`, and it no longer matters that the unbounded rule sits
+ * above the targeting rule in the source.
+ *
+ * `nothing` is a DISTINCT FLOOR rather than a merge into `owning-player`, and
+ * that is the decision the bottom of the ladder turns on: a clause that drains
+ * you for 3 lands on a person and a clause that taps for mana lands on nobody,
+ * and pricing them identically was the defect. It keeps the old `self` value of
+ * 0.85 exactly, so the corpus floor does not move by this change alone.
+ */
+export type StakesTier =
+  | 'nothing'
+  | 'owning-player'
+  | 'owned-permanent'
+  | 'opposing-permanent'
+  | 'opposing-player'
 
 /**
  * Whether a mass effect spares the caster.
@@ -122,25 +145,31 @@ const PERSISTENCE_VALUE: Readonly<Record<PersistenceTier, number>> = {
 }
 
 /**
- * The stakes ladder (doc 18 §18.5).
+ * The stakes ladder (doc 18 §18.5, ADR-0066).
  *
- * An UNRESTRICTED `target creature` reads as `opposing`, not as a middle tier
- * of its own: the target is chosen by the caster and the caster chooses the
- * opponent's, so scoring Swords to Plowshares below a card that may only hit an
- * opponent's creatures would rank a strictly worse card higher.
+ * An UNRESTRICTED `target creature` reads as `opposing-permanent`, not as a
+ * middle tier of its own: the target is chosen by the caster and the caster
+ * chooses the opponent's, so scoring Swords to Plowshares below a card that may
+ * only hit an opponent's creatures would rank a strictly worse card higher.
+ *
+ * A PERSON OUTRANKS THEIR BOARD on both sides of the ladder, because a board is
+ * replaceable and a life total is the game. The two middle rungs are the same
+ * distance apart as the two outer ones are from them, so the ladder reads as
+ * "whose, then which of theirs" rather than as four unrelated constants.
  */
 const STAKES_VALUE: Readonly<Record<StakesTier, number>> = {
-  self: 0.85,
-  own: 1.0,
-  opposing: 1.2,
-  player: 1.4,
+  nothing: 0.85,
+  'owning-player': 0.9,
+  'owned-permanent': 1.0,
+  'opposing-permanent': 1.2,
+  'opposing-player': 1.4,
 }
 
 /**
  * What a mass effect loses for also hitting your board.
  *
- * THE `self` STAKES TIER, REUSED. A symmetric wrath is a wrath that is also
- * pointed at you, and "pointed at you" is already a number in `STAKES_VALUE`.
+ * THE `nothing` STAKES TIER, REUSED. A symmetric wrath is a wrath that is also
+ * pointed at you, and the bottom of `STAKES_VALUE` is already that number.
  * Rejected: a second, independently chosen constant — it would have been one
  * more thing to justify and one more thing to drift out of step.
  *
@@ -201,8 +230,8 @@ const SEVERITY_VALUE: Readonly<Record<SeverityTier, number>> = {
  * observation about whichever pool happened to be measured.
  *
  * It is REACHABLE, not a theoretical bound: `unbounded` breadth with an
- * `each opponent` clause takes `player` stakes and the `one-sided` symmetry
- * branch, so an upkeep trigger over every opponent scores exactly this. The
+ * `each opponent` clause takes `opposing-player` stakes and the `one-sided`
+ * symmetry branch, so an upkeep trigger over every opponent scores this. The
  * symmetry discount cannot apply at the maximum for the same reason — a
  * symmetric effect is by definition not the `each opponent` shape — so it is
  * correctly absent from the product.
@@ -213,7 +242,10 @@ const SEVERITY_VALUE: Readonly<Record<SeverityTier, number>> = {
  * only one of them owns it.
  */
 export const IMPACT_MAX =
-  BREADTH_VALUE.unbounded * PERSISTENCE_VALUE.upkeep * STAKES_VALUE.player * SEVERITY_VALUE.exile
+  BREADTH_VALUE.unbounded *
+  PERSISTENCE_VALUE.upkeep *
+  STAKES_VALUE['opposing-player'] *
+  SEVERITY_VALUE.exile
 
 export interface CardImpact {
   /**
@@ -266,7 +298,7 @@ const NO_IMPACT: CardImpact = Object.freeze({
   score: 0,
   breadth: 'none',
   persistence: 'one-shot',
-  stakes: 'self',
+  stakes: 'nothing',
   symmetry: 'none',
   severity: 'none',
   scales: false,
@@ -538,6 +570,193 @@ const INSTANT_OR_SORCERY = /instant|sorcery/
 const UPKEEP = /at the beginning of/
 const WHENEVER = /\bwhenever\b/
 /**
+ * `when` IS A TRIGGER WORD, and its absence was the model's largest blind spot
+ * (ADR-0066).
+ *
+ * *"When ~ enters, draw a card"* says `when`, not `whenever`, and it is exactly
+ * as much a triggered ability. It matched neither `WHENEVER` nor `UPKEEP`, fell
+ * past the activated test and landed on `one-shot`: 5,289 commander-legal
+ * permanents — 16.6% of the corpus — were priced as though their ability
+ * happened once. Accursed Marauder went 8.4 → 15.96 and Priest of Gix 0.425 →
+ * 0.808 on this rule alone.
+ *
+ * `\bwhen\b` DOES NOT MATCH `whenever` — there is no word boundary after the
+ * fourth letter — so the two tests stay independent and `WHENEVER` keeps its
+ * own place in the ladder above the activated rung.
+ *
+ * BARE RATHER THAN ANCHORED, and that was measured rather than assumed. Magic
+ * templates a triggered ability at the START of its ability, so `^(when|
+ * whenever|at)\b` is the obvious candidate and it is wrong: it promotes 5,022
+ * cards against the bare rule's 5,289, and every one of the 292 clauses in the
+ * difference is a genuine trigger the anchor cannot see. They were read, all of
+ * them, and they are 197 ability-word prefixes (*"corrupted — when ~ enters"*,
+ * *"revolt — when ~ enters"*, *"metalcraft — when ~ enters"*), 33 triggers
+ * granted inside quotation marks (*"all slivers have \"when ~ enters …\""*), 30
+ * reflexive *"when you do"* triggers hung off an exert or a sacrifice, 20 Saga
+ * chapters, and 12 delayed triggers following a replacement effect. Not one is
+ * prose. The anchor's own unique catch is 15 clauses reading *"at end of
+ * combat"*, which this pass deliberately leaves unclaimed — see ADR-0066.
+ *
+ * ITS PLACE IN THE LADDER IS BELOW `activated`, AND THAT IS THE WHOLE SAFETY OF
+ * IT. 86 clauses are an activated ability whose EFFECT contains a delayed or
+ * granted trigger — Havengul Lich's *"{1}: you may cast target creature card in
+ * a graveyard this turn. when you cast it this turn, …"*. The cost recurs on
+ * every one of them, so `activated` is the correct reading by this axis's own
+ * ordering, and testing `when` above the colon rule would have promoted all 86
+ * to a rung that says no cost recurs. Ordering it below removes the entire
+ * false-positive population; there is no other one.
+ */
+const WHEN = /\bwhen\b/
+
+/**
+ * A TAX: a standing modification to what other people's spells or abilities
+ * cost (ADR-0066).
+ *
+ * *"Taxes are Phase-triggered, every target, so they should be rated pretty
+ * high."* A static tax names no trigger word at all, so it fell to `one-shot`,
+ * and it names no group the breadth rules count, so it fell to `none` — 0.425,
+ * the model floor, for Sphere of Resistance and for Thalia. The rule gives a
+ * tax clause `upkeep` persistence and `unbounded` breadth; stakes falls out of
+ * the ladder normally.
+ *
+ * THE BOUNDARY IS WHOSE SPELLS, and getting it wrong in the permissive
+ * direction turns every cost-reducer into a Sphere of Resistance. *"Spells you
+ * cast cost {1} less"* is a cost modification too, and it is already the
+ * Quandrix `SPELL_GRANT` case at `triggered`. `TAX_IS_YOURS` excludes it. What
+ * is left is what OTHER people, or everybody, pay.
+ *
+ * Three shapes, all read off the corpus rather than imagined: an increase
+ * (*"spells cost {1} more to cast"*), Trinisphere's floor (*"each spell that
+ * would cost less than three mana to cast costs three mana to cast"*), and the
+ * Rhystic clause, where the tax is optional and the payment is the whole point
+ * (*"unless that player pays {1}"*).
+ *
+ * TRINISPHERE'S `instead` IS REMINDER TEXT and this rule never sees it. The
+ * printed sentence ends at "costs three mana to cast"; the *"costs {2}{B} to
+ * cast instead"* a reader remembers is inside the parentheses `REMINDER` strips
+ * before any pattern runs. Requiring the word matched nothing at all.
+ *
+ * `TAX_UNLESS` IS ANCHORED ON THE STANDING TRIGGER, AND THAT IS THE WHOLE
+ * SAFETY OF IT. A bare *"unless its controller pays"* is not a tax rule at all
+ * — it is the templating of a SOFT COUNTERSPELL, and it caught 143 cards of
+ * which the great majority were Daze, Censor, Syncopate, Mystical Dispute, Rune
+ * Snag and every other *"counter target spell unless its controller pays {2}"*
+ * in the format. A soft counterspell answers ONE spell that is already on the
+ * stack. Priced as a tax it would have taken `unbounded` breadth and scored 7.2
+ * against hard Counterspell's 1.2, which is the single worst reading this pass
+ * could have produced. Requiring `whenever a player/an opponent casts` keeps
+ * only the standing ones — Rhystic Study, Esper Sentinel, Nether Void, Aether
+ * Barrier, Spelltithe Enforcer, Isolation Cell, Soul Barrier, In the Eye of
+ * Chaos — which are taxes in exactly the sense the increase branch is.
+ *
+ * Two more exclusions, both bought with a card that was in the population and
+ * should not have been:
+ *
+ *   - A TAX IS A STATIC ABILITY, NEVER AN ACTIVATED ONE. Mavinda, Students'
+ *     Advocate charges {8} more for a spell YOU recast, and Loreseeker's Stone
+ *     charges {1} more to activate its OWN ability. Both are a cost the card
+ *     puts on itself, and both sit behind a colon, so `ACTIVATED` separates
+ *     them from every genuine tax at no cost — not one is an activated ability.
+ *   - A TEMPORARY TAX IS NOT A STANDING ONE, which is the exclusion
+ *     `SPELL_GRANT` already makes for the same reason. Elspeth Conquers Death's
+ *     chapter ii, Tax Collector and Academy Loremaster all tax for a turn, and
+ *     `upkeep` means there is nothing to wait for and no cost that recurs.
+ *   - `this way` NAMES ONE CARD, NOT A CLASS. Elite Spellbinder, Lightstall
+ *     Inquisitor, Invasion of Gobakhan and Soul Partition exile a single card
+ *     and charge {2} more for THAT card — *"a spell cast by an opponent this
+ *     way costs {2} more to cast"*. The phrase points back at the one card the
+ *     clause just exiled, so the effect reaches one card and not a board, and
+ *     admitting it would have given a three-mana 3/1 an unbounded reach.
+ *
+ * Propaganda taxes an ATTACK and Smothering Tithe taxes a DRAW. Both are real
+ * cards doing a real thing and neither modifies what a spell or an ability
+ * costs, so neither is admitted. Excluding them is the conservative direction on
+ * purpose: every card wrongly admitted here becomes a Sphere of Resistance.
+ */
+const TAX_INCREASE =
+  /\b(?:spells?|abilit(?:y|ies))\b[^.\n]{0,60}?\bcosts? (?:\{[^}\n]{1,6}\}|one|two|three|four|[0-9]+)[^.\n]{0,24}?\bmore\b/
+const TAX_FLOOR =
+  /\bwould cost less than [^.\n]{0,40}?\bto (?:cast|activate)\b[^.\n]{0,30}?\bcosts?\b/
+const TAX_UNLESS =
+  /\bwhenever (?:a|an|each) (?:player|opponent)\b[^.\n]{0,60}?\bcasts?\b[^.\n]{0,140}?\bunless\b[^.\n]{0,50}?\bpays?\b/
+/** Your own spells are a grant, not a tax — the Quandrix case, already handled. */
+const TAX_IS_YOURS = /\bspells? you cast\b|\byour spells?\b/
+/** A tax that lasts a turn is not standing. The `SPELL_GRANT` exclusion, reused. */
+const TAX_IS_TEMPORARY = /\bthis turn\b|\buntil (?:your|end of|the end of)\b/
+/** A cost charged to one exiled card, not to a class of spells. See above. */
+const TAX_IS_ONE_CARD = /\bthis way\b/
+
+/**
+ * How much mana this clause puts in your pool, or 0 if it produces none
+ * (ADR-0066).
+ *
+ * The model was blind to cards whose point is mana: Sol Ring scored 0.68
+ * against a corpus median of 0.95 and the docblock accepted it openly. A clause
+ * that produces mana scores 1.0 PER MANA PRODUCED — Sol Ring 2.0, Arcane Signet
+ * 1.0, Dark Ritual 3.0 — and that number is the CLAUSE's score, competing under
+ * ADR-0043's winning-clause rule like any other line rather than being added to
+ * the product. A card whose removal clause scores higher still reports the
+ * removal clause and its own tuple.
+ *
+ * GROSS, NOT NET, and the alternative was considered rather than overlooked.
+ * *"{1}, {T}: Add {G}{G}"* nets one mana and produces two, and this scores the
+ * two. Net is the better measure of a mana base — it is what `fixing.ts` uses,
+ * deliberately, for exactly that job — but impact is a property of the card and
+ * not of a turn, and the netting question has no answer for the large class of
+ * rituals and triggers whose cost is not a mana cost at all: Dark Ritual's
+ * {B} is the card's own casting cost, not an activation cost, and subtracting
+ * it would price a ritual by the arbitrage rather than by what it does.
+ * `fixing.ts` nets because it is ranking mana bases against each other; this
+ * does not, because it is describing one card.
+ *
+ * `fixing.ts`'s private `addedMana` reads the same three phrasings and was NOT
+ * reused. Its word form is a bare `add (one|two|…)`, which is safe there
+ * because it only ever runs on a land's mana ability, and unsafe here because
+ * corpus-wide it would read *"add two +1/+1 counters"* as two mana. This asks
+ * for the word `mana` or a mana symbol before it will count anything.
+ */
+const WORD_MANA: Readonly<Record<string, number>> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+}
+const MANA_SYMBOL = String.raw`\{[wubrgcxs0-9/]{1,5}\}`
+/** `add` reaching a mana symbol or the word `mana` — never `add two counters`. */
+const ADDS_MANA = new RegExp(String.raw`\badds?\b(?=[^.;:\n]{0,40}?(?:${MANA_SYMBOL}|\bmana\b))`)
+const ADD_WORD = /\badds?\s+(?:up to\s+)?(one|two|three|four|five|six|seven)\b/
+const ADD_X = /\badds?\s+x\b/
+const MANA_RUN = new RegExp(`(?:${MANA_SYMBOL})+`, 'g')
+/**
+ * Ramp that finds a land rather than adding mana — Rampant Growth's shape.
+ *
+ * A land put onto the battlefield is a mana source, and the user's own worked
+ * example prices it at one: Rampant Growth 1.0. Counted as ONE, always, even
+ * where the clause lands two (Skyshroud Claim, Explosive Vegetation) — how many
+ * lands a multi-land tutor actually lands is a second measurement this pass did
+ * not make, and undercounting by one is the honest way to be wrong about it.
+ */
+const RAMP_TO_BATTLEFIELD =
+  /\bsearch(?:es)? (?:your|their) library for [^.\n]{0,80}?\blands?\b[^.\n]{0,80}?\bonto the battlefield\b/
+
+const manaProduced = (clause: string): number => {
+  if (RAMP_TO_BATTLEFIELD.test(clause)) return 1
+  if (!ADDS_MANA.test(clause)) return 0
+  const tail = clause.slice(clause.search(/\badds?\b/))
+  const word = ADD_WORD.exec(tail)
+  if (word !== null) return WORD_MANA[word[1] ?? ''] ?? 1
+  if (ADD_X.test(tail)) return 1
+  const runs = tail.match(MANA_RUN)
+  // A choice between runs — "Add {W}{W}, {W}{U}, or {U}{U}" — gives you one run,
+  // so the run length is the amount and counting every symbol would read a
+  // filter land as producing six. `fixing.ts` reaches the same conclusion.
+  if (runs === null) return 1
+  return Math.max(...runs.map((run) => (run.match(/\{/g) ?? []).length))
+}
+/**
  * An activated ability: a cost, a colon, then an effect, at the start of a line.
  *
  * Bounded at 60 characters before the colon so a sentence containing a colon
@@ -627,6 +846,19 @@ const TARGET_PLAYER = /target (player|opponent)/
 const OPPOSING =
   /you don't control|an opponent controls|target (?:(?!of |you |an |your |each |all )[a-z0-9'-]+ ){0,3}?(?:creature|permanent|artifact|enchantment|land|planeswalker|spell)s?\b(?![^.,;:\n]{0,24} you control)/
 const YOU_CONTROL = /you control/
+/**
+ * The clause lands on YOU, the person — the `owning-player` rung.
+ *
+ * The tier the old `self` floor was hiding. "Drains you for 3" and "taps for
+ * mana" both scored 0.85 because both failed every test above, and they are not
+ * the same card: one lands on a life total and the other lands on nobody. The
+ * verbs are the ones that name a person as what the effect happens TO — life,
+ * cards and turns — never the ones that name a person as the actor, so `you
+ * put`, `you exile` and `you choose` are deliberately absent: those are you
+ * doing something to an object, and the object is what the other rungs measure.
+ */
+const OWNING_PLAYER =
+  /\byou (?:gain|lose|draw|discard|mill|skip)\b|\bdamage to you\b|\byou (?:can't|don't) (?:win|lose|draw)\b/
 
 /**
  * A permanent ON THE BATTLEFIELD, which is not the same noun as a card in a zone.
@@ -787,8 +1019,22 @@ const clauseImpact = (clause: string, oneShot: boolean, overloaded: boolean): Cl
     YOU_CONTROL.test(effect) &&
     !NAMES_OPPOSING_SIDE.test(effect)
 
+  /*
+   * A tax is read off the LINE AS WRITTEN, like persistence and unlike the
+   * scope questions: `MEASURED` and `SERIAL_SPELL_CLASS` both strip the very
+   * phrase a tax is made of. "Each spell a player casts costs {1} more" keeps
+   * its reach precisely because `SERIAL_SPELL_CLASS` requires `you cast`, and
+   * the tax test requires the opposite, so the two can never both fire.
+   */
+  const taxes =
+    (TAX_INCREASE.test(clause) || TAX_FLOOR.test(clause) || TAX_UNLESS.test(clause)) &&
+    !TAX_IS_YOURS.test(clause) &&
+    !TAX_IS_TEMPORARY.test(clause) &&
+    !TAX_IS_ONE_CARD.test(clause) &&
+    !ACTIVATED.test(clause)
+
   let breadth: BreadthTier
-  if (quantified || plural || overloaded) breadth = 'unbounded'
+  if (quantified || plural || overloaded || taxes) breadth = 'unbounded'
   else if (X_TARGET.test(effect)) breadth = 'variable'
   else if (UP_TO_SEVERAL.test(effect)) breadth = 'several'
   else if (UP_TO_TWO.test(effect)) breadth = 'few'
@@ -797,20 +1043,54 @@ const clauseImpact = (clause: string, oneShot: boolean, overloaded: boolean): Cl
 
   let persistence: PersistenceTier
   if (oneShot) persistence = 'one-shot'
-  else if (UPKEEP.test(clause)) persistence = 'upkeep'
+  // A tax is a standing modification with no trigger word and nothing to wait
+  // for, which is what `upkeep` means. It is asked ABOVE `whenever` because
+  // Rhystic Study spells its tax as a trigger and is a tax either way.
+  else if (UPKEEP.test(clause) || taxes) persistence = 'upkeep'
   // A static grant to a class of your future spells is a repeat that never
   // says `whenever`. See `SPELL_GRANT` — this is the Quandrix ruling.
   else if (WHENEVER.test(clause) || grantsToSpells) persistence = 'triggered'
   else if (ACTIVATED.test(clause)) persistence = 'activated'
+  // `when` is a trigger word, asked BELOW the colon rule so an activated
+  // ability carrying a delayed trigger keeps its recurring cost. See `WHEN`.
+  else if (WHEN.test(clause)) persistence = 'triggered'
   else persistence = 'one-shot'
 
-  let stakes: StakesTier
-  if (yoursOnly) stakes = 'own'
-  else if (TARGET_PLAYER.test(effect) || ANY_TARGET.test(effect) || eachPlayer) stakes = 'player'
-  else if (breadth === 'unbounded') stakes = 'opposing'
-  else if (OPPOSING.test(effect)) stakes = 'opposing'
-  else if (YOU_CONTROL.test(effect)) stakes = 'own'
-  else stakes = 'self'
+  /*
+   * THE HIGHEST-SCORING TARGET THE CLAUSE COULD LAND ON (ADR-0066).
+   *
+   * A maximum over candidates rather than a cascade, so a clause that may hit
+   * either side takes the better of the two and the answer stops depending on
+   * which pattern is written first. The old ordering already encoded part of
+   * this — `any target` was tested above the unbounded rule so that it reached
+   * a player — and writing it as a maximum makes that an intention rather than
+   * an accident of line order.
+   *
+   * `yoursOnly` REMOVES the opposing candidates rather than outranking them,
+   * and that distinction is what keeps the two defects the old cascade fixed
+   * from coming back. A mass effect scoped entirely to the caster's own side
+   * has no opponent's permanent among its possible targets, so an anthem is not
+   * eligible for `opposing-permanent` at all — under a naive maximum every
+   * anthem and every lord would have taken 1.2 off the unbounded rule and
+   * Craterhoof and Diregraf Captain would both have moved.
+   *
+   * The other two guards are inside the patterns and are unchanged: `opponents`
+   * followed by `control` is a possessive naming a board and never reaches
+   * `EACH_PLAYER` (1,472 cards), and `OPPOSING`'s trailing lookahead keeps
+   * `target <qualifier> <noun> you control` off the opposing rungs (1,070).
+   */
+  let stakes: StakesTier = 'nothing'
+  const offer = (tier: StakesTier): void => {
+    if (STAKES_VALUE[tier] > STAKES_VALUE[stakes]) stakes = tier
+  }
+  if (!yoursOnly) {
+    if (TARGET_PLAYER.test(effect) || ANY_TARGET.test(effect) || eachPlayer) {
+      offer('opposing-player')
+    }
+    if (breadth === 'unbounded' || OPPOSING.test(effect)) offer('opposing-permanent')
+  }
+  if (yoursOnly || YOU_CONTROL.test(effect)) offer('owned-permanent')
+  if (OWNING_PLAYER.test(effect)) offer('owning-player')
 
   const symmetry: Symmetry =
     breadth !== 'unbounded'
@@ -821,12 +1101,22 @@ const clauseImpact = (clause: string, oneShot: boolean, overloaded: boolean): Cl
 
   const severity = severityOf(clause, breadth)
 
-  const raw =
+  const product =
     BREADTH_VALUE[breadth] *
     PERSISTENCE_VALUE[persistence] *
     STAKES_VALUE[stakes] *
     SEVERITY_VALUE[severity] *
     (symmetry === 'symmetric' ? SYMMETRY_DISCOUNT : 1)
+
+  /*
+   * A MANA CLAUSE SCORES BY A DIFFERENT RULE — 1.0 per mana produced — and it
+   * is a clause that happens to score differently, never a special case for a
+   * named card. The larger of the two readings is taken rather than the mana
+   * amount outright, so a line that both makes mana and does something bigger
+   * keeps the bigger reading; on every card the rule exists for, the mana
+   * amount is the larger one anyway. See `manaProduced`.
+   */
+  const raw = Math.max(product, manaProduced(clause))
 
   // Rounded to three places so the value is stable across platforms and can be
   // compared for equality in a test. Float multiplication of four constants is

@@ -19,7 +19,20 @@ them are in §18.13's last section — and again, with newer numbers, in
 database, and the honest record of what they will say is a measurement, not a
 guess.
 
-**§18.17 (ADR-0055) is the most recent pass** and adds a fifth axis,
+**SUPERSEDED IN PART BY [ADR-0066](adr/0066-mana-and-taxes-are-rules-not-blind-spots.md).**
+This document is the design record and is left as written; the model it describes
+has since changed in four ways, and
+[doc 22](22-impact-reference.md) is the re-measured reference for what the code
+does now. In short: the four displayed axes are **Breadth / Rate / Stakes /
+Severity**; `when` is a trigger word, which moved 5,289 cards off `one-shot`;
+stakes is five tiers chosen by maximum rather than four by first match, so
+`self` / `own` / `opposing` / `player` are now `nothing` / `owning-player` /
+`owned-permanent` / `opposing-permanent` / `opposing-player`; and the two blind
+spots §18.2 accepted — mana and taxes — are rules, so Sol Ring scores 2.0 rather
+than 0.68 and Rhystic Study 15.84 rather than 0.808. `IMPACT_MAX` is unmoved at
+22.176. Every tier count quoted below predates it.
+
+**§18.17 (ADR-0055) was the most recent pass before that** and adds a fifth axis,
 severity, which moves `IMPACT_MAX` from 18.48 to 22.176. §18.15 (ADR-0043) and changes how the tiers are
 chosen: clauses are scored, not cards, and the highest-scoring clause supplies
 all four tiers at once. Tier counts quoted in §18.3–§18.5 predate it.

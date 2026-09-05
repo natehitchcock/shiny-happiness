@@ -34,7 +34,7 @@ const WRATH: ImpactView = {
   score: 6.12,
   breadth: 'unbounded',
   persistence: 'one-shot',
-  stakes: 'opposing',
+  stakes: 'opposing-permanent',
   symmetry: 'symmetric',
   severity: 'destroy',
   scales: false,
@@ -46,7 +46,7 @@ const TORMENT: ImpactView = {
   score: 8.4,
   breadth: 'unbounded',
   persistence: 'one-shot',
-  stakes: 'player',
+  stakes: 'opposing-player',
   symmetry: 'one-sided',
   severity: 'none',
   scales: true,
@@ -58,7 +58,7 @@ const VANILLA: ImpactView = {
   score: 0,
   breadth: 'none',
   persistence: 'one-shot',
-  stakes: 'self',
+  stakes: 'nothing',
   symmetry: 'none',
   severity: 'none',
   scales: false,
@@ -70,7 +70,7 @@ const FRAGILE: ImpactView = {
   score: 1.2,
   breadth: 'one',
   persistence: 'one-shot',
-  stakes: 'opposing',
+  stakes: 'opposing-permanent',
   symmetry: 'none',
   severity: 'none',
   scales: false,
@@ -90,7 +90,7 @@ const CRATERHOOF: ImpactView = {
   score: 6,
   breadth: 'unbounded',
   persistence: 'one-shot',
-  stakes: 'own',
+  stakes: 'owned-permanent',
   symmetry: 'one-sided',
   severity: 'none',
   scales: false,
@@ -107,7 +107,7 @@ const AGATHA: ImpactView = {
   score: 9.6,
   breadth: 'unbounded',
   persistence: 'activated',
-  stakes: 'own',
+  stakes: 'owned-permanent',
   symmetry: 'one-sided',
   severity: 'none',
   scales: false,
@@ -119,7 +119,7 @@ const CYCLONIC_RIFT: ImpactView = {
   score: 7.2,
   breadth: 'unbounded',
   persistence: 'one-shot',
-  stakes: 'opposing',
+  stakes: 'opposing-permanent',
   symmetry: 'one-sided',
   severity: 'none',
   scales: false,
@@ -131,7 +131,7 @@ const DISK: ImpactView = {
   score: 9.792,
   breadth: 'unbounded',
   persistence: 'activated',
-  stakes: 'opposing',
+  stakes: 'opposing-permanent',
   symmetry: 'symmetric',
   severity: 'none',
   scales: false,
@@ -226,30 +226,30 @@ describe('impactFraction', () => {
 describe('impactRows', () => {
   it('says what a wrath reaches, how often, whose board, and what is left', () => {
     expect(impactRows(WRATH)).toEqual([
-      { label: 'Reach', value: 'everything at once' },
-      { label: 'Repeats', value: 'once, then it is done' },
-      { label: 'Falls on', value: "an opponent's side, your board included" },
-      { label: 'Ends up', value: 'in the graveyard' },
+      { label: 'Breadth', value: 'Every target' },
+      { label: 'Rate', value: 'Once' },
+      { label: 'Stakes', value: "another player's permanent, your board included" },
+      { label: 'Severity', value: 'in the graveyard' },
     ])
   })
 
-  it('draws no "Ends up" row for a card that removes nothing', () => {
+  it('draws no "Severity" row for a card that removes nothing', () => {
     // 79.5% of the corpus has `severity: 'none'`. A row that never varies on
     // four cards in five is a row that stops being read, so it is not drawn.
     const rows = impactRows(CRATERHOOF)
-    expect(rows.map((row) => row.label)).not.toContain('Ends up')
+    expect(rows.map((row) => row.label)).not.toContain('Severity')
     expect(rows).toHaveLength(3)
   })
 
   it('names each rung in the pane\u2019s own register', () => {
-    const endsUp = (severity: ImpactView['severity']): string | undefined =>
-      impactRows({ ...WRATH, severity }).find((row) => row.label === 'Ends up')?.value
-    expect(endsUp('tap')).toBe('tapped, and still there')
-    expect(endsUp('flicker')).toBe('right back where it was')
-    expect(endsUp('bounce')).toBe("in its owner's hand")
-    expect(endsUp('damage')).toBe('damaged, and dead only sometimes')
-    expect(endsUp('destroy')).toBe('in the graveyard')
-    expect(endsUp('exile')).toBe('gone for good')
+    const severityRow = (severity: ImpactView['severity']): string | undefined =>
+      impactRows({ ...WRATH, severity }).find((row) => row.label === 'Severity')?.value
+    expect(severityRow('tap')).toBe('tapped, and still there')
+    expect(severityRow('flicker')).toBe('right back where it was')
+    expect(severityRow('bounce')).toBe("in its owner's hand")
+    expect(severityRow('damage')).toBe('damaged, and dead only sometimes')
+    expect(severityRow('destroy')).toBe('in the graveyard')
+    expect(severityRow('exile')).toBe('gone for good')
   })
 
   it('distinguishes a one-sided mass effect from a symmetric one', () => {
@@ -258,18 +258,18 @@ describe('impactRows', () => {
     // `one-shot`; the only thing separating their lines is the half the
     // discount pays for. `you`, not `your board`, because `player` stakes take
     // life and cards rather than permanents.
-    const falls = impactRows(TORMENT).find((row) => row.label === 'Falls on')
-    expect(falls?.value).toBe('a player, not the board, never you')
+    const falls = impactRows(TORMENT).find((row) => row.label === 'Stakes')
+    expect(falls?.value).toBe('another player, never you')
     expect(falls?.value).not.toBe(impactRows(WRATH)[2]?.value)
     // Torment removes nothing — it takes life and cards, not permanents.
-    expect(impactRows(TORMENT).map((row) => row.label)).not.toContain('Ends up')
+    expect(impactRows(TORMENT).map((row) => row.label)).not.toContain('Severity')
   })
 
   it('does not tell a card that only hits your own board that it never hits yours', () => {
     // The regression. Craterhoof is `own` + `one-sided` and the flat qualifier
     // rendered "your own side — never yours" under the card's own text.
-    const falls = impactRows(CRATERHOOF).find((row) => row.label === 'Falls on')
-    expect(falls?.value).toBe('your own side')
+    const falls = impactRows(CRATERHOOF).find((row) => row.label === 'Stakes')
+    expect(falls?.value).toBe('your own permanent')
     expect(falls?.value).not.toContain('never')
   })
 
@@ -283,27 +283,27 @@ describe('impactRows', () => {
    * same over-claim since it was written.
    *
    * The refinement takes no new field: `symmetry` and `stakes` are already on
-   * the wire and already decide the "Falls on" row. A symmetric mass effect
+   * the wire and already decide the "Stakes" row. A symmetric mass effect
    * really does hit everything, so it keeps the unqualified words.
    */
   it('says whose side an unbounded ONE-SIDED effect reaches', () => {
     const reach = (rows: readonly { label: string; value: string }[]): string | undefined =>
-      rows.find((row) => row.label === 'Reach')?.value
-    expect(reach(impactRows(CRATERHOOF))).toBe('your whole side at once')
-    expect(reach(impactRows(AGATHA))).toBe('your whole side at once')
-    expect(reach(impactRows(CYCLONIC_RIFT))).toBe("an opponent's whole side at once")
+      rows.find((row) => row.label === 'Breadth')?.value
+    expect(reach(impactRows(CRATERHOOF))).toBe('Every target on your side')
+    expect(reach(impactRows(AGATHA))).toBe('Every target on your side')
+    expect(reach(impactRows(CYCLONIC_RIFT))).toBe("Every target on an opponent's side")
   })
 
   it('leaves a symmetric mass effect saying everything, because it is everything', () => {
-    const reach = impactRows(WRATH).find((row) => row.label === 'Reach')
-    expect(reach?.value).toBe('everything at once')
-    expect(impactRows(DISK).find((row) => row.label === 'Reach')?.value).toBe('everything at once')
+    const reach = impactRows(WRATH).find((row) => row.label === 'Breadth')
+    expect(reach?.value).toBe('Every target')
+    expect(impactRows(DISK).find((row) => row.label === 'Breadth')?.value).toBe('Every target')
   })
 
   it('leaves the counted tiers alone', () => {
     // The refinement is only ever about `unbounded`; a card that names one
     // thing says so whoever it belongs to.
-    expect(impactRows(FRAGILE).find((row) => row.label === 'Reach')?.value).toBe('one thing')
+    expect(impactRows(FRAGILE).find((row) => row.label === 'Breadth')?.value).toBe('Single targets')
   })
 })
 
@@ -315,16 +315,16 @@ describe('impactRows', () => {
  * second notation. What tells them is that only effects are read, that Sol Ring
  * names nothing to affect, and that this is a known limit rather than a verdict.
  *
- * The register is the pane's own: "Reach: everything at once", "Effects only".
+ * The register is the pane's own: "Breadth: Every target". Since ADR-0066 the
  * Short sentences, the game's words, no algebra, and no constant that could
  * drift out of step with the data file it came from.
  */
 describe('impactAlgorithm', () => {
-  it("names the three readings the pane already shows, in the pane's own words", () => {
+  it("names the four readings the pane already shows, in the pane's own words", () => {
     const said = impactAlgorithm().join(' ')
-    expect(said).toContain('Reach')
-    expect(said).toContain('Repeats')
-    expect(said).toContain('Falls on')
+    expect(said).toContain('Breadth')
+    expect(said).toContain('Rate')
+    expect(said).toContain('Stakes')
     // Multiplied, not added — the shape of the model in one word.
     expect(said).toContain('multiplied')
   })
@@ -440,7 +440,7 @@ describe('impactNotes', () => {
     // Ring badly.
     for (const impact of [WRATH, TORMENT, VANILLA, FRAGILE, CRATERHOOF]) {
       expect(impactNotes(impact)).toContain(
-        'Effects only: a card whose job is mana or a tax reads low here.',
+        'Effects, mana and taxes: a card whose job is drawing cards reads low here.',
       )
     }
   })
@@ -463,7 +463,7 @@ describe('impactNotes', () => {
     // sentence there would be a false statement dressed up as sourcing.
     for (const role of [BOARD_WIPE, SPOT_REMOVAL]) {
       const note = impactNotes(WRATH, role).join(' ')
-      expect(note).toContain('Effects only: a card whose job is mana or a tax reads low here.')
+      expect(note).toContain('Effects, mana and taxes: a card whose job is drawing cards reads low here.')
       expect(note).not.toContain('blind spot')
     }
   })

@@ -256,7 +256,38 @@ describe('cardImpact', () => {
     })
 
     it('reads a triggered ability', () => {
-      expect(cardImpact(RHYSTIC_STUDY).persistence).toBe('triggered')
+      // Rhystic Study used to be the anchor here and is a TAX after ADR-0066,
+      // which reads `upkeep` — see the tax tests below. A plain `whenever` with
+      // nothing else going on is what this assertion was always about.
+      const whenever = card({
+        typeLine: 'Enchantment',
+        oracleText: 'Whenever a creature dies, you gain 1 life.',
+      })
+      expect(cardImpact(whenever).persistence).toBe('triggered')
+    })
+
+    it('reads a plain "when" trigger as triggered, not as a one-shot (ADR-0066)', () => {
+      // The largest single blind spot the model had: 5,289 commander-legal
+      // permanents say `when` rather than `whenever` and were priced as though
+      // their ability happened once.
+      const when = card({
+        typeLine: 'Creature — Human',
+        oracleText: 'When this creature enters, draw a card.',
+      })
+      expect(cardImpact(when).persistence).toBe('triggered')
+    })
+
+    it('leaves an activated ability carrying a delayed trigger alone (ADR-0066)', () => {
+      // 86 clauses are an activated ability whose EFFECT contains a `when`.
+      // The cost recurs on every one of them, so `activated` is the correct
+      // reading and the `when` test is deliberately ordered below the colon
+      // rule. Havengul Lich's shape.
+      const both = card({
+        typeLine: 'Creature — Zombie',
+        oracleText:
+          '{1}: You may cast target creature card in a graveyard this turn. When you cast it this turn, this creature gains all activated abilities of that card.',
+      })
+      expect(cardImpact(both).persistence).toBe('activated')
     })
 
     it('reads an upkeep trigger above a conditional one', () => {
@@ -264,8 +295,12 @@ describe('cardImpact', () => {
         typeLine: 'Enchantment',
         oracleText: 'At the beginning of your upkeep, draw a card.',
       })
+      const whenever = card({
+        typeLine: 'Enchantment',
+        oracleText: 'Whenever a creature dies, you gain 1 life.',
+      })
       expect(cardImpact(upkeep).persistence).toBe('upkeep')
-      expect(cardImpact(upkeep).score).toBeGreaterThan(cardImpact(RHYSTIC_STUDY).score)
+      expect(cardImpact(upkeep).score).toBeGreaterThan(cardImpact(whenever).score)
     })
 
     it('forces a self-sacrificing ability back to one-shot', () => {
@@ -289,7 +324,7 @@ describe('cardImpact', () => {
 
   describe('stakes', () => {
     it('reads "any target" as reaching a player', () => {
-      expect(cardImpact(LIGHTNING_BOLT).stakes).toBe('player')
+      expect(cardImpact(LIGHTNING_BOLT).stakes).toBe('opposing-player')
     })
 
     it('reads an unrestricted target creature as opposing, not as its own tier', () => {
@@ -300,15 +335,15 @@ describe('cardImpact', () => {
         typeLine: 'Instant',
         oracleText: 'Exile target creature. Its controller gains life equal to its power.',
       })
-      expect(cardImpact(swords).stakes).toBe('opposing')
+      expect(cardImpact(swords).stakes).toBe('opposing-permanent')
     })
 
     it('reads a pump spell on your own board as own', () => {
-      expect(cardImpact(CRATERHOOF).stakes).toBe('own')
+      expect(cardImpact(CRATERHOOF).stakes).toBe('owned-permanent')
     })
 
     it('reads a card that names nobody as self', () => {
-      expect(cardImpact(SOL_RING).stakes).toBe('self')
+      expect(cardImpact(SOL_RING).stakes).toBe('nothing')
     })
   })
 
@@ -362,10 +397,20 @@ describe('cardImpact', () => {
   })
 
   describe('the ordering a Magic player would check', () => {
-    it('puts the mass effects above the spot removal above the mana rock', () => {
+    it('puts the mass effects above the spot removal above the vanilla', () => {
       const score = (c: ImpactInput): number => cardImpact(c).score
-      // The claim is mass > spot removal > mana rock, and it still holds: all
-      // three mass effects sit above all the spot removal.
+      // The claim is mass > spot removal, and it still holds: all three mass
+      // effects sit above all the spot removal.
+      //
+      // THE MANA ROCK LEFT THE BOTTOM OF THIS CHAIN AT ADR-0066, and that is
+      // the whole substance of the mana rule rather than a side effect of it.
+      // Sol Ring scores 2.0 for the two mana it makes and Lightning Bolt 1.12
+      // for a damage clause pointed at one target, so the rock is now ABOVE the
+      // burn spell. That is a real claim and it is the intended one: this is
+      // Commander, the model is a property of the card, and a two-mana ritual
+      // on a permanent is worth more here than three damage once. The chain
+      // below therefore ends at a vanilla creature, which is the only card the
+      // model still asserts everything outranks.
       //
       // The two mass effects SWAPPED when ADR-0055 landed, and that is the axis
       // working rather than a regression. Cyclonic Rift and Wrath of God are
@@ -373,24 +418,44 @@ describe('cardImpact', () => {
       // it BOUNCES and Wrath DESTROYS, and the permanents Rift answers all come
       // back. The model has never had an axis for tempo or instant speed, which
       // is where the rest of Rift's real-world reputation lives — the same
-      // stated blindness that prices Sol Ring at 0.68.
+      // stated blindness that used to price Sol Ring at 0.68.
+      //
+      // RHYSTIC STUDY LEFT THIS CHAIN AT ADR-0066 and is asserted separately
+      // below. It is a tax, taxes read `upkeep` over an unbounded reach, and it
+      // now scores 15.84 — above every card in this ordering except Torment of
+      // Hailfire. That is the intended consequence of the tax rule and not a
+      // regression, so the chain drops it rather than pretending it still sits
+      // between Lightning Bolt and Sol Ring.
       expect(score(TORMENT_OF_HAILFIRE)).toBeGreaterThan(score(WRATH_OF_GOD))
       expect(score(WRATH_OF_GOD)).toBeGreaterThan(score(CYCLONIC_RIFT))
       expect(score(CYCLONIC_RIFT)).toBeGreaterThan(score(LIGHTNING_BOLT))
-      expect(score(LIGHTNING_BOLT)).toBeGreaterThan(score(RHYSTIC_STUDY))
-      expect(score(RHYSTIC_STUDY)).toBeGreaterThan(score(SOL_RING))
+      expect(score(LIGHTNING_BOLT)).toBeGreaterThan(score(GRIZZLY_BEARS))
+      expect(score(SOL_RING)).toBeGreaterThan(score(GRIZZLY_BEARS))
+    })
+
+    it('puts a tax near the top and a mana rock above a vanilla (ADR-0066)', () => {
+      const score = (c: ImpactInput): number => cardImpact(c).score
+      // Both halves of ADR-0066's headline. A tax is a standing, board-wide
+      // effect and is priced like one; a mana rock is priced by the mana it
+      // makes rather than by the nothing it targets.
+      expect(score(RHYSTIC_STUDY)).toBeGreaterThan(score(WRATH_OF_GOD))
       expect(score(SOL_RING)).toBeGreaterThan(score(GRIZZLY_BEARS))
     })
 
     it('pins the measured values, so a tier change cannot pass silently', () => {
       // Lightning Bolt moved 1.4 -> 1.12 when ADR-0055 landed: it is damage, and
       // damage is 0.8 of destroy because it only kills sometimes.
+      //
+      // Two moved at ADR-0066 and both are the point of it. Rhystic Study
+      // 0.808 -> 15.84: it is a tax, so `unbounded` x `upkeep` x
+      // `opposing-permanent`. Sol Ring 0.68 -> 2.0: `{T}: Add {C}{C}` produces
+      // two mana, and the mana rule scores a clause at 1.0 per mana.
       expect(cardImpact(TORMENT_OF_HAILFIRE).score).toBe(8.4)
       expect(cardImpact(CYCLONIC_RIFT).score).toBe(5.4)
       expect(cardImpact(WRATH_OF_GOD).score).toBe(6.12)
       expect(cardImpact(LIGHTNING_BOLT).score).toBe(1.12)
-      expect(cardImpact(RHYSTIC_STUDY).score).toBe(0.808)
-      expect(cardImpact(SOL_RING).score).toBe(0.68)
+      expect(cardImpact(RHYSTIC_STUDY).score).toBe(15.84)
+      expect(cardImpact(SOL_RING).score).toBe(2)
       expect(cardImpact(GRIZZLY_BEARS).score).toBe(0)
     })
   })
@@ -423,7 +488,10 @@ describe('reach is the set the effect touches, not every plural in the sentence'
     // number of creatures you control" is the count — and stripping the count
     // must leave the effect standing.
     expect(cardImpact(CRATERHOOF).breadth).toBe('unbounded')
-    expect(cardImpact(CRATERHOOF).score).toBe(6)
+    // 11.4 rather than 6.0 since ADR-0066: the reach is unchanged, and the
+    // `when ~ enters` that carries it now reads `triggered` rather than
+    // `one-shot`. What this test is about is the reach surviving the count.
+    expect(cardImpact(CRATERHOOF).score).toBe(11.4)
   })
 
   it('leaves the effect that FOLLOWS a count standing', () => {
@@ -445,7 +513,7 @@ describe('reach is the set the effect touches, not every plural in the sentence'
         'Trample\nWhenever you cast a spell, if that spell was kicked, put a +1/+1 counter on Hallar, then Hallar deals damage equal to the number of +1/+1 counters on it to each opponent.',
     })
     expect(cardImpact(hallar).breadth).toBe('unbounded')
-    expect(cardImpact(hallar).stakes).toBe('player')
+    expect(cardImpact(hallar).stakes).toBe('opposing-player')
   })
 
   it('still reads X targets as variable, because "among" is not always counting', () => {
@@ -468,7 +536,7 @@ describe('falls on — whose side the effect lands on', () => {
     // `target creature you control` and never reached the `you control` branch.
     // 1,070 commander-legal cards were told they hit an opponent's board while
     // exiling, untapping or pumping the caster's own creature.
-    expect(cardImpact(EMIEL).stakes).toBe('own')
+    expect(cardImpact(EMIEL).stakes).toBe('owned-permanent')
   })
 
   it('still reads an unrestricted target creature as opposing', () => {
@@ -479,7 +547,7 @@ describe('falls on — whose side the effect lands on', () => {
       typeLine: 'Instant',
       oracleText: 'Exile target creature. Its controller gains life equal to its power.',
     })
-    expect(cardImpact(swords).stakes).toBe('opposing')
+    expect(cardImpact(swords).stakes).toBe('opposing-permanent')
     expect(cardImpact(swords).score).toBe(1.44)
   })
 
@@ -489,7 +557,7 @@ describe('falls on — whose side the effect lands on', () => {
     // card whose plural carried NO quantifier. Agatha's Soul Cauldron says
     // "creatures you control" three times and named an opponent nowhere.
     const agatha = cardImpact(AGATHAS_SOUL_CAULDRON)
-    expect(agatha.stakes).toBe('own')
+    expect(agatha.stakes).toBe('owned-permanent')
     expect(agatha.symmetry).toBe('one-sided')
     expect(agatha.breadth).toBe('unbounded')
   })
@@ -512,14 +580,14 @@ describe('falls on — whose side the effect lands on', () => {
       oracleText:
         'Constellation — Whenever this creature or another enchantment you control enters, creatures your opponents control get -1/-1 until end of turn.',
     })
-    expect(cardImpact(doomwake).stakes).toBe('opposing')
+    expect(cardImpact(doomwake).stakes).toBe('opposing-permanent')
     expect(cardImpact(doomwake).breadth).toBe('unbounded')
   })
 
   it('still reads "each opponent" as reaching the people', () => {
     // The counter-example that bounds it. Torment of Hailfire takes life and
     // cards from a person, and `player` is exactly right for it.
-    expect(cardImpact(TORMENT_OF_HAILFIRE).stakes).toBe('player')
+    expect(cardImpact(TORMENT_OF_HAILFIRE).stakes).toBe('opposing-player')
     expect(cardImpact(TORMENT_OF_HAILFIRE).score).toBe(8.4)
   })
 
@@ -527,7 +595,7 @@ describe('falls on — whose side the effect lands on', () => {
     // The counter-example that bounds it: a card may say "you control"
     // somewhere and still wipe everything, so an unrestricted mass effect
     // overrides the scope test rather than losing to it.
-    expect(cardImpact(WRATH_OF_GOD).stakes).toBe('opposing')
+    expect(cardImpact(WRATH_OF_GOD).stakes).toBe('opposing-permanent')
     expect(cardImpact(WRATH_OF_GOD).symmetry).toBe('symmetric')
     expect(cardImpact(WRATH_OF_GOD).score).toBe(6.12)
   })
@@ -541,7 +609,7 @@ describe('symmetry — a wipe that names a list of types still hits your board',
     // the Disk spares their board.
     const disk = cardImpact(NEVINYRRALS_DISK)
     expect(disk.symmetry).toBe('symmetric')
-    expect(disk.stakes).toBe('opposing')
+    expect(disk.stakes).toBe('opposing-permanent')
     expect(disk.score).toBe(9.792)
   })
 
@@ -591,7 +659,7 @@ describe('IMPACT_MAX', () => {
     const at = cardImpact(ceiling)
     expect(at.breadth).toBe('unbounded')
     expect(at.persistence).toBe('upkeep')
-    expect(at.stakes).toBe('player')
+    expect(at.stakes).toBe('opposing-player')
     expect(at.symmetry).toBe('one-sided')
     expect(at.severity).toBe('none')
     expect(at.score).toBe(18.48)
@@ -650,7 +718,7 @@ describe('the winning clause brings its whole tuple (ADR-0043)', () => {
   it('reports the lord clause wholesale, not a tuple assembled from two clauses', () => {
     const at = cardImpact(DIREGRAF_CAPTAIN)
     expect(at.breadth).toBe('unbounded')
-    expect(at.stakes).toBe('own')
+    expect(at.stakes).toBe('owned-permanent')
     expect(at.persistence).toBe('one-shot')
     expect(at.symmetry).toBe('one-sided')
   })
@@ -701,9 +769,15 @@ describe('the winning clause brings its whole tuple (ADR-0043)', () => {
       typeLine: 'Instant',
       oracleText: 'Exile target creature. Its controller gains life equal to its power.',
     })
+    // TWO OF THE SIX MOVED AT ADR-0066, each for a rule written down there.
+    // Craterhoof 6.0 -> 11.4: its whole effect is a `when ~ enters` trigger,
+    // and `when` is a trigger word now, so it reads `triggered` (1.9) instead
+    // of `one-shot`. Sol Ring 0.68 -> 2.0: it taps for two mana and a mana
+    // clause scores 1.0 per mana. The other four are untouched, which is what
+    // this assertion is for.
     expect(cardImpact(WRATH_OF_GOD).score).toBe(6.12)
-    expect(cardImpact(CRATERHOOF).score).toBe(6.0)
-    expect(cardImpact(SOL_RING).score).toBe(0.68)
+    expect(cardImpact(CRATERHOOF).score).toBe(11.4)
+    expect(cardImpact(SOL_RING).score).toBe(2)
     expect(cardImpact(FOREST).score).toBe(0)
     expect(cardImpact(CYCLONIC_RIFT).score).toBe(5.4)
     expect(cardImpact(swords).score).toBe(1.44)
@@ -714,7 +788,7 @@ describe('the winning clause brings its whole tuple (ADR-0043)', () => {
     // it carries `unbounded`, so the card still reports the mass mode.
     const at = cardImpact(CYCLONIC_RIFT)
     expect(at.breadth).toBe('unbounded')
-    expect(at.stakes).toBe('opposing')
+    expect(at.stakes).toBe('opposing-permanent')
   })
 
   it('keeps fragility a fact about the card, not about one clause', () => {
@@ -914,7 +988,7 @@ describe('a serial class of spells is measured on repeat, never on reach', () =>
   it('does not report a grant to your own spells as reaching an opponent', () => {
     // The stakes ladder sends anything `unbounded` to `opposing` by default, so
     // the breadth error and the stakes error always arrive together.
-    expect(cardImpact(THREEFOLD_SIGNAL).stakes).not.toBe('opposing')
+    expect(cardImpact(THREEFOLD_SIGNAL).stakes).not.toBe('opposing-permanent')
   })
 
   it('scores it far below Cyclonic Rift, which it used to equal exactly', () => {
@@ -1032,7 +1106,7 @@ describe('a qualifier between "target" and its noun', () => {
       typeLine: 'Creature — Demon',
       oracleText: 'When this creature enters, destroy target non-Demon creature.',
     })
-    expect(cardImpact(clause).stakes).toBe('opposing')
+    expect(cardImpact(clause).stakes).toBe('opposing-permanent')
   })
 
   it('lets the removal clause win its own card again', () => {
@@ -1049,7 +1123,7 @@ describe('a qualifier between "target" and its noun', () => {
       'Counter target noncreature spell.',
       'Destroy target attacking or blocking creature.',
     ]) {
-      expect(cardImpact(card({ typeLine: 'Instant', oracleText: text })).stakes).toBe('opposing')
+      expect(cardImpact(card({ typeLine: 'Instant', oracleText: text })).stakes).toBe('opposing-permanent')
     }
   })
 
@@ -1087,7 +1161,7 @@ describe('a qualifier between "target" and its noun', () => {
       oracleText:
         'Whenever you cast an instant or sorcery spell from your hand, you may cast target card with the same name as that spell from your graveyard.',
     })
-    expect(cardImpact(harness).stakes).not.toBe('opposing')
+    expect(cardImpact(harness).stakes).not.toBe('opposing-permanent')
   })
 
   it('does not read "the target of a spell" as a targeting clause', () => {
@@ -1098,7 +1172,7 @@ describe('a qualifier between "target" and its noun', () => {
       typeLine: 'Creature — Human Shaman',
       oracleText: 'Whenever this creature becomes the target of a spell, draw a card.',
     })
-    expect(cardImpact(bare).stakes).not.toBe('opposing')
+    expect(cardImpact(bare).stakes).not.toBe('opposing-permanent')
   })
 
   it('leaves the six anchors exactly where they were', () => {
@@ -1108,9 +1182,15 @@ describe('a qualifier between "target" and its noun', () => {
       typeLine: 'Instant',
       oracleText: 'Exile target creature. Its controller gains life equal to its power.',
     })
+    // TWO OF THE SIX MOVED AT ADR-0066, each for a rule written down there.
+    // Craterhoof 6.0 -> 11.4: its whole effect is a `when ~ enters` trigger,
+    // and `when` is a trigger word now, so it reads `triggered` (1.9) instead
+    // of `one-shot`. Sol Ring 0.68 -> 2.0: it taps for two mana and a mana
+    // clause scores 1.0 per mana. The other four are untouched, which is what
+    // this assertion is for.
     expect(cardImpact(WRATH_OF_GOD).score).toBe(6.12)
-    expect(cardImpact(CRATERHOOF).score).toBe(6.0)
-    expect(cardImpact(SOL_RING).score).toBe(0.68)
+    expect(cardImpact(CRATERHOOF).score).toBe(11.4)
+    expect(cardImpact(SOL_RING).score).toBe(2)
     expect(cardImpact(FOREST).score).toBe(0)
     expect(cardImpact(CYCLONIC_RIFT).score).toBe(5.4)
     expect(cardImpact(swords).score).toBe(1.44)
@@ -1173,7 +1253,7 @@ describe('severity (ADR-0055)', () => {
       const i = cardImpact(c)
       expect(i.breadth).toBe('one')
       expect(i.persistence).toBe('one-shot')
-      expect(i.stakes).toBe('opposing')
+      expect(i.stakes).toBe('opposing-permanent')
       expect(i.symmetry).toBe('none')
     }
   })
@@ -1191,13 +1271,16 @@ describe('severity (ADR-0055)', () => {
   })
 
   it('leaves a card that removes nothing completely alone', () => {
-    // The ruling. `none` is worth 1.0, so every non-removal card in the corpus
-    // is bit-identical to what it scored before this axis existed.
+    // The ruling. `none` is worth 1.0, so SEVERITY moves no non-removal card.
+    // The two numbers below moved for ADR-0066's reasons — Craterhoof's `when`
+    // trigger, Sol Ring's two mana — and neither is a severity reading; both
+    // still report `severity: 'none'`, which is what this test asserts.
     const draw = spell('Draw two cards.')
     expect(cardImpact(draw).severity).toBe('none')
     expect(cardImpact(CRATERHOOF).severity).toBe('none')
-    expect(cardImpact(CRATERHOOF).score).toBe(6.0)
-    expect(cardImpact(SOL_RING).score).toBe(0.68)
+    expect(cardImpact(CRATERHOOF).score).toBe(11.4)
+    expect(cardImpact(SOL_RING).severity).toBe('none')
+    expect(cardImpact(SOL_RING).score).toBe(2)
     expect(cardImpact(FOREST).score).toBe(0)
   })
 
@@ -1313,7 +1396,7 @@ describe('IMPACT_MAX after severity', () => {
     const at = cardImpact(ceiling)
     expect(at.breadth).toBe('unbounded')
     expect(at.persistence).toBe('upkeep')
-    expect(at.stakes).toBe('player')
+    expect(at.stakes).toBe('opposing-player')
     expect(at.severity).toBe('exile')
     expect(at.symmetry).toBe('one-sided')
     expect(at.score).toBe(IMPACT_MAX)
@@ -1383,5 +1466,244 @@ describe('severity — the guards', () => {
       oracleText: 'Have target opponent gain control of target permanent you control.',
     })
     expect(cardImpact(donate).severity).toBe('none')
+  })
+})
+
+/**
+ * MANA, TAXES AND THE FIVE-RUNG STAKES LADDER (ADR-0066).
+ *
+ * Three rules that each removed a stated blind spot, and one that removed a
+ * dependence on rule order. Every fixture is a real card with its real oracle
+ * text, and every count quoted in a comment was measured over the 31,782
+ * commander-legal cards rather than estimated.
+ */
+describe('mana production earns impact (ADR-0066)', () => {
+  const rock = (name: string, text: string): ImpactInput =>
+    card({ name, manaCost: '{1}', typeLine: 'Artifact', oracleText: text })
+
+  it('scores 1.0 per mana produced, in each spelling the corpus uses', () => {
+    // The names are ordinary multi-word ones on purpose: `normalise` replaces
+    // every occurrence of the card's own name with `~`, so a one-letter name
+    // would eat the letter out of the word `Add` and the fixture would be
+    // testing the harness rather than the rule.
+    expect(cardImpact(rock('Mana Stone', '{T}: Add {C}.')).score).toBe(1)
+    expect(cardImpact(rock('Wild Growth', '{T}: Add {G}{G}.')).score).toBe(2)
+    expect(cardImpact(rock('Grim Monolith', '{T}: Add {C}{C}{C}.')).score).toBe(3)
+    expect(cardImpact(rock('Worn Powerstone', '{T}: Add two mana of any color.')).score).toBe(2)
+    expect(cardImpact(rock('Fellwar Stone', '{T}: Add one mana of any color.')).score).toBe(1)
+  })
+
+  it('prices the four cards the rule was specified against', () => {
+    expect(cardImpact(SOL_RING).score).toBe(2)
+    const signet = card({
+      name: 'Arcane Signet',
+      manaCost: '{2}',
+      typeLine: 'Artifact',
+      oracleText: "{T}: Add one mana of any color in your commander's color identity.",
+    })
+    expect(cardImpact(signet).score).toBe(1)
+    const ritual = card({
+      name: 'Dark Ritual',
+      manaCost: '{B}',
+      typeLine: 'Instant',
+      oracleText: 'Add {B}{B}{B}.',
+    })
+    expect(cardImpact(ritual).score).toBe(3)
+    const rampant = card({
+      name: 'Rampant Growth',
+      manaCost: '{1}{G}',
+      typeLine: 'Sorcery',
+      oracleText:
+        'Search your library for a basic land card, put it onto the battlefield tapped, then shuffle.',
+    })
+    // A land put onto the battlefield is a mana source, counted as one.
+    expect(cardImpact(rampant).score).toBe(1)
+  })
+
+  it('takes a choice between runs as one run, not as every symbol', () => {
+    // A filter land offers a CHOICE, so the run length is what one activation
+    // gives you. Counting every symbol would read this as producing six.
+    const filter = card({
+      name: 'Mystic Gate',
+      manaCost: null,
+      typeLine: 'Land',
+      oracleText: '{T}: Add {C}.\n{W/U}, {T}: Add {W}{W}, {W}{U}, or {U}{U}.',
+    })
+    expect(cardImpact(filter).score).toBe(2)
+  })
+
+  it('does not read "add two +1/+1 counters" as two mana', () => {
+    // Why `fixing.ts`'s private `addedMana` was not reused: its word form is a
+    // bare `add (one|two|…)`, safe on a land's mana ability and unsafe
+    // corpus-wide. This rule asks for a mana symbol or the word `mana`.
+    const counters = card({
+      name: 'Counter Maker',
+      manaCost: '{2}',
+      typeLine: 'Creature — Elf',
+      oracleText: '{T}: Add two +1/+1 counters to target creature you control.',
+    })
+    expect(cardImpact(counters).score).toBeLessThan(2)
+  })
+
+  it('lets a bigger clause on the same card win, as any other clause would', () => {
+    // The mana amount is the CLAUSE's score under ADR-0043's winning-clause
+    // rule, never an addition to the card. A removal clause that scores higher
+    // still wins and still reports its own tuple.
+    const both = card({
+      name: 'Both',
+      manaCost: '{4}',
+      typeLine: 'Artifact',
+      oracleText: '{T}: Add {C}.\nDestroy all creatures.',
+    })
+    expect(cardImpact(both).severity).toBe('destroy')
+    expect(cardImpact(both).score).toBeGreaterThan(2)
+  })
+})
+
+describe('a tax is Phase-Triggered over every target (ADR-0066)', () => {
+  const tax = (name: string, text: string): ImpactInput =>
+    card({ name, manaCost: '{2}', typeLine: 'Artifact', oracleText: text })
+
+  it('reads a static cost increase as upkeep over an unbounded reach', () => {
+    const sphere = tax('Sphere of Resistance', 'Spells cost {1} more to cast.')
+    expect(cardImpact(sphere).persistence).toBe('upkeep')
+    expect(cardImpact(sphere).breadth).toBe('unbounded')
+    expect(cardImpact(sphere).score).toBe(15.84)
+  })
+
+  it("reads Trinisphere's floor, whose 'instead' is inside reminder text", () => {
+    // The printed sentence ends at "costs three mana to cast". Requiring the
+    // word `instead` matched nothing at all, because `REMINDER` strips it.
+    const trinisphere = tax(
+      'Trinisphere',
+      'As long as this artifact is untapped, each spell that would cost less than three mana to cast costs three mana to cast. (Additional mana in the cost may be paid with any color.)',
+    )
+    expect(cardImpact(trinisphere).persistence).toBe('upkeep')
+    expect(cardImpact(trinisphere).score).toBe(15.84)
+  })
+
+  it('reads the Rhystic clause, where the payment is the whole point', () => {
+    expect(cardImpact(RHYSTIC_STUDY).persistence).toBe('upkeep')
+    expect(cardImpact(RHYSTIC_STUDY).breadth).toBe('unbounded')
+    expect(cardImpact(RHYSTIC_STUDY).score).toBe(15.84)
+  })
+
+  it('LEAVES A COST-REDUCER FOR YOUR OWN SPELLS ALONE — the boundary', () => {
+    // The permissive failure this rule must not have: "spells you cast cost {1}
+    // less" is a cost modification too, and it is already the Quandrix
+    // `SPELL_GRANT` case at `triggered`. A tax is about what OTHER people pay.
+    const yours = tax('Cheap', 'Spells you cast cost {1} less to cast.')
+    expect(cardImpact(yours).persistence).toBe('triggered')
+    expect(cardImpact(yours).breadth).not.toBe('unbounded')
+  })
+
+  it('LEAVES A SOFT COUNTERSPELL ALONE — the measured near-disaster', () => {
+    // A bare "unless its controller pays" is the templating of a soft
+    // counterspell, not of a tax: it caught 143 cards, of which the great
+    // majority were Daze, Censor, Syncopate and Mystical Dispute. Priced as a
+    // tax, Daze would have taken `unbounded` breadth and scored 7.2 against
+    // hard Counterspell's 1.2. Anchoring on `whenever a player casts` is what
+    // separates the standing taxes from the one-shot answers.
+    const daze = card({
+      name: 'Daze',
+      manaCost: '{1}{U}',
+      typeLine: 'Instant',
+      oracleText: 'Counter target spell unless its controller pays {1}.',
+    })
+    expect(cardImpact(daze).breadth).toBe('one')
+    expect(cardImpact(daze).score).toBe(1.2)
+  })
+
+  it('leaves a tax that lasts one turn alone', () => {
+    // The `SPELL_GRANT` exclusion, reused: `upkeep` means nothing recurs and
+    // there is nothing to wait for, and a Saga chapter is neither.
+    const temporary = tax(
+      'Brief',
+      'Until your next turn, spells your opponents cast cost {1} more to cast.',
+    )
+    expect(cardImpact(temporary).persistence).not.toBe('upkeep')
+  })
+
+  it('leaves a cost charged to one exiled card alone', () => {
+    // Elite Spellbinder's shape. `this way` points back at the single card the
+    // clause just exiled, so the effect reaches one card and not a board.
+    const spellbinder = card({
+      name: 'Elite Spellbinder',
+      manaCost: '{1}{W}{W}',
+      typeLine: 'Creature — Human',
+      oracleText:
+        "When this creature enters, look at target opponent's hand. You may exile a nonland card from it. For as long as that card remains exiled, its owner may play it. A spell cast this way costs {2} more to cast.",
+    })
+    expect(cardImpact(spellbinder).persistence).not.toBe('upkeep')
+  })
+})
+
+describe('stakes is a maximum over candidates, not a cascade (ADR-0066)', () => {
+  it('takes the better of two sides a clause could land on', () => {
+    // `any target` reaches a player, and it no longer matters that the
+    // unbounded rule is written above the targeting rule in the source.
+    const bolt = card({
+      name: 'Bolt',
+      manaCost: '{R}',
+      typeLine: 'Instant',
+      oracleText: 'This spell deals 3 damage to any target.',
+    })
+    expect(cardImpact(bolt).stakes).toBe('opposing-player')
+  })
+
+  it('keeps a distinct floor between a drain and a mana ability', () => {
+    // The explicit answer to "where does the old `self` tier go": a clause that
+    // lands on YOU is `owning-player` (0.9) and a clause that lands on nobody
+    // is `nothing` (0.85), so the two no longer price identically.
+    const drain = card({
+      name: 'Drain',
+      manaCost: '{1}',
+      typeLine: 'Enchantment',
+      oracleText: 'At the beginning of your upkeep, you lose 3 life.',
+    })
+    expect(cardImpact(drain).stakes).toBe('owning-player')
+    const mana = card({
+      name: 'Rock',
+      manaCost: '{2}',
+      typeLine: 'Artifact',
+      oracleText: '{T}: Add {C}.',
+    })
+    expect(cardImpact(mana).stakes).toBe('nothing')
+  })
+
+  it('does NOT promote an anthem to an opponent under the maximum', () => {
+    // The regression a naive maximum would have caused. A mass effect scoped
+    // entirely to your own side has no opponent's permanent among its possible
+    // targets, so `yoursOnly` removes the opposing candidates rather than
+    // losing to them — otherwise every anthem and lord would have taken the
+    // 1.2 off the unbounded rule.
+    expect(cardImpact(CRATERHOOF).stakes).toBe('owned-permanent')
+    const anthem = card({
+      name: 'Glorious Anthem',
+      manaCost: '{1}{W}{W}',
+      typeLine: 'Enchantment',
+      oracleText: 'Creatures you control get +1/+1.',
+    })
+    expect(cardImpact(anthem).stakes).toBe('owned-permanent')
+    expect(cardImpact(anthem).score).toBe(6.0)
+  })
+
+  it("keeps the possessive out of the player rung — bare 'opponents' + 'control'", () => {
+    // 1,472 cards. "Creatures your opponents control get -1/-1" is aimed at a
+    // BOARD; the possessive is doing nothing but naming whose.
+    const doomwake = card({
+      name: 'Doomwake Giant',
+      manaCost: '{4}{B}',
+      typeLine: 'Creature — Giant',
+      oracleText:
+        'Constellation — Whenever an enchantment you control enters, creatures your opponents control get -1/-1 until end of turn.',
+    })
+    expect(cardImpact(doomwake).stakes).toBe('opposing-permanent')
+  })
+
+  it('leaves IMPACT_MAX where it was, derived rather than assumed', () => {
+    // The top of the ladder is still 1.4, so the ceiling is unchanged — but it
+    // is derived from the tables, so this asserts it rather than trusting it.
+    expect(IMPACT_MAX).toBe(22.176)
   })
 })

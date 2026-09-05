@@ -13,7 +13,7 @@ const WRATH_IMPACT: ImpactView = {
   score: 6.12,
   breadth: 'unbounded',
   persistence: 'one-shot',
-  stakes: 'opposing',
+  stakes: 'opposing-permanent',
   symmetry: 'symmetric',
   severity: 'none',
   scales: false,
@@ -34,7 +34,7 @@ const LAND_IMPACT: ImpactView = {
   score: 0,
   breadth: 'none',
   persistence: 'one-shot',
-  stakes: 'self',
+  stakes: 'nothing',
   symmetry: 'none',
   severity: 'none',
   scales: false,
@@ -56,7 +56,7 @@ const SOL_RING_IMPACT: ImpactView = {
   score: 0.68,
   breadth: 'none',
   persistence: 'activated',
-  stakes: 'own',
+  stakes: 'owned-permanent',
   symmetry: 'none',
   severity: 'none',
   scales: false,
@@ -125,10 +125,10 @@ describe('CardMetrics — the tiers are the reasons', () => {
   it('says what the card reaches, how often, and whose board', () => {
     render(<CardMetrics impact={WRATH_IMPACT} efficiency={WRATH_EFFICIENCY} />)
     const panel = within(metrics())
-    expect(panel.getByText('Reach')).toBeDefined()
-    expect(panel.getByText('everything at once')).toBeDefined()
-    expect(panel.getByText('once, then it is done')).toBeDefined()
-    expect(panel.getByText("an opponent's side, your board included")).toBeDefined()
+    expect(panel.getByText('Breadth')).toBeDefined()
+    expect(panel.getByText('Every target')).toBeDefined()
+    expect(panel.getByText('Once')).toBeDefined()
+    expect(panel.getByText("another player's permanent, your board included")).toBeDefined()
   })
 
   it('shows the arithmetic behind the rate', () => {
@@ -171,7 +171,7 @@ describe('CardMetrics — the number is placed against its own role', () => {
     render(<CardMetrics impact={SOL_RING_IMPACT} impactRole={RAMP_ROLE} />)
     const panel = within(metrics())
     expect(panel.getByText(/961 of those 1,401 it finds nothing to count/)).toBeDefined()
-    expect(panel.queryByText(/a card whose job is mana or a tax reads low here/)).toBeNull()
+    expect(panel.queryByText(/a card whose job is drawing cards reads low here/)).toBeNull()
   })
 
   it('keeps the generic caveat where the model reads the role well', () => {
@@ -183,7 +183,7 @@ describe('CardMetrics — the number is placed against its own role', () => {
       />,
     )
     const panel = within(metrics())
-    expect(panel.getByText(/a card whose job is mana or a tax reads low here/)).toBeDefined()
+    expect(panel.getByText(/a card whose job is drawing cards reads low here/)).toBeDefined()
     expect(panel.queryByText(/blind spot/)).toBeNull()
   })
 
@@ -193,7 +193,7 @@ describe('CardMetrics — the number is placed against its own role', () => {
     render(<CardMetrics impact={WRATH_IMPACT} efficiency={WRATH_EFFICIENCY} />)
     expect(metrics().querySelector('.rt-metric-role')).toBeNull()
     expect(
-      within(metrics()).getByText(/a card whose job is mana or a tax reads low here/),
+      within(metrics()).getByText(/a card whose job is drawing cards reads low here/),
     ).toBeDefined()
   })
 
@@ -214,7 +214,7 @@ describe('CardMetrics — degenerate and absent', () => {
     expect(panel.getByText(/nothing here for this model to measure/)).toBeDefined()
     // And no confident tier claims about a card with no text. `stakes: 'self'`
     // on a Forest is a default, not a finding.
-    expect(panel.queryByText('Reach')).toBeNull()
+    expect(panel.queryByText('Breadth')).toBeNull()
   })
 
   it('renders nothing at all when detail has not arrived', () => {
@@ -280,17 +280,20 @@ describe('CardMetrics — the explanation slot', () => {
     expect(shown[0]?.textContent).not.toBe(shown[1]?.textContent)
   })
 
-  it('explains the tiers using the same three words the rows above use', () => {
+  it('explains the tiers using the same four words the rows above use', () => {
     render(<CardMetrics impact={WRATH_IMPACT} explain={spy} />)
     const said = within(metrics()).getByTestId('explainer').textContent ?? ''
-    for (const label of ['Reach', 'Repeats', 'Falls on']) expect(said).toContain(label)
+    // The four axis names, since ADR-0066. They used to be sentence-openers —
+    // "Reach", "Repeats", "Falls on" — which read well and gave the reader no
+    // way to look a row up against the model.
+    for (const label of ['Breadth', 'Rate', 'Stakes', 'Severity']) expect(said).toContain(label)
   })
 
   it('names the blind spot, which is the whole reason a reader opens it', () => {
-    // A builder opens this because Sol Ring reads 0.68 and they think the app
-    // is wrong. The answer is that only effects are read (doc 18 §18.2).
+    // A builder opens this because a card they rate reads low and they think
+    // the app is wrong. The answer is what the model reads (doc 18 §18.2).
     render(<CardMetrics impact={WRATH_IMPACT} explain={spy} />)
-    expect(within(metrics()).getByTestId('explainer').textContent).toContain('Effects only')
+    expect(within(metrics()).getByTestId('explainer').textContent).toContain('Effects, mana and taxes')
   })
 
   it('leaves the pane exactly as it was when no explainer is supplied', () => {
