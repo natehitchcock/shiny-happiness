@@ -103,31 +103,50 @@ export const registerCommanderRoutes = (app: FastifyInstance, pool: Pool): void 
       }
 
       const snapshotId = await liveSnapshotId(pool)
-      const [{ items, total }, facts] = await Promise.all([
-        commandersBySemantics(pool, tags, { limit }),
+      const [carriers, facts] = await Promise.all([
+        commandersBySemantics(pool, tags),
         cachedPrintingFacts(pool, snapshotId),
       ])
 
       /*
-       * Ranked HERE and not in SQL. The repository narrows to the commanders
-       * that carry at least one pick and cuts the page on the same measure; the
-       * rule that decides two-of-two leads one-of-two is the domain's, so there
-       * is one implementation of it and it is the one under unit test.
+       * RANKED IN FULL, THEN CUT — in that order, and the order is the whole
+       * point (ADR-0069).
+       *
+       * The repository narrows to the commanders that carry at least one pick
+       * and does nothing else: it returns all of them, unordered. The rule that
+       * decides what "best first" means — match count, then how much the card
+       * does, then the name — is the domain's, so there is one implementation
+       * of it and it is the one under unit test.
+       *
+       * `cardImpact` cannot be expressed in SQL, so a query that cut the page
+       * could only cut it on the match count and the name. That is exactly what
+       * it used to do, and a pick that every carrier matches one-of-one left the
+       * NAME deciding the list: five Aangs for `creature-etb`. Ranking the page
+       * afterwards would have returned the impact-best of the alphabetically
+       * first sixty, which is the same defect and harder to see.
+       *
+       * The cost is bounded by the corpus rather than by the request: 786
+       * carriers for the widest tag in the corpus, 6.5 ms to rank
+       * `creature-etb`'s 645 (ADR-0069 §4).
        *
        * The filter inside `rankBySemanticMatches` is not redundant with the
        * overlap in SQL. It is what guarantees the 307 commanders carrying no
        * `produces`/`wants` semantic at all can never appear here even if the
        * query were later loosened.
        */
-      const ranked = rankBySemanticMatches(items, tags)
-      const ids = ranked.map((r) => r.card.oracleId)
+      const ranked = rankBySemanticMatches(carriers, tags)
+      // Art is fetched for the page, never for the rows the cut discarded.
+      const page = ranked.slice(0, limit)
+      const ids = page.map((r) => r.card.oracleId)
       const matches: Record<string, number> = {}
-      for (const r of ranked) matches[r.card.oracleId] = r.matched
+      for (const r of page) matches[r.card.oracleId] = r.matched
 
       return rep.send({
-        items: ranked.map((r) => r.card),
+        items: page.map((r) => r.card),
         matches,
-        total,
+        // The size of the whole answer, not of the page: a full page cannot say
+        // whether it is all of them.
+        total: ranked.length,
         images: imagesFor(ids, facts),
         datasetSnapshotId: snapshotId,
       })

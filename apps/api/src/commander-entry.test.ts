@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createTestDatabase, databaseUrl, type TestDatabase } from '@roundtable/db/testing'
 import { upsertCards } from '@roundtable/db'
 import type { Card, CardType, OracleId, SynergyTag } from '@roundtable/domain'
-import { oracleId, printingId } from '@roundtable/domain'
+import { cardImpact, oracleId, printingId } from '@roundtable/domain'
 import type { FastifyInstance } from 'fastify'
 import { buildServer } from './server.js'
 import { clearCorpusCache } from './corpus-cache.js'
@@ -447,5 +447,181 @@ describeDb('commander entry — semantics and quickdraw (ADR-0067)', () => {
       }
       for (const item of body.items) expect(body.images).toHaveProperty(item.oracleId)
     })
+  })
+})
+
+/* -------------------------------------------------- the impact tiebreak --- */
+
+/**
+ * What "best first" means once every carrier matches one of one (ADR-0069).
+ *
+ * ## Why this is a second database rather than more rows in the first
+ *
+ * The corpus above is shared with the quickdraw suite, whose assertions are
+ * deterministic functions of the POOL — which hand a fixed seed deals depends on
+ * every commander in the table, so adding twelve rows for a ranking test would
+ * silently redeal every hand in the file and the failure would look like a
+ * sampler defect. Separate databases per suite is already the pattern in
+ * `api-06.test.ts` and `db.test.ts`, and it is what makes this corpus readable:
+ * twelve cards, each with a stated impact.
+ *
+ * ## The corpus
+ *
+ * Every text below was run through the shipped `cardImpact` and its score is
+ * asserted in the first test, so a fixture cannot drift into agreeing with the
+ * ranking for the wrong reason.
+ *
+ *   Zzz, The Drain        18.48   landfall            — late by name, best by impact
+ *   Bbb, The Twin         15.96   landfall            ┐ identical text, therefore
+ *   Ccc, The Twin         15.96   landfall            ┘ an exact impact tie
+ *   Aang 000 … Aang 007    0.808  landfall            — the alphabetically first eight
+ *   Zzzz, Both At Once     0      landfall + elf      — two of two, and does nothing
+ */
+const HUGE_TEXT = 'At the beginning of each upkeep, each opponent loses 1 life.'
+const BIG_TEXT = 'When this creature enters, each opponent sacrifices a creature.'
+const SMALL_TEXT = 'When this creature enters, draw a card.'
+
+const DRAIN = 'Zzz, The Drain'
+const TWIN_B = 'Bbb, The Twin'
+const TWIN_C = 'Ccc, The Twin'
+const BOTH = 'Zzzz, Both At Once'
+
+/**
+ * Not a database test, and deliberately in this file rather than beside it.
+ *
+ * The suite below asserts an ORDER that only means anything if these four texts
+ * score what the corpus comment says they score. That is a fact about the
+ * shipped `cardImpact` and needs no Postgres, so it is checked here where a
+ * contributor without a database still sees it fail.
+ */
+describe('the impact fixtures this file ranks by', () => {
+  const score = (oracleText: string): number =>
+    cardImpact({
+      name: 'fixture',
+      manaCost: '{2}{G}',
+      oracleText,
+      typeLine: 'Legendary Creature — Beast',
+    }).score
+
+  it('states what each fixture text is worth, so the corpus cannot drift', () => {
+    expect(score(HUGE_TEXT)).toBe(18.48)
+    expect(score(BIG_TEXT)).toBe(15.96)
+    expect(score(SMALL_TEXT)).toBe(0.808)
+    expect(score('')).toBe(0)
+  })
+})
+
+describeDb('commander entry — ordering by impact (ADR-0069)', () => {
+  let db: TestDatabase
+  let app: FastifyInstance
+
+  const commander = (name: string, oracleText: string, carries: readonly string[]): Card =>
+    card(name, {
+      typeLine: 'Legendary Creature — Beast',
+      canBeCommander: true,
+      oracleText,
+      synergyProduces: tags(...carries),
+      edhrecRank: 500,
+    })
+
+  beforeAll(async () => {
+    db = await createTestDatabase('commander_impact')
+    await upsertCards(db.pool, [
+      commander(DRAIN, HUGE_TEXT, ['landfall']),
+      commander(TWIN_B, BIG_TEXT, ['landfall']),
+      commander(TWIN_C, BIG_TEXT, ['landfall']),
+      ...Array.from({ length: 8 }, (_, i) =>
+        commander(`Aang ${String(i).padStart(3, '0')}`, SMALL_TEXT, ['landfall']),
+      ),
+      commander(BOTH, '', ['landfall', 'subtype:elf']),
+    ])
+    app = await buildServer({ pool: db.pool })
+    clearCorpusCache()
+  }, 60_000)
+
+  afterAll(async () => {
+    clearCorpusCache()
+    await app.close()
+    await db.drop()
+  })
+
+  const pick = async (
+    query: string,
+  ): Promise<{
+    items: { oracleId: string; name: string }[]
+    matches: Record<string, number>
+    total: number
+    images: Record<string, unknown>
+  }> => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/commanders/by-semantics?${query}`,
+    })
+    expect(res.statusCode).toBe(200)
+    return res.json() as never
+  }
+
+  it('orders equal match counts by impact and not by name', async () => {
+    /*
+     * The defect, as one line. Every one of these twelve carries landfall and
+     * nothing else, so all twelve match one of one and the tiebreak decides the
+     * entire list — which is why the live corpus answered `creature-etb` with
+     * Aang, Aang, Aang, Aang, Aatchik.
+     */
+    const { items } = await pick('tags=landfall&limit=200')
+    expect(items.slice(0, 3).map((i) => i.name)).toEqual([DRAIN, TWIN_B, TWIN_C])
+    expect(items.at(-1)?.name).toBe(BOTH)
+  })
+
+  it('breaks a genuine impact tie by name, so two identical cards keep an order', async () => {
+    // Bbb and Ccc have the same text and therefore the same score to the last
+    // decimal. Something has to decide, and the alphabet is what adds nothing.
+    const { items } = await pick('tags=landfall&limit=200')
+    const names = items.map((i) => i.name)
+    expect(names.indexOf(TWIN_B)).toBe(names.indexOf(TWIN_C) - 1)
+  })
+
+  it('lets a higher match count beat a higher impact', async () => {
+    /*
+     * Impact is the tiebreak and never the sort. `Zzzz, Both At Once` has no
+     * rules text at all — impact exactly 0 — and still leads a commander
+     * scoring 18.48, because it answers both of the builder's picks.
+     */
+    const { items, matches } = await pick('tags=landfall,subtype:elf&limit=200')
+    expect(items[0]?.name).toBe(BOTH)
+    expect(matches[items[0]?.oracleId ?? '']).toBe(2)
+    expect(items[1]?.name).toBe(DRAIN)
+  })
+
+  it('RANKS BEFORE IT CUTS: the impact-best carrier survives a limit that its name would not', async () => {
+    /*
+     * THE REGRESSION THIS FILE EXISTS FOR, and the one that would come back
+     * quietly. The old query ordered by match count then NAME and cut in SQL, so
+     * a page of three was the alphabetically first three — eight Aangs stand
+     * here for the 645 carriers `creature-etb` has. Re-sorting that page by
+     * impact afterwards returns the impact-best of the alphabetically first
+     * three, which still shows the reader nothing but Aangs.
+     *
+     * So the assertion is not only that the drain is first; it is that no Aang
+     * appears at all in a page of three, which is only true if the whole
+     * matching set was ranked before anything was cut.
+     */
+    const { items } = await pick('tags=landfall&limit=3')
+    expect(items.map((i) => i.name)).toEqual([DRAIN, TWIN_B, TWIN_C])
+    expect(items.filter((i) => i.name.startsWith('Aang '))).toEqual([])
+  })
+
+  it('counts the whole matching set in `total`, not the page it cut', async () => {
+    const { items, total } = await pick('tags=landfall&limit=3')
+    expect(items).toHaveLength(3)
+    expect(total).toBe(12)
+  })
+
+  it('fetches art for the page and not for the rows it discarded', async () => {
+    // A ranked-then-cut endpoint holds the whole matching set for a moment;
+    // hydrating art for all of it would move twelve entries to render three.
+    const { items, images } = await pick('tags=landfall&limit=3')
+    expect(Object.keys(images)).toHaveLength(items.length)
+    for (const item of items) expect(images).toHaveProperty(item.oracleId)
   })
 })

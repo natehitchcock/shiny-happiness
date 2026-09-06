@@ -1,5 +1,6 @@
 import type { Card } from './card.js'
 import type { OracleId } from './ids.js'
+import { cardImpact } from './impact.js'
 import { semanticCategory, type SemanticCategory, type SynergyTag } from './synergy.js'
 import { sampleWithSeed } from './seeded-random.js'
 
@@ -212,39 +213,103 @@ export interface RankedCommander {
   readonly card: Card
   /** How many of the builder's picks this commander carries. Never 0 here. */
   readonly matched: number
+  /**
+   * `cardImpact(card).score` — how much this commander does, from its text alone.
+   *
+   * Carried on the row rather than recomputed by whoever reads it, because it
+   * is what the order was decided by and a second computation is a second
+   * opinion waiting to disagree.
+   */
+  readonly impact: number
+}
+
+/** A commander with its impact already computed, ready to be ranked. */
+export interface ScoredCommander {
+  readonly card: Card
+  readonly impact: number
 }
 
 /**
- * The commanders that carry the picks, best match first.
+ * Every card beside what it does.
  *
- * TWO OF TWO LEADS ONE OF TWO, which is the whole ordering rule the builder was
- * promised, and the tiebreak is the NAME.
+ * Separated from the ranking so a caller that ranks the same pool against
+ * several sets of picks can score it once. `cardImpact` reads only
+ * `oracleText`, `typeLine` and `manaCost`, so this is a pure function of the
+ * cards and stores nothing.
+ */
+export const scoreCommanderImpact = (cards: readonly Card[]): readonly ScoredCommander[] =>
+  cards.map((card) => ({ card, impact: cardImpact(card).score }))
+
+/**
+ * The commanders that carry the picks, best match first — and among equals, the
+ * ones that do the most (ADR-0069).
  *
- * Not `edhrecRank`, and that omission is deliberate rather than an oversight —
- * ADR-0067 §5 argues it at length. Route 2 uses popularity because a random
- * draw has to stay recognisable; Route 1 must not, because the builder is here
- * asking what is interesting and letting popularity break the ties would answer
- * a different question in the same list. Alphabetical is the order that adds
- * nothing, which is what a tiebreak should do.
+ * TWO OF TWO STILL LEADS ONE OF TWO. That is the rule the builder was promised
+ * and impact never overrides it: the list answers "which commanders carry what
+ * I picked", so the count of picks carried is the sort and everything below it
+ * is a tiebreak.
+ *
+ * THE TIEBREAK IS IMPACT AND IT USED TO BE THE ALPHABET, which was a defect
+ * rather than a preference. Pick one common semantic and every carrier matches
+ * one of one, so the tiebreak does all of the work — `creature-etb` has 645
+ * carriers and the first five were Aang, Aang, Aang, Aang, Aatchik. At sixty
+ * rendered items that was invisible; at five it is the whole list.
+ *
+ * STILL NOT `edhrecRank`, and that refusal is unchanged rather than merely
+ * inherited (ADR-0067 §5, ADR-0069 §3). Route 2 uses popularity because a
+ * random draw has to stay recognisable; Route 1 must not, because the builder
+ * is here asking what is interesting and a popularity tiebreak would answer a
+ * different question under the same heading. Impact is a property of the card's
+ * own text — what it does, not who plays it — which is the question this list
+ * is already asking.
+ *
+ * NAME STILL BREAKS A GENUINE IMPACT TIE, because impact is a product of five
+ * constants and exact ties are common — every vanilla scores 0 — and a list
+ * whose order depends on which equal card the database happened to return first
+ * is a list that reorders itself between two identical requests.
  *
  * A commander carrying NONE of the picks is dropped rather than ranked last.
  * 307 of the 3,411 legal commanders carry no `produces`/`wants` semantic at all
  * and can never match anything; a zero-match tail would be those 307 plus every
  * commander about something else, under a heading that says these carry the
  * semantics.
+ *
+ * RANK THE WHOLE MATCHING SET, THEN CUT. A caller that cuts first and ranks the
+ * page gets the impact-best of the alphabetically first N, which is the same
+ * defect wearing a hat.
+ */
+export const rankScoredBySemanticMatches = (
+  scored: readonly ScoredCommander[],
+  picks: readonly SynergyTag[],
+): readonly RankedCommander[] =>
+  scored
+    .map(({ card, impact }) => ({ card, impact, matched: semanticMatchCount(card, picks) }))
+    .filter((ranked) => ranked.matched > 0)
+    .sort((a, b) =>
+      b.matched !== a.matched
+        ? b.matched - a.matched
+        : b.impact !== a.impact
+          ? b.impact - a.impact
+          : a.card.name.localeCompare(b.card.name, 'en'),
+    )
+
+/**
+ * The same ranking, over cards whose impact has not been computed yet.
+ *
+ * Scores only the carriers, not everything handed in: impact is ~8.2 µs a card
+ * measured over the live corpus (27.95 ms for all 3,411), and the cards that
+ * carry none of the picks are dropped before it is asked. That is the whole
+ * difference — 6.5 ms to rank `creature-etb`'s 645 carriers against 29 ms to
+ * score the pool first and throw most of it away.
  */
 export const rankBySemanticMatches = (
   cards: readonly Card[],
   picks: readonly SynergyTag[],
 ): readonly RankedCommander[] =>
-  cards
-    .map((card) => ({ card, matched: semanticMatchCount(card, picks) }))
-    .filter((ranked) => ranked.matched > 0)
-    .sort((a, b) =>
-      b.matched !== a.matched
-        ? b.matched - a.matched
-        : a.card.name.localeCompare(b.card.name, 'en'),
-    )
+  rankScoredBySemanticMatches(
+    scoreCommanderImpact(cards.filter((card) => semanticMatchCount(card, picks) > 0)),
+    picks,
+  )
 
 /* -------------------------------------------------------------- route 2 --- */
 

@@ -145,10 +145,22 @@ amended by
 [ADR-0068](adr/0068-looking-is-not-choosing-and-a-deck-is-mostly-not-its-theme.md).
 The commander name search is untouched and still comes first; below it the start
 screen offers **eight** of the **66** qualifying semantics (pick some, see the
-commanders that carry them, ranked by how many you matched) and a quickdraw of
-three commanders with the wildcard marked. Both end at the same `chosen` the
-search ends at, so the card face, the focus prompt, the archetype and "Start
-building" are the screen that was already there.
+commanders that carry them, ranked by how many you matched and then by how much
+they DO) and a quickdraw of three commanders with the wildcard marked. Both end
+at the same `chosen` the search ends at, so the card face, the focus prompt, the
+archetype and "Start building" are the screen that was already there.
+
+**That second term is [ADR-0069](adr/0069-a-tiebreak-that-decides-every-row-is-the-sort.md),
+and it is a fix rather than a flourish.** The tiebreak was the name, which is
+fine for the occasional pair and wrong as a sort: pick ONE common semantic and
+every carrier matches one of one, so the alphabet decided the whole list —
+`creature-etb` has 645 carriers and the carrier list, which draws five now,
+answered with four Aangs and an Aatchik. Ties break on `cardImpact` (doc 22),
+the name still settles a genuine impact tie, and `edhrec_rank` is still refused
+here for ADR-0067 §5's reason. Impact cannot be computed in SQL, so the query
+narrows and never cuts: the whole matching set is ranked and `limit` is applied
+after. Cutting first and ranking the page is the same defect, and there is a
+test whose only job is to fail if anybody does that.
 
 **Four things ADR-0068 changed about that screen.** The thresholds are **10
 commanders / 70 supporting cards**, not 20/150: the old floor asked how many

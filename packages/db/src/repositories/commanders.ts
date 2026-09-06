@@ -70,71 +70,56 @@ export const semanticCensus = async (pool: Pool): Promise<SemanticCensusEntry[]>
   }))
 }
 
-export interface CommandersBySemantics {
-  readonly items: readonly Card[]
-  /**
-   * How many commanders carry at least one pick, before `limit`.
-   *
-   * Counted rather than inferred from `items.length`, because a page that is
-   * exactly `limit` long cannot say whether it is the whole answer. The screen
-   * needs to tell "these are the 12 there are" from "these are 12 of 340".
-   */
-  readonly total: number
-}
-
 /**
- * The commanders that carry any of `tags`.
+ * EVERY commander that carries any of `tags`. No page, no order, no limit.
  *
  * ARRAY OVERLAP (`&&`), which is what the two GIN indexes from migration 0003
  * were built for — the same index the census above cannot use for `has` and
  * this query would not be affordable without.
  *
- * The ORDER is decided in the domain (`rankBySemanticMatches`), not here, and
- * the SQL only narrows. That split is deliberate: the ranking rule is "how many
- * of the builder's picks did this one match", the ranking is what the builder
- * is being shown, and a rule that lived in a string in this file would be
- * testable only against a live database. What SQL must still do is CUT, because
- * a wide pick can match hundreds of commanders and shipping all of them to sort
- * three of them at the top is the read ADR-0064 argues about.
+ * ## Why this no longer cuts, and why that is the fix (ADR-0069)
  *
- * So the cut is made on the same measure the domain sorts by — the size of the
- * intersection — computed here purely as an ORDER BY. `limit` rows come back
- * already carrying the best matches, and the domain re-derives the number it
- * ranks by from the cards themselves rather than trusting a count computed in
- * SQL. Two implementations of one rule would eventually be two answers
- * (migration 0010 makes the same argument), so only one of them is authoritative
- * and it is the one in `packages/domain`.
+ * It used to return `limit` rows ordered by `cardinality(ARRAY(… INTERSECT …))`
+ * and then by name, so SQL narrowed AND cut on the match count. The trouble is
+ * that a single common pick makes every carrier a one-of-one match: 645
+ * commanders carry `creature-etb`, all 645 tie, and the NAME did all of the
+ * work. The first five were Aang, Aang, Aang, Aang, Aatchik.
+ *
+ * The order is now match count, then how much the commander DOES, then name —
+ * and impact is computed from the card's own text by `cardImpact`, which no
+ * amount of SQL can express. So the ranking has to happen in the domain over
+ * the whole matching set, and anything cut here would be cut on the wrong
+ * measure. Ranking a page ordered by name returns the impact-best of the
+ * alphabetically first sixty, which is the same defect with a smaller symptom.
+ *
+ * ## What that costs, measured
+ *
+ * The result is bounded by the corpus rather than by a parameter, and the bound
+ * is small: 3,411 commander-legal commanders in total, of which 3,104 carry any
+ * semantic at all. The widest single tag is `token` at 786 carriers (430 KiB of
+ * rows), and `creature-etb`'s 645 are 348 KiB — against the 12.1 MB
+ * `findEligibleCards` moves for a five-colour deck. Selecting only the columns
+ * impact reads would have saved 21% of those bytes and cost a second round trip
+ * to hydrate the survivors, and a round trip here is ~36 ms (ADR-0063).
+ *
+ * The count query that used to run beside this one is gone: the caller ranks
+ * the whole set, so `total` is the length of what it ranked. One round trip
+ * where there were two.
  */
 export const commandersBySemantics = async (
   pool: Pool,
   tags: readonly SynergyTag[],
-  options: { readonly limit?: number } = {},
-): Promise<CommandersBySemantics> => {
-  if (tags.length === 0) return { items: [], total: 0 }
+): Promise<readonly Card[]> => {
+  if (tags.length === 0) return []
 
-  const overlap = `legality_commander = 'legal'
+  const { rows } = await pool.query<CardRow>(
+    `SELECT ${ELIGIBLE_COLUMNS} FROM cards
+      WHERE legality_commander = 'legal'
         AND can_be_commander IS TRUE
-        AND (synergy_produces || synergy_wants) && $1::text[]`
-
-  const [page, counted] = await Promise.all([
-    pool.query<CardRow>(
-      `SELECT ${ELIGIBLE_COLUMNS} FROM cards
-        WHERE ${overlap}
-        ORDER BY cardinality(
-                   ARRAY(SELECT unnest(synergy_produces || synergy_wants)
-                         INTERSECT
-                         SELECT unnest($1::text[]))
-                 ) DESC,
-                 name
-        LIMIT $2`,
-      [tags, options.limit ?? 60],
-    ),
-    pool.query<{ total: string }>(`SELECT count(*)::text AS total FROM cards WHERE ${overlap}`, [
-      tags,
-    ]),
-  ])
-
-  return { items: cardsFromRows(page.rows), total: Number(counted.rows[0]?.total ?? '0') }
+        AND (synergy_produces || synergy_wants) && $1::text[]`,
+    [tags],
+  )
+  return cardsFromRows(rows)
 }
 
 export interface CommanderDrawPools {
