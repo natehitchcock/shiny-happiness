@@ -91,6 +91,59 @@ The image URLs are Scryfall's own CDN, sent through unaltered
 ([ADR-0021](adr/0021-card-art-from-scryfalls-cdn.md)). `search` returns art for
 the page it returns, not for everything the scan touched.
 
+## 10.2a Commander entry
+
+Two ways to start a deck that are not typing a name
+([ADR-0067](adr/0067-a-name-is-the-wrong-question-for-someone-who-has-not-chosen.md)).
+Additive: nothing in §10.2 changes, and `POST /decks` is still where both of
+them end up.
+
+```
+GET /api/v1/commanders/semantics
+    → { offers: SemanticOffer[], datasetSnapshotId }
+
+    SemanticOffer = { tag: SynergyTag
+                      category: 'mechanics' | 'keyword' | 'type'
+                      commanders: number      // commander-legal commanders carrying it
+                      supporting: number }    // commander-legal cards carrying it
+
+GET /api/v1/commanders/by-semantics?tags=&limit=
+    → { items: Card[], matches: Record<OracleId, number>, total,
+        images: ImageMap, datasetSnapshotId }
+    tags is COMMA SEPARATED, and every member must be a known SynergyTag.
+    items are ranked by how many of `tags` each carries, then by name.
+
+GET /api/v1/commanders/quickdraw?seed=
+    → { items: Card[], wildcard: OracleId | null, seed,
+        images: ImageMap, datasetSnapshotId }
+```
+
+**The offer is the whole qualifying set, not a sample.** A tag qualifies when at
+least 20 commander-legal commanders carry it and at least 150 commander-legal
+cards support it, counting `produces` and `wants` and never `has` — 48 tags
+against the live corpus. The client draws its handful of eight from that with the
+domain's own seeded sampler, so a redraw is a new seed rather than a request.
+
+**`matches` rides beside the cards**, the way `prices` and `images` do (§10.2).
+How many of *your* picks a commander matched is a fact about the request, not
+about the card, and a `Card` that carried it would be a different `Card`
+depending on who asked. `total` is the size of the whole answer, so a full page
+can say whether it is all of them.
+
+**`seed` on `quickdraw` is required, and the endpoint holds no randomness.** The
+client generates one `crypto.randomUUID()` per deal; the three commanders are a
+deterministic function of it, which is what lets a contract test assert an exact
+hand. An optional seed with a server-side fallback would be two code paths of
+which only the seeded one is ever tested.
+
+**`wildcard` names a card by id, not by position.** It is the last item today and
+is marked as such on screen, but a contract that said "the third" would break the
+first time anybody wanted to shuffle. `null` means the pool could not yield a
+third distinct commander, and `items` is then short — never padded with a
+familiar card wearing the wildcard's label.
+
+**Colour identity is not a filter on either route.** There is no deck yet.
+
 ## 10.3 Decks
 
 ```

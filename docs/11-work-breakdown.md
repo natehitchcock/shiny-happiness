@@ -139,6 +139,24 @@ gap stops being land and becomes ramp. The card list behind each bar had been
 deduplicated to MATCH the broken bar, so it was fixed in the same pass and
 repeats are grouped for display as `Forest ×20`.
 
+**There are three ways to start a deck now, not one** —
+[ADR-0067](adr/0067-a-name-is-the-wrong-question-for-someone-who-has-not-chosen.md).
+The commander name search is untouched and still comes first; below it the start
+screen offers eight of the 48 qualifying semantics (pick some, see the
+commanders that carry them, ranked by how many you matched) and a quickdraw of
+three commanders with the wildcard marked. Both end at the same `chosen` the
+search ends at, so the card face, the focus prompt, the archetype and "Start
+building" are the screen that was already there.
+
+Two things to know before touching it. **A semantic here is `produces` or
+`wants` and never `has`** — membership is what a card IS and this screen asks
+what a deck is ABOUT, and counting membership would offer `subtype:human` on
+1,409 commanders. And **nothing in the feature is random on the server**: one
+`crypto.randomUUID()` per draw in the browser, and a deterministic function of
+it all the way down, which is what lets the tests assert an exact hand. The new
+API suite is `apps/api/src/commander-entry.test.ts` and it is in the literal
+`DATABASE_SUITES` list in `vitest.config.ts` — it must stay there.
+
 The app is called **Lotus Wizard** in the interface. The name is tentative and
 **not cleared** — `LEGAL-01` owns that, and there is a real question to answer
 first: see doc 04 §4.6. Package scopes stay `@roundtable/*` until it is settled.
