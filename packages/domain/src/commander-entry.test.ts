@@ -66,7 +66,9 @@ const census = (tag: string, commanders: number, supporting: number): SemanticCe
 
 describe('qualifyingSemantics', () => {
   it('keeps a tag that clears both floors', () => {
-    expect(qualifyingSemantics([census('landfall', 20, 150)]).map((o) => o.tag)).toEqual(['landfall'])
+    expect(qualifyingSemantics([census('landfall', 20, 150)]).map((o) => o.tag)).toEqual([
+      'landfall',
+    ])
   })
 
   it('drops a deck nobody can lead — plenty of cards, too few commanders', () => {

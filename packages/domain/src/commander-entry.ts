@@ -188,7 +188,9 @@ export const rankBySemanticMatches = (
     .map((card) => ({ card, matched: semanticMatchCount(card, picks) }))
     .filter((ranked) => ranked.matched > 0)
     .sort((a, b) =>
-      b.matched !== a.matched ? b.matched - a.matched : a.card.name.localeCompare(b.card.name, 'en'),
+      b.matched !== a.matched
+        ? b.matched - a.matched
+        : a.card.name.localeCompare(b.card.name, 'en'),
     )
 
 /* -------------------------------------------------------------- route 2 --- */

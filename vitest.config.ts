@@ -36,6 +36,7 @@ const DATABASE_SUITES = [
   'apps/api/src/api.test.ts',
   'apps/api/src/api-02.test.ts',
   'apps/api/src/api-06.test.ts',
+  'apps/api/src/commander-entry.test.ts',
   'apps/api/src/recommendations.perf.test.ts',
   'apps/ingest/src/scryfall-ingest.test.ts',
   'packages/db/src/db.test.ts',

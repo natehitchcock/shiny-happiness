@@ -270,6 +270,48 @@ export const cardSearchQuery = {
   additionalProperties: false,
 } as const
 
+/**
+ * The picked semantics, comma separated (ADR-0067).
+ *
+ * A STRING and not an array, because this is a querystring and Fastify's
+ * default parser gives `?tags=a&tags=b` as an array but `?tags=a` as a scalar —
+ * a shape that changes with the number of values is a shape every caller gets
+ * wrong once. One string, split and validated in the route against the domain's
+ * own `SYNERGY_TAGS`, which is where the vocabulary already lives.
+ *
+ * `additionalProperties` is left open here for `cardSearchQuery`'s reason: a
+ * share link with a tracking parameter on it is not a malformed request.
+ */
+export const commanderSemanticsQuery = {
+  type: 'object',
+  required: ['tags'],
+  properties: {
+    tags: { type: 'string', minLength: 1, maxLength: 2000 },
+    limit: { type: 'integer', minimum: 1, maximum: 200, default: 60 },
+  },
+} as const
+
+/**
+ * The seed a quickdraw hand is dealt from (ADR-0067).
+ *
+ * REQUIRED, which is the decision rather than an omission. The endpoint holds
+ * no randomness of its own: the client generates one `crypto.randomUUID()` per
+ * draw and every card that comes back is a function of it. An optional seed
+ * with a server-side fallback would be two code paths where only the seeded one
+ * is ever tested.
+ *
+ * Any string, not a uuid format. The sampler hashes whatever it is given, and a
+ * `format: 'uuid'` here would be the API asserting a fact about the client's
+ * choice of entropy that it has no reason to care about.
+ */
+export const quickdrawQuery = {
+  type: 'object',
+  required: ['seed'],
+  properties: {
+    seed: { type: 'string', minLength: 1, maxLength: 200 },
+  },
+} as const
+
 const acceptCommand = {
   type: 'object',
   required: ['type', 'oracleId', 'origin'],

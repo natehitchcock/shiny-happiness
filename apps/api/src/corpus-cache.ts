@@ -1,12 +1,15 @@
 import type { Pool } from 'pg'
 import {
   combosInIdentity,
+  commanderDrawPools,
   findEligibleCards,
   gameChangerOracleIds,
   printingFactsForAll,
-  type PrintingFacts,
+  semanticCensus,
+  type CommanderDrawPools,
 } from '@roundtable/db'
-import type { Card, Color, Combo, OracleId } from '@roundtable/domain'
+import type { PrintingFacts } from '@roundtable/db'
+import type { Card, Color, Combo, OracleId, SemanticCensusEntry } from '@roundtable/domain'
 import { createSnapshotCache, identityKey } from './snapshot-cache.js'
 
 /**
@@ -79,6 +82,26 @@ const facts = createSnapshotCache<ReadonlyMap<OracleId, PrintingFacts>>(1)
  */
 const gameChangers = createSnapshotCache<readonly OracleId[]>(1)
 
+/**
+ * The two start-screen reads (ADR-0067). One entry each, for `facts`' reason:
+ * neither query takes a parameter that anything on that screen can vary.
+ *
+ * These are here for a THIRD reason, which is neither ADR-0017's bytes nor
+ * ADR-0064's round trips. `semanticCensus` is a full pass over 31,782 rows
+ * unnested into ~108,000 (tag, card) pairs and re-aggregated — the most
+ * expensive single read in this file by CPU, and by some way the cheapest by
+ * payload, at about fifteen kilobytes for the whole vocabulary. It is also the
+ * FIRST thing the application does for a visitor who has not chosen a commander,
+ * which is the worst possible moment to spend a hundred milliseconds. Cached, it
+ * is paid once per ingest.
+ *
+ * `commanderDrawPools` is 3,411 uuids, and is cached because a reroll is a
+ * button somebody clicks repeatedly and idly. The pools do not change between
+ * clicks; only the seed does.
+ */
+const census = createSnapshotCache<readonly SemanticCensusEntry[]>(1)
+const drawPools = createSnapshotCache<CommanderDrawPools>(1)
+
 /** Combos castable in this identity (ADR-0017). */
 export const cachedCombosInIdentity = async (
   pool: Pool,
@@ -139,10 +162,26 @@ export const cachedGameChangerOracleIds = async (
 ): Promise<readonly OracleId[]> =>
   gameChangers.get(snapshotId, 'all', () => gameChangerOracleIds(pool))
 
+/** How many cards stand behind every semantic tag (ADR-0067). */
+export const cachedSemanticCensus = async (
+  pool: Pool,
+  snapshotId: string | null,
+): Promise<readonly SemanticCensusEntry[]> =>
+  census.get(snapshotId, 'all', () => semanticCensus(pool))
+
+/** The commander id pools a quickdraw hand is dealt from (ADR-0067). */
+export const cachedCommanderDrawPools = async (
+  pool: Pool,
+  snapshotId: string | null,
+): Promise<CommanderDrawPools> =>
+  drawPools.get(snapshotId, 'all', () => commanderDrawPools(pool))
+
 /** Drop everything held. For tests, and for anything that rewrites the corpus. */
 export const clearCorpusCache = (): void => {
   combos.clear()
   eligible.clear()
   facts.clear()
   gameChangers.clear()
+  census.clear()
+  drawPools.clear()
 }

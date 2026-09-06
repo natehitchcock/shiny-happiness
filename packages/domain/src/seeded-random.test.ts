@@ -71,7 +71,8 @@ describe('sampleWithSeed', () => {
     // The partial Fisher-Yates is the whole reason this is worth asserting: a
     // naive "shuffle the first k" only ever returns the first k.
     const seen = new Set<number>()
-    for (let i = 0; i < 500; i += 1) for (const n of sampleWithSeed(pool(40), 3, `s${String(i)}`)) seen.add(n)
+    for (let i = 0; i < 500; i += 1)
+      for (const n of sampleWithSeed(pool(40), 3, `s${String(i)}`)) seen.add(n)
     expect(seen.size).toBe(40)
   })
 

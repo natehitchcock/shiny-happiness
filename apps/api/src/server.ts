@@ -2,6 +2,7 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
 import { PROBLEM_CONTENT_TYPE, badRequest } from './errors.js'
 import { registerCardRoutes } from './routes/cards.js'
+import { registerCommanderRoutes } from './routes/commanders.js'
 import { registerDeckRoutes } from './routes/decks.js'
 import { registerRecommendationRoutes } from './routes/recommendations.js'
 import { registerAnalysisRoutes } from './routes/analysis.js'
@@ -78,6 +79,10 @@ export const buildServer = async (options: ServerOptions): Promise<FastifyInstan
   // prefix to inherit.
   registerHealthRoutes(app, options.pool)
   registerCardRoutes(app, options.pool)
+  // ADR-0067. Registered after the card routes because it imports `imagesFor`
+  // from them; nothing about the order matters at runtime, every path is
+  // absolute.
+  registerCommanderRoutes(app, options.pool)
   registerDeckRoutes(app, options.pool)
   registerRecommendationRoutes(app, options.pool)
   registerAnalysisRoutes(app, options.pool)
