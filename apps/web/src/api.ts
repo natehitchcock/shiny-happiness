@@ -483,6 +483,78 @@ export const searchCards = (
       (options.excludeUniversesBeyond === true ? '&excludeUniversesBeyond=true' : ''),
   )
 
+/**
+ * One semantic worth offering at the start screen (ADR-0067, doc 10 §10.6).
+ *
+ * The counts ride along so the chip can say what stands behind it without a
+ * second call. `category` is the domain's own (`semanticCategory`), sent rather
+ * than re-derived here: the client already re-derives it in `offerCategories`
+ * for tags that arrive bare, and there is no reason for a response that knows
+ * the answer to make the reader work it out again.
+ */
+export interface SemanticOffer {
+  tag: string
+  category: 'mechanics' | 'keyword' | 'type'
+  /** Commander-legal commanders carrying the tag. */
+  commanders: number
+  /** Commander-legal cards carrying it at all. */
+  supporting: number
+}
+
+/**
+ * Every semantic worth offering — the whole qualifying set, not a sample.
+ *
+ * It is 48 tags against the live corpus, so the CLIENT draws its handful of
+ * eight from this with `drawSemanticOffers`. Sampling on the server would have
+ * needed a seed on this endpoint for no benefit; the pool is small enough to
+ * send whole, and a redraw is then free rather than a round trip.
+ */
+export const commanderSemantics = (): Promise<{ offers: SemanticOffer[] }> =>
+  request('/commanders/semantics')
+
+/**
+ * The commanders carrying the picked semantics, best match first.
+ *
+ * `matches` is keyed by oracle id and rides beside the cards, the way `images`
+ * does: how many of YOUR picks a commander matched is a fact about the request,
+ * not about the card. `total` is the whole answer's size, so a full page can say
+ * whether it is all of them.
+ */
+export const commandersBySemantics = (
+  tags: readonly string[],
+  options: { limit?: number } = {},
+): Promise<{
+  items: Card[]
+  matches: Record<string, number>
+  total: number
+  images?: Record<string, ImageUris>
+}> =>
+  request(
+    `/commanders/by-semantics?tags=${encodeURIComponent(tags.join(','))}` +
+      `&limit=${String(options.limit ?? 60)}`,
+  )
+
+/**
+ * Three commanders, two of them recognisable and one from anywhere.
+ *
+ * THE SEED IS THE CALLER'S, and this is the only entropy in either entry route:
+ * one `crypto.randomUUID()` per deal, here in the browser. The endpoint is a
+ * deterministic function of it, which is what lets the contract tests assert an
+ * exact hand instead of mocking the sampler they exist to exercise.
+ *
+ * `wildcard` names the card drawn from the whole pool, by id. It may be null on
+ * a corpus too small to deal a third distinct commander, in which case `items`
+ * is short — never padded with a familiar card wearing the wildcard's label.
+ */
+export const quickdrawCommanders = (
+  seed: string,
+): Promise<{
+  items: Card[]
+  wildcard: string | null
+  seed: string
+  images?: Record<string, ImageUris>
+}> => request(`/commanders/quickdraw?seed=${encodeURIComponent(seed)}`)
+
 export interface Hydrated {
   cards: Map<string, Card>
   /** Cheapest printing, in USD. An estimate — see `PriceNote`. */

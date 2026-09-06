@@ -90,7 +90,21 @@ export interface SemanticOffer {
  */
 const CATEGORY_ORDER: readonly SemanticCategory[] = ['mechanics', 'keyword', 'type']
 
-const byCategoryThenTag = (a: SemanticOffer, b: SemanticOffer): number => {
+/**
+ * Sortable by category and tag, which is all the ordering needs.
+ *
+ * Structural rather than `SemanticOffer`, so the CLIENT can sort the shape it
+ * received off the wire — where `tag` is a plain `string`, because JSON has no
+ * branded types — without a cast at the seam. A cast there would be a place the
+ * compiler stops checking, on the one boundary where the two sides can actually
+ * drift.
+ */
+interface Sortable {
+  readonly tag: string
+  readonly category: SemanticCategory
+}
+
+const byCategoryThenTag = (a: Sortable, b: Sortable): number => {
   const rank = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category)
   return rank !== 0 ? rank : a.tag.localeCompare(b.tag, 'en')
 }
@@ -130,11 +144,11 @@ export const qualifyingSemantics = (
  * headings ADR-0065 introduced only work if the tags under them are in an order
  * a reader can predict.
  */
-export const drawSemanticOffers = (
-  offers: readonly SemanticOffer[],
+export const drawSemanticOffers = <T extends Sortable>(
+  offers: readonly T[],
   seed: string,
   count: number = SEMANTIC_OFFER_SAMPLE,
-): readonly SemanticOffer[] => sampleWithSeed(offers, count, seed).sort(byCategoryThenTag)
+): readonly T[] => sampleWithSeed(offers, count, seed).sort(byCategoryThenTag)
 
 /**
  * How many of `picks` this card carries, over `produces` and `wants` only.
