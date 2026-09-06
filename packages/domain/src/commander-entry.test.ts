@@ -8,9 +8,12 @@ import {
   qualifyingSemantics,
   quickdraw,
   rankBySemanticMatches,
+  rankScoredBySemanticMatches,
+  scoreCommanderImpact,
   semanticMatchCount,
   type SemanticCensusEntry,
 } from './commander-entry.js'
+import { cardImpact } from './impact.js'
 import { oracleId, printingId } from './ids.js'
 import type { Card, OracleId } from './index.js'
 import type { SynergyTag } from './synergy.js'
@@ -306,6 +309,153 @@ describe('rankBySemanticMatches', () => {
 
   it('returns nothing when nothing was picked', () => {
     expect(rankBySemanticMatches([two, oneA], [])).toEqual([])
+  })
+})
+
+/**
+ * The tiebreak is IMPACT, not the alphabet (ADR-0069).
+ *
+ * Every text below was run through the shipped `cardImpact` and the score it
+ * gives is asserted, not assumed — a fixture whose impact was guessed would
+ * make these tests agree with each other and with nothing else.
+ */
+describe('rankBySemanticMatches — the impact tiebreak (ADR-0069)', () => {
+  const picks = ['token', 'creature-death'] as SynergyTag[]
+
+  /** 18.48: unbounded × upkeep × opposing-player, one-sided. */
+  const HUGE = 'At the beginning of each upkeep, each opponent loses 1 life.'
+  /** 15.96: unbounded × triggered × opposing-player, one-sided. */
+  const BIG = 'When this creature enters, each opponent sacrifices a creature.'
+  /** 0.808: none × triggered × nothing. The model is blind to card draw (doc 22 §22.13). */
+  const SMALL = 'When this creature enters, draw a card.'
+
+  const carrier = (name: string, oracleText: string, opts: Partial<Card> = {}): Card =>
+    card(name, { oracleText, synergyProduces: ['token'] as SynergyTag[], ...opts })
+
+  it('states the impact of every fixture text, so the fixtures cannot drift', () => {
+    expect(cardImpact(carrier('H', HUGE)).score).toBe(18.48)
+    expect(cardImpact(carrier('B', BIG)).score).toBe(15.96)
+    expect(cardImpact(carrier('S', SMALL)).score).toBe(0.808)
+    expect(cardImpact(carrier('N', '')).score).toBe(0)
+  })
+
+  it('orders equal match counts by impact, not by name', () => {
+    /*
+     * The whole defect. Both carry one of two picks, so the tiebreak decides
+     * the list — and with the alphabet deciding it, the reader is shown the
+     * commander that draws a card ahead of the one that drains the table.
+     */
+    const ranked = rankBySemanticMatches([carrier('Aang', SMALL), carrier('Zzz', HUGE)], picks)
+    expect(ranked.map((r) => r.card.name)).toEqual(['Zzz', 'Aang'])
+  })
+
+  it('reports the impact it ranked by', () => {
+    const ranked = rankBySemanticMatches([carrier('Aang', SMALL), carrier('Zzz', HUGE)], picks)
+    expect(ranked.map((r) => r.impact)).toEqual([18.48, 0.808])
+  })
+
+  it('lets a higher match count still beat a higher impact', () => {
+    /*
+     * Impact is the TIEBREAK and never the sort. Two-of-two answers more of
+     * what the builder asked for than one-of-two does, whatever either card
+     * goes on to do, and a card scoring 18.48 on one pick must not climb over
+     * a card scoring 0 on both.
+     */
+    const both = card('Zzz, Both At Once', {
+      oracleText: '',
+      synergyProduces: ['token'] as SynergyTag[],
+      synergyWants: ['creature-death'] as SynergyTag[],
+    })
+    const ranked = rankBySemanticMatches([carrier('Aang', HUGE), both], picks)
+    expect(ranked.map((r) => [r.card.name, r.matched, r.impact])).toEqual([
+      ['Zzz, Both At Once', 2, 0],
+      ['Aang', 1, 18.48],
+    ])
+  })
+
+  it('still breaks a genuine impact tie by name, so the order is deterministic', () => {
+    // Same text, so the same score to the last decimal: something has to decide,
+    // and the alphabet is the thing that adds nothing (ADR-0067 §5).
+    const ranked = rankBySemanticMatches(
+      [carrier('Zulu', BIG), carrier('Alpha', BIG), carrier('Mike', BIG)],
+      picks,
+    )
+    expect(ranked.map((r) => r.card.name)).toEqual(['Alpha', 'Mike', 'Zulu'])
+  })
+
+  it('never lets popularity in through the new tiebreak', () => {
+    // Two cards, identical text and therefore identical impact, ranks inverted
+    // against their names. `edhrecRank` is still not read (ADR-0067 §5).
+    const ranked = rankBySemanticMatches(
+      [carrier('Zulu', BIG, { edhrecRank: 1 }), carrier('Alpha', BIG, { edhrecRank: 30000 })],
+      picks,
+    )
+    expect(ranked.map((r) => r.card.name)).toEqual(['Alpha', 'Zulu'])
+  })
+
+  it('finds the impact-best carrier however late its name sorts', () => {
+    /*
+     * THE REGRESSION THIS EXISTS FOR. Sixty carriers whose names all begin with
+     * A and one that begins with Z, all matching one of two picks. Rank the
+     * whole set and the Z is first; rank the alphabetical first sixty and it is
+     * nowhere — which is the same defect the limit was hiding, and it would come
+     * back silently the day anybody sorts a page instead of the answer.
+     */
+    const aangs = Array.from({ length: 60 }, (_, i) =>
+      carrier(`Aang ${String(i).padStart(3, '0')}`, SMALL),
+    )
+    const ranked = rankBySemanticMatches([...aangs, carrier('Zzz, The Drain', HUGE)], picks)
+    expect(ranked).toHaveLength(61)
+    expect(ranked[0]?.card.name).toBe('Zzz, The Drain')
+  })
+})
+
+describe('scoreCommanderImpact and rankScoredBySemanticMatches', () => {
+  const picks = ['token'] as SynergyTag[]
+  const drain = card('Zzz', {
+    oracleText: 'At the beginning of each upkeep, each opponent loses 1 life.',
+    synergyProduces: ['token'] as SynergyTag[],
+  })
+  const draw = card('Aang', {
+    oracleText: 'When this creature enters, draw a card.',
+    synergyProduces: ['token'] as SynergyTag[],
+  })
+
+  it('scores a pool once, keeping each card beside its score', () => {
+    expect(scoreCommanderImpact([draw, drain]).map((s) => [s.card.name, s.impact])).toEqual([
+      ['Aang', 0.808],
+      ['Zzz', 18.48],
+    ])
+  })
+
+  it('ranks a pre-scored pool exactly as it ranks the cards themselves', () => {
+    // What lets the API compute impact once per snapshot instead of per request
+    // (ADR-0069): the pre-scored path is the SAME rule, not a second one.
+    const fromCards = rankBySemanticMatches([draw, drain], picks)
+    const fromScored = rankScoredBySemanticMatches(scoreCommanderImpact([draw, drain]), picks)
+    expect(fromScored).toEqual(fromCards)
+  })
+
+  it('ranks by the score it was handed, without recomputing it', () => {
+    /*
+     * The cache hands over numbers, and this is what says the ranker trusts
+     * them. Scores are deliberately inverted against what `cardImpact` would
+     * say, so a ranker that quietly recomputed would order these the other way.
+     */
+    const ranked = rankScoredBySemanticMatches(
+      [
+        { card: drain, impact: 0 },
+        { card: draw, impact: 99 },
+      ],
+      picks,
+    )
+    expect(ranked.map((r) => r.card.name)).toEqual(['Aang', 'Zzz'])
+  })
+
+  it('drops a scored commander that carries none of the picks', () => {
+    const nothing = card('Nothing At All')
+    const ranked = rankScoredBySemanticMatches(scoreCommanderImpact([nothing, draw]), picks)
+    expect(ranked.map((r) => r.card.name)).toEqual(['Aang'])
   })
 })
 
