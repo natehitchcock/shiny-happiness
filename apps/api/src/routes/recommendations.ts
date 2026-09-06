@@ -259,10 +259,22 @@ export const registerRecommendationRoutes = (app: FastifyInstance, pool: Pool): 
                *
                * The `?? 0` is unreachable — `recommend` sets both on every item
                * — but the fields are optional on `Recommendation` (AGENTS.md
-               * R2 made them additive), so the type needs an answer. Zero is
-               * the honest one: it is what a card with no rules text scores, so
-               * a build that somehow omitted them would drop out of `impact>=6`
+               * R2 made them additive), so the type needs an answer.
+               *
+               * For IMPACT, zero is the honest one: it is exactly what a card
+               * with no rules text scores, and it is the model's floor, so a
+               * build that somehow omitted it would drop out of `impact>=6`
                * rather than silently pass it.
+               *
+               * FOR EFFICIENCY IT IS MERELY UNREACHABLE, and that is worth
+               * saying rather than leaving the impact argument to cover both.
+               * ADR-0070 made efficiency a difference in mana that runs from
+               * about −11 to +11 with a median of +0.13, so zero is the MIDDLE
+               * of the distribution and not a floor: a hypothetical build that
+               * omitted it would drop out of `eff>=1` and sail through
+               * `eff<1`. No single value fails a predicate in both directions,
+               * which is why this leans on the branch being dead rather than on
+               * the sentinel being safe.
                */
               impact: item.impact?.score ?? 0,
               efficiency: item.efficiency?.score ?? 0,
