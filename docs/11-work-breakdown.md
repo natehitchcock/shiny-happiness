@@ -379,10 +379,22 @@ table is in the ADR, and the script that produced it reads `interactsWith` out
 of the built package rather than a copied literal — the first version of that
 measurement was hand-copied and went stale the moment `land-creature` landed.
 
+**Efficiency was rebuilt by
+[ADR-0070](adr/0070-an-effect-has-a-price-and-efficiency-is-what-is-left.md)**,
+and the two paragraphs below describe the model it replaced. Efficiency is now
+the sum of the fitted MANA prices of a card's effects minus its mana value — a
+difference in mana, routinely negative — with no vanilla baseline, no
+stat/impact exchange rate and no `/ (MV + 1)`. Impact is no longer an input;
+only the Rate axis is. `baseline.data.json` and the `baseline` script are gone,
+replaced by `effect-prices.data.json` and
+`pnpm --filter @roundtable/ingest effect-prices`. The impact half of both
+paragraphs still stands.
+
 **Every card now says how big it is and what it costs you.**
 [Doc 18](18-card-impact-and-efficiency.md) is built: two CARD-INTRINSIC metrics,
 `impact` (breadth × persistence × stakes, discounted for symmetry) and
-`efficiency` (surplus stat points per mana), on every recommendation item and on
+`efficiency` (surplus stat points per mana — superseded, see the ADR-0070 note
+above), on every recommendation item and on
 card detail. Deck-relative impact was offered and declined — the deck already
 has three deck-relative numbers per row — and the known cost is stated rather
 than patched: Sol Ring scores 0.68 and Rhystic Study 0.81, which was accepted
@@ -392,7 +404,7 @@ The fair rate is **measured, not asserted**. 339 commander-legal vanilla
 creatures say a four-drop's body is 6.78 power-plus-toughness where the folk
 "2/2 for 2" rule predicts 8, and the gap between that row and all creatures is
 the format's own price of text — one impact point buys 0.4484 stat points.
-`packages/domain/src/efficiency/baseline.data.json` is **generated** from the
+`packages/domain/src/efficiency/baseline.data.json` was **generated** from the
 corpus by `pnpm --filter @roundtable/ingest baseline` (read-only, not part of
 the scheduled worker), so power creep updates it instead of quietly invalidating
 a frozen constant.
@@ -421,7 +433,8 @@ for them, and the column list is saved to the deck on every add and every remove
   that is split is WHERE a column lands, and the split is a function of its
   `kind`: a tick beside the name, a number beside the other numbers. A tick is
   scanned down the list; a number is compared with the mana value and the price
-  on its own row, which is what "per mana" and "$4.10" are for.
+  on its own row, which is what "mana" and "$4.10" are for (it read "per mana"
+  until ADR-0070 removed the divisor).
 - **The two metrics are the deck's `DEFAULT_COLUMNS`**, read through the domain's
   `columnsFor`, so `null` means the defaults and `[]` means the builder cleared
   them and gets none back. Removing one PATCHes optimistically and rolls back
@@ -482,12 +495,14 @@ not a bare float, because the user has never seen either number:
   `fragile` get the marker §18.5 asks for, and the model's own documented blind
   spot ("effects only: a card whose job is mana or a tax reads low") is printed
   unconditionally, because otherwise Sol Ring's 0.68 reads as a verdict.
-- **Efficiency as a rate, with its working.** `0.549 per mana`, then
-  `No surplus body, plus 2.744 for its text, over 5 — its mana plus the card
-  itself`, then the caveat that it divides by cost so a small cheap card can
-  out-rate a bomb. **No meter**: impact has an exact ceiling and efficiency has
-  none, so a bar would need a maximum invented in the renderer — the unstated
-  range the rest of this is built to remove.
+- **Efficiency as a price, with its working.** `0.127 mana` (it read
+  `0.549 per mana` before ADR-0070), then `The format charges 4.127 mana for a
+  card like this — 4.127 for what it does, no body — against the 4 it asks for`,
+  then the caveat that the model prices only what it can name, so a cheap card
+  it cannot read still reads as a bargain. **No meter**: impact has an exact
+  ceiling and efficiency has none at either end, so a bar would need a maximum
+  invented in the renderer — the unstated range the rest of this is built to
+  remove.
 
 **Nothing rounds for display.** ADR-0025 §2 binds it: the filter compares the
 raw score, so the pane draws the stored number, ragged decimals and all

@@ -79,6 +79,12 @@ const FIXTURES: readonly CardView[] = [
      * block drawn from made-up tiers would look fine while showing a
      * combination the classifier cannot produce.
      *
+     * The efficiency half is re-run against ADR-0070's shipped price table and
+     * the card's own derivations — Thassa is `protection`, produces
+     * `enchantment-etb` and `creature-etb`, and is a 6/5, which is where 3.507
+     * of effects and 2.624 of body come from. It will move when the table is
+     * refitted, and that is expected of a fixture quoting a measurement.
+     *
      * Three fixtures, three readings worth looking at side by side: a mid
      * scorer here, the documented blind spot on Sol Ring below, and a card that
      * is almost all body on `f3`.
@@ -93,7 +99,7 @@ const FIXTURES: readonly CardView[] = [
       scales: false,
       fragile: false,
     },
-    efficiency: { score: 1.081, statSurplus: 4.219, effectValue: 1.184, baseline: 6.781, cost: 5 },
+    efficiency: { score: 2.131, worth: 6.131, effectValue: 3.507, bodyValue: 2.624, cost: 4 },
   },
   {
     oracleId: 'f2',
@@ -127,7 +133,7 @@ const FIXTURES: readonly CardView[] = [
       scales: false,
       fragile: false,
     },
-    efficiency: { score: 0.152, statSurplus: 0, effectValue: 0.305, baseline: 2.966, cost: 2 },
+    efficiency: { score: 1.907, worth: 2.907, effectValue: 2.907, bodyValue: 0, cost: 1 },
   },
   {
     oracleId: 'f3',
@@ -144,6 +150,12 @@ const FIXTURES: readonly CardView[] = [
     // Two keywords and no effect: 0.425, the floor for a card that has text the
     // model cannot count. Next to a 2.64 and a 0.68 it shows the bottom of the
     // meter is a real position and not a loading state.
+    //
+    // The two metrics disagree about this card ON PURPOSE, and that is the
+    // reading worth looking at. Impact is at its floor because there is no
+    // effect to count; efficiency is +1.066 because ADR-0070 prices a body and
+    // a 5/4 for four is 1.818 mana of one. `evasion` and a one-shot Rate make
+    // up the other 3.249.
     impact: {
       score: 0.425,
       breadth: 'none',
@@ -154,7 +166,7 @@ const FIXTURES: readonly CardView[] = [
       scales: false,
       fragile: false,
     },
-    efficiency: { score: 0.038, statSurplus: 0, effectValue: 0.191, baseline: 6.781, cost: 5 },
+    efficiency: { score: 1.066, worth: 5.066, effectValue: 3.249, bodyValue: 1.818, cost: 4 },
   },
   {
     oracleId: 'f4',

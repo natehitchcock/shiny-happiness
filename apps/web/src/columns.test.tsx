@@ -805,14 +805,14 @@ describe('the impact and efficiency filter fields (doc 18 §18.8)', () => {
     /*
      * The EXACT text of each `<code>`, not a substring of the whole panel.
      *
-     * Found by mutation: replacing the `eff>=1.5` row in the field list with
-     * `price>=1.5` left `toContain('eff>=1.5')` green, because the worked
-     * example lower down still says `eff>=1.5 mv<=3`. A substring match on a
+     * Found by mutation: replacing the `eff>=1` row in the field list with
+     * `price>=1` left `toContain('eff>=1')` green, because the worked
+     * example lower down still says `eff>=1 mv<=3`. A substring match on a
      * panel that mentions a field twice cannot tell the list from the prose.
      */
     const snippets = [...help.querySelectorAll('code')].map((c) => c.textContent)
     expect(snippets).toContain('impact>=6')
-    expect(snippets).toContain('eff>=1.5')
+    expect(snippets).toContain('eff>=1')
 
     // And a worked example that composes one of them with another field, which
     // is the thing a builder actually needs to see to believe it composes.

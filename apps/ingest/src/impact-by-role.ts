@@ -11,7 +11,7 @@
  * So the interface places a card against the cards that share its role, and the
  * only honest source for "what is normal for a ramp card" is the corpus.
  *
- * READ-ONLY against the database, exactly like `efficiency-baseline.ts`: it runs
+ * READ-ONLY against the database, exactly like `effect-prices.ts`: it runs
  * no ingest, writes no card, queries no third party (ADR-0008), and touches
  * nothing but one file in the repository.
  *
@@ -56,7 +56,7 @@ interface Row {
  * Only the four fields the classifier reads.
  *
  * Selected straight from `cards` rather than hydrated through the repository,
- * the same trade `efficiency-baseline.ts` makes: this needs all 31,782 rows and
+ * the same trade `effect-prices.ts` makes: this needs all 31,782 rows and
  * the repository would carry printings, synergy tags and combos that no part of
  * this calculation looks at. `ImpactInput` is the narrow type that makes it safe
  * — no cast to `Card` and no invented fields.
@@ -105,7 +105,7 @@ const main = async (): Promise<number> => {
     )
     if (rows.length === 0) {
       // Refusing rather than writing quartiles of nothing, the same argument
-      // `efficiency-baseline.ts` makes: an empty corpus produces a file in which
+      // `effect-prices.ts` makes: an empty corpus produces a file in which
       // every role's band is undefined and nothing downstream would fail to say
       // so.
       console.error('corpus is empty — run the ingest before regenerating the role bands')

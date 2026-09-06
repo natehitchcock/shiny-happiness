@@ -15,6 +15,12 @@ source against the live corpus on 2026-09-05 — 31,782 commander-legal cards.
 Nothing here is quoted from a docblock without being re-measured, and two places
 where the docblocks have drifted are called out in §22.11.
 
+**`efficiency/baseline.data.json` no longer exists.** ADR-0070 replaced the
+efficiency model outright and deleted it; the sentence below that calls it stale
+is left as written because it was true of the model it described.
+`impact/by-role.data.json` is unaffected by that change and is still stale on
+ADR-0066's terms.
+
 **Re-measured after [ADR-0066](adr/0066-mana-and-taxes-are-rules-not-blind-spots.md)**,
 which renamed the four displayed axes, made `when` a trigger word, turned stakes
 into five tiers chosen by maximum, and gave mana production and taxes rules of
@@ -84,9 +90,19 @@ graveyard or fixing colours names nothing this model counts. That is stated in
 §22.13 and in the pane, and it is not patched.
 
 **Zero means zero.** A card with no rules text scores exactly `0`, and only such
-a card does. That is not a rounding convenience: the vanilla creatures are what
-`efficiency.ts` calibrates its baseline against, and a measuring stick with a
-nonzero reading at zero cannot calibrate anything. The emptiness check runs twice
+a card does. That is not a rounding convenience: it is what makes `impact=0` an
+answerable question about vanilla creatures, and a measuring stick with a
+nonzero reading at zero is not measuring from anywhere.
+
+The reason ORIGINALLY given for this was that the vanilla creatures are what
+`efficiency.ts` calibrates its baseline against. **That reason expired with
+[ADR-0070](adr/0070-an-effect-has-a-price-and-efficiency-is-what-is-left.md)** —
+`efficiency.ts` has no baseline and no longer reads this score at all. The rule
+stays, on the argument above, which never depended on efficiency; it is recorded
+here rather than quietly reworded because a rule whose only stated justification
+has gone is worth looking at again rather than inheriting.
+
+The emptiness check runs twice
 — once on the raw string, once after reminder text is stripped — because a basic
 Forest's entire printed text is the parenthetical `({T}: Add {G}.)` and it walked
 past the first check into the `none` floor of 0.425.
@@ -668,10 +684,18 @@ Five of these are worth reading twice:
 - **One rung for damage.** Deliberate — the kill rate is a slope and a slope
   forbids a boundary — but 1 damage and 10 damage price identically.
 
-Impact is an **input to efficiency**, which divides it by mana value along with a
-measured stat baseline (doc 18 §18.6). A change to any rung above moves every
-efficiency number too, and the exchange rate between them is refitted rather than
-held constant.
+**Impact is NOT an input to efficiency, as of
+[ADR-0070](adr/0070-an-effect-has-a-price-and-efficiency-is-what-is-left.md).**
+It was — efficiency divided it by mana value along with a measured stat
+baseline, and refitted an exchange rate against it, so a pass over any rung
+above moved every efficiency number twice. That coupling is gone. Efficiency is
+now the sum of the fitted mana prices of a card's effects minus its mana value,
+and the composite score above appears nowhere in it.
+
+**The one thing efficiency still reads from this module is Rate** (§22.5), as
+one priced feature among eighty-one. A rung moved there does move efficiency, by
+a little: the four tiers are priced 3.004 / 3.103 / 3.125 / 3.145 mana, a spread
+of 0.14 across the whole axis. Nothing else here reaches it.
 
 ---
 

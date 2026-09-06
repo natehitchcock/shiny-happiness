@@ -1,176 +1,315 @@
 import type { Card } from './card.js'
-import { cardImpact, type ImpactInput } from './impact.js'
-import baseline from './efficiency/baseline.data.json' with { type: 'json' }
+import { cardImpact, type ImpactInput, type PersistenceTier } from './impact.js'
+import { ROLE_PRECEDENCE, type Role } from './role.js'
+import type { SynergyTag } from './synergy.js'
+import prices from './efficiency/effect-prices.data.json' with { type: 'json' }
 
 /**
- * How much you get for the mana (doc 18 §18.6).
+ * What a card is worth against what it costs (ADR-0070).
  *
- * The fair rate is DERIVED, not asserted. Vanilla creatures — commander-legal,
- * a creature, and literally no rules text — are the only cards in Magic whose
- * whole contribution is their body, so they are the only honest measure of what
- * mana buys before text. The corpus says a four-drop's body is 6.78 power plus
- * toughness; the folk "2/2 for 2" rule predicts 8, and overprices big creatures
- * by about 18%.
+ * EVERY EFFECT CARRIES A MANA PRICE LEARNED FROM THE CORPUS. A card is worth
+ * the sum of its effects' prices; efficiency is that sum minus what the card
+ * actually costs. The unit is MANA, and the number is a DIFFERENCE rather than
+ * a rate — `+2.19` means "the format normally charges two more mana than this
+ * card asks", and a negative score means the opposite and is not clamped.
  *
- * The gap between the vanilla row and the all-creatures row is the format's own
- * price of text, and that is the exchange rate between stats and abilities. Both
- * live in `efficiency/baseline.data.json`, REGENERATED from the corpus rather
- * than frozen here: power creep is real and continuing, and a constant written
- * today is a lie in eighteen months with nothing to make it fail.
+ * THE PRICES ARE FITTED, NOT PLAIN MEANS, and that is the whole of what this
+ * gets right. Summing the mean mana value of every "draw" card and every "ramp"
+ * card double-counts, because the mean of the draw bucket already includes the
+ * cards that also ramp: over the 31,782 commander-legal cards that sum predicts
+ * a mean mana value of 3.99 against an actual 3.29 — a 1.21x systematic
+ * inflation — and misses by 1.69 mana on average. A least-squares fit asks the
+ * different and correct question: what does this effect add to the price of a
+ * card that already has the others? Fitted over roles alone, so that the two
+ * columns are the same quantity: wincon falls from a naive 3.85 to 1.88,
+ * equipment from 2.38 to 0.81, board wipe from 4.56 to 3.38.
+ *
+ * DO NOT EXPECT THOSE THREE IN `effect-prices.data.json`. The shipped fit has
+ * the Rate tiers in it, and they carry the constant — about 3 mana — so every
+ * role price there is that much lower again and several are negative. The
+ * comparison above is roles-against-roles because that is the only pair of
+ * numbers that means anything; ADR-0070 §4.1 has the same table with the same
+ * caveat.
+ *
+ * IMPACT IS NOT AN INPUT. The composite `cardImpact().score` appears nowhere
+ * here; the previous model made it a term and refitted an exchange rate against
+ * it, so every pass over the impact classifier moved every efficiency number
+ * twice (doc 18 §18.6, superseded). The one thing taken from that module is the
+ * `persistence` axis — Rate — which is a priced feature like any other.
  */
 
-export interface EfficiencyBaseline {
-  /** Mean P+T of textless creatures at each mana value, with sample counts. */
-  readonly vanillaStatlineByManaValue: Readonly<
-    Record<string, { readonly n: number; readonly statline: number }>
-  >
-  /** Least-squares fit over MV 1–6, for extrapolation past the sampled range. */
-  readonly vanillaStatlineFit: { readonly slope: number; readonly intercept: number }
-  /** `r`: what one point of `cardImpact().score` is worth in stat points. */
-  readonly statPointsPerImpactPoint: number
+/** The three provenances a price file can have. Only one of them is measured. */
+export type EffectPriceSource = 'corpus-database' | 'scryfall-oracle-bulk'
+
+/**
+ * The fitted price of every feature, generated from the corpus.
+ *
+ * GENERATED, never written by hand:
+ * `pnpm --filter @roundtable/ingest effect-prices`. Power creep is real and
+ * continuing, and the corpus reprices itself every set; a coefficient frozen in
+ * TypeScript today is a lie in eighteen months with nothing to make it fail.
+ * That is the argument `brackets/rules.data.json` already establishes for data
+ * that is not ours to invent, and the argument the baseline this replaces made
+ * for itself.
+ */
+export interface EffectPrices {
+  /** Where the fit was run. Only `corpus-database` is the shipped generator. */
+  readonly source: EffectPriceSource
+  /** ISO date, so a reader can see how old the prices are. */
+  readonly generatedAt: string
+  readonly corpus: { readonly commanderLegal: number }
+  readonly fit: {
+    readonly ridgeLambda: number
+    readonly minProduceSupport: number
+    readonly features: number
+    readonly meanManaValue: number
+    readonly meanPredictedManaValue: number
+    readonly meanAbsoluteError: number
+    readonly crossValidatedMeanAbsoluteError: number
+    readonly rootMeanSquaredError: number
+    readonly r2: number
+  }
+  /** Marginal mana price of holding each of the twenty roles. */
+  readonly roles: Readonly<Record<string, number>>
+  /**
+   * Marginal mana price of each event the card PRODUCES.
+   *
+   * Only tags the fit had enough cards to price — see `fit.minProduceSupport`.
+   * A tag absent from this table contributes nothing, which is the honest
+   * reading of "the corpus has not shown us what this costs".
+   */
+  readonly produces: Readonly<Record<string, number>>
+  /** Marginal mana price of each Rate tier. Every card has exactly one. */
+  readonly rate: Readonly<Record<string, number>>
+  /**
+   * The body, priced as a little model of its own.
+   *
+   * `hasBody` is the offset for having a body at all and is strongly negative;
+   * `power` and `toughness` are the price of one point of each. A card with no
+   * printed power and toughness contributes exactly ZERO from all three, never
+   * an offset with a zero body attached — an instant that quietly inherited the
+   * `hasBody` offset would shift every noncreature in the format at once.
+   */
+  readonly body: {
+    readonly hasBody: number
+    readonly power: number
+    readonly toughness: number
+  }
+}
+
+/** The four Rate tiers, which partition the corpus: every card has exactly one. */
+const RATE_TIERS: readonly PersistenceTier[] = ['one-shot', 'activated', 'triggered', 'upkeep']
+
+/**
+ * Refuse a price file that would score every card wrong in silence.
+ *
+ * A file of zeroes is the failure that matters: it makes every card worth
+ * nothing, so efficiency becomes exactly `−manaValue`, every column sorts by
+ * cheapness, and NOTHING downstream fails to say so. The same argument
+ * `loadBracketRules` makes about an empty Game Changers set, and the same one
+ * the generator makes when the corpus query comes back empty.
+ *
+ * Thrown at module load rather than returned as a `Result`, because this is
+ * programmer error in the AGENTS.md §7 sense: the file is checked in beside the
+ * code and a broken one is a broken build, not a runtime condition a caller can
+ * handle.
+ *
+ * Exported so the guard can be tested against a broken table without anyone
+ * having to break the shipped file to see it work.
+ */
+export const assertUsablePrices = (from: EffectPrices): EffectPrices => {
+  const missingRole = ROLE_PRECEDENCE.find((role) => from.roles[role] === undefined)
+  if (missingRole !== undefined) {
+    throw new Error(`effect-prices.data.json has no price for role "${missingRole}"`)
+  }
+  for (const tier of RATE_TIERS) {
+    if (from.rate[tier] === undefined) {
+      throw new Error(`effect-prices.data.json has no price for Rate tier "${tier}"`)
+    }
+  }
+  const everything = [
+    ...Object.values(from.roles),
+    ...Object.values(from.produces),
+    ...Object.values(from.rate),
+    from.body.hasBody,
+    from.body.power,
+    from.body.toughness,
+  ]
+  if (everything.every((n) => n === 0)) {
+    throw new Error('effect-prices.data.json is all zeroes — regenerate it before shipping')
+  }
+  if (!everything.every((n) => Number.isFinite(n))) {
+    throw new Error('effect-prices.data.json holds a non-finite price')
+  }
+  /*
+   * The one QUALITY check that belongs at load rather than in a test.
+   *
+   * A fit whose mean prediction has drifted off the corpus mean is the naive
+   * model's 1.21x inflation coming back — the single defect the least-squares
+   * fit exists to remove — and unlike a bad coefficient it is visible from the
+   * file alone, in two numbers the generator already publishes. Half a mana is
+   * deliberately slack: the shipped fit lands within 0.0004, so anything that
+   * trips this is broken rather than merely drifting.
+   *
+   * Everything sharper than this — the error ladder, the held-out gap — stays
+   * in `efficiency.test.ts`, where a threshold can be read and argued with.
+   */
+  if (Math.abs(from.fit.meanPredictedManaValue - from.fit.meanManaValue) > 0.5) {
+    throw new Error(
+      `effect-prices.data.json predicts a mean mana value of ${String(from.fit.meanPredictedManaValue)} against a corpus mean of ${String(from.fit.meanManaValue)} — the fit is biased`,
+    )
+  }
+  return from
 }
 
 /**
- * The measured baseline this build ships with.
+ * The prices this build ships with.
  *
- * IMPACT IS AN INPUT TO ONE HALF OF THIS, and the coupling is easy to miss:
- * `statPointsPerImpactPoint` is fitted against the MEAN IMPACT of all creatures
- * at each mana value, so every change to `cardImpact` moves it. The other half
- * — `vanillaStatlineByManaValue` and `vanillaStatlineFit` — reads only power,
- * toughness and oracle text, and cannot move for that reason.
- *
- * `r` is therefore STALE AS SHIPPED by about 3.6% (doc 18 §18.6, §18.13): the
- * reach-and-stakes audit removed false positives that were inflating mean
- * impact, and the same measured gap over a smaller mean gives 0.4644 rather
- * than 0.4484. Regenerate with `pnpm --filter @roundtable/ingest baseline`
- * against a corpus database. It is stale in a benign direction — every score is
- * uniformly a little low, so the ordering between cards is essentially
- * untouched — but a reader comparing this file to the model should know why.
+ * READ `source` BEFORE TRUSTING THE NUMBERS. `corpus-database` means the
+ * generator was run against a real corpus, which is the only supported state.
+ * Anything else is a stand-in fitted somewhere the generator does not run, and
+ * `efficiency.test.ts` fails on it deliberately rather than letting a
+ * provisional number ship quietly.
  */
-export const EFFICIENCY_BASELINE: EfficiencyBaseline = baseline
+export const EFFECT_PRICES: EffectPrices = assertUsablePrices(prices as EffectPrices)
 
 /**
- * Below this many samples a mana value's measured mean is not worth trusting.
+ * Exactly the fields the metric reads.
  *
- * Eight and above have single-digit samples (two vanilla creatures at MV 8), and
- * one unusual card would move the row by whole points of P+T. Those fall through
- * to the fitted line, which is informed by all 319.
- */
-const MIN_SAMPLE = 10
-
-/**
- * What a body of this mana value is worth, before any text.
- *
- * The measured table, not the fitted line, wherever the sample supports it. The
- * line reads 10.74 at six mana against a measured 11.80, and a baseline that is
- * a whole point of P+T wrong at the top of the curve is wrong exactly where the
- * expensive cards are. The line is kept for what the table cannot cover.
- *
- * Floored at zero: the fit extrapolates below zero for negative mana values,
- * which do not exist, and a negative baseline would hand a free creature a
- * surplus for having a body at all.
- */
-export const vanillaStatline = (
-  manaValue: number,
-  from: EfficiencyBaseline = EFFICIENCY_BASELINE,
-): number => {
-  const bucket = from.vanillaStatlineByManaValue[String(Math.round(manaValue))]
-  if (bucket !== undefined && bucket.n >= MIN_SAMPLE) return bucket.statline
-  const { slope, intercept } = from.vanillaStatlineFit
-  return Math.max(0, slope * manaValue + intercept)
-}
-
-/**
- * Exactly the fields the metric reads — the impact model's inputs plus the body.
- *
- * Narrower than `Card` for the same reason `ImpactInput` is: it says what is
- * actually consumed, and it lets the baseline generator pass a database row.
+ * Wider than the type it replaces, and that is the contract change ADR-0070
+ * records: the model's vocabulary is now the card's own derivations — `roles`
+ * and `synergyProduces` — rather than a body and an impact score. Both are
+ * STORED on the card (doc 02 §2.4, ADR-0011), so no caller has to derive
+ * anything to ask this question; `ImpactInput` is still in the intersection
+ * because Rate is read from the impact classifier.
  */
 export type EfficiencyInput = ImpactInput &
-  Pick<Card, 'manaValue' | 'types' | 'power' | 'toughness'>
+  Pick<Card, 'manaValue' | 'types' | 'power' | 'toughness' | 'roles' | 'synergyProduces'>
 
 export interface CardEfficiency {
   /**
-   * Stat points of surplus per mana of cost. The number a column draws.
+   * `worth − cost`, IN MANA. The number a column draws.
    *
-   * Zero for a card that is exactly what its mana buys and nothing more, which
-   * is what a vanilla creature is by construction. Never negative.
+   * NEGATIVE IS MEANINGFUL AND IS NOT CLAMPED. A card that costs more than the
+   * format charges for what it does is genuinely a bad rate, and saying so is
+   * the point; the metric this replaces floored at zero and could not.
+   *
+   * Zero means "priced exactly at the going rate", which is a real reading
+   * rather than a floor.
    */
   readonly score: number
-  /** `max(0, P+T − vanillaStatline(MV))`. Always 0 for a noncreature. */
-  readonly statSurplus: number
-  /** `statPointsPerImpactPoint × impact.score`, in stat points. */
+  /** What the corpus charges for everything this card does and is, in mana. */
+  readonly worth: number
+  /** The part of `worth` that is priced effects — roles, produced events, Rate. */
   readonly effectValue: number
-  /** What that mana buys as a plain body — the number `statSurplus` is measured against. */
-  readonly baseline: number
-  /** `manaValue + 1`: the mana, plus the card itself. See below. */
+  /** The part of `worth` that is the body. Exactly 0 for a card with no statline. */
+  readonly bodyValue: number
+  /** `manaValue`. What you actually pay — no `+ 1`, because this is a difference. */
   readonly cost: number
 }
 
 /**
  * Read a creature's printed power and toughness as numbers.
  *
- * Null unless BOTH parse. Magic prints `*`, `1+*` and `?`, and a card whose
- * power is `*` has a real power that this function cannot state — treating it as
- * 0 would claim the creature has no body, which for Tarmogoyf is a lie. Such a
- * card gets no stat term at all and stands on its text, which is the honest
- * reading of a body nobody can name.
+ * Null unless BOTH parse AND the card is a creature. Magic prints `*`, `1+*`
+ * and `?`, and a card whose power is `*` has a real power this function cannot
+ * state — treating it as 0 would claim Tarmogoyf has no body. Such a card gets
+ * no body term at all and stands on its effects, which is the honest reading of
+ * a body nobody can name.
+ *
+ * The `=== null` test is separate from the finiteness test and is load-bearing:
+ * `Number(null)` is `0`, which is finite, so folding the two would give 22
+ * commander-legal creatures with no printed power a 0/0 body and the `hasBody`
+ * offset that comes with it.
+ *
+ * EXPORTED FOR THE GENERATOR, which must read a body by exactly this rule or it
+ * fits coefficients under one definition and `cardEfficiency` applies them
+ * under another. That is the argument `effect-prices-fit.ts` already makes for
+ * importing `cardImpact` rather than reimplementing it, and the two copies of
+ * this function that existed before were identical only by luck.
  */
-const statlineOf = (card: EfficiencyInput): number | null => {
+export const efficiencyBody = (
+  card: EfficiencyInput,
+): { power: number; toughness: number } | null => {
   if (!card.types.includes('creature')) return null
+  if (card.power === null || card.toughness === null) return null
   const power = Number(card.power)
   const toughness = Number(card.toughness)
-  if (card.power === null || card.toughness === null) return null
   if (!Number.isFinite(power) || !Number.isFinite(toughness)) return null
-  return power + toughness
+  return { power, toughness }
 }
 
 /**
- * How much of a card you get per mana.
+ * What the corpus charges for a card like this, minus what it asks for.
  *
  * ```
- * statSurplus = max(0, P+T − vanillaStatline(MV))     creatures only
- * value       = statSurplus + r × impact              stat points
- * efficiency  = value / (MV + 1)
+ * worth      = Σ role prices + Σ produced-event prices + Rate + body
+ * efficiency = worth − manaValue                                    mana
  * ```
  *
- * BOTH TERMS ARE SURPLUSES, and that is the whole of what this gets right. The
- * formula this was scoped as — `(P+T + r × impact) / MV` — was built, measured
- * and rejected: `r` is derived from what a creature GIVES UP to have text, so
- * adding it to a body's full value asks a number about the margin to price the
- * whole. The literal formula rates Grizzly Bears at 2.00 and Wrath of God at
- * 0.69, and a metric that says a vanilla bear is three times the card a Wrath is
- * is not one to ship.
+ * THE VOCABULARY IS ROLES, PRODUCED SEMANTICS, RATE AND THE BODY, and each of
+ * the four earned its place with a measurement (ADR-0070 §4):
  *
- * `max(0, …)` on the body because a body below the going rate is not a DEBT.
- * Llanowar Elves is a 1/1 for one against a vanilla rate of 2.97, and charging
- * it −0.97 says the card would be better if it did nothing at all.
+ *   - **Roles** alone leave 11,231 cards in the `synergy` catch-all, whose
+ *     fitted price came out at exactly the corpus mean and therefore predicts
+ *     nothing. Mean absolute error 1.41 mana.
+ *   - **`synergyProduces`**, and only produces. `wants` is a payoff rather than
+ *     an effect and `has` is membership, so neither is something the card DOES.
+ *     Three produce tags are excluded for the same reason — `spell-cast`,
+ *     `enchantment-etb` and `artifact-etb` are derived from the TYPE LINE by
+ *     `synergy.ts`, so they are membership wearing a `produces` label. Error
+ *     falls to 1.39.
+ *   - **Rate** — the axis `impact.ts` calls `persistence`, and the only thing
+ *     taken from that module. Its four tiers span every card, so they are also
+ *     what makes the fit unbiased: mean predicted mana value lands on the
+ *     corpus mean of 3.291 exactly.
+ *   - **The body**, priced rather than assumed. It is worth 0.44 mana per point
+ *     of power and 0.37 per point of toughness against a −1.85 offset for
+ *     having one, and it takes the error from 1.21 to 0.95 — the single largest
+ *     improvement any feature makes. A vanilla creature is therefore NO LONGER
+ *     the floor by construction: a 6/6 for four scores positive, because the
+ *     body is worth more than four mana, and a model that could not say so was
+ *     missing something real.
  *
- * The denominator is `MV + 1`, and the `+ 1` is the card: a spell costs a card
- * as well as its mana. It also has to be there — 21 commander-legal creatures
- * and a good many noncreature spells have mana value 0, and `x / 0` has to go
- * somewhere. Under `/MV` the metric would also be close to a rename of "cheap",
- * with the one-mana column winning every sort by construction.
+ * A NONCREATURE CONTRIBUTES EXACTLY ZERO FROM THE BODY, offset included. It is
+ * not a creature that is missing a body; it has none. Getting this wrong is the
+ * one silent error in the file — every instant and sorcery in the format would
+ * inherit the −1.85 offset and the whole table would shift by that amount —
+ * which is why it is asserted rather than left to reading.
  *
- * Pure and total. Non-creatures have no stat term: a noncreature spell is not a
- * creature that is missing a body, so it gets neither the surplus nor a penalty.
+ * Pure and total. Rounded to three decimals on the way out, because the query
+ * predicate compares the same number the column prints (ADR-0025 §2) and float
+ * addition of eighty coefficients is otherwise `2.1900000000000004` on the wire.
  */
 export const cardEfficiency = (
   card: EfficiencyInput,
-  from: EfficiencyBaseline = EFFICIENCY_BASELINE,
+  from: EffectPrices = EFFECT_PRICES,
 ): CardEfficiency => {
-  const impact = cardImpact(card)
-  const baselineStats = vanillaStatline(card.manaValue, from)
-  const statline = statlineOf(card)
-  const statSurplus = statline === null ? 0 : Math.max(0, statline - baselineStats)
-  const effectValue = from.statPointsPerImpactPoint * impact.score
-  const cost = card.manaValue + 1
+  let effectValue = from.rate[cardImpact(card).persistence] ?? 0
+  for (const role of new Set<Role>(card.roles)) {
+    effectValue += from.roles[role] ?? 0
+  }
+  for (const tag of new Set<SynergyTag>(card.synergyProduces)) {
+    // A tag the fit had too few cards to price contributes nothing. Absence is
+    // "the corpus has not shown us what this costs", not "it is free".
+    effectValue += from.produces[tag] ?? 0
+  }
+
+  const statline = efficiencyBody(card)
+  const bodyValue =
+    statline === null
+      ? 0
+      : from.body.hasBody +
+        from.body.power * statline.power +
+        from.body.toughness * statline.toughness
+
   const round = (n: number): number => Math.round(n * 1000) / 1000
+  const worth = effectValue + bodyValue
   return {
-    score: round((statSurplus + effectValue) / cost),
-    statSurplus: round(statSurplus),
+    score: round(worth - card.manaValue),
+    worth: round(worth),
     effectValue: round(effectValue),
-    baseline: round(baselineStats),
-    cost,
+    bodyValue: round(bodyValue),
+    cost: card.manaValue,
   }
 }

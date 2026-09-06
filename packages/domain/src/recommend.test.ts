@@ -643,10 +643,25 @@ describe('filtering by impact and efficiency (doc 18 §18.8)', () => {
       typeLine: 'Sorcery',
       types: ['sorcery'],
       oracleText: "Destroy all creatures. They can't be regenerated.",
+      // ADR-0070 moved efficiency onto the card's own derivations, so a fixture
+      // that leaves `roles` and `synergyProduces` at the helper's defaults gives
+      // the metric nothing to tell two cards apart — these two scored
+      // IDENTICALLY on the first run after the change, and a filter test whose
+      // two rows tie cannot fail. Wrath of God's real derivations.
+      roles: ['board-wipe'],
+      primaryRole: 'board-wipe',
+      synergyProduces: ['creature-death'],
     }),
   })
   const bear = pooled('bear', {
-    card: card('bear', { typeLine: 'Creature — Bear', types: ['creature'], oracleText: '' }),
+    card: card('bear', {
+      typeLine: 'Creature — Bear',
+      types: ['creature'],
+      oracleText: '',
+      // And a real body, which is a priced feature now.
+      power: '2',
+      toughness: '2',
+    }),
   })
   const input = baseInput({ pool: [wrath, bear] })
 
@@ -662,12 +677,14 @@ describe('filtering by impact and efficiency (doc 18 §18.8)', () => {
   })
 
   it('keeps exactly the rows whose own efficiency cell clears the threshold', () => {
-    const cutoff = 0.5
+    // A whole mana of separation between the two rows, so the cutoff is not
+    // sitting on a rounding boundary.
+    const cutoff = 1.5
     const expected = unfiltered
       .filter((i) => (i.efficiency?.score ?? -1) >= cutoff)
       .map((i) => i.oracleId)
     expect(expected).toEqual([oracleId('wrath')])
-    expect(itemsOf(recommend({ ...input, query: ast('eff>=0.5') })).map((i) => i.oracleId)).toEqual(
+    expect(itemsOf(recommend({ ...input, query: ast('eff>=1.5') })).map((i) => i.oracleId)).toEqual(
       expected,
     )
   })

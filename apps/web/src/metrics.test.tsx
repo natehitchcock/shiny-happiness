@@ -113,6 +113,10 @@ const WRATH_INPUT: EfficiencyInput = {
   types: ['sorcery'],
   power: null,
   toughness: null,
+  // ADR-0070: the model's vocabulary is the card's own derivations, so a
+  // fixture has to carry them. Wrath of God's real ones.
+  roles: ['board-wipe'],
+  synergyProduces: ['creature-death'],
 }
 
 const impactOf = (): CardImpact => cardImpact(WRATH_INPUT)
@@ -252,7 +256,7 @@ describe('the preview panel draws both metrics', () => {
     expect(popover.getByText(/same in every deck/)).toBeDefined()
   })
 
-  it('shows efficiency as a rate, with its working and its caveat', async () => {
+  it('shows efficiency in mana, with its working and its caveat', async () => {
     const card = wrath()
     const panel = await openPreview(card, {
       impact: impactOf(),
@@ -262,8 +266,9 @@ describe('the preview panel draws both metrics', () => {
       await within(panel).findByRole('region', { name: 'Impact and efficiency' }),
     )
     expect(shown.getByText(String(efficiencyOf().score))).toBeDefined()
-    expect(shown.getByText('per mana')).toBeDefined()
-    expect(shown.getByText(/A rate, not a ranking/)).toBeDefined()
+    // "mana", not "per mana": ADR-0070 removed the divisor.
+    expect(shown.getByText('mana')).toBeDefined()
+    expect(shown.getByText(/A price, not a ranking/)).toBeDefined()
   })
 
   it('places the score against the card’s own role, not against the ceiling', async () => {
@@ -367,8 +372,10 @@ describe('the view model and the domain model agree', () => {
 
   it('accepts a real `CardEfficiency` as an `EfficiencyView`', () => {
     const view: EfficiencyView = efficiencyOf()
-    expect(view.cost).toBe(5)
-    expect(view.statSurplus).toBe(0)
+    // `cost` is the mana value itself now — there is no `+ 1`, because the
+    // score is a difference rather than a rate (ADR-0070).
+    expect(view.cost).toBe(4)
+    expect(view.bodyValue).toBe(0)
   })
 
   it('accepts a real `RoleImpactBand` as the numbers half of an `ImpactRoleView`', () => {

@@ -357,6 +357,15 @@ right.
 could not be computed is reported, never silently omitted.
 
 **Every `Recommendation` carries `impact` and `efficiency`** (doc 18 §18.8).
+`efficiency` is a `CardEfficiency`, and **its unit is MANA**: `score` is what
+the corpus charges for the card's effects minus the card's mana value, so it is
+routinely negative and has no floor
+([ADR-0070](adr/0070-an-effect-has-a-price-and-efficiency-is-what-is-left.md)).
+It kept its field name and its type's name through that change and neither the
+name nor the type says what the unit is, which is the one thing a client
+drawing it has to know. It was "stat points of surplus per mana" before, and a
+client that still labels it "per mana" is drawing a plausible wrong thing.
+
 They are card-intrinsic, so they are the same in every deck, and they sit
 BESIDE `reasons` rather than inside it: a `Reason` answers "why was this
 suggested to *me*", and a claim that is true of the card in every deck that has
