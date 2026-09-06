@@ -18,7 +18,7 @@ import type { SynergyTag } from './synergy.js'
 /**
  * The two entry routes' deterministic core (ADR-0067).
  *
- * The corpus figures quoted in the names below — 48 qualifying tags, 3,411
+ * The corpus figures quoted in the names below — 66 qualifying tags, 3,411
  * commanders, 791 under rank 5000, 307 with no semantic at all — are measured
  * facts about the live corpus and are asserted end to end by the database
  * suites, not here. What is asserted here is the RULE that produces them, over
@@ -66,37 +66,56 @@ const census = (tag: string, commanders: number, supporting: number): SemanticCe
 
 describe('qualifyingSemantics', () => {
   it('keeps a tag that clears both floors', () => {
-    expect(qualifyingSemantics([census('landfall', 20, 150)]).map((o) => o.tag)).toEqual([
+    expect(qualifyingSemantics([census('landfall', 10, 70)]).map((o) => o.tag)).toEqual([
       'landfall',
     ])
   })
 
   it('drops a deck nobody can lead — plenty of cards, too few commanders', () => {
-    expect(qualifyingSemantics([census('landfall', 19, 4000)])).toEqual([])
+    expect(qualifyingSemantics([census('landfall', 9, 4000)])).toEqual([])
   })
 
   it('drops a deck nobody can fill — plenty of commanders, too few cards', () => {
-    expect(qualifyingSemantics([census('landfall', 400, 149)])).toEqual([])
+    expect(qualifyingSemantics([census('landfall', 400, 69)])).toEqual([])
   })
 
-  it('states the thresholds as 20 and 150', () => {
-    expect(SEMANTIC_OFFER_THRESHOLDS).toEqual({ minCommanders: 20, minSupporting: 150 })
+  it('states the thresholds as 10 and 70', () => {
+    expect(SEMANTIC_OFFER_THRESHOLDS).toEqual({ minCommanders: 10, minSupporting: 70 })
+  })
+
+  it('admits a tribe that can be built but not filled from its own tribe', () => {
+    /*
+     * ADR-0068's whole argument, as one case. An Angel deck measured 14
+     * commanders and 76 supporting cards — buildable, and excluded by the old
+     * 150-card floor for having too few Angels. Most of a Commander deck is
+     * staples and lands whatever it is about, so a supporting count is a poor
+     * proxy for "can this be filled".
+     */
+    expect(qualifyingSemantics([census('subtype:angel', 14, 76)]).map((o) => o.tag)).toEqual([
+      'subtype:angel',
+    ])
+    expect(
+      qualifyingSemantics([census('subtype:angel', 14, 76)], {
+        minCommanders: 20,
+        minSupporting: 150,
+      }),
+    ).toEqual([])
   })
 
   it('is a plateau and not a cliff', () => {
     /*
-     * The evidence the numbers are not overfitted. These 49 fixtures stand in
-     * for the corpus's real distribution around the floor: moving the commander
-     * threshold from 15 to 30 moves the offer by a handful either way rather
-     * than falling off a cliff, which is the shape ADR-0067 §4 measured on the
-     * live corpus (49 / 48 / 47 / 42 at 15 / 20 / 25 / 30).
+     * The evidence the numbers are not overfitted. These fixtures stand in for
+     * the corpus's real distribution around the floor: moving the commander
+     * threshold from 8 to 15 moves the offer by a handful either way rather
+     * than falling off a cliff, which is the shape ADR-0068 measured on the
+     * live corpus (69 / 66 / 64 / 56 at 8 / 10 / 12 / 15 commanders).
      */
-    const shelf = Array.from({ length: 49 }, (_, i) => census(`tag-${String(i)}`, 14 + i, 200))
+    const shelf = Array.from({ length: 49 }, (_, i) => census(`tag-${String(i)}`, 7 + i, 200))
     const at = (minCommanders: number): number =>
-      qualifyingSemantics(shelf, { minCommanders, minSupporting: 150 }).length
-    expect([at(15), at(20), at(25), at(30)]).toEqual([48, 43, 38, 33])
+      qualifyingSemantics(shelf, { minCommanders, minSupporting: 70 }).length
+    expect([at(8), at(10), at(12), at(15)]).toEqual([48, 46, 44, 41])
     // No step bigger than the change in the threshold itself.
-    expect(at(15) - at(20)).toBeLessThanOrEqual(5)
+    expect(at(8) - at(10)).toBeLessThanOrEqual(2)
   })
 
   it('files each tag under the domain’s own category', () => {
@@ -137,21 +156,23 @@ describe('qualifyingSemantics', () => {
 
 describe('drawSemanticOffers', () => {
   const shelf = qualifyingSemantics(
-    Array.from({ length: 48 }, (_, i) => census(`tag-${String(i).padStart(2, '0')}`, 40, 400)),
+    Array.from({ length: 66 }, (_, i) => census(`tag-${String(i).padStart(2, '0')}`, 40, 400)),
   )
 
-  it('draws eight by default', () => {
+  it('draws three by default', () => {
     expect(drawSemanticOffers(shelf, 'seed')).toHaveLength(SEMANTIC_OFFER_SAMPLE)
-    expect(SEMANTIC_OFFER_SAMPLE).toBe(8)
+    // Pinned, because the number is a product decision rather than an
+    // implementation detail: it was eight and ADR-0068 made it three.
+    expect(SEMANTIC_OFFER_SAMPLE).toBe(3)
   })
 
-  it('draws the same eight for the same seed', () => {
+  it('draws the same sample for the same seed', () => {
     expect(drawSemanticOffers(shelf, 'abc').map((o) => o.tag)).toEqual(
       drawSemanticOffers(shelf, 'abc').map((o) => o.tag),
     )
   })
 
-  it('draws a different eight when the builder redraws', () => {
+  it('draws a different sample when the builder redraws', () => {
     expect(drawSemanticOffers(shelf, 'abc').map((o) => o.tag)).not.toEqual(
       drawSemanticOffers(shelf, 'def').map((o) => o.tag),
     )
@@ -160,11 +181,11 @@ describe('drawSemanticOffers', () => {
   it('never offers the same tag twice in one draw', () => {
     for (let i = 0; i < 100; i += 1) {
       const drawn = drawSemanticOffers(shelf, `draw-${String(i)}`)
-      expect(new Set(drawn.map((o) => o.tag)).size).toBe(8)
+      expect(new Set(drawn.map((o) => o.tag)).size).toBe(SEMANTIC_OFFER_SAMPLE)
     }
   })
 
-  it('keeps the drawn eight in category order, not draw order', () => {
+  it('keeps the drawn sample in category order, not draw order', () => {
     const drawn = drawSemanticOffers(
       qualifyingSemantics([
         census('subtype:elf', 40, 400),
@@ -177,8 +198,8 @@ describe('drawSemanticOffers', () => {
     expect(drawn.map((o) => o.category)).toEqual(['mechanics', 'keyword', 'type'])
   })
 
-  it('offers everything it has when there is less than eight', () => {
-    expect(drawSemanticOffers(shelf.slice(0, 3), 'seed')).toHaveLength(3)
+  it('offers everything it has when there is less than a full sample', () => {
+    expect(drawSemanticOffers(shelf.slice(0, 2), 'seed')).toHaveLength(2)
   })
 })
 

@@ -504,10 +504,15 @@ export interface SemanticOffer {
 /**
  * Every semantic worth offering — the whole qualifying set, not a sample.
  *
- * It is 48 tags against the live corpus, so the CLIENT draws its handful of
- * eight from this with `drawSemanticOffers`. Sampling on the server would have
- * needed a seed on this endpoint for no benefit; the pool is small enough to
- * send whole, and a redraw is then free rather than a round trip.
+ * It is 66 tags against the live corpus (ADR-0068 lowered the floors from
+ * 20/150 to 10/70), so the CLIENT draws its handful of three from this with
+ * `drawSemanticOffers`. Sampling on the server would have needed a seed on this
+ * endpoint for no benefit; the pool is small enough to send whole, and a redraw
+ * is then free rather than a round trip.
+ *
+ * Sending the WHOLE set is also what lets the route offer to show all of them,
+ * ranked by the `commanders` count that already rides on every entry — no
+ * second endpoint and no second query for the expander.
  */
 export const commanderSemantics = (): Promise<{ offers: SemanticOffer[] }> =>
   request('/commanders/semantics')

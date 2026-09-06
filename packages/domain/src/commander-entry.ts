@@ -51,28 +51,61 @@ export interface SemanticOfferThresholds {
 }
 
 /**
- * 20 commanders and 150 supporting cards.
+ * 10 commanders and 70 supporting cards.
  *
  * Measured against the live corpus — 31,782 commander-legal cards, 3,411 of
  * them commander-legal commanders — and chosen off a PLATEAU rather than a
  * cliff, which is the evidence they are not fitted to a number somebody liked:
  *
- *   15 / 150 → 49 tags      25 / 150 → 47 tags
- *   20 / 150 → 48 tags      30 / 150 → 42 tags
+ *    8 / 60 → 69 tags       10 / 70 → 66 tags  ← chosen
+ *   10 / 60 → 68 tags       10 / 75 → 65 tags
+ *   10 / 65 → 67 tags       10 / 80 → 62 tags
+ *                           12 / 70 → 64 tags
+ *                           15 / 70 → 56 tags
  *
- * Moving the commander floor by a third in either direction moves the offer by
- * one or two tags. A threshold that behaved like that would have to be defended
- * card by card; this one does not.
+ * The 66 split 26 mechanics, 13 keyword, 27 type.
  *
- * The 48 split 24 mechanics, 11 keyword, 13 type.
+ * ## Why this is not the number that shipped (ADR-0068)
+ *
+ * It was 20 / 150, on its own plateau (49 / 48 / 47 / 42 at 15 / 20 / 25 / 30
+ * commanders) — sound arithmetic about the question it was asking, and the
+ * question was wrong. A supporting-card floor asks how many cards are ABOUT the
+ * theme; what decides whether a deck can be built is whether it can be FILLED,
+ * and most of a Commander deck is staples and lands regardless of what it is
+ * about. An Angel deck is fourteen Angels plus ramp, removal and thirty-odd
+ * lands. The 150 floor excluded it for having too few Angels.
+ *
+ * The 18 tags the drop admits are almost entirely tribal, which is the evidence
+ * the old floor was measuring the wrong thing: vampire (24 commanders / 125
+ * supporting), ally (20/115), bird (19/98), wizard (17/98), angel (14/76),
+ * dinosaur (14/84), knight (14/100), phyrexian (14/85), merfolk (12/77),
+ * saproling (12/92), wolf (11/77), hero (35/72), plus creature-cast (27/100),
+ * land-creature (19/192), protection (16/148), forest (13/194), arcane (12/90)
+ * and reach (11/108). The offer becomes markedly more tribal, which is the
+ * point rather than a side effect.
+ *
+ * Two admitted tags are worth a reader's scepticism and neither is excluded
+ * here, because a curated exclusion list is a separate decision from a
+ * threshold: `subtype:hero` (35/72) is almost certainly noise — Theros
+ * hero's-path cards rather than a deck anybody builds — and `subtype:forest`
+ * (13/194) and `subtype:arcane` (12/90) are real but odd answers to "what is
+ * this deck about".
  */
 export const SEMANTIC_OFFER_THRESHOLDS: SemanticOfferThresholds = {
-  minCommanders: 20,
-  minSupporting: 150,
+  minCommanders: 10,
+  minSupporting: 70,
 }
 
-/** How many of the qualifying tags one draw puts in front of the builder. */
-export const SEMANTIC_OFFER_SAMPLE = 8
+/**
+ * How many of the qualifying tags one draw puts in front of the builder.
+ *
+ * THREE, and it was eight (ADR-0068). Eight chips is a wall of vocabulary in
+ * front of somebody who has not chosen anything yet and is being asked the
+ * vaguest question on the screen; three is a prompt. Nothing is lost by
+ * narrowing it — the redraw is still free and still deals a fresh sample, and
+ * the whole qualifying set is now one press away rather than unreachable.
+ */
+export const SEMANTIC_OFFER_SAMPLE = 3
 
 export interface SemanticOffer {
   readonly tag: SynergyTag

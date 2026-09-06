@@ -722,6 +722,19 @@ const HIDE_SETTLED_HELP =
 const plural = (n: number, word: string): string => `${String(n)} ${word}${n === 1 ? '' : 's'}`
 
 /**
+ * A list of words as a sentence would say it: "a", "a and b", "a, b and c".
+ *
+ * No Oxford comma, matching the prose everywhere else in this file. Returns ''
+ * for an empty list rather than a stray conjunction — every caller checks the
+ * length first, and a helper that emits " and " for nothing would make the one
+ * that forgets impossible to spot.
+ */
+const listWords = (words: readonly string[]): string =>
+  words.length <= 1
+    ? (words[0] ?? '')
+    : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]!}`
+
+/**
  * A reason, said in words. The UI never shows a bare reason kind.
  *
  * `near-combo` takes its count from the recommendation rather than the reason:
@@ -1306,7 +1319,19 @@ const withQualifier = (tag: string, qualifier: string | undefined): string =>
  * handed back only the card would leave that face blank until something else
  * happened to fetch it.
  */
-type ChooseCommander = (card: api.Card, images?: Record<string, api.ImageUris>) => void
+type ChooseCommander = (
+  card: api.Card,
+  images?: Record<string, api.ImageUris>,
+  /**
+   * The semantics the reader picked on the way to this commander (ADR-0068).
+   *
+   * Route 1 only. The other two doors ask no such question, and an absent list
+   * is not an empty one: it means this route had nothing to say about focus,
+   * which is why `Start` treats undefined and `[]` the same way here but the
+   * create body does not (see `semanticEmphasis`).
+   */
+  picks?: readonly string[],
+) => void
 
 /**
  * One offered semantic, as a toggle.
@@ -1328,12 +1353,23 @@ const SemanticPick = ({
   offer,
   picked,
   onToggle,
+  ref,
 }: {
   offer: api.SemanticOffer
   picked: boolean
   onToggle: (tag: string) => void
+  /**
+   * Held by the route, so focus can follow a chip that MOVES (ADR-0068).
+   *
+   * Choosing a semantic re-renders it in the picks region, which unmounts the
+   * button that was pressed — the classic way to drop a keyboard user onto
+   * `<body>`. The route keeps a ref per tag and puts focus back on whichever
+   * element the tag is now drawn as.
+   */
+  ref?: React.Ref<HTMLButtonElement>
 }): React.JSX.Element => (
   <button
+    ref={ref}
     type="button"
     className="tag start-semantic"
     data-picked={picked}
@@ -1355,26 +1391,40 @@ const SemanticPick = ({
 /**
  * ROUTE 1 (ADR-0067) — start from what the deck is about.
  *
- * Offer eight of the 48 qualifying semantics, take one or more, and show the
+ * Offer three of the 66 qualifying semantics, take one or more, and show the
  * commanders that carry them ranked by how many of the picks each one matches.
+ *
+ * ## Three, and the other sixty-three one press away (ADR-0068)
+ *
+ * It offered eight. Eight chips is a wall of vocabulary in front of somebody who
+ * has not chosen anything yet and is being asked the vaguest question on the
+ * page; three is a prompt. Narrowing the sample is only defensible because the
+ * whole set is now reachable — "See all 66", ranked by how many commanders carry
+ * each tag, off the census the endpoint already sent.
  *
  * ## Where the randomness is
  *
  * Here, and nowhere below. The endpoint serves the whole qualifying set in a
- * stable order — 48 tags is small enough to send — and the eight are drawn from
+ * stable order — 66 tags is small enough to send — and the three are drawn from
  * it by the domain's own seeded sampler with a seed this component makes. A
  * redraw is a new seed and no round trip.
  *
  * That is what keeps the tests honest: a test that fixes the seed gets a fixed
- * eight out of the SHIPPED sampler rather than out of a mock standing in for it,
- * and the server has no `ORDER BY random()` for anything to have to pin.
+ * sample out of the SHIPPED sampler rather than out of a mock standing in for
+ * it, and the server has no `ORDER BY random()` for anything to have to pin.
  *
  * ## What is deliberately not here
  *
  * No colour filter. There is no deck yet, so there is no identity to filter by
  * — the commander the builder picks is what will decide it.
  */
-const SemanticEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.Element => {
+const SemanticEntry = ({
+  onChoose,
+  onPreview,
+}: {
+  onChoose: ChooseCommander
+  onPreview: ChooseCommander
+}): React.JSX.Element => {
   const headingId = useId()
   const [offers, setOffers] = useState<readonly api.SemanticOffer[] | null>(null)
   const [failed, setFailed] = useState(false)
@@ -1388,13 +1438,38 @@ const SemanticEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.E
   } | null>(null)
   const [looking, setLooking] = useState(false)
   /**
-   * Always-mounted live region (see the workspace's, and `Quickbuild`'s).
+   * TWO always-mounted live regions (see the workspace's, and `Quickbuild`'s).
    *
-   * A redraw replaces eight chips in place. Without this it is a silent change
-   * — the control keeps its own name, so a screen reader is told nothing at all
-   * happened — which is precisely the failure R4 names.
+   * A redraw replaces the chips in place. Without a live region it is a silent
+   * change — the control keeps its own name, so a screen reader is told nothing
+   * at all happened — which is precisely the failure R4 names.
+   *
+   * Two rather than one because they carry two different sentences on two
+   * different clocks, and one region made the faster of them unhearable: the
+   * chip-moved message is written at the click and the carrier count arrives a
+   * round trip later, so a single region had the second overwrite the first —
+   * always in a test, and in the browser whenever the answer came back quickly.
+   * Which is precisely the case where "the chip is still on screen, over here"
+   * most needed saying. They are LABELLED so each is a distinct region rather
+   * than two anonymous ones a reader cannot tell apart.
    */
   const [announcement, setAnnouncement] = useState('')
+  const [found, setFound] = useState('')
+  const picksId = useId()
+  /** Whether the whole qualifying set is on screen rather than the sample. */
+  const [showingAll, setShowingAll] = useState(false)
+  /**
+   * One chip per tag, wherever that tag is currently drawn.
+   *
+   * Set-only, never deleted on unmount: a tag that moves between the pool and
+   * the picks region is unmounted and remounted in the SAME commit, and React
+   * runs the detach before the attach — so a delete-on-null would be ordered
+   * correctly today and silently wrong if that ever changed. The effect that
+   * reads this checks `isConnected` instead, which cannot be wrong either way.
+   */
+  const chipRefs = useRef(new Map<string, HTMLButtonElement>())
+  /** A tag whose chip has just moved region and must keep focus. */
+  const focusAfterMove = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -1416,6 +1491,69 @@ const SemanticEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.E
     [offers, seed],
   )
 
+  /**
+   * Every qualifying tag, most-carried first (ADR-0068).
+   *
+   * The census already counts commanders per tag and the endpoint already sends
+   * the whole set — that is what makes a redraw free — so revealing all of them
+   * costs no query and asserts nothing the server has not already said. Ranked
+   * by commanders rather than by supporting cards because the question on this
+   * screen is "what could I lead", and the tie is broken on the words the chip
+   * actually shows so the order is one a reader can see the reason for.
+   */
+  const everySemantic = useMemo(
+    () =>
+      offers === null
+        ? []
+        : [...offers].sort(
+            (a, b) =>
+              b.commanders - a.commanders || readable(a.tag).localeCompare(readable(b.tag), 'en'),
+          ),
+    [offers],
+  )
+
+  /*
+   * The pool and the picks, and a tag is in exactly ONE of them.
+   *
+   * The defect: a redraw replaced the sample wholesale, so a chosen tag that
+   * was not in the new sample left the screen entirely — and leaving the screen
+   * reads as being unselected whether or not the state survived it. That is the
+   * trap `EmphasisChoice` already names one screen over: a focus "chosen,
+   * pressed, and invisible", a control with no chip on screen. The redraw made
+   * it reachable in one click.
+   *
+   * Filtering the pool is what keeps the fix from becoming a smaller version of
+   * the confusion it fixes: two controls for one tag, one pressed and one not,
+   * is worse than the disappearance.
+   */
+  const pool = (showingAll ? everySemantic : drawn).filter((o) => !picked.includes(o.tag))
+  const byTag = useMemo(() => new Map((offers ?? []).map((o) => [o.tag, o])), [offers])
+  const pickedOffers = picked
+    .map((tag) => byTag.get(tag))
+    .filter((o): o is api.SemanticOffer => o !== undefined)
+
+  /*
+   * Focus follows the chip across the move, and the move is said out loud.
+   *
+   * Pressing a control that then renders somewhere else is the classic way to
+   * drop a keyboard user onto `<body>`. Cleared unconditionally so one press
+   * arms exactly one focus move — an arm left standing would let some later,
+   * unrelated render steal focus.
+   */
+  useEffect(() => {
+    const tag = focusAfterMove.current
+    if (tag === null) return
+    focusAfterMove.current = null
+    const chip = chipRefs.current.get(tag)
+    if (chip?.isConnected === true) chip.focus()
+  })
+
+  const chipRef =
+    (tag: string) =>
+    (element: HTMLButtonElement | null): void => {
+      if (element !== null) chipRefs.current.set(tag, element)
+    }
+
   useEffect(() => {
     if (picked.length === 0) {
       setCarriers(null)
@@ -1435,7 +1573,7 @@ const SemanticEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.E
           images: r.images ?? {},
         })
         setLooking(false)
-        setAnnouncement(
+        setFound(
           `${plural(r.total, 'commander')} carry ${plural(picked.length, 'chosen semantic')}.`,
         )
       })
@@ -1450,10 +1588,26 @@ const SemanticEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.E
     }
   }, [picked])
 
-  const toggle = (tag: string): void =>
+  const toggle = (tag: string): void => {
+    const choosing = !picked.includes(tag)
+    focusAfterMove.current = tag
     setPicked((current) =>
       current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag],
     )
+    /*
+     * WHERE the chip went, not just that it was pressed.
+     *
+     * A sighted reader watches it jump between the two regions; the state is
+     * already on `aria-pressed`, so what a screen-reader user is missing is the
+     * relocation itself — and "it is still on screen, over here" is the whole
+     * reassurance this change exists to give.
+     */
+    setAnnouncement(
+      choosing
+        ? `${readable(tag)} chosen — moved to the semantics you have chosen.`
+        : `${readable(tag)} put back with the offers.`,
+    )
+  }
 
   const redraw = (): void => {
     setSeed(crypto.randomUUID())
@@ -1478,22 +1632,80 @@ const SemanticEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.E
         </p>
       ) : null}
 
+      {/*
+       * The semantics already chosen, in a region of their own (ADR-0068).
+       *
+       * ABSENT, not empty, when nothing is chosen: a heading over no chips is a
+       * promise of something that is not there — the same rule `SemanticOffer`
+       * and `OfferCategory` follow one screen over.
+       *
+       * ABOVE the pool, because it is the answer so far and the pool is the
+       * question. A reader who has picked two semantics is looking at what they
+       * have, and scrolling past sixty-odd offers to find it would be the
+       * disappearance this fixes wearing a different hat.
+       */}
+      {pickedOffers.length > 0 ? (
+        <section className="start-picks" aria-labelledby={picksId}>
+          <h4 id={picksId}>Semantics you have chosen</h4>
+          <p className="tags start-semantics">
+            {pickedOffers.map((offer) => (
+              <SemanticPick
+                key={offer.tag}
+                offer={offer}
+                picked
+                onToggle={toggle}
+                ref={chipRef(offer.tag)}
+              />
+            ))}
+          </p>
+        </section>
+      ) : null}
+
       <p className="tags start-semantics">
-        {drawn.map((offer) => (
+        {pool.map((offer) => (
           <SemanticPick
             key={offer.tag}
             offer={offer}
-            picked={picked.includes(offer.tag)}
+            picked={false}
             onToggle={toggle}
+            ref={chipRef(offer.tag)}
           />
         ))}
       </p>
 
       {offers === null && !failed ? <p className="note">Finding some semantics…</p> : null}
 
-      {offers !== null ? (
+      {/*
+       * A redraw of the sample, and the way to the whole set.
+       *
+       * The redraw goes away while everything is on screen: dealing three new
+       * ones under a reader who is looking at all sixty-six changes nothing they
+       * can see, so the control would do nothing and say it had.
+       *
+       * THE LABEL CARRIES THE REAL COUNT, from the census the server sent, so it
+       * cannot promise a number that differs from what pressing it reveals.
+       */}
+      {offers !== null && !showingAll ? (
         <button type="button" className="act" onClick={redraw}>
-          Show me eight others
+          Show me {SEMANTIC_OFFER_SAMPLE} others
+        </button>
+      ) : null}
+
+      {offers !== null ? (
+        <button
+          type="button"
+          className="act"
+          aria-expanded={showingAll}
+          onClick={() => {
+            setShowingAll((current) => !current)
+            setAnnouncement(
+              showingAll
+                ? `Back to ${String(SEMANTIC_OFFER_SAMPLE)} offered semantics.`
+                : `All ${String(offers.length)} semantics shown, most-led first.`,
+            )
+          }}
+        >
+          {showingAll ? 'Show fewer' : `See all ${String(offers.length)}`}
         </button>
       ) : null}
 
@@ -1538,9 +1750,18 @@ const SemanticEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.E
                       card={c}
                       actions={[
                         {
+                          label: 'Preview',
+                          kind: 'preview',
+                          onClick: () => onPreview(c, carriers.images),
+                        },
+                        {
                           label: 'Choose',
                           kind: 'accept',
-                          onClick: () => onChoose(c, carriers.images),
+                          // The picks travel with the commander: they are the
+                          // reader's answer to "what is this deck about", and
+                          // dropping them here is what made the focus prompt
+                          // ask it a second time.
+                          onClick: () => onChoose(c, carriers.images, picked),
                         },
                       ]}
                     />
@@ -1552,8 +1773,11 @@ const SemanticEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.E
         </div>
       ) : null}
 
-      <p className="sr" role="status" aria-live="polite">
+      <p className="sr" role="status" aria-live="polite" aria-label="Semantics offered">
         {announcement}
+      </p>
+      <p className="sr" role="status" aria-live="polite" aria-label="Commanders found">
+        {found}
       </p>
     </section>
   )
@@ -1579,7 +1803,13 @@ const SemanticEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.E
  * function of that seed, so the contract test asserts the exact hand rather than
  * pinning a generator it does not own.
  */
-const QuickdrawEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.Element => {
+const QuickdrawEntry = ({
+  onChoose,
+  onPreview,
+}: {
+  onChoose: ChooseCommander
+  onPreview: ChooseCommander
+}): React.JSX.Element => {
   const headingId = useId()
   const [seed, setSeed] = useState(() => crypto.randomUUID())
   const [hand, setHand] = useState<{
@@ -1646,6 +1876,7 @@ const QuickdrawEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.
               <CardRow
                 card={c}
                 actions={[
+                  { label: 'Preview', kind: 'preview', onClick: () => onPreview(c, hand.images) },
                   { label: 'Choose', kind: 'accept', onClick: () => onChoose(c, hand.images) },
                 ]}
               />
@@ -1738,6 +1969,199 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
    * commander does not have and nobody chose.
    */
   const [emphasis, setEmphasis] = useState<readonly string[]>([])
+  /**
+   * Which of those focuses arrived from Route 1's picks rather than a click.
+   *
+   * Kept apart from `emphasis` for one job: the line under the prompt that says
+   * WHY a chip is already pressed. A focus that appears pre-pressed with no
+   * explanation reads as a bug, and the sentence has to name the tags it is
+   * about rather than gesture at them.
+   *
+   * It is not a second source of truth about the focus. `emphasis` is the deck's
+   * answer and the only thing that rides the create call; this is a note about
+   * where part of it came from, and the sentence is drawn from the INTERSECTION
+   * of the two so that toggling a carried chip off stops it being claimed.
+   */
+  const [carried, setCarried] = useState<readonly string[]>([])
+
+  /* --------------------------------------------- looking before choosing */
+
+  /**
+   * The card the detail pane is on, and every commander this screen has offered.
+   *
+   * TWO pieces because they answer different questions. `previewId` is what the
+   * pane is showing and moves as the reader follows a name in the rules text;
+   * `candidates` is every card one of the three lists has handed over, which is
+   * how the pane gets a card to draw before its detail lands, how Back reaches
+   * one it has already left, and — the part that is not convenience — how the
+   * screen knows whether the thing on screen is something it may offer to
+   * CHOOSE. A card reached by following "Search your library for Sol Ring" is
+   * not a commander, and the server's `is:commander` would reject it.
+   */
+  const [previewId, setPreviewId] = useState<string | null>(null)
+  const [candidates, setCandidates] = useState<ReadonlyMap<string, api.Card>>(new Map())
+  const [previewDetail, setPreviewDetail] = useState<api.CardDetail | null>(null)
+  /**
+   * Cards left behind by following a card name inside the pane, oldest first.
+   *
+   * The workspace's arrangement exactly (see `followReference` there): only a
+   * link INSIDE the pane pushes, opening from a list clears it, and the oldest
+   * is evicted at `MAX_TRAIL` because the reader walks backwards from the newest
+   * end and will never reach the far one.
+   */
+  const [previewTrail, setPreviewTrail] = useState<readonly { oracleId: string; name: string }[]>(
+    [],
+  )
+  const [previewSaid, setPreviewSaid] = useState('')
+  /** The control that opened the pane, so closing can hand focus back. */
+  const previewOpener = useRef<HTMLElement | null>(null)
+  /**
+   * The pane's Back and Close, held here rather than inside it.
+   *
+   * The pane unmounts while an in-panel navigation fetches a card no list on
+   * this screen offered, so a ref owned by it would not survive the gap that
+   * focus has to be restored across — the same reason the workspace holds its
+   * own pair, stated on `Preview`'s own props.
+   */
+  const previewBackRef = useRef<HTMLButtonElement | null>(null)
+  const previewCloseRef = useRef<HTMLButtonElement | null>(null)
+  /** Set by an in-panel navigation, so focus can follow the card that arrives. */
+  const navigatedInPane = useRef(false)
+  /** Set when the pane's own Choose fired, so focus lands somewhere afterwards. */
+  const choseFromPane = useRef(false)
+  const startRef = useRef<HTMLButtonElement>(null)
+  /*
+   * The same breakpoint the workspace decides its sheet on, through the same
+   * hook — not a second query. Two answers to "is this screen narrow" is how a
+   * viewport ends up with a panel that grabs focus but never appears.
+   */
+  const singleColumn = useSingleColumn()
+
+  const previewCard = previewId === null ? undefined : candidates.get(previewId)
+  const previewShown = previewCard ?? previewDetail
+  const previewBackTo = previewTrail.length === 0 ? null : previewTrail[previewTrail.length - 1]!
+
+  /**
+   * Put a card in the pane and fetch its detail.
+   *
+   * `api.getCardDetail` DIRECTLY, and not through `cardcache`'s `cardDetail`.
+   * That cache is keyed to a dataset snapshot and this screen has none, so it
+   * would take the `snapshotId === null` path — which is the bare fetch anyway,
+   * plus a side effect of clearing every entry the workspace had cached on the
+   * way past. No new endpoint either way (R2): this is the route the pane has
+   * always read.
+   */
+  const showInPane = (oracleId: string, card: api.Card | null): void => {
+    setPreviewId(oracleId)
+    setPreviewDetail(null)
+    if (card !== null) {
+      setCandidates((current) => new Map(current).set(card.oracleId, card))
+    }
+    void api
+      .getCardDetail(oracleId)
+      .then((d) => {
+        // Ignore a response for a card the reader has already navigated away
+        // from — two quick clicks otherwise race, and the loser wins.
+        setPreviewId((current) => {
+          if (current === d.oracleId) setPreviewDetail(d)
+          return current
+        })
+      })
+      .catch(() => undefined)
+  }
+
+  /**
+   * Open the pane on a commander one of the three lists is offering.
+   *
+   * The art rides along for the same reason `choose` takes it: the routes fetch
+   * their own image URLs with their results, and the pane drawing a blank frame
+   * for a card the screen already has the art for would be a hole invented here.
+   */
+  const previewCommander = (card: api.Card, images?: Record<string, api.ImageUris>): void => {
+    if (images !== undefined) {
+      setResultImages((current) => new Map([...current, ...Object.entries(images)]))
+    }
+    const active = document.activeElement
+    previewOpener.current = active instanceof HTMLElement ? active : null
+    // A fresh start, so the trail is dropped: Back means "the card whose text
+    // sent me here", never a general browsing history.
+    setPreviewTrail([])
+    showInPane(card.oracleId, card)
+  }
+
+  const closePreview = useCallback((): void => {
+    setPreviewId(null)
+    setPreviewDetail(null)
+    setPreviewTrail([])
+    const opener = previewOpener.current
+    previewOpener.current = null
+    // A list redrawn under an open pane — a redeal, a new search — leaves a
+    // detached button behind; focusing it would drop focus to nowhere.
+    if (opener !== null && opener.isConnected) opener.focus()
+  }, [])
+
+  /** Follow a card name from inside the pane, remembering where we were. */
+  const followInPane = (oracleId: string): void => {
+    if (previewId !== null && previewId !== oracleId) {
+      const name = previewShown?.name ?? 'the previous card'
+      setPreviewTrail((previous) => [...previous, { oracleId: previewId, name }].slice(-MAX_TRAIL))
+    }
+    navigatedInPane.current = true
+    showInPane(oracleId, null)
+  }
+
+  const backInPane = (): void => {
+    const previous = previewTrail[previewTrail.length - 1]
+    if (previous === undefined) return
+    setPreviewTrail((current) => current.slice(0, -1))
+    navigatedInPane.current = true
+    showInPane(previous.oracleId, candidates.get(previous.oracleId) ?? null)
+  }
+
+  /*
+   * Say which card the pane is on, on open and on every swap.
+   *
+   * A sighted reader watches the pane change; without this a screen-reader user
+   * is told nothing at all happened, which is the failure R4 names. Keyed on the
+   * NAME as well as the id because a card followed from rules text has no name
+   * until its detail lands, and the sentence has to wait for it rather than
+   * announce "card".
+   */
+  const previewName = previewShown?.name
+  useEffect(() => {
+    if (previewId === null || previewName === undefined) return
+    setPreviewSaid(`Previewing ${previewName}.`)
+  }, [previewId, previewName])
+
+  /*
+   * Put focus back in the pane after an in-panel navigation, and somewhere real
+   * after the pane's own Choose.
+   *
+   * The first half is the workspace's, for its reason: following a name to a
+   * card no list here offered unmounts the pane for the length of the fetch and
+   * focus falls to `<body>`.
+   *
+   * The second half is this screen's own. Choosing from the pane closes the pane
+   * AND replaces all three lists with the chosen-commander panel, so there is no
+   * opener left to return to — every candidate for it has just unmounted. "Start
+   * building" is where that reader is going next, and it is on screen.
+   */
+  useEffect(() => {
+    if (choseFromPane.current && chosen !== null) {
+      choseFromPane.current = false
+      navigatedInPane.current = false
+      startRef.current?.focus()
+      return
+    }
+    if (!navigatedInPane.current) return
+    const back = previewBackRef.current
+    const close = previewCloseRef.current
+    // The pane has not drawn yet; stay armed and try again on the next render.
+    if (back === null && close === null) return
+    navigatedInPane.current = false
+    const target = back !== null && !back.disabled ? back : close
+    target?.focus()
+  })
 
   /**
    * The commander's own semantics, ALL THREE directions, deduplicated.
@@ -1781,6 +2205,15 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
    * how the two screens come to describe the same commander differently.
    */
   const commanderQualifiers = chosen === null ? NO_QUALIFIERS : commanderQualifierWords([chosen])
+
+  /**
+   * The carried-over focuses that are still on, for the line that explains them.
+   *
+   * The intersection rather than `carried` itself: a reader who turns one off
+   * has answered the question the sentence was justifying, and a line still
+   * naming it would be describing a chip that is no longer pressed.
+   */
+  const carriedFocus = carried.filter((tag) => emphasis.includes(tag))
 
   /**
    * Add or drop one tag before the deck exists. Local state — there is nothing
@@ -1895,13 +2328,63 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
    * map too, and a route handing back its three images must not blank the eight
    * the search just fetched.
    */
-  const choose = (card: api.Card, images?: Record<string, api.ImageUris>): void => {
+  const choose = (
+    card: api.Card,
+    images?: Record<string, api.ImageUris>,
+    picks?: readonly string[],
+  ): void => {
     if (images !== undefined) {
       setResultImages((current) => new Map([...current, ...Object.entries(images)]))
     }
-    // For the reason the search box's `onChange` clears it: the picks were about
-    // whichever commander is being replaced.
-    setEmphasis([])
+    /*
+     * The picks the COMMANDER agrees with become the deck's first focus
+     * (ADR-0068).
+     *
+     * The reader answers "what is this deck about" on the way in through Route
+     * 1, and the focus prompt below then asked them the same question again
+     * from scratch. This carries the answer across.
+     *
+     * ## Derived here, not fetched
+     *
+     * A commander is in Route 1's results BECAUSE it carries a picked tag, so
+     * the tags to focus are `picks ∩ (produces ∪ wants)` and both sides are
+     * already in hand. Widening the endpoint to send the per-card matched tags
+     * would be storing what can be derived (ADR-0048's rule) for nothing.
+     *
+     * ## `has` is excluded
+     *
+     * The same refusal ADR-0067 makes in `semanticMatchCount`, and it has to be
+     * the same one: Route 1 asks what a deck is ABOUT, and a commander merely
+     * BEING an Elf is not a reason to make the deck about Elves. If the two
+     * disagreed, the screen would contradict itself between the list a
+     * commander appeared in and the focus it arrived with.
+     *
+     * ## Recomputed on every choice
+     *
+     * Not merged with what was there. A focus carried over from a commander the
+     * reader has moved on from is a claim about a card they are not looking at,
+     * which is what ADR-0057 refuses — so choosing again, from any of the three
+     * doors, replaces the set outright. The other two doors pass no picks and
+     * therefore clear it, which is the behaviour the search box's `onChange`
+     * has always had.
+     */
+    const answers = new Set([...card.synergyProduces, ...card.synergyWants])
+    const carriedOver = (picks ?? []).filter((tag) => answers.has(tag))
+    setCarried(carriedOver)
+    setEmphasis(carriedOver)
+    /*
+     * The pane goes with the lists it was opened from.
+     *
+     * Cleared directly rather than through `closePreview`, which restores focus
+     * to the control that opened the pane — and every one of those controls is
+     * inside the three lists this very call is about to unmount. Focus is dealt
+     * with by the effect above instead, which knows whether the choice came from
+     * the pane or from a row.
+     */
+    setPreviewId(null)
+    setPreviewDetail(null)
+    setPreviewTrail([])
+    previewOpener.current = null
     setChosen(card)
   }
 
@@ -1960,153 +2443,209 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
           }}
         />
       ) : null}
-      <div className="start">
-        {/* h2, not h1: the wordmark above is the page's heading, exactly as it
+      {/*
+       * The start column, and beside it the detail pane (ADR-0068).
+       *
+       * A SIDE COLUMN where there is room and the workspace's own bottom sheet
+       * where there is not — chosen over a centred overlay for one reason: the
+       * point of previewing here is COMPARING, so the other candidates have to
+       * stay on screen while one of them is being read. An overlay would cover
+       * the hand it exists to help you choose from.
+       *
+       * `data-preview` rather than a class, so the stylesheet can widen this row
+       * only while a card is open: reserving a column for a pane that is closed
+       * most of the time would push the start column off centre permanently, and
+       * this page is a centred column when nothing is being read.
+       */}
+      <div
+        className="start-layout"
+        data-preview={previewShown === null || previewShown === undefined ? 'closed' : 'open'}
+      >
+        <div className="start">
+          {/* h2, not h1: the wordmark above is the page's heading, exactly as it
             is in the workspace. Two h1s would be two answers to "what is this
             page". */}
-        <h2>Build a Commander deck around combos and synergies</h2>
-        <p>Pick a commander to begin.</p>
+          <h2>Build a Commander deck around combos and synergies</h2>
+          <p>Pick a commander to begin.</p>
 
-        <div className="field">
-          <label htmlFor="commander">Commander</label>
-          <div className="filter-bar">
-            <input
-              id="commander"
-              type="text"
-              value={chosen?.name ?? term}
-              placeholder="Search cards that can lead a deck…"
-              onChange={(e) => {
-                setChosen(null)
-                // The picks below were about the commander being replaced.
-                setEmphasis([])
-                setTerm(e.target.value)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') setQuery(term)
-              }}
-            />
-            {/* `remaining={null}`: nothing counts down here, so the button is
+          <div className="field">
+            <label htmlFor="commander">Commander</label>
+            <div className="filter-bar">
+              <input
+                id="commander"
+                type="text"
+                value={chosen?.name ?? term}
+                placeholder="Search cards that can lead a deck…"
+                onChange={(e) => {
+                  setChosen(null)
+                  // The picks below were about the commander being replaced.
+                  setEmphasis([])
+                  setCarried([])
+                  setTerm(e.target.value)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') setQuery(term)
+                }}
+              />
+              {/* `remaining={null}`: nothing counts down here, so the button is
                 a magnifying glass and never a ring. */}
-            <SearchButton
-              what="search"
-              onRun={() => setQuery(term)}
-              remaining={null}
-              restartKey={term}
-              busy={search === 'searching'}
-            />
+              <SearchButton
+                what="search"
+                onRun={() => setQuery(term)}
+                remaining={null}
+                restartKey={term}
+                busy={search === 'searching'}
+              />
+            </div>
           </div>
-        </div>
 
-        {chosen === null ? (
-          <>
-            <div className="start-results">
-              {/* No "searching…" line here: the button IS the spinner, and saying
+          {chosen === null ? (
+            <>
+              <div className="start-results">
+                {/* No "searching…" line here: the button IS the spinner, and saying
               it in two places is one place too many. */}
-              {search === 'failed' ? (
-                <p className="problem">
-                  {searchError} — the card search is not answering, so no commander can be picked
-                  yet.
-                </p>
-              ) : null}
+                {search === 'failed' ? (
+                  <p className="problem">
+                    {searchError} — the card search is not answering, so no commander can be picked
+                    yet.
+                  </p>
+                ) : null}
 
-              {search === 'done' && results.length === 0 ? (
-                <p className="problem">
-                  Nothing found.
-                  <span className="note">
-                    {' '}
-                    No card that can be a commander matches “{query}”.
-                    {noUB ? ' Universes Beyond cards are excluded — try unchecking that.' : ''}
-                  </span>
-                </p>
-              ) : null}
+                {search === 'done' && results.length === 0 ? (
+                  <p className="problem">
+                    Nothing found.
+                    <span className="note">
+                      {' '}
+                      No card that can be a commander matches “{query}”.
+                      {noUB ? ' Universes Beyond cards are excluded — try unchecking that.' : ''}
+                    </span>
+                  </p>
+                ) : null}
+
+                {/*
+                 * The results stay text rows, deliberately.
+                 *
+                 * Eight art crops here would be eight image requests to help pick
+                 * between candidates that are already distinguished by the thing
+                 * the reader typed — a name. Art earns its space at the moment the
+                 * choice is MADE, below, where there is one card and getting it
+                 * wrong means building a deck around the wrong legend.
+                 *
+                 * THE PREVIEW DOES NOT BREAK THAT (ADR-0068), and it is worth
+                 * saying so here rather than leaving the next reader to assume the
+                 * rule was forgotten. A row gained a Preview button, not a
+                 * picture: the art is fetched when a card is actually opened, so
+                 * the cost is one image for the card someone asked about instead
+                 * of eight for cards nobody has. The URLs were already in hand
+                 * either way — `searchCards` returns them with the results — so
+                 * what this comment has always been about is the browser fetching
+                 * eight JPEGs, and it still does not.
+                 */}
+                {results.slice(0, 8).map((c) => (
+                  <CardRow
+                    key={c.oracleId}
+                    card={c}
+                    actions={[
+                      { label: 'Preview', kind: 'preview', onClick: () => previewCommander(c) },
+                      { label: 'Choose', kind: 'accept', onClick: () => choose(c) },
+                    ]}
+                  />
+                ))}
+              </div>
 
               {/*
-               * The results stay text rows, deliberately.
+               * The two other doors (ADR-0067), BESIDE the search and not instead
+               * of it.
                *
-               * Eight art crops here would be eight image requests to help pick
-               * between candidates that are already distinguished by the thing
-               * the reader typed — a name. Art earns its space at the moment the
-               * choice is MADE, below, where there is one card and getting it
-               * wrong means building a deck around the wrong legend.
+               * Below it rather than above, and that ordering is the decision. A
+               * reader who arrived knowing the commander they want should meet the
+               * box that answers them first; these are for the reader who does not,
+               * and that reader is scrolling anyway. Both vanish once a commander is
+               * chosen, because the question they answer has been answered.
                */}
-              {results.slice(0, 8).map((c) => (
-                <CardRow
-                  key={c.oracleId}
-                  card={c}
-                  actions={[{ label: 'Choose', kind: 'accept', onClick: () => choose(c) }]}
-                />
-              ))}
-            </div>
+              <SemanticEntry onChoose={choose} onPreview={previewCommander} />
+              <QuickdrawEntry onChoose={choose} onPreview={previewCommander} />
+            </>
+          ) : (
+            /*
+             * The commander, as a card, once one is chosen.
+             *
+             * "Krenko" is four different legends and "Kenrith" is two; a name in
+             * a text field does not confirm which one this deck is being built
+             * around, and every later screen assumes the choice was right. The
+             * card face answers it at a glance, and `CardFace` carries the
+             * fallback for a commander with no art rather than leaving a hole.
+             *
+             * No `onActivate`: there is nothing to open here, so the frame is not
+             * a button and does not take focus.
+             */
+            <>
+              <div className="start-chosen">
+                <CardFace card={cardView(chosen, undefined, resultImages.get(chosen.oracleId))} />
+                <p className="note">
+                  Building around <strong>{chosen.name}</strong>. Search again to change it.
+                </p>
+              </div>
 
-            {/*
-             * The two other doors (ADR-0067), BESIDE the search and not instead
-             * of it.
-             *
-             * Below it rather than above, and that ordering is the decision. A
-             * reader who arrived knowing the commander they want should meet the
-             * box that answers them first; these are for the reader who does not,
-             * and that reader is scrolling anyway. Both vanish once a commander is
-             * chosen, because the question they answer has been answered.
-             */}
-            <SemanticEntry onChoose={choose} />
-            <QuickdrawEntry onChoose={choose} />
-          </>
-        ) : (
-          /*
-           * The commander, as a card, once one is chosen.
-           *
-           * "Krenko" is four different legends and "Kenrith" is two; a name in
-           * a text field does not confirm which one this deck is being built
-           * around, and every later screen assumes the choice was right. The
-           * card face answers it at a glance, and `CardFace` carries the
-           * fallback for a commander with no art rather than leaving a hole.
-           *
-           * No `onActivate`: there is nothing to open here, so the frame is not
-           * a button and does not take focus.
-           */
-          <>
-            <div className="start-chosen">
-              <CardFace card={cardView(chosen, undefined, resultImages.get(chosen.oracleId))} />
-              <p className="note">
-                Building around <strong>{chosen.name}</strong>. Search again to change it.
-              </p>
-            </div>
-
-            {/*
-             * The focus prompt, asked HERE — after the commander is settled and
-             * before the deck exists.
-             *
-             * A prompt, not a gate. "Start building" stays enabled with nothing
-             * picked, there is no skip button to press (a skip button would
-             * make choosing nothing feel like a refusal rather than an answer),
-             * and the same question is reachable from the deck rail afterwards.
-             * A modal was rejected for the same reason: this is one more thing
-             * on a page that already asks three, not a decision to block on.
-             *
-             * A SIBLING of `.start-chosen`, not a child. That element is a flex
-             * ROW holding the card beside its caption, so a third child would
-             * squeeze both into a column a few words wide — measured in a
-             * browser before this was moved out.
-             */}
-            <section className="start-emphasis" aria-label="Semantic focus">
-              <h3>What is this deck about?</h3>
-              {/* "Only reorders" was true until the focus guarantee (ADR-0026)
+              {/*
+               * The focus prompt, asked HERE — after the commander is settled and
+               * before the deck exists.
+               *
+               * A prompt, not a gate. "Start building" stays enabled with nothing
+               * picked, there is no skip button to press (a skip button would
+               * make choosing nothing feel like a refusal rather than an answer),
+               * and the same question is reachable from the deck rail afterwards.
+               * A modal was rejected for the same reason: this is one more thing
+               * on a page that already asks three, not a decision to block on.
+               *
+               * A SIBLING of `.start-chosen`, not a child. That element is a flex
+               * ROW holding the card beside its caption, so a third child would
+               * squeeze both into a column a few words wide — measured in a
+               * browser before this was moved out.
+               */}
+              <section className="start-emphasis" aria-label="Semantic focus">
+                <h3>What is this deck about?</h3>
+                {/* "Only reorders" was true until the focus guarantee (ADR-0026)
                   and is not any more: a focus now also keeps the top three
                   cards supporting it in every category, which is an addition
                   rather than a reordering. The half that has to survive intact
                   is the one about hiding, because that is the promise. */}
-              <p className="note">
-                Optional. Pick any of {chosen.name}’s semantics and cards supporting them are ranked
-                higher, with the top three kept in every category. Nothing is ever hidden, and you
-                can change it at any point while building.
-              </p>
-              <EmphasisChoice
-                tags={commanderTags}
-                qualifiers={commanderQualifiers}
-                selected={emphasis}
-                onToggle={toggleStartEmphasis}
-              />
-              {/*
+                <p className="note">
+                  Optional. Pick any of {chosen.name}’s semantics and cards supporting them are
+                  ranked higher, with the top three kept in every category. Nothing is ever hidden,
+                  and you can change it at any point while building.
+                </p>
+                {/*
+                 * WHY some of them are already on (ADR-0068).
+                 *
+                 * A chip that arrives pre-pressed with no explanation reads as a
+                 * bug, and this one is pressed because of something the reader
+                 * did on a part of the screen that is no longer there. One line,
+                 * in the register of the copy above it rather than a tooltip —
+                 * the reason has to be readable without hunting for it.
+                 *
+                 * Drawn from carried ∩ emphasis, so toggling one off stops it
+                 * being claimed rather than leaving a sentence that names a
+                 * focus which is no longer on. Absent entirely when the
+                 * intersection is empty: an absence needs no explaining, and a
+                 * line saying nothing was carried would be an apology for it.
+                 */}
+                {carriedFocus.length === 0 ? null : (
+                  <p className="note">
+                    {listWords(carriedFocus.map(readable))}{' '}
+                    {carriedFocus.length === 1 ? 'is' : 'are'} already focused: you picked{' '}
+                    {carriedFocus.length === 1 ? 'it' : 'them'} above, and {chosen.name} carries{' '}
+                    {carriedFocus.length === 1 ? 'it' : 'them'}. Toggle{' '}
+                    {carriedFocus.length === 1 ? 'it' : 'them'} off like any other.
+                  </p>
+                )}
+                <EmphasisChoice
+                  tags={commanderTags}
+                  qualifiers={commanderQualifiers}
+                  selected={emphasis}
+                  onToggle={toggleStartEmphasis}
+                />
+                {/*
                 The chain, at the moment the request literally names — "when
                 selecting a focus". This is where the FIRST focus is chosen, so
                 an expansion that only existed in the workspace would miss the
@@ -2117,61 +2656,110 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
                 support, which is the honest answer — ordering it here would
                 present a ranking derived from nothing.
               */}
-              <FocusExpansion
-                base={commanderTags}
-                selected={emphasis}
-                support={undefined}
-                onToggle={toggleStartEmphasis}
-                busy={false}
-              />
-            </section>
-          </>
-        )}
+                <FocusExpansion
+                  base={commanderTags}
+                  selected={emphasis}
+                  support={undefined}
+                  onToggle={toggleStartEmphasis}
+                  busy={false}
+                />
+              </section>
+            </>
+          )}
 
-        <div className="row">
-          <div className="field" style={{ flex: 1 }}>
-            <label htmlFor="archetype">Archetype</label>
-            <select id="archetype" value={archetype} onChange={(e) => setArchetype(e.target.value)}>
-              {ARCHETYPES.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
+          <div className="row">
+            <div className="field" style={{ flex: 1 }}>
+              <label htmlFor="archetype">Archetype</label>
+              <select
+                id="archetype"
+                value={archetype}
+                onChange={(e) => setArchetype(e.target.value)}
+              >
+                {ARCHETYPES.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field" style={{ flex: 1 }}>
+              <label htmlFor="bracket">Bracket</label>
+              <select
+                id="bracket"
+                value={bracket}
+                onChange={(e) => setBracket(Number(e.target.value))}
+              >
+                {[1, 2, 3, 4, 5].map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div className="field" style={{ flex: 1 }}>
-            <label htmlFor="bracket">Bracket</label>
-            <select
-              id="bracket"
-              value={bracket}
-              onChange={(e) => setBracket(Number(e.target.value))}
-            >
-              {[1, 2, 3, 4, 5].map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          </div>
+
+          <label className="check">
+            <input type="checkbox" checked={noUB} onChange={(e) => setNoUB(e.target.checked)} />
+            Exclude Universes Beyond cards
+          </label>
+
+          <button
+            className="primary"
+            disabled={chosen === null || busy}
+            onClick={create}
+            // A disabled button with no explanation is a dead end. This one is
+            // disabled for exactly one reason, so it can say so.
+            title={chosen === null ? 'Pick a commander first' : 'Create this deck'}
+          >
+            {busy ? 'Creating…' : 'Start building'}
+          </button>
+          {chosen === null ? <p className="note">Pick a commander to continue.</p> : null}
+          {error !== null ? <p className="problem">{error}</p> : null}
         </div>
 
-        <label className="check">
-          <input type="checkbox" checked={noUB} onChange={(e) => setNoUB(e.target.checked)} />
-          Exclude Universes Beyond cards
-        </label>
-
-        <button
-          className="primary"
-          disabled={chosen === null || busy}
-          onClick={create}
-          // A disabled button with no explanation is a dead end. This one is
-          // disabled for exactly one reason, so it can say so.
-          title={chosen === null ? 'Pick a commander first' : 'Create this deck'}
-        >
-          {busy ? 'Creating…' : 'Start building'}
-        </button>
-        {chosen === null ? <p className="note">Pick a commander to continue.</p> : null}
-        {error !== null ? <p className="problem">{error}</p> : null}
+        {/*
+         * The pane, and the sentence that says it changed.
+         *
+         * The live region is ALWAYS MOUNTED, exactly as the two routes above mount
+         * theirs: a region inserted at the same moment its text appears is not
+         * reliably announced, and this one has to speak on the very first open.
+         *
+         * `sheet` is `useSingleColumn()` — the workspace's own hook and the
+         * workspace's own breakpoint, so a viewport cannot be a sheet to one
+         * screen and a column to the other.
+         *
+         * What is deliberately NOT passed: `accepted`, `lockedIds` and `cards`,
+         * which are the deck-relative group, and `emphasis` with its toggle. There
+         * is no deck on this screen — no partners to find and no focus to write —
+         * and each of those absences is a documented state of the component rather
+         * than an empty value standing in for one. See `Preview`'s props.
+         */}
+        <div className="start-detail">
+          <Preview
+            card={previewCard}
+            detail={previewDetail}
+            price={undefined}
+            images={previewId === null ? undefined : resultImages.get(previewId)}
+            onClose={closePreview}
+            {...(previewCard === undefined
+              ? {}
+              : {
+                  onChoose: (): void => {
+                    choseFromPane.current = true
+                    choose(previewCard)
+                  },
+                })}
+            sheet={singleColumn}
+            onFollowReference={followInPane}
+            onBack={backInPane}
+            backTo={previewBackTo}
+            backRef={previewBackRef}
+            closeRef={previewCloseRef}
+          />
+        </div>
+        <p className="sr" role="status" aria-live="polite" aria-label="Card preview">
+          {previewSaid}
+        </p>
       </div>
     </>
   )
@@ -3496,6 +4084,7 @@ const Preview = ({
   price,
   images,
   onClose,
+  onChoose,
   accepted,
   lockedIds,
   cards,
@@ -3517,19 +4106,57 @@ const Preview = ({
   /** Art for the default printing. Absent when it has none resolved. */
   images: api.ImageUris | undefined
   onClose: () => void
-  accepted: ReadonlySet<string>
-  lockedIds: ReadonlySet<string>
-  cards: ReadonlyMap<string, api.Card>
+  /**
+   * The host screen's own action on the card, drawn in the header (ADR-0068).
+   *
+   * ABSENT IS THE NORMAL CASE and the workspace never passes it: there, the
+   * pane is for reading and the Add / Reject decision belongs to the row in the
+   * feed, which is still on screen behind it. The start screen is the opposite
+   * — the pane is the only place a commander has been looked AT, and making the
+   * reader close it and find the row again is the flow this exists to remove.
+   *
+   * The pane does not decide WHETHER the card can be taken. It is handed a
+   * callback or it is not, because "is this card a legal choice here" is a
+   * question about the screen: on the start screen a card reached by following a
+   * name in another card's rules text is very often not a commander at all.
+   */
+  onChoose?: (() => void) | undefined
+  /**
+   * The deck this card is being read AGAINST, or absent where there is no deck.
+   *
+   * The three travel together because they answer one question and feed exactly
+   * one panel: `Works` — what this card combos with, is one piece away from, and
+   * synergises with, all of it relative to the cards already accepted.
+   *
+   * ABSENT IS NOT AN EMPTY DECK, and that distinction is load-bearing rather
+   * than tidiness. Passing empty sets does NOT make `Works` fall silent: a
+   * two-card combo has exactly one other piece, an empty `accepted` makes that
+   * piece missing, and one missing piece is precisely the "one card away"
+   * branch. A start-screen reader would have been shown the heading "Works with
+   * your deck" over a line reading "No combo assembled yet — these need one more
+   * card" before they had a deck at all. So the panel is omitted where there is
+   * no deck rather than fed a lie about an empty one.
+   */
+  accepted?: ReadonlySet<string> | undefined
+  lockedIds?: ReadonlySet<string> | undefined
+  cards?: ReadonlyMap<string, api.Card> | undefined
   /**
    * The workspace is one column, so this panel is a bottom sheet over the feed
    * rather than the top of the right-hand rail.
    */
   sheet: boolean
-  /** The deck's emphasised tags, so a chip can show whether it is one of them. */
-  emphasis: readonly string[]
-  onToggleEmphasis: (tag: string) => void
+  /**
+   * The deck's emphasised tags, so a chip can show whether it is one of them.
+   *
+   * Absent where there is no deck to focus, which is the state `Semantics` and
+   * `TagChip` already have a name for: the chips are labels and no emphasise
+   * button is drawn beside them. A no-op toggle was the rejected alternative —
+   * it draws a control that does nothing, which is worse than no control.
+   */
+  emphasis?: readonly string[] | undefined
+  onToggleEmphasis?: ((tag: string) => void) | undefined
   /** A focus write is in flight, so the toggles are held rather than removed. */
-  emphasisBusy: boolean
+  emphasisBusy?: boolean | undefined
   /** Open a card named in this card's rules text, remembering where we were. */
   onFollowReference: (oracleId: string) => void
   onBack: () => void
@@ -3542,12 +4169,18 @@ const Preview = ({
    */
   backTo: { oracleId: string; name: string } | null
   /**
-   * The header controls, owned by the WORKSPACE and only attached here.
+   * The header controls, owned by the HOST SCREEN and only attached here.
    *
    * This panel unmounts across an in-panel navigation to a card the deck does
    * not hold — `card` is undefined and `detail` is cleared for the fetch, so for
    * a moment there is nothing to draw. A ref living in here would be torn down
    * with it, and the focus restore has to outlive that gap.
+   *
+   * It said WORKSPACE while the workspace was the only host. It is not a
+   * workspace-only prop and never was: the reason is the unmount, and the start
+   * screen's pane unmounts across exactly the same gap for exactly the same
+   * reason (ADR-0068). Each screen owns its own pair; neither borrows the
+   * other's.
    */
   backRef: React.RefObject<HTMLButtonElement | null>
   closeRef: React.RefObject<HTMLButtonElement | null>
@@ -3727,6 +4360,21 @@ const Preview = ({
          * navigation" is also the only way it stays consistent between Back and
          * following a link.
          */}
+        {/*
+         * The host screen's action, FIRST among the header controls.
+         *
+         * First because it is the only one of the three that is why the reader
+         * opened the pane: they are looking at this card in order to decide
+         * about it, and a keyboard reader reaching the panel meets the decision
+         * before the two ways out of it. `Choose <name>` rather than a bare
+         * `Choose`, matching the rows' own labels exactly (`CardRow` builds
+         * `${label} ${card.name}`), so one test helper reaches both.
+         */}
+        {onChoose === undefined ? null : (
+          <button className="act accept" onClick={onChoose} aria-label={`Choose ${shown.name}`}>
+            Choose
+          </button>
+        )}
         <button
           className="act"
           onClick={onBack}
@@ -3880,7 +4528,20 @@ const Preview = ({
         </>
       ) : null}
 
-      {detail === null ? (
+      {/*
+       * The deck-relative panel, and the placeholder that stands in for it.
+       *
+       * Both are gated on there BEING a deck, not on the deck being non-empty.
+       * See the `accepted` prop's docblock: an empty deck is not a quiet deck
+       * here, it is a deck every combo is one card away from completing, and
+       * "Works with your deck" over a reader who has not started one is a claim
+       * about something that does not exist.
+       *
+       * "Looking up combos…" goes with it rather than staying behind. Where
+       * there is no deck it is a promise of a panel that will never arrive.
+       */}
+      {accepted === undefined || lockedIds === undefined || cards === undefined ? null : detail ===
+        null ? (
         <p className="note">Looking up combos…</p>
       ) : (
         <Works
@@ -3892,14 +4553,20 @@ const Preview = ({
         />
       )}
 
+      {/*
+       * Spread rather than passed, for `exactOptionalPropertyTypes`: these are
+       * optional on `Semantics` and an explicit `undefined` is not the same as
+       * an absent prop to the compiler. The absence is what makes the chips
+       * label-only, which is the state this screen wants.
+       */}
       <Semantics
         produces={shown.synergyProduces}
         wants={shown.synergyWants}
         has={shown.synergyHas ?? []}
         oracleText={shown.oracleText}
-        emphasis={emphasis}
-        onToggleEmphasis={onToggleEmphasis}
-        emphasisBusy={emphasisBusy}
+        {...(emphasis === undefined ? {} : { emphasis })}
+        {...(onToggleEmphasis === undefined ? {} : { onToggleEmphasis })}
+        {...(emphasisBusy === undefined ? {} : { emphasisBusy })}
       />
     </aside>
   )

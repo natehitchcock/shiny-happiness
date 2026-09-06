@@ -119,10 +119,17 @@ GET /api/v1/commanders/quickdraw?seed=
 ```
 
 **The offer is the whole qualifying set, not a sample.** A tag qualifies when at
-least 20 commander-legal commanders carry it and at least 150 commander-legal
-cards support it, counting `produces` and `wants` and never `has` — 48 tags
-against the live corpus. The client draws its handful of eight from that with the
-domain's own seeded sampler, so a redraw is a new seed rather than a request.
+least 10 commander-legal commanders carry it and at least 70 commander-legal
+cards support it, counting `produces` and `wants` and never `has` — 66 tags
+against the live corpus. The client draws its handful of three from that with the
+domain's own seeded sampler, so a redraw is a new seed rather than a request, and
+"See all 66" is a filter over a list already in hand rather than a second call.
+
+The floors were 20/150 and 48 tags until
+[ADR-0068](adr/0068-looking-is-not-choosing-and-a-deck-is-mostly-not-its-theme.md)
+§5: a supporting-card floor asks how many cards are ABOUT a theme, when what
+decides whether a deck can be built is whether it can be FILLED. **The response
+shape did not change** — only which tags clear the bar.
 
 **`matches` rides beside the cards**, the way `prices` and `images` do (§10.2).
 How many of *your* picks a commander matched is a fact about the request, not

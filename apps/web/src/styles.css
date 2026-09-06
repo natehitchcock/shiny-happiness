@@ -2410,6 +2410,34 @@ select {
   border-color: var(--brass);
 }
 
+/*
+ * The semantics already chosen, in a box of their own (ADR-0068).
+ *
+ * A redraw used to replace the sample wholesale, so a chosen tag that was not in
+ * the new sample left the screen — and leaving the screen reads as being
+ * unselected whether or not the state survived it. The brass left edge is the
+ * same mark `.preview` and the deck rail use for "you decided this", so the
+ * region reads as the reader's own answer rather than as a fourth offer.
+ */
+.start-picks {
+  border-left: 2px solid var(--brass);
+  padding-left: calc(var(--step) * 1.5);
+  margin: calc(var(--step) * 2) 0;
+}
+
+.start-picks h4 {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+  margin: 0 0 var(--step);
+}
+
+.start-picks .start-semantics {
+  margin: 0;
+}
+
 .start-carriers {
   margin-top: var(--step);
 }
@@ -2467,6 +2495,75 @@ select {
 .start-chosen strong {
   color: var(--parchment);
   font-weight: 600;
+}
+
+/* --------------------------------------- the start screen's detail pane */
+
+/*
+ * Looking at a commander before committing to one (ADR-0068).
+ *
+ * The row that holds the start column and, beside it, the same `Preview` the
+ * workspace uses. A SIDE COLUMN and not a centred overlay, because the reason to
+ * preview here is to compare: the eight search results, the carriers of a
+ * semantic or the three dealt cards have to stay on screen and clickable while
+ * one of them is being read, and an overlay covers the very hand it is helping
+ * you choose from.
+ *
+ * `justify-content: center` with the pane in the flow rather than pinned to the
+ * viewport edge, so the two together stay centred — the page is a centred column
+ * and a pane hanging off one side would make it look like the layout had broken.
+ *
+ * The row only becomes a row when a card is open. Reserving 21rem permanently
+ * would push the start column off centre for every reader who never opens one,
+ * and it is closed almost all of the time.
+ */
+.start-layout {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: calc(var(--step) * 3);
+}
+
+/*
+ * Below the workspace's own single-column breakpoint the pane is the bottom
+ * sheet — `.preview.preview-sheet` positions itself `fixed`, so this column has
+ * nothing to hold and must not reserve a gap for it.
+ *
+ * The BOX is all that changes between the two, never the parent: the element
+ * stays exactly where it is in the source at every width, so crossing the
+ * breakpoint is a repaint rather than a remount that would throw away an
+ * in-flight `/cards/{id}` and reorder the document for a screen reader. That is
+ * the rule the workspace's own sheet follows and the reason it follows it.
+ */
+@media (min-width: 901px) {
+  /*
+   * Undoes `.preview`'s workspace positioning for this host.
+   *
+   * `@media (min-width: 901px) .preview` makes the panel `position: absolute;
+   * right: 100%` so it can hang off the analysis rail's left edge. There is no
+   * rail here and no positioned ancestor to hang from, so it is put back in the
+   * flow and made sticky instead — a card stays beside the list while the reader
+   * scrolls the candidates under it, which is the comparison this is for.
+   */
+  .start-layout[data-preview='open'] > .start-detail {
+    flex: 0 0 21rem;
+    max-width: 21rem;
+  }
+
+  .start-detail .preview {
+    position: sticky;
+    top: calc(var(--step) * 2);
+    right: auto;
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100vh - 6rem);
+    margin: 8vh 0 0;
+    margin-right: 0;
+    overflow-y: auto;
+    /* Beside, not on top of: the shadow is what says "overlay", and this panel
+       is a column of the layout. */
+    box-shadow: none;
+  }
 }
 
 /* ------------------------------------------------------ empty search */
