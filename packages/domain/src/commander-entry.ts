@@ -99,13 +99,19 @@ export const SEMANTIC_OFFER_THRESHOLDS: SemanticOfferThresholds = {
 /**
  * How many of the qualifying tags one draw puts in front of the builder.
  *
- * THREE, and it was eight (ADR-0068). Eight chips is a wall of vocabulary in
- * front of somebody who has not chosen anything yet and is being asked the
- * vaguest question on the screen; three is a prompt. Nothing is lost by
- * narrowing it — the redraw is still free and still deals a fresh sample, and
- * the whole qualifying set is now one press away rather than unreachable.
+ * EIGHT — it was eight, ADR-0068 made it three, and the amendment puts it back.
+ * The three was not wrong when it was asked for: the qualifying set was 48 tags
+ * and three was a prompt rather than a wall. In the same sitting the thresholds
+ * moved to 10 commanders / 70 supporting cards and the set grew to 66, and
+ * three of 66 is a window too narrow to see the vocabulary through — a reader
+ * would have to work the redraw repeatedly to learn what this screen can even
+ * be about.
+ *
+ * The sample is what the screen OPENS with, not the limit: "See all 66" and the
+ * redraw both survive unchanged, so eight is the first look and neither the
+ * whole set nor a fresh draw got further away.
  */
-export const SEMANTIC_OFFER_SAMPLE = 3
+export const SEMANTIC_OFFER_SAMPLE = 8
 
 export interface SemanticOffer {
   readonly tag: SynergyTag
