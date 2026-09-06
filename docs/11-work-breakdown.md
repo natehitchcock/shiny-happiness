@@ -140,13 +140,34 @@ deduplicated to MATCH the broken bar, so it was fixed in the same pass and
 repeats are grouped for display as `Forest ×20`.
 
 **There are three ways to start a deck now, not one** —
-[ADR-0067](adr/0067-a-name-is-the-wrong-question-for-someone-who-has-not-chosen.md).
+[ADR-0067](adr/0067-a-name-is-the-wrong-question-for-someone-who-has-not-chosen.md),
+amended by
+[ADR-0068](adr/0068-looking-is-not-choosing-and-a-deck-is-mostly-not-its-theme.md).
 The commander name search is untouched and still comes first; below it the start
-screen offers eight of the 48 qualifying semantics (pick some, see the
+screen offers **three** of the **66** qualifying semantics (pick some, see the
 commanders that carry them, ranked by how many you matched) and a quickdraw of
 three commanders with the wildcard marked. Both end at the same `chosen` the
 search ends at, so the card face, the focus prompt, the archetype and "Start
 building" are the screen that was already there.
+
+**Four things ADR-0068 changed about that screen.** The thresholds are **10
+commanders / 70 supporting cards**, not 20/150: the old floor asked how many
+cards are ABOUT a theme, when what decides whether a deck can be built is
+whether it can be FILLED, and most of a Commander deck is staples and lands
+whatever it is about. The sample is three with a **"See all 66"** expander
+ranked by how many commanders carry each tag. **Chosen semantics live in a
+region of their own** and a tag is drawn in exactly one place, because a redraw
+used to make a pick vanish and vanishing reads as being unselected. And a pick
+the chosen commander carries in `produces` or `wants` **becomes the deck's first
+focus**, computed on the client and riding the create call.
+
+**Every list on that screen previews.** A row's `Preview` button opens the
+WORKSPACE's `Preview` — a side column where there is room, the same bottom sheet
+where there is not — and the pane carries the `Choose`. It deliberately offers
+no emphasise control and no "Works with your deck" panel there: **empty deck
+sets do not make `Works` fall silent**, they make every two-card combo one card
+away, so the deck-relative props are absent rather than empty. Read ADR-0068 §3.3
+before passing them.
 
 Two things to know before touching it. **A semantic here is `produces` or
 `wants` and never `has`** — membership is what a card IS and this screen asks

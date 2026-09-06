@@ -31,10 +31,17 @@ import { clearCorpusCache } from './corpus-cache.js'
  * apart:
  *
  *   landfall       200 cards,  25 commanders  → qualifies
- *   treasure       200 cards,  10 commanders  → too few commanders
- *   token          100 cards,  30 commanders  → too few supporting cards
+ *   treasure       200 cards,   9 commanders  → too few commanders
+ *   token           69 cards,  30 commanders  → too few supporting cards
  *   subtype:elf    160 cards,  22 commanders  → qualifies, and it is TRIBAL
  *   subtype:human    0 cards,  50 commanders  → invisible: membership only
+ *
+ * The two REFUSED families sit one under their floor rather than comfortably
+ * below it — 9 against 10, and 69 against 70 — because a fixture that fails a
+ * threshold by a wide margin cannot tell a floor that moved from a floor that
+ * stopped being applied. ADR-0068 moved these floors from 20/150 to 10/70 and
+ * both of these families passed the new ones on the old numbers, which is
+ * exactly the silent green this shape exists to prevent.
  */
 const hasDatabase = databaseUrl() !== null
 const describeDb = hasDatabase ? describe : describe.skip
@@ -110,8 +117,8 @@ describeDb('commander entry — semantics and quickdraw (ADR-0067)', () => {
     db = await createTestDatabase('commander_entry')
     await upsertCards(db.pool, [
       ...family('Landfall', 'landfall', 200, 25),
-      ...family('Treasure', 'treasure', 200, 10),
-      ...family('Token', 'token', 100, 30),
+      ...family('Treasure', 'treasure', 200, 9),
+      ...family('Token', 'token', 69, 30),
       ...family('Elfish', 'subtype:elf', 160, 22, 'wants'),
 
       /*
@@ -189,11 +196,11 @@ describeDb('commander entry — semantics and quickdraw (ADR-0067)', () => {
       expect((await offers()).map((o) => o.tag)).toContain('landfall')
     })
 
-    it('refuses a deck nobody can lead — 200 cards, 10 commanders', async () => {
+    it('refuses a deck nobody can lead — 200 cards, 9 commanders', async () => {
       expect((await offers()).map((o) => o.tag)).not.toContain('treasure')
     })
 
-    it('refuses a deck nobody can fill — 30 commanders, 100 cards', async () => {
+    it('refuses a deck nobody can fill — 30 commanders, 69 cards', async () => {
       expect((await offers()).map((o) => o.tag)).not.toContain('token')
     })
 
