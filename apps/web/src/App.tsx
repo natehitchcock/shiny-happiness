@@ -63,6 +63,13 @@ import {
   // lives with them, next to the array that is total over all three.
   semanticCategory,
   type SemanticCategory,
+  // The eight offers this screen puts in front of a builder who has not chosen
+  // a commander (ADR-0067). Sampled HERE rather than by the server: the whole
+  // qualifying set is 48 tags and arrives in one call, so a redraw is a pure
+  // function of a new seed rather than another round trip. The sampler is the
+  // domain's, so the draw is the same code the API tests exercise.
+  SEMANTIC_OFFER_SAMPLE,
+  drawSemanticOffers,
   // Where a card name sits inside one ability of rules text. The SAME function
   // the server ran to decide which names are references at all (doc 09 §9.4), so
   // the panel cannot link a span the server did not resolve.
@@ -1291,6 +1298,375 @@ const NO_QUALIFIERS: ReadonlyMap<string, string> = new Map<string, string>()
 const withQualifier = (tag: string, qualifier: string | undefined): string =>
   qualifier === undefined || qualifier === '' ? readable(tag) : `${readable(tag)} (${qualifier})`
 
+/**
+ * What a commander chosen by either of the new routes has to hand back.
+ *
+ * The art comes with it because the routes fetch their own: `Start` keeps one
+ * `resultImages` map for the chosen commander's card face, and a route that
+ * handed back only the card would leave that face blank until something else
+ * happened to fetch it.
+ */
+type ChooseCommander = (card: api.Card, images?: Record<string, api.ImageUris>) => void
+
+/**
+ * One offered semantic, as a toggle.
+ *
+ * A BUTTON and not a checkbox, matching `EmphasisToggle` and for its reason:
+ * the state is carried by `aria-pressed` with a name that does not flip, so a
+ * screen reader reads one control changing rather than two controls swapping.
+ *
+ * NEVER COLOUR ALONE (P1). The glyph changes shape — the same ✦/✧ pair the
+ * emphasis toggles use — `aria-pressed` carries it to assistive technology, and
+ * the stylesheet draws a brass border on top of both.
+ *
+ * The counts are in the `title` rather than on the chip. Eight chips each
+ * carrying "137 commanders · 2,914 cards" is a wall of numbers in front of
+ * somebody who has not chosen anything yet; the numbers are the evidence behind
+ * the offer, and they are one hover or one focus away rather than absent.
+ */
+const SemanticPick = ({
+  offer,
+  picked,
+  onToggle,
+}: {
+  offer: api.SemanticOffer
+  picked: boolean
+  onToggle: (tag: string) => void
+}): React.JSX.Element => (
+  <button
+    type="button"
+    className="tag start-semantic"
+    data-picked={picked}
+    aria-pressed={picked}
+    aria-label={`${readable(offer.tag)} — ${plural(offer.commanders, 'commander')}, ${plural(
+      offer.supporting,
+      'card',
+    )}`}
+    title={`${plural(offer.commanders, 'commander')} lead this, and ${plural(
+      offer.supporting,
+      'card',
+    )} support it`}
+    onClick={() => onToggle(offer.tag)}
+  >
+    <span aria-hidden="true">{picked ? EMPHASIS_ON : EMPHASIS_OFF}</span> {readable(offer.tag)}
+  </button>
+)
+
+/**
+ * ROUTE 1 (ADR-0067) — start from what the deck is about.
+ *
+ * Offer eight of the 48 qualifying semantics, take one or more, and show the
+ * commanders that carry them ranked by how many of the picks each one matches.
+ *
+ * ## Where the randomness is
+ *
+ * Here, and nowhere below. The endpoint serves the whole qualifying set in a
+ * stable order — 48 tags is small enough to send — and the eight are drawn from
+ * it by the domain's own seeded sampler with a seed this component makes. A
+ * redraw is a new seed and no round trip.
+ *
+ * That is what keeps the tests honest: a test that fixes the seed gets a fixed
+ * eight out of the SHIPPED sampler rather than out of a mock standing in for it,
+ * and the server has no `ORDER BY random()` for anything to have to pin.
+ *
+ * ## What is deliberately not here
+ *
+ * No colour filter. There is no deck yet, so there is no identity to filter by
+ * — the commander the builder picks is what will decide it.
+ */
+const SemanticEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.Element => {
+  const headingId = useId()
+  const [offers, setOffers] = useState<readonly api.SemanticOffer[] | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [seed, setSeed] = useState(() => crypto.randomUUID())
+  const [picked, setPicked] = useState<readonly string[]>([])
+  const [carriers, setCarriers] = useState<{
+    items: api.Card[]
+    matches: Record<string, number>
+    total: number
+    images: Record<string, api.ImageUris>
+  } | null>(null)
+  const [looking, setLooking] = useState(false)
+  /**
+   * Always-mounted live region (see the workspace's, and `Quickbuild`'s).
+   *
+   * A redraw replaces eight chips in place. Without this it is a silent change
+   * — the control keeps its own name, so a screen reader is told nothing at all
+   * happened — which is precisely the failure R4 names.
+   */
+  const [announcement, setAnnouncement] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .commanderSemantics()
+      .then((r) => {
+        if (!cancelled) setOffers(r.offers)
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const drawn = useMemo(
+    () => (offers === null ? [] : drawSemanticOffers(offers, seed)),
+    [offers, seed],
+  )
+
+  useEffect(() => {
+    if (picked.length === 0) {
+      setCarriers(null)
+      setLooking(false)
+      return
+    }
+    let cancelled = false
+    setLooking(true)
+    api
+      .commandersBySemantics(picked)
+      .then((r) => {
+        if (cancelled) return
+        setCarriers({
+          items: r.items,
+          matches: r.matches,
+          total: r.total,
+          images: r.images ?? {},
+        })
+        setLooking(false)
+        setAnnouncement(
+          `${plural(r.total, 'commander')} carry ${plural(picked.length, 'chosen semantic')}.`,
+        )
+      })
+      .catch(() => {
+        if (cancelled) return
+        setCarriers(null)
+        setLooking(false)
+        setFailed(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [picked])
+
+  const toggle = (tag: string): void =>
+    setPicked((current) =>
+      current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag],
+    )
+
+  const redraw = (): void => {
+    setSeed(crypto.randomUUID())
+    // Said before the chips change rather than after, because the message is
+    // about what is arriving. The count is stated because "new semantics" alone
+    // does not tell a reader whether the list they were on is still there.
+    setAnnouncement(`${String(SEMANTIC_OFFER_SAMPLE)} new semantics offered.`)
+  }
+
+  return (
+    <section className="start-route" aria-labelledby={headingId}>
+      <h3 id={headingId}>Or start from what the deck is about</h3>
+      <p className="note">
+        Pick one or more and see which commanders carry them. Every one of these has at least twenty
+        commanders and a hundred and fifty cards behind it.
+      </p>
+
+      {failed && offers === null ? (
+        <p className="problem">
+          The semantics are not answering, so this way in is unavailable — the commander search
+          above still works.
+        </p>
+      ) : null}
+
+      <p className="tags start-semantics">
+        {drawn.map((offer) => (
+          <SemanticPick
+            key={offer.tag}
+            offer={offer}
+            picked={picked.includes(offer.tag)}
+            onToggle={toggle}
+          />
+        ))}
+      </p>
+
+      {offers === null && !failed ? <p className="note">Finding some semantics…</p> : null}
+
+      {offers !== null ? (
+        <button type="button" className="act" onClick={redraw}>
+          Show me eight others
+        </button>
+      ) : null}
+
+      {picked.length > 0 ? (
+        <div className="start-carriers">
+          {looking && carriers === null ? <p className="note">Looking…</p> : null}
+          {carriers !== null && carriers.items.length === 0 ? (
+            <p className="problem">
+              No commander carries all of those together. Drop one of the picks.
+            </p>
+          ) : null}
+          {carriers !== null && carriers.items.length > 0 ? (
+            <>
+              <p className="note">
+                {plural(carriers.total, 'commander')} carry {plural(picked.length, 'pick')}
+                {carriers.total > carriers.items.length
+                  ? `, best ${String(carriers.items.length)} first`
+                  : ''}
+                .
+              </p>
+              {/*
+               * A REAL list (P1). These are enumerable alternatives and the
+               * count matters to somebody who cannot see the page, so the
+               * number of items has to be announceable rather than inferred
+               * from how long the scroll is.
+               */}
+              <ul
+                className="start-carrier-list"
+                aria-label="Commanders carrying the chosen semantics"
+              >
+                {carriers.items.map((c) => (
+                  <li key={c.oracleId}>
+                    <span className="sr">
+                      {`Matches ${String(carriers.matches[c.oracleId] ?? 0)} of ${String(
+                        picked.length,
+                      )}. `}
+                    </span>
+                    <span className="start-match" aria-hidden="true">
+                      {String(carriers.matches[c.oracleId] ?? 0)}/{String(picked.length)}
+                    </span>
+                    <CardRow
+                      card={c}
+                      actions={[
+                        {
+                          label: 'Choose',
+                          kind: 'accept',
+                          onClick: () => onChoose(c, carriers.images),
+                        },
+                      ]}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
+      <p className="sr" role="status" aria-live="polite">
+        {announcement}
+      </p>
+    </section>
+  )
+}
+
+/**
+ * ROUTE 2 (ADR-0067) — quickdraw.
+ *
+ * Three commanders: two from `edhrec_rank <= 5000` and one from the whole legal
+ * pool, with the wildcard marked. A reroll deals three more.
+ *
+ * ## Yes, this uses popularity and Route 1 refuses it
+ *
+ * Deliberately. Popularity may not decide what is INTERESTING — that is Route
+ * 1's question and its ranking has no rank in it — but it is allowed to keep a
+ * random draw RECOGNISABLE. There are 3,411 legal commanders and 216 under rank
+ * 2000, so a uniform draw is almost always three cards nobody has heard of, and
+ * a hand nobody recognises is not an invitation.
+ *
+ * ## Where the randomness is
+ *
+ * One `crypto.randomUUID()` per deal, here. The endpoint is a deterministic
+ * function of that seed, so the contract test asserts the exact hand rather than
+ * pinning a generator it does not own.
+ */
+const QuickdrawEntry = ({ onChoose }: { onChoose: ChooseCommander }): React.JSX.Element => {
+  const headingId = useId()
+  const [seed, setSeed] = useState(() => crypto.randomUUID())
+  const [hand, setHand] = useState<{
+    items: api.Card[]
+    wildcard: string | null
+    images: Record<string, api.ImageUris>
+  } | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [announcement, setAnnouncement] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .quickdrawCommanders(seed)
+      .then((r) => {
+        if (cancelled) return
+        setHand({ items: r.items, wildcard: r.wildcard, images: r.images ?? {} })
+        setFailed(false)
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [seed])
+
+  const reroll = (): void => {
+    setSeed(crypto.randomUUID())
+    setAnnouncement('Three new commanders dealt.')
+  }
+
+  return (
+    <section className="start-route" aria-labelledby={headingId}>
+      <h3 id={headingId}>Or deal three at random</h3>
+      <p className="note">
+        Two commanders you have a fair chance of recognising, and one from anywhere in the format.
+      </p>
+
+      {failed ? (
+        <p className="problem">
+          The draw is not answering, so this way in is unavailable — the commander search above
+          still works.
+        </p>
+      ) : null}
+
+      {hand === null && !failed ? <p className="note">Dealing…</p> : null}
+
+      {hand !== null ? (
+        <ul className="start-hand" aria-label="Three commanders dealt">
+          {hand.items.map((c) => (
+            <li key={c.oracleId}>
+              {/*
+               * THE WILDCARD'S MARK IS WORDS, not a colour (P1). The stylesheet
+               * tints the row as well, and that tint is decoration on top of a
+               * label that is already readable and already announced — a reader
+               * who cannot see the tint loses nothing.
+               */}
+              {c.oracleId === hand.wildcard ? (
+                <span className="start-wildcard">
+                  <span aria-hidden="true">✦</span> Wildcard — drawn from every legal commander
+                </span>
+              ) : null}
+              <CardRow
+                card={c}
+                actions={[
+                  { label: 'Choose', kind: 'accept', onClick: () => onChoose(c, hand.images) },
+                ]}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {hand !== null ? (
+        <button type="button" className="act" onClick={reroll}>
+          Deal three more
+        </button>
+      ) : null}
+
+      <p className="sr" role="status" aria-live="polite">
+        {announcement}
+      </p>
+    </section>
+  )
+}
+
 const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JSX.Element => {
   const [term, setTerm] = useState('')
   /**
@@ -1505,6 +1881,30 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
     }
   }, [query, noUB])
 
+  /**
+   * Settle on a commander, from whichever of the three doors it came through
+   * (ADR-0067).
+   *
+   * ONE function for all three, and that is the whole shape of this change: the
+   * new routes do not create decks, do not have their own archetype pickers and
+   * do not duplicate the focus prompt. They END here, at the same `chosen`, and
+   * everything below — the card face, "What is this deck about?", the archetype
+   * and bracket, "Start building" — is the screen that was already there.
+   *
+   * The art is merged rather than replaced. The search's own results are in this
+   * map too, and a route handing back its three images must not blank the eight
+   * the search just fetched.
+   */
+  const choose = (card: api.Card, images?: Record<string, api.ImageUris>): void => {
+    if (images !== undefined) {
+      setResultImages((current) => new Map([...current, ...Object.entries(images)]))
+    }
+    // For the reason the search box's `onChange` clears it: the picks were about
+    // whichever commander is being replaced.
+    setEmphasis([])
+    setChosen(card)
+  }
+
   const create = (): void => {
     if (chosen === null) return
     setBusy(true)
@@ -1598,43 +1998,59 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
         </div>
 
         {chosen === null ? (
-          <div className="start-results">
-            {/* No "searching…" line here: the button IS the spinner, and saying
+          <>
+            <div className="start-results">
+              {/* No "searching…" line here: the button IS the spinner, and saying
               it in two places is one place too many. */}
-            {search === 'failed' ? (
-              <p className="problem">
-                {searchError} — the card search is not answering, so no commander can be picked yet.
-              </p>
-            ) : null}
+              {search === 'failed' ? (
+                <p className="problem">
+                  {searchError} — the card search is not answering, so no commander can be picked
+                  yet.
+                </p>
+              ) : null}
 
-            {search === 'done' && results.length === 0 ? (
-              <p className="problem">
-                Nothing found.
-                <span className="note">
-                  {' '}
-                  No card that can be a commander matches “{query}”.
-                  {noUB ? ' Universes Beyond cards are excluded — try unchecking that.' : ''}
-                </span>
-              </p>
-            ) : null}
+              {search === 'done' && results.length === 0 ? (
+                <p className="problem">
+                  Nothing found.
+                  <span className="note">
+                    {' '}
+                    No card that can be a commander matches “{query}”.
+                    {noUB ? ' Universes Beyond cards are excluded — try unchecking that.' : ''}
+                  </span>
+                </p>
+              ) : null}
+
+              {/*
+               * The results stay text rows, deliberately.
+               *
+               * Eight art crops here would be eight image requests to help pick
+               * between candidates that are already distinguished by the thing
+               * the reader typed — a name. Art earns its space at the moment the
+               * choice is MADE, below, where there is one card and getting it
+               * wrong means building a deck around the wrong legend.
+               */}
+              {results.slice(0, 8).map((c) => (
+                <CardRow
+                  key={c.oracleId}
+                  card={c}
+                  actions={[{ label: 'Choose', kind: 'accept', onClick: () => choose(c) }]}
+                />
+              ))}
+            </div>
 
             {/*
-             * The results stay text rows, deliberately.
+             * The two other doors (ADR-0067), BESIDE the search and not instead
+             * of it.
              *
-             * Eight art crops here would be eight image requests to help pick
-             * between candidates that are already distinguished by the thing
-             * the reader typed — a name. Art earns its space at the moment the
-             * choice is MADE, below, where there is one card and getting it
-             * wrong means building a deck around the wrong legend.
+             * Below it rather than above, and that ordering is the decision. A
+             * reader who arrived knowing the commander they want should meet the
+             * box that answers them first; these are for the reader who does not,
+             * and that reader is scrolling anyway. Both vanish once a commander is
+             * chosen, because the question they answer has been answered.
              */}
-            {results.slice(0, 8).map((c) => (
-              <CardRow
-                key={c.oracleId}
-                card={c}
-                actions={[{ label: 'Choose', kind: 'accept', onClick: () => setChosen(c) }]}
-              />
-            ))}
-          </div>
+            <SemanticEntry onChoose={choose} />
+            <QuickdrawEntry onChoose={choose} />
+          </>
         ) : (
           /*
            * The commander, as a card, once one is chosen.

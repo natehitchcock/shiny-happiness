@@ -2,7 +2,12 @@ import { semanticMembership } from '@roundtable/domain'
 import type { Card, Color, OracleId, PrintingId, Role } from '@roundtable/domain'
 import type { Pool } from 'pg'
 
-interface CardRow {
+/**
+ * Exported since ADR-0067 so `commanders.ts` can read the same columns into the
+ * same cards. It is the shape `toCard` accepts and nothing more; a read that
+ * wants a `Card` out of this package must produce one of these.
+ */
+export interface CardRow {
   readonly oracle_id: string
   readonly name: string
   readonly mana_cost: string | null
@@ -96,6 +101,16 @@ const toCard = (row: CardRow): Card => ({
   synergyHas: semanticMembership({ typeLine: row.type_line, keywords: row.keywords }),
   gameChanger: row.game_changer,
 })
+
+/**
+ * Rows to cards, for a read that lives in another file.
+ *
+ * `toCard` itself stays private: it is the one place `synergyHas` is derived
+ * (ADR-0048) and the one place NULL `can_be_commander` is kept distinct from
+ * `false`, and a second caller mapping rows by hand would eventually get one of
+ * those wrong. This exports the mapping without exporting a second way to do it.
+ */
+export const cardsFromRows = (rows: readonly CardRow[]): Card[] => rows.map(toCard)
 
 /**
  * Bulk upsert.
@@ -259,7 +274,7 @@ export const getCards = async (pool: Pool, ids: readonly OracleId[]): Promise<Ca
  * `pg_column_size` so the two halves are comparable: the ADR-0046 tag columns
  * ADD 1.247 MiB and this trim gives back 0.396 MiB.
  */
-const ELIGIBLE_COLUMNS = `oracle_id, name, mana_cost, mana_value, color_identity, colors,
+export const ELIGIBLE_COLUMNS = `oracle_id, name, mana_cost, mana_value, color_identity, colors,
        produced_mana, type_line, types, oracle_text, power, toughness, loyalty,
        keywords, legality_commander, can_be_commander, edhrec_rank, default_printing,
        roles, primary_role, universes_beyond, synergy_produces, synergy_wants, game_changer`

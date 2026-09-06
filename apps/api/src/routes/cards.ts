@@ -159,7 +159,7 @@ const asCandidate = (card: Card, facts: PrintingFacts | undefined): AnnotatedCan
  * that diverges from doc 04 §4.1's "no client request ever hits a third-party
  * image host", and why `ING-04` is still the gated project it always was.
  */
-interface ImageUris {
+export interface ImageUris {
   readonly artCrop: string | null
   readonly normal: string | null
   /**
@@ -200,7 +200,12 @@ interface ImageUris {
  */
 const NO_IMAGES: ImageUris = { artCrop: null, normal: null }
 
-const imagesFor = (
+/**
+ * Exported since ADR-0067, so the commander-entry routes send art on exactly
+ * the same terms rather than growing a second, subtly different answer to
+ * "what does it mean for a card to have no picture".
+ */
+export const imagesFor = (
   ids: readonly OracleId[],
   facts: ReadonlyMap<OracleId, PrintingFacts>,
 ): Record<string, ImageUris> => {

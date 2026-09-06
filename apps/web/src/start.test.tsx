@@ -14,6 +14,10 @@ import { App } from './App'
  */
 vi.mock('./api', () => ({
   searchCards: vi.fn(),
+  // The start screen's two other doors call these on mount (ADR-0067).
+  commanderSemantics: vi.fn(),
+  commandersBySemantics: vi.fn(),
+  quickdrawCommanders: vi.fn(),
   createDeck: vi.fn(),
   getDeck: vi.fn(),
   listDecks: vi.fn(),
@@ -34,6 +38,15 @@ const mocked = vi.mocked(api)
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  /*
+   * ADR-0067. The two entry routes below the commander search fetch on mount,
+   * so every suite that mounts the start screen has to answer them. Empty
+   * offers and an empty hand keep this file's start screen exactly as it was:
+   * the routes render their headings and nothing else.
+   */
+  mocked.commanderSemantics.mockResolvedValue({ offers: [] })
+  mocked.commandersBySemantics.mockResolvedValue({ items: [], matches: {}, total: 0 })
+  mocked.quickdrawCommanders.mockResolvedValue({ items: [], wildcard: null, seed: 'test-seed' })
   mocked.searchCards.mockResolvedValue({ items: [] })
   mocked.getRecommendations.mockResolvedValue({
     datasetSnapshotId: null,

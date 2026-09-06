@@ -2354,6 +2354,99 @@ select {
 }
 
 /*
+ * The two other ways in (ADR-0067), below the search and above the archetype.
+ *
+ * A rule ABOVE each rather than a box around each. The start column is 560 px
+ * and already holds a field, a results list and three more controls; three
+ * bordered panels stacked in it read as three separate forms rather than as
+ * three ways to answer one question. A hairline says "another way" for a pixel.
+ */
+.start-route {
+  margin: calc(var(--step) * 2) 0;
+  padding-top: calc(var(--step) * 1.5);
+  border-top: 1px solid var(--rule);
+  text-align: left;
+}
+.start-route h3 {
+  margin: 0 0 4px;
+  font: 600 0.95rem/1.3 var(--display);
+}
+.start-route > .note {
+  margin: 0 0 var(--step);
+}
+
+.start-semantics {
+  gap: 6px;
+}
+
+/*
+ * An offered semantic, as a toggle.
+ *
+ * Reuses `.tag`'s pill shape so the chips here and the chips under a chosen
+ * commander are recognisably the same kind of thing, and adds what a `.tag`
+ * lacks and a control must have: a pointer, a hover, a real focus ring and a
+ * target big enough to hit. 24 px matches `.act.emphasise`, which is the other
+ * chip-sized button on this screen.
+ */
+.start-semantic {
+  min-height: 24px;
+  background: none;
+  color: var(--parchment-dim);
+  cursor: pointer;
+  font: 500 0.7rem/1.6 var(--ui);
+}
+.start-semantic:hover {
+  color: var(--parchment);
+  border-color: var(--parchment-dim);
+}
+.start-semantic:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+/* "You decided this" is brass here as everywhere else — on top of a glyph that
+   has already changed shape, never instead of one. */
+.start-semantic[data-picked='true'] {
+  color: var(--brass);
+  border-color: var(--brass);
+}
+
+.start-carriers {
+  margin-top: var(--step);
+}
+.start-carrier-list,
+.start-hand {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.start-carrier-list > li,
+.start-hand > li {
+  position: relative;
+}
+
+/* How many of the picks this one matched, beside the row it belongs to. */
+.start-match {
+  float: right;
+  margin-top: 8px;
+  color: var(--parchment-dim);
+  font: 500 0.68rem/1 var(--mono);
+}
+
+/*
+ * The wildcard's mark.
+ *
+ * The colour is the third signal, not the first: the row says "Wildcard" in
+ * words, the glyph is a shape, and this only tints what both already say.
+ */
+.start-wildcard {
+  display: block;
+  color: var(--brass);
+  font: 500 0.68rem/1.4 var(--ui);
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+
+/*
  * The chosen commander, shown as a card rather than as a name in a text field.
  *
  * It takes the place of the results list, so the block it sits in is the same
