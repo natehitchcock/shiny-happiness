@@ -200,14 +200,14 @@ that has no intercept adds an intercept — and that is nearly all of the 1.3866
 1.2132 improvement. Measured against a model that already has an explicit
 intercept, Rate's own contribution is:
 
-| model | MAE |
-| --- | ---: |
-| roles + produces + intercept | 1.2127 |
-| + Rate | 1.2076 |
-| roles + produces + intercept + body | 1.0636 |
-| + Rate | 1.0585 |
+| model | MAE | Rate buys |
+| --- | ---: | ---: |
+| roles + produces + intercept | 1.2215 | |
+| + Rate | 1.2132 | 0.0083 |
+| roles + produces + intercept + body | 1.0636 | |
+| + Rate | 1.0585 | 0.0051 |
 
-**Five thousandths of a mana, both times.** The fitted tier prices show the same
+**Under a hundredth of a mana, both times.** The fitted tier prices show the same
 thing directly — one-shot 3.004, activated 3.103, triggered 3.125, upkeep 3.145
 — a spread of 0.14 mana across the whole axis. The ordering is the one the
 report predicted (a repeating effect does cost more than a one-shot) and the
@@ -230,13 +230,21 @@ The body is priced as a little model of its own:
 | `toughness` | 0.3663 | one point of toughness, in mana |
 
 **A point of power is worth 1.20× a point of toughness**, which is a fact about
-Magic the model now simply has. Fitting them as one summed `P+T` feature instead
-was measured and is very slightly worse — 0.9505 against 0.9503, and 0.9535
-against 0.9533 held out — so the split is kept, and it is kept for what it says
-as much as for the thousandth of a mana.
+Magic the model now simply has, and the reason to fit them as two features
+rather than one. Both forms were measured:
+
+| body form | MAE | CV MAE | coefficients |
+| --- | ---: | ---: | --- |
+| power and toughness separately | **0.9503** | **0.9533** | offset −1.8486, power 0.4402, toughness 0.3663 |
+| one summed `P+T` | 0.9505 | 0.9535 | offset −1.8559, per point 0.4029 |
+
+The split fits better on both, by two ten-thousandths of a mana — which is
+noise, and is not why it is kept. It is kept because 0.4402 and 0.3663 are a
+statement about Magic and 0.4029 is their average wearing a disguise. Two
+features against 31,782 rows cost nothing to carry.
 
 **Including the body at all is the single largest improvement any feature
-makes**: 1.2076 → 0.9503, a fifth of the remaining error, against the 1.4122
+makes**: 1.2132 → 0.9503, a fifth of the remaining error, against the 1.4122
 that roles-only least squares reached.
 
 **A card with no printed numeric power and toughness contributes exactly zero
