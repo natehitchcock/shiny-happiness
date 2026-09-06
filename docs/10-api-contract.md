@@ -121,7 +121,7 @@ GET /api/v1/commanders/quickdraw?seed=
 **The offer is the whole qualifying set, not a sample.** A tag qualifies when at
 least 10 commander-legal commanders carry it and at least 70 commander-legal
 cards support it, counting `produces` and `wants` and never `has` — 66 tags
-against the live corpus. The client draws its handful of three from that with the
+against the live corpus. The client draws its handful of eight from that with the
 domain's own seeded sampler, so a redraw is a new seed rather than a request, and
 "See all 66" is a filter over a list already in hand rather than a second call.
 

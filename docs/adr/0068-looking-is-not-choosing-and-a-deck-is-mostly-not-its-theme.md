@@ -1,7 +1,9 @@
 # ADR-0068 — Looking is not choosing, and a deck is mostly not its theme
 
-**Status:** accepted
+**Status:** accepted, amended
 **Date:** 2026-09-05
+**Amended:** 2026-09-05 — §11, two corrections to §3.6 and §6, made the same day
+after seeing them on the screen
 **Relates to:** [ADR-0067](0067-a-name-is-the-wrong-question-for-someone-who-has-not-chosen.md)
 (the two routes this amends — its thresholds and its sample size are superseded
 here, its `has` refusal is reused unchanged),
@@ -19,9 +21,12 @@ brings with it).
 **Changes:** `Preview` gains one optional prop and five of its existing props
 become optional; `Start` gains a detail pane, a picks region, an expander and a
 focus carry-over; `SEMANTIC_OFFER_THRESHOLDS` moves from 20/150 to 10/70 and
-`SEMANTIC_OFFER_SAMPLE` from 8 to 3. **No wire shape changes and no new
-endpoint** — `GET /cards/{oracleId}` and `GET /commanders/semantics` already
-serve everything four of these five changes need.
+`SEMANTIC_OFFER_SAMPLE` from 8 to 3 — **and then back to 8, and the preview
+trigger from an action button to the card's own name: see §11, an amendment made
+the same day.** `CardRow` gains one optional prop and loses its `Preview`
+action. **No wire shape changes and no new endpoint** — `GET /cards/{oracleId}`
+and `GET /commanders/semantics` already serve everything four of these five
+changes need.
 
 ---
 
@@ -157,6 +162,9 @@ assume the rule had been forgotten.
 
 ### 3.6 Accessibility
 
+> **Superseded in part by §11.1.** The label below is unchanged; the thing
+> carrying it is the card's name, not an action button.
+
 - The trigger is `CardRow`'s own action button, and `CardRow` builds
   `${label} ${card.name}` — so labelling the action `Preview` produces
   `Preview Krenko, Mob Boss`, which is character-for-character the label the
@@ -247,6 +255,11 @@ from a threshold and is not one to make inside this change:
   to "what is this deck about".
 
 ## 6. Three offered, sixty-six reachable
+
+> **Superseded by §11.2: the sample is 8.** Three was chosen against a 48-tag
+> qualifying set and did not survive §5 growing that set to 66. Everything else
+> in this section — the expander, the real count, the free redraw — still
+> stands.
 
 The sample drops from eight to three. Three is a prompt; eight is a wall of
 vocabulary in front of somebody who has not chosen anything yet.
@@ -379,3 +392,90 @@ column renders correctly at any particular width. What is tested is the half tha
 is not CSS — which of the two boxes the component is told it is, the dialog role
 and focus move that follow from it, and every behaviour above. The column
 placement itself has been reasoned about and written down; it has not been seen.
+
+## 11. Amendment, the same day — two corrections
+
+Two of the decisions above were wrong on the screen, and both were corrected in
+the same sitting that made them. Recorded here rather than under a new number:
+same screen, same sitting, and a reader who arrives at §3.6 or §6 has to be told
+in the same document that they moved.
+
+### 11.1 The preview trigger was a button, and should have been the name
+
+**What was built.** Each of the three lists rendered `CardRow` with two actions
+side by side — `Preview`, then `Choose` — and §3.6 reasoned about what the first
+of them should be called.
+
+**In the user's words:** "The preview pane should also be shown when I click the
+entry option (not on the choose button), instead of showing a jenky preview
+button."
+
+**Why it was wrong, and this is the part worth keeping: the app had already
+settled this, and the new screen did not use it.** The deck rail, the rejected
+list and the name-match list all make the card's name the trigger — a
+`.name.as-link` button, inside a `.name-cell` whose own click opens the same
+pane, guarded with `closest('.hint')` so a click that landed on a nested control
+cannot fire twice. Three call sites, one idiom, all of it older than this ADR.
+§3.6 argued carefully about the label the new button should carry and never
+asked whether the button should exist. The lesson is not "use the name": it is
+that a new screen building rows out of an existing component owes itself one
+look at what the existing rows do, because a second idiom for one interaction is
+paid for by every reader after it.
+
+**"Jenky" was also literal.** `kind: 'preview'` had no styling of its own. What
+it had was a collision: the class it produced, `act preview`, matched the
+`.preview` PANEL rules — a border, a background, a margin, and above 900px
+`position: absolute; right: 100%; z-index: 25; width: 21rem`. So there was no
+dead rule to delete when the action went. The collision left with it.
+
+**What changed.**
+
+- `CardRow` takes an optional `onPreview`. Given it, the name is a button inside
+  a `.name-cell`; without it the row is the plain `.name` span it always was.
+  All three call sites pass it, so nothing renders the old shape today — the
+  prop is optional because a row with nothing to open is a legitimate row, not
+  because a caller needed protecting.
+- The `Preview` action is deleted from all three lists. `Choose` is the only
+  button left on the row.
+- The actions stay SIBLINGS of the name cell rather than becoming children of
+  it. That is what keeps a press on `Choose` from also opening the pane.
+  Rejected: `stopPropagation` on the action, which leaves the nesting wrong and
+  hides it.
+- The row is **not** a clickable `<div>`. The row-wide click is the precedent's
+  two halves — the cell's handler, and an `::after` overlay stretched from the
+  name button by the stylesheet — layered on top of a genuine button, which is
+  what a keyboard and a screen reader actually meet.
+
+§3.6's first bullet is superseded in one word only: the label is still
+`Preview <name>`, character-for-character what the workspace says, so the test
+helper still reaches both screens — but the thing carrying that label is the
+card's name, not an action button.
+
+### 11.2 Three offered was too few; the offer opens with eight
+
+§6 dropped `SEMANTIC_OFFER_SAMPLE` from eight to three. **Three was right about
+the set it was chosen against and did not survive that set changing.** 48 tags
+qualified when three was asked for. §5, in the same sitting, moved the
+thresholds to 10 commanders / 70 supporting cards and the qualifying set became
+66 — and three of 66 is too narrow a window to see the vocabulary through: a
+reader would have to work the redraw repeatedly to learn what this screen can
+even be about. The sample is **8**.
+
+Nothing else about Route 1 moves. The thresholds stay at 10/70, the set is still
+66, and "See all 66", the redraw, the picks region and the focus carry-over are
+untouched. Eight is what the screen OPENS with, not a limit on what it offers.
+
+The lesson: a number chosen against a set is only as good as that set. Two
+decisions in one sitting moved in opposite directions — one narrowed the window,
+the other widened what stood behind it — and neither was re-read against the
+other before it shipped.
+
+### 11.3 What the amendment does not verify
+
+§10's limit, and one more of the same kind. jsdom computes no boxes, so the
+`::after` overlay that carries the row-wide click across the rest of the row is
+**not testable here at all**. What is tested is the cell's own handler, that the
+trigger is a focusable `<button>` carrying the card's name in all three lists,
+that a click whose target is the row element reaches no handler, and that
+`Choose` chooses without opening the pane. Whether a row with one button where
+there were two LOOKS right has been reasoned about; it has not been seen.
