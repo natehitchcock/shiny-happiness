@@ -305,6 +305,14 @@ number a user types into `eff>=1` must be the number the column shows them.
 that cards which like Treasures cost more, which is true and is not a statement
 about what the card does.
 
+**An age guard on `generatedAt`.** The file carries the date it was fitted, and
+"these prices are eighteen months old" is exactly the failure the regeneration
+argument is about — but a domain that reads the clock is not pure, and AGENTS.md
+R1 is not negotiable for a convenience. A test that goes red on a date is a time
+bomb that fires on someone who did not cause it. So the date is carried for a
+reader and the guards that ship are the ones that can be evaluated from the file
+alone: provenance, completeness, and not-all-zeroes.
+
 ## 7. What is left open, stated
 
 **The metric is substantially a measure of cheapness.** `corr(efficiency,
