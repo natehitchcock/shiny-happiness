@@ -19,6 +19,15 @@ them are in §18.13's last section — and again, with newer numbers, in
 database, and the honest record of what they will say is a measurement, not a
 guess.
 
+**One of those two files no longer exists.**
+[ADR-0070](adr/0070-an-effect-has-a-price-and-efficiency-is-what-is-left.md)
+replaced the efficiency model outright and deleted `efficiency/baseline.data.json`
+and the `pnpm --filter @roundtable/ingest baseline` command with it. Every
+`baseline` invocation and every `r: 0.4919 -> …` estimate below is a historical
+record of a model that no longer ships; the surviving generator is
+`pnpm --filter @roundtable/ingest effect-prices`. `impact/by-role.data.json` is
+unaffected and is still stale on ADR-0066's terms.
+
 **SUPERSEDED IN PART BY [ADR-0066](adr/0066-mana-and-taxes-are-rules-not-blind-spots.md).**
 This document is the design record and is left as written; the model it describes
 has since changed in four ways, and
