@@ -2410,6 +2410,34 @@ select {
   border-color: var(--brass);
 }
 
+/*
+ * The semantics already chosen, in a box of their own (ADR-0068).
+ *
+ * A redraw used to replace the sample wholesale, so a chosen tag that was not in
+ * the new sample left the screen — and leaving the screen reads as being
+ * unselected whether or not the state survived it. The brass left edge is the
+ * same mark `.preview` and the deck rail use for "you decided this", so the
+ * region reads as the reader's own answer rather than as a fourth offer.
+ */
+.start-picks {
+  border-left: 2px solid var(--brass);
+  padding-left: calc(var(--step) * 1.5);
+  margin: calc(var(--step) * 2) 0;
+}
+
+.start-picks h4 {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--parchment-dim);
+  margin: 0 0 var(--step);
+}
+
+.start-picks .start-semantics {
+  margin: 0;
+}
+
 .start-carriers {
   margin-top: var(--step);
 }

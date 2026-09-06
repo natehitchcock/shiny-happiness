@@ -1328,12 +1328,23 @@ const SemanticPick = ({
   offer,
   picked,
   onToggle,
+  ref,
 }: {
   offer: api.SemanticOffer
   picked: boolean
   onToggle: (tag: string) => void
+  /**
+   * Held by the route, so focus can follow a chip that MOVES (ADR-0068).
+   *
+   * Choosing a semantic re-renders it in the picks region, which unmounts the
+   * button that was pressed — the classic way to drop a keyboard user onto
+   * `<body>`. The route keeps a ref per tag and puts focus back on whichever
+   * element the tag is now drawn as.
+   */
+  ref?: React.Ref<HTMLButtonElement>
 }): React.JSX.Element => (
   <button
+    ref={ref}
     type="button"
     className="tag start-semantic"
     data-picked={picked}
@@ -1355,19 +1366,27 @@ const SemanticPick = ({
 /**
  * ROUTE 1 (ADR-0067) — start from what the deck is about.
  *
- * Offer eight of the 48 qualifying semantics, take one or more, and show the
+ * Offer three of the 66 qualifying semantics, take one or more, and show the
  * commanders that carry them ranked by how many of the picks each one matches.
+ *
+ * ## Three, and the other sixty-three one press away (ADR-0068)
+ *
+ * It offered eight. Eight chips is a wall of vocabulary in front of somebody who
+ * has not chosen anything yet and is being asked the vaguest question on the
+ * page; three is a prompt. Narrowing the sample is only defensible because the
+ * whole set is now reachable — "See all 66", ranked by how many commanders carry
+ * each tag, off the census the endpoint already sent.
  *
  * ## Where the randomness is
  *
  * Here, and nowhere below. The endpoint serves the whole qualifying set in a
- * stable order — 48 tags is small enough to send — and the eight are drawn from
+ * stable order — 66 tags is small enough to send — and the three are drawn from
  * it by the domain's own seeded sampler with a seed this component makes. A
  * redraw is a new seed and no round trip.
  *
  * That is what keeps the tests honest: a test that fixes the seed gets a fixed
- * eight out of the SHIPPED sampler rather than out of a mock standing in for it,
- * and the server has no `ORDER BY random()` for anything to have to pin.
+ * sample out of the SHIPPED sampler rather than out of a mock standing in for
+ * it, and the server has no `ORDER BY random()` for anything to have to pin.
  *
  * ## What is deliberately not here
  *
@@ -1394,13 +1413,38 @@ const SemanticEntry = ({
   } | null>(null)
   const [looking, setLooking] = useState(false)
   /**
-   * Always-mounted live region (see the workspace's, and `Quickbuild`'s).
+   * TWO always-mounted live regions (see the workspace's, and `Quickbuild`'s).
    *
-   * A redraw replaces eight chips in place. Without this it is a silent change
-   * — the control keeps its own name, so a screen reader is told nothing at all
-   * happened — which is precisely the failure R4 names.
+   * A redraw replaces the chips in place. Without a live region it is a silent
+   * change — the control keeps its own name, so a screen reader is told nothing
+   * at all happened — which is precisely the failure R4 names.
+   *
+   * Two rather than one because they carry two different sentences on two
+   * different clocks, and one region made the faster of them unhearable: the
+   * chip-moved message is written at the click and the carrier count arrives a
+   * round trip later, so a single region had the second overwrite the first —
+   * always in a test, and in the browser whenever the answer came back quickly.
+   * Which is precisely the case where "the chip is still on screen, over here"
+   * most needed saying. They are LABELLED so each is a distinct region rather
+   * than two anonymous ones a reader cannot tell apart.
    */
   const [announcement, setAnnouncement] = useState('')
+  const [found, setFound] = useState('')
+  const picksId = useId()
+  /** Whether the whole qualifying set is on screen rather than the sample. */
+  const [showingAll, setShowingAll] = useState(false)
+  /**
+   * One chip per tag, wherever that tag is currently drawn.
+   *
+   * Set-only, never deleted on unmount: a tag that moves between the pool and
+   * the picks region is unmounted and remounted in the SAME commit, and React
+   * runs the detach before the attach — so a delete-on-null would be ordered
+   * correctly today and silently wrong if that ever changed. The effect that
+   * reads this checks `isConnected` instead, which cannot be wrong either way.
+   */
+  const chipRefs = useRef(new Map<string, HTMLButtonElement>())
+  /** A tag whose chip has just moved region and must keep focus. */
+  const focusAfterMove = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -1422,6 +1466,69 @@ const SemanticEntry = ({
     [offers, seed],
   )
 
+  /**
+   * Every qualifying tag, most-carried first (ADR-0068).
+   *
+   * The census already counts commanders per tag and the endpoint already sends
+   * the whole set — that is what makes a redraw free — so revealing all of them
+   * costs no query and asserts nothing the server has not already said. Ranked
+   * by commanders rather than by supporting cards because the question on this
+   * screen is "what could I lead", and the tie is broken on the words the chip
+   * actually shows so the order is one a reader can see the reason for.
+   */
+  const everySemantic = useMemo(
+    () =>
+      offers === null
+        ? []
+        : [...offers].sort(
+            (a, b) =>
+              b.commanders - a.commanders || readable(a.tag).localeCompare(readable(b.tag), 'en'),
+          ),
+    [offers],
+  )
+
+  /*
+   * The pool and the picks, and a tag is in exactly ONE of them.
+   *
+   * The defect: a redraw replaced the sample wholesale, so a chosen tag that
+   * was not in the new sample left the screen entirely — and leaving the screen
+   * reads as being unselected whether or not the state survived it. That is the
+   * trap `EmphasisChoice` already names one screen over: a focus "chosen,
+   * pressed, and invisible", a control with no chip on screen. The redraw made
+   * it reachable in one click.
+   *
+   * Filtering the pool is what keeps the fix from becoming a smaller version of
+   * the confusion it fixes: two controls for one tag, one pressed and one not,
+   * is worse than the disappearance.
+   */
+  const pool = (showingAll ? everySemantic : drawn).filter((o) => !picked.includes(o.tag))
+  const byTag = useMemo(() => new Map((offers ?? []).map((o) => [o.tag, o])), [offers])
+  const pickedOffers = picked
+    .map((tag) => byTag.get(tag))
+    .filter((o): o is api.SemanticOffer => o !== undefined)
+
+  /*
+   * Focus follows the chip across the move, and the move is said out loud.
+   *
+   * Pressing a control that then renders somewhere else is the classic way to
+   * drop a keyboard user onto `<body>`. Cleared unconditionally so one press
+   * arms exactly one focus move — an arm left standing would let some later,
+   * unrelated render steal focus.
+   */
+  useEffect(() => {
+    const tag = focusAfterMove.current
+    if (tag === null) return
+    focusAfterMove.current = null
+    const chip = chipRefs.current.get(tag)
+    if (chip?.isConnected === true) chip.focus()
+  })
+
+  const chipRef =
+    (tag: string) =>
+    (element: HTMLButtonElement | null): void => {
+      if (element !== null) chipRefs.current.set(tag, element)
+    }
+
   useEffect(() => {
     if (picked.length === 0) {
       setCarriers(null)
@@ -1441,7 +1548,7 @@ const SemanticEntry = ({
           images: r.images ?? {},
         })
         setLooking(false)
-        setAnnouncement(
+        setFound(
           `${plural(r.total, 'commander')} carry ${plural(picked.length, 'chosen semantic')}.`,
         )
       })
@@ -1456,10 +1563,26 @@ const SemanticEntry = ({
     }
   }, [picked])
 
-  const toggle = (tag: string): void =>
+  const toggle = (tag: string): void => {
+    const choosing = !picked.includes(tag)
+    focusAfterMove.current = tag
     setPicked((current) =>
       current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag],
     )
+    /*
+     * WHERE the chip went, not just that it was pressed.
+     *
+     * A sighted reader watches it jump between the two regions; the state is
+     * already on `aria-pressed`, so what a screen-reader user is missing is the
+     * relocation itself — and "it is still on screen, over here" is the whole
+     * reassurance this change exists to give.
+     */
+    setAnnouncement(
+      choosing
+        ? `${readable(tag)} chosen — moved to the semantics you have chosen.`
+        : `${readable(tag)} put back with the offers.`,
+    )
+  }
 
   const redraw = (): void => {
     setSeed(crypto.randomUUID())
@@ -1484,22 +1607,80 @@ const SemanticEntry = ({
         </p>
       ) : null}
 
+      {/*
+       * The semantics already chosen, in a region of their own (ADR-0068).
+       *
+       * ABSENT, not empty, when nothing is chosen: a heading over no chips is a
+       * promise of something that is not there — the same rule `SemanticOffer`
+       * and `OfferCategory` follow one screen over.
+       *
+       * ABOVE the pool, because it is the answer so far and the pool is the
+       * question. A reader who has picked two semantics is looking at what they
+       * have, and scrolling past sixty-odd offers to find it would be the
+       * disappearance this fixes wearing a different hat.
+       */}
+      {pickedOffers.length > 0 ? (
+        <section className="start-picks" aria-labelledby={picksId}>
+          <h4 id={picksId}>Semantics you have chosen</h4>
+          <p className="tags start-semantics">
+            {pickedOffers.map((offer) => (
+              <SemanticPick
+                key={offer.tag}
+                offer={offer}
+                picked
+                onToggle={toggle}
+                ref={chipRef(offer.tag)}
+              />
+            ))}
+          </p>
+        </section>
+      ) : null}
+
       <p className="tags start-semantics">
-        {drawn.map((offer) => (
+        {pool.map((offer) => (
           <SemanticPick
             key={offer.tag}
             offer={offer}
-            picked={picked.includes(offer.tag)}
+            picked={false}
             onToggle={toggle}
+            ref={chipRef(offer.tag)}
           />
         ))}
       </p>
 
       {offers === null && !failed ? <p className="note">Finding some semantics…</p> : null}
 
-      {offers !== null ? (
+      {/*
+       * A redraw of the sample, and the way to the whole set.
+       *
+       * The redraw goes away while everything is on screen: dealing three new
+       * ones under a reader who is looking at all sixty-six changes nothing they
+       * can see, so the control would do nothing and say it had.
+       *
+       * THE LABEL CARRIES THE REAL COUNT, from the census the server sent, so it
+       * cannot promise a number that differs from what pressing it reveals.
+       */}
+      {offers !== null && !showingAll ? (
         <button type="button" className="act" onClick={redraw}>
-          Show me eight others
+          Show me {SEMANTIC_OFFER_SAMPLE} others
+        </button>
+      ) : null}
+
+      {offers !== null ? (
+        <button
+          type="button"
+          className="act"
+          aria-expanded={showingAll}
+          onClick={() => {
+            setShowingAll((current) => !current)
+            setAnnouncement(
+              showingAll
+                ? `Back to ${String(SEMANTIC_OFFER_SAMPLE)} offered semantics.`
+                : `All ${String(offers.length)} semantics shown, most-led first.`,
+            )
+          }}
+        >
+          {showingAll ? 'Show fewer' : `See all ${String(offers.length)}`}
         </button>
       ) : null}
 
@@ -1563,8 +1744,11 @@ const SemanticEntry = ({
         </div>
       ) : null}
 
-      <p className="sr" role="status" aria-live="polite">
+      <p className="sr" role="status" aria-live="polite" aria-label="Semantics offered">
         {announcement}
+      </p>
+      <p className="sr" role="status" aria-live="polite" aria-label="Commanders found">
+        {found}
       </p>
     </section>
   )
@@ -2184,7 +2368,10 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
        * most of the time would push the start column off centre permanently, and
        * this page is a centred column when nothing is being read.
        */}
-      <div className="start-layout" data-preview={previewShown == null ? 'closed' : 'open'}>
+      <div
+        className="start-layout"
+        data-preview={previewShown === null || previewShown === undefined ? 'closed' : 'open'}
+      >
         <div className="start">
           {/* h2, not h1: the wordmark above is the page's heading, exactly as it
             is in the workspace. Two h1s would be two answers to "what is this

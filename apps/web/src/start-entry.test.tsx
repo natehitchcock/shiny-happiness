@@ -193,6 +193,12 @@ const QUICKDRAW = 'Or deal three at random'
  * one in another.
  */
 const SAMPLE = SEMANTIC_OFFER_SAMPLE
+const REDRAW = `Show me ${String(SAMPLE)} others`
+/** The expander's label carries the REAL size of the qualifying set, not a round number. */
+const SEE_ALL = `See all ${String(OFFERS.length)}`
+const PICKS = 'Semantics you have chosen'
+/** The route has two live regions; this is the one the chips write to. */
+const OFFERED = 'Semantics offered'
 
 const show = async (): Promise<void> => {
   render(<App />)
@@ -241,22 +247,22 @@ describe('both routes sit beside the commander search, not instead of it', () =>
 })
 
 describe('route 1 — start from what the deck is about', () => {
-  it('offers eight of the qualifying semantics, not all of them', async () => {
+  it('offers a handful of the qualifying semantics, not all of them', async () => {
     await show()
-    await waitFor(() => expect(chips()).toHaveLength(8))
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
     // Drawn from the twelve the server sent, and every one of them a real offer.
     for (const shown of chips()) expect(shown.length).toBeGreaterThan(0)
   })
 
-  it('draws the same eight from the same seed, and different eight on a redraw', async () => {
+  it('draws the same sample from the same seed, and a different one on a redraw', async () => {
     await show()
-    await waitFor(() => expect(chips()).toHaveLength(8))
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
     const first = chips()
 
-    await click(screen.getByText('Show me eight others'))
+    await click(screen.getByText(REDRAW))
     const second = chips()
 
-    expect(second).toHaveLength(8)
+    expect(second).toHaveLength(SAMPLE)
     expect(second).not.toEqual(first)
 
     // And the seed decides it: a second mount starting from seed 1 again draws
@@ -264,31 +270,31 @@ describe('route 1 — start from what the deck is about', () => {
     cleanup()
     seeds = 0
     await show()
-    await waitFor(() => expect(chips()).toHaveLength(8))
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
     expect(chips()).toEqual(first)
   })
 
   it('asks the server once and redraws without another round trip', async () => {
     // 48 tags is small enough to send whole, which is what makes a redraw free.
     await show()
-    await waitFor(() => expect(chips()).toHaveLength(8))
-    await click(screen.getByText('Show me eight others'))
-    await click(screen.getByText('Show me eight others'))
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+    await click(screen.getByText(REDRAW))
+    await click(screen.getByText(REDRAW))
     expect(mocked.commanderSemantics).toHaveBeenCalledTimes(1)
   })
 
   it('announces that new semantics arrived rather than changing silently', async () => {
     await show()
-    await waitFor(() => expect(chips()).toHaveLength(8))
-    await click(screen.getByText('Show me eight others'))
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+    await click(screen.getByText(REDRAW))
 
-    const live = within(region(SEMANTICS)).getByRole('status')
-    expect(live.textContent).toContain('8 new semantics offered')
+    const live = within(region(SEMANTICS)).getByRole('status', { name: OFFERED })
+    expect(live.textContent).toContain(`${String(SAMPLE)} new semantics offered`)
   })
 
   it('makes each offer a real toggle, keyboard reachable and not colour alone', async () => {
     await show()
-    await waitFor(() => expect(chips()).toHaveLength(8))
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
 
     const first = within(region(SEMANTICS)).getAllByRole('button', { pressed: false })[0]!
     expect(first.tagName).toBe('BUTTON')
@@ -296,14 +302,20 @@ describe('route 1 — start from what the deck is about', () => {
     // The glyph is the second signal, so the state does not live in a colour.
     expect(first.textContent).toContain('✧')
 
+    const tag = first.textContent?.replace(/^[✦✧]\s*/, '').trim() ?? ''
     await click(first)
-    expect(first.getAttribute('aria-pressed')).toBe('true')
-    expect(first.textContent).toContain('✦')
+
+    // The SAME tag, now pressed — in the picks region, because that is where a
+    // chosen semantic lives. The control it was is gone; the control it became
+    // carries the state.
+    const picked = within(region(PICKS)).getByRole('button', { pressed: true })
+    expect(picked.textContent).toContain(tag)
+    expect(picked.textContent).toContain('✦')
   })
 
   it('says what stands behind an offer, in its accessible name', async () => {
     await show()
-    await waitFor(() => expect(chips()).toHaveLength(8))
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
     const first = within(region(SEMANTICS)).getAllByRole('button', { pressed: false })[0]!
     expect(first.getAttribute('aria-label')).toContain('40 commanders')
     expect(first.getAttribute('aria-label')).toContain('400 cards')
@@ -316,7 +328,7 @@ describe('route 1 — start from what the deck is about', () => {
       total: 2,
     })
     await show()
-    await waitFor(() => expect(chips()).toHaveLength(8))
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
     await click(within(region(SEMANTICS)).getAllByRole('button', { pressed: false })[0]!)
 
     await waitFor(() =>
@@ -335,7 +347,7 @@ describe('route 1 — start from what the deck is about', () => {
       total: 2,
     })
     await show()
-    await waitFor(() => expect(chips()).toHaveLength(8))
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
     const buttons = within(region(SEMANTICS)).getAllByRole('button', { pressed: false })
     await click(buttons[0]!)
     await click(within(region(SEMANTICS)).getAllByRole('button', { pressed: false })[0]!)
@@ -356,7 +368,7 @@ describe('route 1 — start from what the deck is about', () => {
   it('says so when nothing carries every pick, rather than showing an empty list', async () => {
     mocked.commandersBySemantics.mockResolvedValue({ items: [], matches: {}, total: 0 })
     await show()
-    await waitFor(() => expect(chips()).toHaveLength(8))
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
     await click(within(region(SEMANTICS)).getAllByRole('button', { pressed: false })[0]!)
 
     await waitFor(() =>
@@ -385,7 +397,7 @@ describe('route 1 — start from what the deck is about', () => {
     } as unknown as api.Deck)
 
     await show()
-    await waitFor(() => expect(chips()).toHaveLength(8))
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
     await click(within(region(SEMANTICS)).getAllByRole('button', { pressed: false })[0]!)
     // Scoped to this route: the same commander is in the quickdraw hand below,
     // and choosing it from there would prove a different thing.
@@ -406,6 +418,162 @@ describe('route 1 — start from what the deck is about', () => {
     expect(mocked.createDeck).toHaveBeenCalledWith(
       expect.objectContaining({ commanders: [LATHRIL.oracleId] }),
     )
+  })
+
+  /**
+   * The whole qualifying set, one press away (ADR-0068).
+   *
+   * Three at a time is a prompt rather than a wall, and it is only defensible if
+   * the other sixty-odd are reachable — otherwise narrowing the sample would be
+   * hiding the vocabulary rather than introducing it.
+   */
+  describe('seeing all of them', () => {
+    it('names the real size of the set rather than a round number', async () => {
+      await show()
+      await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+      // The count comes from the census the server sent, so it cannot drift from
+      // what pressing the button actually reveals.
+      expect(screen.getByText(SEE_ALL)).toBeDefined()
+    })
+
+    it('reveals every qualifying tag, ranked by how many commanders carry it', async () => {
+      mocked.commanderSemantics.mockResolvedValue({
+        offers: [
+          { tag: 'landfall', category: 'mechanics', commanders: 12, supporting: 200 },
+          { tag: 'treasure', category: 'mechanics', commanders: 90, supporting: 200 },
+          { tag: 'token', category: 'mechanics', commanders: 45, supporting: 200 },
+        ],
+      })
+      await show()
+      await waitFor(() => expect(screen.getByText('See all 3')).toBeDefined())
+      await click(screen.getByText('See all 3'))
+
+      // Most-carried first: the census already holds the count, so this needs no
+      // second query and makes no claim the endpoint has not already made.
+      expect(chips()).toEqual(['treasure', 'making tokens', 'lands entering'])
+    })
+
+    it('collapses back to the sample without losing what was chosen', async () => {
+      await show()
+      await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+      await click(screen.getByText(SEE_ALL))
+      expect(chips().length).toBeGreaterThan(SAMPLE)
+
+      const chosen = within(region(SEMANTICS)).getAllByRole('button', { pressed: false })[0]!
+      const tag = chosen.textContent?.replace(/^[✦✧]\s*/, '').trim() ?? ''
+      await click(chosen)
+
+      await click(screen.getByText('Show fewer'))
+      expect(chips()).toHaveLength(SAMPLE)
+      expect(within(region(PICKS)).getByRole('button', { pressed: true }).textContent).toContain(
+        tag,
+      )
+    })
+  })
+
+  /**
+   * The bug this fixes, in the user's words: "when I select semantics, move them
+   * to a separate region so that showing eight others don't unselect the ones
+   * I've chosen so far".
+   *
+   * A redraw replaces the sample wholesale, so a chosen tag that is not in the
+   * new sample simply left the screen — and leaving the screen reads as being
+   * unselected whether or not the state survived. `EmphasisChoice` carries the
+   * same lesson about a focus that would be "chosen, pressed, and invisible".
+   */
+  describe('the semantics already chosen keep a place of their own', () => {
+    const pickFirst = async (): Promise<string> => {
+      const first = within(region(SEMANTICS)).getAllByRole('button', { pressed: false })[0]!
+      const tag = first.textContent?.replace(/^[✦✧]\s*/, '').trim() ?? ''
+      await click(first)
+      return tag
+    }
+
+    it('has no region at all until something is chosen', async () => {
+      await show()
+      await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+      // Absent, not empty: a heading over nothing is a promise of something
+      // that is not there.
+      expect(screen.queryByRole('region', { name: PICKS })).toBeNull()
+    })
+
+    it('keeps a pick on screen across a redraw', async () => {
+      await show()
+      await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+      const tag = await pickFirst()
+
+      await click(screen.getByText(REDRAW))
+      await click(screen.getByText(REDRAW))
+
+      const picks = within(region(PICKS)).getAllByRole('button', { pressed: true })
+      expect(picks.map((b) => b.textContent?.replace(/^[✦✧]\s*/, '').trim())).toEqual([tag])
+    })
+
+    it('draws a chosen tag exactly once, never in both places', async () => {
+      await show()
+      await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+      const tag = await pickFirst()
+
+      // Expanding brings the whole set into the pool, including the tag that has
+      // already been chosen — which must still appear only in the picks region.
+      await click(screen.getByText(SEE_ALL))
+
+      const everywhere = within(region(SEMANTICS))
+        .getAllByRole('button')
+        .filter((b) => b.getAttribute('aria-pressed') !== null)
+        .map((b) => b.textContent?.replace(/^[✦✧]\s*/, '').trim())
+      expect(everywhere.filter((t) => t === tag)).toHaveLength(1)
+    })
+
+    it('returns a released tag to the pool', async () => {
+      await show()
+      await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+      const tag = await pickFirst()
+      expect(chips()).not.toContain(tag)
+
+      await click(within(region(PICKS)).getByRole('button', { pressed: true }))
+
+      expect(screen.queryByRole('region', { name: PICKS })).toBeNull()
+      expect(chips()).toContain(tag)
+    })
+
+    it('keeps focus on the chip that moved, and says that it moved', async () => {
+      // The classic way to dump focus on `<body>`: press a control that then
+      // renders somewhere else. A keyboard reader must still be standing on it.
+      await show()
+      await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+      const tag = await pickFirst()
+
+      const moved = within(region(PICKS)).getByRole('button', { pressed: true })
+      expect(document.activeElement).toBe(moved)
+
+      const live = within(region(SEMANTICS)).getByRole('status', { name: OFFERED })
+      expect(live.textContent).toContain(tag)
+      expect(live.textContent).toContain('chosen')
+
+      // And back the other way, so the return trip is not the silent one.
+      await click(moved)
+      const returned = within(region(SEMANTICS))
+        .getAllByRole('button', { pressed: false })
+        .find((b) => b.textContent?.includes(tag) === true)
+      expect(document.activeElement).toBe(returned)
+      expect(
+        within(region(SEMANTICS)).getByRole('status', { name: OFFERED }).textContent,
+      ).toContain('back')
+    })
+
+    it('still sends every pick to the server, wherever the chip is drawn', async () => {
+      await show()
+      await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+      const first = await pickFirst()
+      const second = await pickFirst()
+
+      await waitFor(() => expect(mocked.commandersBySemantics).toHaveBeenCalled())
+      const sent = mocked.commandersBySemantics.mock.calls.at(-1)?.[0]
+      expect(sent).toHaveLength(2)
+      expect(within(region(PICKS)).getAllByRole('button', { pressed: true })).toHaveLength(2)
+      expect(first).not.toEqual(second)
+    })
   })
 
   it('says the route is unavailable rather than rendering an empty offer', async () => {
