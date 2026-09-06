@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { SEMANTIC_OFFER_SAMPLE } from '@roundtable/domain'
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from './api'
@@ -102,9 +103,48 @@ const OFFERS: api.SemanticOffer[] = [
   offer('ability:flying', 'keyword'),
 ]
 
-const KRENKO = card('Krenko, Mob Boss')
-const LATHRIL = card('Lathril, Blade of the Elves')
+const KRENKO = card('Krenko, Mob Boss', {
+  oracleText: '{T}: Create X 1/1 red Goblin creature tokens.',
+  synergyProduces: ['token'],
+})
+const LATHRIL = card('Lathril, Blade of the Elves', {
+  synergyProduces: ['token'],
+  synergyWants: ['creature-death'],
+})
 const STRANGER = card('Nobody Has Heard Of Me')
+
+/**
+ * A card's detail, as the preview asks for it.
+ *
+ * `combos` defaults to a TWO-CARD combo on purpose. That is the shape that
+ * makes `Works` speak with an empty deck — a combo missing exactly one piece
+ * is the "one card away" branch — and the empty-deck test below is the reason
+ * this fixture is not the convenient empty one.
+ */
+const detailOf = (c: api.Card, over: Partial<api.CardDetail> = {}): api.CardDetail => ({
+  ...c,
+  printings: [
+    {
+      printingId: `p-${c.oracleId}`,
+      setCode: 'cmr',
+      setName: 'Commander Legends',
+      rarity: 'rare',
+      priceUsd: 1.5,
+    },
+  ],
+  combos: [
+    {
+      id: `combo-${c.oracleId}`,
+      pieces: [
+        { oracleId: c.oracleId, name: c.name },
+        { oracleId: 'o-Thornbite Staff', name: 'Thornbite Staff' },
+      ],
+      produces: ['infinite tokens'],
+    },
+  ],
+  references: [],
+  ...over,
+})
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -130,6 +170,10 @@ beforeEach(() => {
   mocked.getAnalysis.mockRejectedValue(new Error('not needed here'))
   mocked.hydrate.mockResolvedValue({ cards: new Map(), prices: new Map(), images: new Map() })
   mocked.basicLands.mockResolvedValue({ items: [] })
+  mocked.getCardDetail.mockImplementation((oracleId: string) => {
+    const known = [KRENKO, LATHRIL, STRANGER].find((c) => c.oracleId === oracleId)
+    return Promise.resolve(detailOf(known ?? card(oracleId)))
+  })
 })
 
 afterEach(() => {
@@ -139,6 +183,16 @@ afterEach(() => {
 
 const SEMANTICS = 'Or start from what the deck is about'
 const QUICKDRAW = 'Or deal three at random'
+
+/**
+ * How many the route offers at once, from the domain rather than from a literal.
+ *
+ * The number is a product decision that has already moved once (eight, then
+ * three), and a test file that spells it out is a second place to change it —
+ * which is how a suite comes to assert the old number in one file and the new
+ * one in another.
+ */
+const SAMPLE = SEMANTIC_OFFER_SAMPLE
 
 const show = async (): Promise<void> => {
   render(<App />)
@@ -456,5 +510,210 @@ describe('route 2 — quickdraw', () => {
     mocked.quickdrawCommanders.mockRejectedValue(new Error('Request failed (500)'))
     await show()
     await waitFor(() => expect(screen.getByText(/The draw is not answering/)).toBeDefined())
+  })
+})
+
+/**
+ * Looking at a commander before committing to one (ADR-0068).
+ *
+ * Every one of the three doors offered a Choose and nothing else, so the only
+ * way to find out what a legend does was to build a deck around it. These tests
+ * are about the pane that answers that — the WORKSPACE's pane, reused, which is
+ * why several of them are about what it must NOT say here.
+ *
+ * ## What these tests cannot check
+ *
+ * Where the pane sits. jsdom does no CSS layout at all, so "a side column when
+ * there is room, a bottom sheet when there is not" is unverifiable here beyond
+ * the one thing that is not CSS: which of the two the component was TOLD it is,
+ * and the dialog semantics and focus move that ride on that flag.
+ */
+const previewPane = (name: string): HTMLElement => screen.getByRole('complementary', { name })
+
+const openPreviewOf = async (name: string, scope?: HTMLElement): Promise<void> => {
+  const trigger = (scope === undefined ? screen : within(scope)).getByLabelText(`Preview ${name}`)
+  await click(trigger)
+  await waitFor(() => expect(previewPane(`${name} details`)).toBeDefined())
+}
+
+describe('previewing a commander before choosing it', () => {
+  it('opens the pane from a name-search result', async () => {
+    mocked.searchCards.mockResolvedValue({ items: [KRENKO] })
+    await show()
+    await openPreviewOf('Krenko, Mob Boss')
+
+    const pane = previewPane('Krenko, Mob Boss details')
+    expect(within(pane).getByRole('heading', { name: 'Krenko, Mob Boss' })).toBeDefined()
+    // The card itself, not a name in a box: the rules text is what the reader
+    // came for and it is the half a row cannot show.
+    expect(pane.textContent).toContain('Create X 1/1 red Goblin creature tokens')
+  })
+
+  it('opens the pane from a commander carrying a chosen semantic', async () => {
+    mocked.commandersBySemantics.mockResolvedValue({
+      items: [LATHRIL],
+      matches: { [LATHRIL.oracleId]: 1 },
+      total: 1,
+    })
+    await show()
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+    await click(within(region(SEMANTICS)).getAllByRole('button', { pressed: false })[0]!)
+    await waitFor(() =>
+      expect(
+        within(region(SEMANTICS)).getByLabelText('Preview Lathril, Blade of the Elves'),
+      ).toBeDefined(),
+    )
+
+    await openPreviewOf('Lathril, Blade of the Elves', region(SEMANTICS))
+    expect(previewPane('Lathril, Blade of the Elves details')).toBeDefined()
+  })
+
+  it('opens the pane from a dealt commander', async () => {
+    await show()
+    await waitFor(() =>
+      expect(screen.getByRole('list', { name: 'Three commanders dealt' })).toBeDefined(),
+    )
+    await openPreviewOf('Nobody Has Heard Of Me', region(QUICKDRAW))
+    expect(previewPane('Nobody Has Heard Of Me details')).toBeDefined()
+  })
+
+  it('shows the card that was asked for, and swaps wholly to the next one', async () => {
+    await show()
+    await waitFor(() =>
+      expect(screen.getByRole('list', { name: 'Three commanders dealt' })).toBeDefined(),
+    )
+    await openPreviewOf('Krenko, Mob Boss', region(QUICKDRAW))
+    expect(
+      screen.queryByRole('complementary', { name: 'Lathril, Blade of the Elves details' }),
+    ).toBeNull()
+
+    await openPreviewOf('Lathril, Blade of the Elves', region(QUICKDRAW))
+    // One pane, showing one card. A second pane, or the first card's text left
+    // under the second card's name, is the failure this pins.
+    expect(screen.getAllByRole('complementary')).toHaveLength(1)
+    expect(screen.queryByRole('complementary', { name: 'Krenko, Mob Boss details' })).toBeNull()
+  })
+
+  it('announces the card the pane opened on, and each swap after it', async () => {
+    await show()
+    await waitFor(() =>
+      expect(screen.getByRole('list', { name: 'Three commanders dealt' })).toBeDefined(),
+    )
+
+    await openPreviewOf('Krenko, Mob Boss', region(QUICKDRAW))
+    expect(screen.getByRole('status', { name: 'Card preview' }).textContent).toContain(
+      'Krenko, Mob Boss',
+    )
+
+    // A sighted reader sees the pane change; without this a screen-reader user
+    // is told nothing at all happened.
+    await openPreviewOf('Lathril, Blade of the Elves', region(QUICKDRAW))
+    expect(screen.getByRole('status', { name: 'Card preview' }).textContent).toContain(
+      'Lathril, Blade of the Elves',
+    )
+  })
+
+  it('carries the Choose action, and it reaches createDeck with that commander', async () => {
+    mocked.createDeck.mockResolvedValue({
+      id: 'd3',
+      name: 'Lathril, Blade of the Elves deck',
+      description: '',
+      commanders: [LATHRIL.oracleId],
+      colorIdentity: ['B'],
+      targetBracket: 3,
+      archetype: 'midrange',
+      version: 1,
+      excludeUniversesBeyond: false,
+      budget: null,
+      entries: [],
+    } as unknown as api.Deck)
+
+    await show()
+    await waitFor(() =>
+      expect(screen.getByRole('list', { name: 'Three commanders dealt' })).toBeDefined(),
+    )
+    await openPreviewOf('Lathril, Blade of the Elves', region(QUICKDRAW))
+
+    const pane = previewPane('Lathril, Blade of the Elves details')
+    const choose = within(pane).getByLabelText('Choose Lathril, Blade of the Elves')
+    expect(choose.tagName).toBe('BUTTON')
+    await click(choose)
+
+    // The same landing the rows reach, through the same `choose`.
+    expect(screen.getByText(/Building around/)).toBeDefined()
+    await click(screen.getByText('Start building').closest('button')!)
+    expect(mocked.createDeck).toHaveBeenCalledWith(
+      expect.objectContaining({ commanders: [LATHRIL.oracleId] }),
+    )
+  })
+
+  it('closes on Escape and puts focus back on the control that opened it', async () => {
+    await show()
+    await waitFor(() =>
+      expect(screen.getByRole('list', { name: 'Three commanders dealt' })).toBeDefined(),
+    )
+    const trigger = within(region(QUICKDRAW)).getByLabelText('Preview Krenko, Mob Boss')
+    trigger.focus()
+    await openPreviewOf('Krenko, Mob Boss', region(QUICKDRAW))
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+
+    expect(screen.queryByRole('complementary', { name: 'Krenko, Mob Boss details' })).toBeNull()
+    // Not `<body>`. A keyboard reader who dismisses the pane has to be returned
+    // to the row they were on, not to the top of the page.
+    expect(document.activeElement).toBe(
+      within(region(QUICKDRAW)).getByLabelText('Preview Krenko, Mob Boss'),
+    )
+  })
+
+  it('offers no emphasise control on this screen, because there is no deck to focus', async () => {
+    await show()
+    await waitFor(() =>
+      expect(screen.getByRole('list', { name: 'Three commanders dealt' })).toBeDefined(),
+    )
+    await openPreviewOf('Krenko, Mob Boss', region(QUICKDRAW))
+
+    const pane = previewPane('Krenko, Mob Boss details')
+    // The chip is still there — it is a label, and the semantics are a fact
+    // about the card. What is absent is the control that would write a focus
+    // to a deck that does not exist.
+    expect(within(pane).getByText('making tokens')).toBeDefined()
+    expect(within(pane).queryByLabelText(/^Emphasise /)).toBeNull()
+  })
+
+  it('makes no claim about a deck, because there is no deck', async () => {
+    // `Works` is NOT silent on an empty accepted set: a two-card combo leaves
+    // exactly one piece missing, which is its "one card away" branch, so an
+    // empty deck would have produced the heading "Works with your deck" and a
+    // line reading "No combo assembled yet — these need one more card".
+    await show()
+    await waitFor(() =>
+      expect(screen.getByRole('list', { name: 'Three commanders dealt' })).toBeDefined(),
+    )
+    await openPreviewOf('Krenko, Mob Boss', region(QUICKDRAW))
+
+    const pane = previewPane('Krenko, Mob Boss details')
+    expect(pane.textContent).not.toContain('Works with your deck')
+    expect(pane.textContent).not.toContain('need one more card')
+    expect(pane.textContent).not.toContain('Synergises with')
+    // What IS a fact about the card survives: it is in a combo, and that is
+    // true of the cardboard rather than of any deck.
+    expect(pane.textContent).toContain('In 1 combo')
+  })
+
+  it('is the rail panel on a wide screen and the sheet on a narrow one', async () => {
+    // The one half of the placement that is not CSS: what the component is told
+    // it is, and the dialog role and focus move that follow from it.
+    await show()
+    await waitFor(() =>
+      expect(screen.getByRole('list', { name: 'Three commanders dealt' })).toBeDefined(),
+    )
+    await openPreviewOf('Krenko, Mob Boss', region(QUICKDRAW))
+
+    const pane = previewPane('Krenko, Mob Boss details')
+    expect(pane.className).not.toContain('preview-sheet')
+    expect(pane.getAttribute('role')).toBeNull()
   })
 })
