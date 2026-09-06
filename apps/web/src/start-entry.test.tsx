@@ -845,32 +845,90 @@ describe('route 2 — quickdraw', () => {
  * are about the pane that answers that — the WORKSPACE's pane, reused, which is
  * why several of them are about what it must NOT say here.
  *
+ * ## The trigger is the card's own name
+ *
+ * It was a second action button beside Choose, and that was the correction
+ * (amendment 1). The label did not change — `Preview Krenko, Mob Boss` is still
+ * character-for-character what the workspace says — so the helper below reaches
+ * the new trigger and the old one identically, which is the whole reason these
+ * tests could be updated rather than rewritten.
+ *
  * ## What these tests cannot check
  *
  * Where the pane sits. jsdom does no CSS layout at all, so "a side column when
  * there is room, a bottom sheet when there is not" is unverifiable here beyond
  * the one thing that is not CSS: which of the two the component was TOLD it is,
  * and the dialog semantics and focus move that ride on that flag.
+ *
+ * The same limit applies to the row-wide click. The mouse convenience is two
+ * halves: a handler on the name cell, which is tested below, and a `::after`
+ * overlay stretched across the row by the stylesheet, which is not testable
+ * here at all — jsdom computes no boxes, so there is nothing for a click to
+ * land on. That half has been reasoned about and written down; it has not been
+ * seen.
  */
 const previewPane = (name: string): HTMLElement => screen.getByRole('complementary', { name })
 
+const previewTrigger = (name: string, scope?: HTMLElement): HTMLElement =>
+  (scope === undefined ? screen : within(scope)).getByLabelText(`Preview ${name}`)
+
 const openPreviewOf = async (name: string, scope?: HTMLElement): Promise<void> => {
-  const trigger = (scope === undefined ? screen : within(scope)).getByLabelText(`Preview ${name}`)
-  await click(trigger)
+  await click(previewTrigger(name, scope))
   await waitFor(() => expect(previewPane(`${name} details`)).toBeDefined())
 }
 
+/**
+ * The name search's results, as a scope.
+ *
+ * By class, which the rest of this file avoids on principle — the block is a
+ * plain `div` with no heading and no landmark, so there is no role or label to
+ * ask for. Scoping matters here because the fixture hand below contains the
+ * same commanders the search can return, and an unscoped query would find the
+ * dealt row and prove the wrong list.
+ */
+const searchResults = (): HTMLElement => document.querySelector('.start-results')!
+
+/** Type a commander's name and commit it, which is the only thing that searches. */
+const searchFor = async (term: string): Promise<void> => {
+  const box = screen.getByLabelText('Commander')
+  await act(async () => {
+    fireEvent.change(box, { target: { value: term } })
+  })
+  await act(async () => {
+    fireEvent.keyDown(box, { key: 'Enter' })
+  })
+}
+
+/** A commander only the SEARCH can produce: never dealt, never a carrier. */
+const GRIST = card('Grist, the Hunger Tide', {
+  oracleText: 'Whenever Grist enters, create a 1/1 black Insect creature token.',
+  synergyProduces: ['token'],
+})
+
 describe('previewing a commander before choosing it', () => {
   it('opens the pane from a name-search result', async () => {
-    mocked.searchCards.mockResolvedValue({ items: [KRENKO] })
+    /*
+     * A REAL search: `Grist` is typed and committed, and the row that opens the
+     * pane is the one under the box.
+     *
+     * This test used to render `Krenko` into the search mock and then open the
+     * pane unscoped — but nothing searches until two characters are committed,
+     * so the only `Preview Krenko, Mob Boss` on the page was the DEALT row, and
+     * the test named a list it never touched. A commander the hand cannot
+     * contain is what makes the scope honest.
+     */
+    mocked.searchCards.mockResolvedValue({ items: [GRIST] })
+    mocked.getCardDetail.mockResolvedValue(detailOf(GRIST))
     await show()
-    await openPreviewOf('Krenko, Mob Boss')
+    await searchFor('Grist')
+    await waitFor(() => expect(previewTrigger(GRIST.name, searchResults())).toBeDefined())
+    await openPreviewOf(GRIST.name, searchResults())
 
-    const pane = previewPane('Krenko, Mob Boss details')
-    expect(within(pane).getByRole('heading', { name: 'Krenko, Mob Boss' })).toBeDefined()
+    const pane = previewPane(`${GRIST.name} details`)
+    expect(within(pane).getByRole('heading', { name: GRIST.name })).toBeDefined()
     // The card itself, not a name in a box: the rules text is what the reader
     // came for and it is the half a row cannot show.
-    expect(pane.textContent).toContain('Create X 1/1 red Goblin creature tokens')
+    expect(pane.textContent).toContain('create a 1/1 black Insect creature token')
   })
 
   it('opens the pane from a commander carrying a chosen semantic', async () => {
@@ -899,6 +957,189 @@ describe('previewing a commander before choosing it', () => {
     )
     await openPreviewOf('Nobody Has Heard Of Me', region(QUICKDRAW))
     expect(previewPane('Nobody Has Heard Of Me details')).toBeDefined()
+  })
+
+  /**
+   * The trigger is the name, and there is no second button (amendment 1).
+   *
+   * In the user's words: "the preview pane should also be shown when I click
+   * the entry option (not on the choose button), instead of showing a jenky
+   * preview button". The pattern was already settled everywhere else in the
+   * app — the deck rail, the rejected list and the name-match list all make the
+   * card's name a `.name.as-link` button — and these three lists simply did not
+   * use it.
+   */
+  describe('the trigger is the card’s own name', () => {
+    /** One of the three lists, and the commander it is being asked about. */
+    interface Rendered {
+      list: string
+      scope: HTMLElement
+      name: string
+    }
+
+    /** All three on screen at once, so one loop can hold each to the same rule. */
+    const inEveryList = async (): Promise<Rendered[]> => {
+      mocked.searchCards.mockResolvedValue({ items: [GRIST] })
+      mocked.commandersBySemantics.mockResolvedValue({
+        items: [LATHRIL],
+        matches: { [LATHRIL.oracleId]: 1 },
+        total: 1,
+      })
+      await show()
+      await searchFor('Grist')
+      await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+      await click(within(region(SEMANTICS)).getAllByRole('button', { pressed: false })[0]!)
+      await waitFor(() =>
+        expect(within(region(SEMANTICS)).getByLabelText(`Choose ${LATHRIL.name}`)).toBeDefined(),
+      )
+      return [
+        { list: 'the name search', scope: searchResults(), name: GRIST.name },
+        { list: 'the carriers of a semantic', scope: region(SEMANTICS), name: LATHRIL.name },
+        { list: 'the dealt hand', scope: region(QUICKDRAW), name: STRANGER.name },
+      ]
+    }
+
+    it('is a button carrying the card’s name, in all three lists', async () => {
+      for (const { list, scope, name } of await inEveryList()) {
+        const trigger = previewTrigger(name, scope)
+        // A real control, not a div with a handler: this is what makes it
+        // focusable and what makes Enter and Space activate it.
+        expect(trigger.tagName, list).toBe('BUTTON')
+        // …and the control IS the name, rather than a button beside it.
+        expect(trigger.textContent, list).toContain(name)
+        expect(trigger.className, list).toContain('as-link')
+      }
+    })
+
+    it('leaves Choose as the only action on the row', async () => {
+      for (const { list, scope, name } of await inEveryList()) {
+        const row = previewTrigger(name, scope).closest('.card-row')!
+        // Exactly two controls, in this order: the name, then the decision.
+        expect(
+          within(row as HTMLElement)
+            .getAllByRole('button')
+            .map((b) => b.getAttribute('aria-label')),
+          list,
+        ).toEqual([`Preview ${name}`, `Choose ${name}`])
+      }
+      // And nothing anywhere still renders the action that was deleted.
+      expect(document.querySelectorAll('.act.preview')).toHaveLength(0)
+      expect(
+        [...document.querySelectorAll('button')].filter((b) => b.textContent === 'Preview'),
+      ).toHaveLength(0)
+    })
+
+    it('opens the pane from a click on the row’s text block, not only on the name', async () => {
+      await show()
+      await waitFor(() =>
+        expect(screen.getByRole('list', { name: 'Three commanders dealt' })).toBeDefined(),
+      )
+      const trigger = previewTrigger(KRENKO.name, region(QUICKDRAW))
+      const cell = trigger.closest('.name-cell')!
+      expect(cell).not.toBe(trigger)
+
+      await act(async () => {
+        fireEvent.click(cell)
+      })
+      await waitFor(() => expect(previewPane(`${KRENKO.name} details`)).toBeDefined())
+    })
+
+    it('does not put the handler on the row itself, which no keyboard could reach', async () => {
+      await show()
+      await waitFor(() =>
+        expect(screen.getByRole('list', { name: 'Three commanders dealt' })).toBeDefined(),
+      )
+      const row = previewTrigger(KRENKO.name, region(QUICKDRAW)).closest('.card-row')!
+
+      // A click whose target is the row element itself reaches no handler: the
+      // row is not a control, and the mouse convenience over the rest of it is
+      // an overlay stretched from the name button — CSS, which jsdom does not
+      // compute. What this pins is the thing that WOULD have been wrong: a
+      // clickable `<div>`, which takes no focus and answers no key.
+      await act(async () => {
+        fireEvent.click(row)
+      })
+      expect(screen.queryAllByRole('complementary')).toHaveLength(0)
+    })
+
+    it('is reachable and activatable from the keyboard', async () => {
+      await show()
+      await waitFor(() =>
+        expect(screen.getByRole('list', { name: 'Three commanders dealt' })).toBeDefined(),
+      )
+      const trigger = previewTrigger(KRENKO.name, region(QUICKDRAW))
+
+      trigger.focus()
+      expect(document.activeElement).toBe(trigger)
+      // In the tab order rather than merely focusable by script.
+      expect(trigger.getAttribute('tabindex')).toBeNull()
+      expect(trigger.hasAttribute('disabled')).toBe(false)
+
+      /*
+       * Activation, as the browser delivers it. jsdom does not synthesise the
+       * Enter-and-Space-to-click behaviour of a native button, so a `keyDown`
+       * here would prove nothing about the component; the guarantee is that the
+       * element IS a `<button>` — asserted above — and that the click a browser
+       * dispatches from those keys opens the pane.
+       */
+      const focused = document.activeElement as HTMLElement
+      await act(async () => {
+        focused.click()
+      })
+      await waitFor(() => expect(previewPane(`${KRENKO.name} details`)).toBeDefined())
+    })
+  })
+
+  /**
+   * Choosing is not looking, in the other direction (amendment 1).
+   *
+   * The actions are SIBLINGS of the name cell rather than children of it, which
+   * is what keeps a press on Choose out of the preview's handler. The rejected
+   * alternative was `stopPropagation` on the button, which leaves the nesting
+   * wrong and hides it.
+   */
+  describe('choosing does not also open the pane', () => {
+    const chose = (): void => {
+      expect(screen.getByText(/Building around/)).toBeDefined()
+      // Not "no pane for this card": no pane at all.
+      expect(screen.queryAllByRole('complementary')).toHaveLength(0)
+    }
+
+    it('from a name-search result', async () => {
+      mocked.searchCards.mockResolvedValue({ items: [GRIST] })
+      await show()
+      await searchFor('Grist')
+      await waitFor(() =>
+        expect(within(searchResults()).getByLabelText(`Choose ${GRIST.name}`)).toBeDefined(),
+      )
+      await click(within(searchResults()).getByLabelText(`Choose ${GRIST.name}`))
+      chose()
+    })
+
+    it('from a commander carrying a chosen semantic', async () => {
+      mocked.commandersBySemantics.mockResolvedValue({
+        items: [LATHRIL],
+        matches: { [LATHRIL.oracleId]: 1 },
+        total: 1,
+      })
+      await show()
+      await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+      await click(within(region(SEMANTICS)).getAllByRole('button', { pressed: false })[0]!)
+      await waitFor(() =>
+        expect(within(region(SEMANTICS)).getByLabelText(`Choose ${LATHRIL.name}`)).toBeDefined(),
+      )
+      await click(within(region(SEMANTICS)).getByLabelText(`Choose ${LATHRIL.name}`))
+      chose()
+    })
+
+    it('from a dealt commander', async () => {
+      await show()
+      await waitFor(() =>
+        expect(within(region(QUICKDRAW)).getByLabelText(`Choose ${STRANGER.name}`)).toBeDefined(),
+      )
+      await click(within(region(QUICKDRAW)).getByLabelText(`Choose ${STRANGER.name}`))
+      chose()
+    })
   })
 
   it('shows the card that was asked for, and swaps wholly to the next one', async () => {
