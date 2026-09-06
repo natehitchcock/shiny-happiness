@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { SEMANTIC_OFFER_SAMPLE } from '@roundtable/domain'
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from './api'
 import { App } from './App'
@@ -573,6 +573,162 @@ describe('route 1 — start from what the deck is about', () => {
       expect(sent).toHaveLength(2)
       expect(within(region(PICKS)).getAllByRole('button', { pressed: true })).toHaveLength(2)
       expect(first).not.toEqual(second)
+    })
+  })
+
+  /**
+   * The picks become the deck's focus, where the commander agrees (ADR-0068).
+   *
+   * The reader answered "what is this deck about" on the way in and was then
+   * asked it again by the focus prompt, because the picks were dropped the
+   * moment a commander was chosen.
+   *
+   * The intersection is computed on the CLIENT and needs nothing new on the
+   * wire: a commander is only in Route 1's results because it carries a picked
+   * tag in `produces` or `wants`, and both sides of that are already in hand.
+   */
+  describe('carrying the picks into the deck’s focus', () => {
+    /** Three offers, so the sample IS the whole set and a pick is nameable. */
+    const THREE: api.SemanticOffer[] = [
+      { tag: 'landfall', category: 'mechanics', commanders: 40, supporting: 400 },
+      { tag: 'treasure', category: 'mechanics', commanders: 40, supporting: 400 },
+      { tag: 'subtype:elf', category: 'type', commanders: 40, supporting: 400 },
+    ]
+
+    /**
+     * Carries `landfall` by causing it and `treasure` by benefiting from it, and
+     * is an Elf without that being a reason to focus Elves.
+     */
+    const OMNATH = card('Omnath, Locus of Rage', {
+      synergyProduces: ['landfall'],
+      synergyWants: ['treasure'],
+      synergyHas: ['subtype:elf'],
+    })
+
+    const startOn = async (commander: api.Card, picks: string[]): Promise<void> => {
+      mocked.commanderSemantics.mockResolvedValue({ offers: THREE })
+      mocked.commandersBySemantics.mockResolvedValue({
+        items: [commander],
+        matches: { [commander.oracleId]: picks.length },
+        total: 1,
+      })
+      await show()
+      await waitFor(() => expect(chips()).toHaveLength(THREE.length))
+      for (const pick of picks) {
+        await click(
+          within(region(SEMANTICS))
+            .getAllByRole('button', { pressed: false })
+            .find((b) => b.textContent?.includes(pick) === true)!,
+        )
+      }
+      await waitFor(() =>
+        expect(within(region(SEMANTICS)).getByLabelText(`Choose ${commander.name}`)).toBeDefined(),
+      )
+      await click(within(region(SEMANTICS)).getByLabelText(`Choose ${commander.name}`))
+    }
+
+    const focus = (tag: string): HTMLElement => screen.getByLabelText(`Emphasise ${tag}`)
+
+    it('pre-selects the picks the commander actually carries', async () => {
+      await startOn(OMNATH, ['lands entering', 'treasure'])
+
+      expect(focus('lands entering').getAttribute('aria-pressed')).toBe('true')
+      expect(focus('treasure').getAttribute('aria-pressed')).toBe('true')
+    })
+
+    it('says why they are already on, rather than leaving it looking like a bug', async () => {
+      await startOn(OMNATH, ['lands entering', 'treasure'])
+      expect(screen.getByText(/carries/i).textContent).toContain('lands entering')
+    })
+
+    it('drops a pick the commander does not carry', async () => {
+      await startOn(OMNATH, ['lands entering'])
+      expect(focus('lands entering').getAttribute('aria-pressed')).toBe('true')
+      // The chip is still OFFERED — it is one of the commander's own semantics,
+      // which is a different question — but it is not focused, because it was
+      // never picked.
+      expect(focus('treasure').getAttribute('aria-pressed')).toBe('false')
+    })
+
+    it('drops a pick the commander only carries by BEING one', async () => {
+      /*
+       * `has` is excluded, exactly as ADR-0067 excludes it from matching. Route
+       * 1 asks what a deck is ABOUT, and a commander merely being an Elf is not
+       * a reason to make the deck about Elves — if the two disagreed the screen
+       * would contradict itself between the list and the prompt.
+       */
+      await startOn(OMNATH, ['Elves'])
+      const elves = screen.queryByLabelText('Emphasise Elves')
+      expect(elves === null || elves.getAttribute('aria-pressed') === 'false').toBe(true)
+    })
+
+    it('draws no line at all when nothing was carried', async () => {
+      await startOn(OMNATH, ['Elves'])
+      // An absence is not explained. There is nothing to justify.
+      expect(screen.queryByText(/carried from the semantics you picked/i)).toBeNull()
+    })
+
+    it('lets a carried focus be toggled off like any other', async () => {
+      await startOn(OMNATH, ['lands entering'])
+      await click(focus('lands entering'))
+      expect(focus('lands entering').getAttribute('aria-pressed')).toBe('false')
+    })
+
+    it('recomputes against the new commander when the choice changes', async () => {
+      await startOn(OMNATH, ['lands entering', 'treasure'])
+      expect(focus('lands entering').getAttribute('aria-pressed')).toBe('true')
+
+      // Back to the search, and a commander that carries none of it. A focus
+      // left over from a legend no longer being built is a claim about a card
+      // the reader is not looking at.
+      mocked.searchCards.mockResolvedValue({ items: [STRANGER] })
+      const box = screen.getByLabelText('Commander')
+      await act(async () => {
+        fireEvent.change(box, { target: { value: 'Nobody' } })
+      })
+      await act(async () => {
+        fireEvent.keyDown(box, { key: 'Enter' })
+      })
+      await waitFor(() =>
+        expect(screen.getAllByLabelText(`Choose ${STRANGER.name}`).length).toBeGreaterThan(0),
+      )
+      await click(screen.getAllByLabelText(`Choose ${STRANGER.name}`)[0]!)
+
+      // Nothing carried, and no chip left pressed from the legend that was
+      // abandoned. `Nobody Has Heard Of Me` derives no semantics at all, so the
+      // prompt says so rather than offering a stale focus.
+      expect(screen.queryByLabelText('Emphasise lands entering')).toBeNull()
+      expect(screen.queryByText(/already focused/)).toBeNull()
+    })
+
+    it('rides the create call rather than a write after it', async () => {
+      mocked.createDeck.mockResolvedValue({
+        id: 'd4',
+        name: `${OMNATH.name} deck`,
+        description: '',
+        commanders: [OMNATH.oracleId],
+        colorIdentity: ['R'],
+        targetBracket: 3,
+        archetype: 'midrange',
+        version: 1,
+        excludeUniversesBeyond: false,
+        budget: null,
+        entries: [],
+      } as unknown as api.Deck)
+
+      await startOn(OMNATH, ['lands entering', 'treasure'])
+      await click(screen.getByText('Start building').closest('button')!)
+
+      // In the create body, not a PATCH afterwards: a two-request create leaves
+      // a window in which the deck exists with the wrong focus, and the first
+      // page of suggestions is the one the focus exists to shape.
+      expect(mocked.createDeck).toHaveBeenCalledWith(
+        expect.objectContaining({
+          commanders: [OMNATH.oracleId],
+          semanticEmphasis: expect.arrayContaining(['landfall', 'treasure']),
+        }),
+      )
+      expect(mocked.patchDeck).not.toHaveBeenCalled()
     })
   })
 

@@ -722,6 +722,19 @@ const HIDE_SETTLED_HELP =
 const plural = (n: number, word: string): string => `${String(n)} ${word}${n === 1 ? '' : 's'}`
 
 /**
+ * A list of words as a sentence would say it: "a", "a and b", "a, b and c".
+ *
+ * No Oxford comma, matching the prose everywhere else in this file. Returns ''
+ * for an empty list rather than a stray conjunction — every caller checks the
+ * length first, and a helper that emits " and " for nothing would make the one
+ * that forgets impossible to spot.
+ */
+const listWords = (words: readonly string[]): string =>
+  words.length <= 1
+    ? (words[0] ?? '')
+    : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]!}`
+
+/**
  * A reason, said in words. The UI never shows a bare reason kind.
  *
  * `near-combo` takes its count from the recommendation rather than the reason:
@@ -1306,7 +1319,19 @@ const withQualifier = (tag: string, qualifier: string | undefined): string =>
  * handed back only the card would leave that face blank until something else
  * happened to fetch it.
  */
-type ChooseCommander = (card: api.Card, images?: Record<string, api.ImageUris>) => void
+type ChooseCommander = (
+  card: api.Card,
+  images?: Record<string, api.ImageUris>,
+  /**
+   * The semantics the reader picked on the way to this commander (ADR-0068).
+   *
+   * Route 1 only. The other two doors ask no such question, and an absent list
+   * is not an empty one: it means this route had nothing to say about focus,
+   * which is why `Start` treats undefined and `[]` the same way here but the
+   * create body does not (see `semanticEmphasis`).
+   */
+  picks?: readonly string[],
+) => void
 
 /**
  * One offered semantic, as a toggle.
@@ -1732,7 +1757,11 @@ const SemanticEntry = ({
                         {
                           label: 'Choose',
                           kind: 'accept',
-                          onClick: () => onChoose(c, carriers.images),
+                          // The picks travel with the commander: they are the
+                          // reader's answer to "what is this deck about", and
+                          // dropping them here is what made the focus prompt
+                          // ask it a second time.
+                          onClick: () => onChoose(c, carriers.images, picked),
                         },
                       ]}
                     />
@@ -1940,6 +1969,20 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
    * commander does not have and nobody chose.
    */
   const [emphasis, setEmphasis] = useState<readonly string[]>([])
+  /**
+   * Which of those focuses arrived from Route 1's picks rather than a click.
+   *
+   * Kept apart from `emphasis` for one job: the line under the prompt that says
+   * WHY a chip is already pressed. A focus that appears pre-pressed with no
+   * explanation reads as a bug, and the sentence has to name the tags it is
+   * about rather than gesture at them.
+   *
+   * It is not a second source of truth about the focus. `emphasis` is the deck's
+   * answer and the only thing that rides the create call; this is a note about
+   * where part of it came from, and the sentence is drawn from the INTERSECTION
+   * of the two so that toggling a carried chip off stops it being claimed.
+   */
+  const [carried, setCarried] = useState<readonly string[]>([])
 
   /* --------------------------------------------- looking before choosing */
 
@@ -2164,6 +2207,15 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
   const commanderQualifiers = chosen === null ? NO_QUALIFIERS : commanderQualifierWords([chosen])
 
   /**
+   * The carried-over focuses that are still on, for the line that explains them.
+   *
+   * The intersection rather than `carried` itself: a reader who turns one off
+   * has answered the question the sentence was justifying, and a line still
+   * naming it would be describing a chip that is no longer pressed.
+   */
+  const carriedFocus = carried.filter((tag) => emphasis.includes(tag))
+
+  /**
    * Add or drop one tag before the deck exists. Local state — there is nothing
    * to PATCH yet, so this is the only place emphasis is written optimistically,
    * and it is not optimistic about anything: `createDeck` carries the answer.
@@ -2276,13 +2328,50 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
    * map too, and a route handing back its three images must not blank the eight
    * the search just fetched.
    */
-  const choose = (card: api.Card, images?: Record<string, api.ImageUris>): void => {
+  const choose = (
+    card: api.Card,
+    images?: Record<string, api.ImageUris>,
+    picks?: readonly string[],
+  ): void => {
     if (images !== undefined) {
       setResultImages((current) => new Map([...current, ...Object.entries(images)]))
     }
-    // For the reason the search box's `onChange` clears it: the picks were about
-    // whichever commander is being replaced.
-    setEmphasis([])
+    /*
+     * The picks the COMMANDER agrees with become the deck's first focus
+     * (ADR-0068).
+     *
+     * The reader answers "what is this deck about" on the way in through Route
+     * 1, and the focus prompt below then asked them the same question again
+     * from scratch. This carries the answer across.
+     *
+     * ## Derived here, not fetched
+     *
+     * A commander is in Route 1's results BECAUSE it carries a picked tag, so
+     * the tags to focus are `picks ∩ (produces ∪ wants)` and both sides are
+     * already in hand. Widening the endpoint to send the per-card matched tags
+     * would be storing what can be derived (ADR-0048's rule) for nothing.
+     *
+     * ## `has` is excluded
+     *
+     * The same refusal ADR-0067 makes in `semanticMatchCount`, and it has to be
+     * the same one: Route 1 asks what a deck is ABOUT, and a commander merely
+     * BEING an Elf is not a reason to make the deck about Elves. If the two
+     * disagreed, the screen would contradict itself between the list a
+     * commander appeared in and the focus it arrived with.
+     *
+     * ## Recomputed on every choice
+     *
+     * Not merged with what was there. A focus carried over from a commander the
+     * reader has moved on from is a claim about a card they are not looking at,
+     * which is what ADR-0057 refuses — so choosing again, from any of the three
+     * doors, replaces the set outright. The other two doors pass no picks and
+     * therefore clear it, which is the behaviour the search box's `onChange`
+     * has always had.
+     */
+    const answers = new Set([...card.synergyProduces, ...card.synergyWants])
+    const carriedOver = (picks ?? []).filter((tag) => answers.has(tag))
+    setCarried(carriedOver)
+    setEmphasis(carriedOver)
     /*
      * The pane goes with the lists it was opened from.
      *
@@ -2391,6 +2480,7 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
                   setChosen(null)
                   // The picks below were about the commander being replaced.
                   setEmphasis([])
+                  setCarried([])
                   setTerm(e.target.value)
                 }}
                 onKeyDown={(e) => {
@@ -2525,6 +2615,30 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
                   ranked higher, with the top three kept in every category. Nothing is ever hidden,
                   and you can change it at any point while building.
                 </p>
+                {/*
+                 * WHY some of them are already on (ADR-0068).
+                 *
+                 * A chip that arrives pre-pressed with no explanation reads as a
+                 * bug, and this one is pressed because of something the reader
+                 * did on a part of the screen that is no longer there. One line,
+                 * in the register of the copy above it rather than a tooltip —
+                 * the reason has to be readable without hunting for it.
+                 *
+                 * Drawn from carried ∩ emphasis, so toggling one off stops it
+                 * being claimed rather than leaving a sentence that names a
+                 * focus which is no longer on. Absent entirely when the
+                 * intersection is empty: an absence needs no explaining, and a
+                 * line saying nothing was carried would be an apology for it.
+                 */}
+                {carriedFocus.length === 0 ? null : (
+                  <p className="note">
+                    {listWords(carriedFocus.map(readable))}{' '}
+                    {carriedFocus.length === 1 ? 'is' : 'are'} already focused: you picked{' '}
+                    {carriedFocus.length === 1 ? 'it' : 'them'} above, and {chosen.name} carries{' '}
+                    {carriedFocus.length === 1 ? 'it' : 'them'}. Toggle{' '}
+                    {carriedFocus.length === 1 ? 'it' : 'them'} off like any other.
+                  </p>
+                )}
                 <EmphasisChoice
                   tags={commanderTags}
                   qualifiers={commanderQualifiers}
