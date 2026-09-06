@@ -280,7 +280,9 @@ describe('the two metrics, in the suggestion row', () => {
       ),
     ).toBeDefined()
     expect(
-      within(row).getByLabelText(`Efficiency ${String(efficiencyOf(WRATH_INPUT).score)} per mana`),
+      // "mana", not "per mana": ADR-0070 made the score a difference between
+      // two mana figures, so the unit lost its denominator.
+      within(row).getByLabelText(`Efficiency ${String(efficiencyOf(WRATH_INPUT).score)} mana`),
     ).toBeDefined()
   })
 

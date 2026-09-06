@@ -304,7 +304,9 @@ describe('assertUsablePrices', () => {
   })
 
   it('refuses a table missing a role', () => {
-    const { land: _dropped, ...rest } = FIXTURE.roles
+    const rest = Object.fromEntries(
+      Object.entries(FIXTURE.roles).filter(([role]) => role !== 'land'),
+    )
     expect(() => assertUsablePrices({ ...FIXTURE, roles: rest })).toThrow(/role "land"/)
   })
 

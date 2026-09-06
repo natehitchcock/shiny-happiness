@@ -133,16 +133,18 @@ describe('CardMetrics — the tiers are the reasons', () => {
     expect(panel.getByText("another player's permanent, your board included")).toBeDefined()
   })
 
-  it('shows the arithmetic behind the rate', () => {
+  it('shows the arithmetic behind the price', () => {
     render(<CardMetrics impact={WRATH_IMPACT} efficiency={WRATH_EFFICIENCY} />)
     expect(
-      within(metrics()).getByText(/No surplus body, plus 2\.744 for its text, over 5/),
+      within(metrics()).getByText(
+        /charges 4\.127 mana for a card like this — 4\.127 for what it does, no body — against the 4/,
+      ),
     ).toBeDefined()
   })
 
-  it('warns that a rate is not a ranking', () => {
+  it('warns that a price is not a ranking', () => {
     render(<CardMetrics impact={WRATH_IMPACT} efficiency={WRATH_EFFICIENCY} />)
-    expect(within(metrics()).getByText(/A rate, not a ranking/)).toBeDefined()
+    expect(within(metrics()).getByText(/A price, not a ranking/)).toBeDefined()
   })
 })
 
@@ -327,7 +329,7 @@ describe('Detail mounts it', () => {
   it('shows both metrics on the L3 detail pane', () => {
     render(<Detail card={card({ impact: WRATH_IMPACT, efficiency: WRATH_EFFICIENCY })} />)
     expect(within(metrics()).getByText('6.12')).toBeDefined()
-    expect(within(metrics()).getByText('0.549')).toBeDefined()
+    expect(within(metrics()).getByText('0.127')).toBeDefined()
   })
 
   it('puts them above "Why this is here"', () => {

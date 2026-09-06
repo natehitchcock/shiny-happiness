@@ -340,7 +340,8 @@ describe('impactAlgorithm', () => {
   })
 
   it('quotes no constant that lives in a data file', () => {
-    // The tier values are in `impact.ts` and `r` is in `baseline.data.json`.
+    // The tier values are in `impact.ts`, and every effect price is in
+    // `effect-prices.data.json`.
     // Copy that repeats either goes stale the first time one moves, with
     // nothing to catch it — a UI string is not covered by the model's tests.
     const said = impactAlgorithm().join(' ')
@@ -351,27 +352,42 @@ describe('impactAlgorithm', () => {
 })
 
 describe('efficiencyAlgorithm', () => {
-  it('explains both halves of the numerator and the plus one', () => {
+  it('explains both halves of the price and names the unit', () => {
     const said = efficiencyAlgorithm().join(' ')
     expect(said.toLowerCase()).toContain('body')
-    expect(said.toLowerCase()).toContain('text')
-    // The `+ 1` is the card itself, and it is the part a reader cannot guess.
-    expect(said).toContain('the card itself')
+    expect(said.toLowerCase()).toContain('effect')
+    // The unit is the part a reader cannot guess, and it is the one that
+    // changed: this is mana, not a rate per mana (ADR-0070).
+    expect(said).toContain('in mana')
+    expect(said).not.toContain('per mana')
   })
 
-  it('says the going rate is measured rather than assumed', () => {
-    // The whole point of §18.6: the folk "2/2 for 2" rule is wrong and the
-    // baseline is regenerated from the corpus.
-    expect(efficiencyAlgorithm().join(' ')).toContain('measured')
+  it('says a negative score is a real answer rather than a bug', () => {
+    // 43% of the corpus is negative. A reader who thinks that is an error will
+    // not trust anything else on the pane.
+    expect(efficiencyAlgorithm().join(' ')).toContain('Negative is a real answer')
   })
 
-  it('says surpluses, because that is what rejected the first formula', () => {
-    expect(efficiencyAlgorithm().join(' ').toLowerCase()).toContain('above')
+  it('says the prices are learned from the corpus rather than chosen', () => {
+    expect(efficiencyAlgorithm().join(' ')).toContain('learned from the corpus')
+  })
+
+  it('says the prices are MARGINAL, because that is what rejected the naive model', () => {
+    // Summing per-effect averages double-counts and overprices the format by a
+    // fifth. That correction is the whole reason this is a fit.
+    expect(efficiencyAlgorithm().join(' ')).toContain('ADDS to a card that already has the others')
+  })
+
+  it('states the blind spot the caveat also carries', () => {
+    expect(efficiencyAlgorithm().join(' ')).toContain('only what it can name')
   })
 
   it('quotes no constant that lives in a data file', () => {
+    // Every price is in `effect-prices.data.json` and is refitted from the
+    // corpus; a UI string is not covered by the model's tests, so copy that
+    // repeats one goes stale the first time it moves with nothing to catch it.
     const said = efficiencyAlgorithm().join(' ')
-    for (const drifts of ['0.4484', '6.78', '1.6993']) {
+    for (const drifts of ['0.4402', '0.3663', '1.8486', '3.0044', '0.9503']) {
       expect(said).not.toContain(drifts)
     }
   })
