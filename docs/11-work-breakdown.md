@@ -144,7 +144,7 @@ repeats are grouped for display as `Forest ×20`.
 amended by
 [ADR-0068](adr/0068-looking-is-not-choosing-and-a-deck-is-mostly-not-its-theme.md).
 The commander name search is untouched and still comes first; below it the start
-screen offers **three** of the **66** qualifying semantics (pick some, see the
+screen offers **eight** of the **66** qualifying semantics (pick some, see the
 commanders that carry them, ranked by how many you matched) and a quickdraw of
 three commanders with the wildcard marked. Both end at the same `chosen` the
 search ends at, so the card face, the focus prompt, the archetype and "Start
@@ -154,16 +154,20 @@ building" are the screen that was already there.
 commanders / 70 supporting cards**, not 20/150: the old floor asked how many
 cards are ABOUT a theme, when what decides whether a deck can be built is
 whether it can be FILLED, and most of a Commander deck is staples and lands
-whatever it is about. The sample is three with a **"See all 66"** expander
-ranked by how many commanders carry each tag. **Chosen semantics live in a
+whatever it is about. The sample is eight with a **"See all 66"** expander
+ranked by how many commanders carry each tag — it was briefly three, against a
+48-tag set, and ADR-0068 §11.2 put it back once the thresholds admitted 66. **Chosen semantics live in a
 region of their own** and a tag is drawn in exactly one place, because a redraw
 used to make a pick vanish and vanishing reads as being unselected. And a pick
 the chosen commander carries in `produces` or `wants` **becomes the deck's first
 focus**, computed on the client and riding the create call.
 
-**Every list on that screen previews.** A row's `Preview` button opens the
+**Every list on that screen previews.** Clicking a row's NAME opens the
 WORKSPACE's `Preview` — a side column where there is room, the same bottom sheet
-where there is not — and the pane carries the `Choose`. It deliberately offers
+where there is not — and the pane carries the `Choose`. The name, not a second
+button beside `Choose`: that was the shape it shipped in for a day, and
+ADR-0068 §11.1 replaced it with the `.name.as-link` trigger the deck rail, the
+rejected list and the name-match list had been using all along. It deliberately offers
 no emphasise control and no "Works with your deck" panel there: **empty deck
 sets do not make `Works` fall silent**, they make every two-card combo one card
 away, so the deck-relative props are absent rather than empty. Read ADR-0068 §3.3

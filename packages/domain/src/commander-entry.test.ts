@@ -159,11 +159,13 @@ describe('drawSemanticOffers', () => {
     Array.from({ length: 66 }, (_, i) => census(`tag-${String(i).padStart(2, '0')}`, 40, 400)),
   )
 
-  it('draws three by default', () => {
+  it('draws eight by default', () => {
     expect(drawSemanticOffers(shelf, 'seed')).toHaveLength(SEMANTIC_OFFER_SAMPLE)
     // Pinned, because the number is a product decision rather than an
-    // implementation detail: it was eight and ADR-0068 made it three.
-    expect(SEMANTIC_OFFER_SAMPLE).toBe(3)
+    // implementation detail: eight, then three, and eight again — three was
+    // chosen against a 48-tag set and did not survive the thresholds admitting
+    // 66 (ADR-0068 amendment 2).
+    expect(SEMANTIC_OFFER_SAMPLE).toBe(8)
   })
 
   it('draws the same sample for the same seed', () => {

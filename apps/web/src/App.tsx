@@ -1133,33 +1133,86 @@ const MetricCell = ({
   )
 }
 
+/**
+ * A card as a row: its name, its cost, and the decisions available about it.
+ *
+ * `onPreview` makes the NAME the way in to the card (ADR-0068 amendment 1).
+ * The row used to carry a `Preview` action button beside `Choose`, and that was
+ * wrong twice over: it asked the reader to pick between two buttons where the
+ * app everywhere else lets them click the thing they are reading about, and its
+ * `act preview` class collided with the `.preview` panel's own rules — a border,
+ * a background, and above 900px `position: absolute; right: 100%` — which is
+ * what "jenky" was describing.
+ *
+ * The pattern is not new here. The deck rail, the rejected list and the
+ * name-match list all make the card's name a `.name.as-link` button inside a
+ * `.name-cell`, and this row simply did not use it. Nothing about the trigger
+ * is novel except that it took a second screen to notice the precedent.
+ *
+ * THE ACTIONS ARE SIBLINGS of the cell, not children of it. That is what keeps
+ * a press on `Choose` from also opening the pane, and it is the reason there is
+ * no `stopPropagation` anywhere near here: a handler that has to cancel an
+ * ancestor's is a nesting mistake wearing a fix.
+ *
+ * The cell's own click is a mouse convenience on top of a real button, never
+ * instead of one — the button is what a keyboard reaches and what a screen
+ * reader announces. The `.hint` guard is the precedent's, and for the same
+ * reason: a click that landed on a nested control must not fire twice.
+ *
+ * Without `onPreview` the row renders exactly the plain `.name` span it always
+ * did. No call site is in that shape today (all three start-screen lists pass
+ * it), so the prop is optional to keep the row usable by a list that has
+ * nothing to open rather than to preserve a caller.
+ */
 const CardRow = ({
   card,
   item,
   actions,
+  onPreview,
 }: {
   card: api.Card | undefined
   item?: api.Recommendation
   actions: { label: string; kind: string; onClick: () => void }[]
+  onPreview?: () => void
 }): React.JSX.Element => {
   const degree = item?.comboDegree
   const near = item?.nearCombosAt1
   const reasons = item?.reasons
+  const why =
+    reasons !== undefined && reasons.length > 0 ? (
+      <span className="reasons">
+        {reasons.map((r, i) => (
+          <span className="reason" data-kind={r.kind} key={i}>
+            {item === undefined ? r.kind : reasonText(r, item)}
+          </span>
+        ))}
+      </span>
+    ) : null
   return (
     <div className="card-row">
       {degree !== undefined ? <Degree degree={degree} near={near ?? 0} /> : null}
-      <span className="name">
-        {card?.name ?? 'Loading…'}
-        {reasons !== undefined && reasons.length > 0 ? (
-          <span className="reasons">
-            {reasons.map((r, i) => (
-              <span className="reason" data-kind={r.kind} key={i}>
-                {item === undefined ? r.kind : reasonText(r, item)}
-              </span>
-            ))}
-          </span>
-        ) : null}
-      </span>
+      {onPreview === undefined ? (
+        <span className="name">
+          {card?.name ?? 'Loading…'}
+          {why}
+        </span>
+      ) : (
+        <span
+          className="name-cell"
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest('.hint') === null) onPreview()
+          }}
+        >
+          <button
+            className="name as-link"
+            onClick={onPreview}
+            aria-label={`Preview ${card?.name ?? 'card'}`}
+          >
+            {card?.name ?? 'Loading…'}
+          </button>
+          {why}
+        </span>
+      )}
       <span className="cost">
         <ManaCost cost={card?.manaCost} />
       </span>
@@ -1748,12 +1801,10 @@ const SemanticEntry = ({
                     </span>
                     <CardRow
                       card={c}
+                      onPreview={() => {
+                        onPreview(c, carriers.images)
+                      }}
                       actions={[
-                        {
-                          label: 'Preview',
-                          kind: 'preview',
-                          onClick: () => onPreview(c, carriers.images),
-                        },
                         {
                           label: 'Choose',
                           kind: 'accept',
@@ -1875,8 +1926,10 @@ const QuickdrawEntry = ({
               ) : null}
               <CardRow
                 card={c}
+                onPreview={() => {
+                  onPreview(c, hand.images)
+                }}
                 actions={[
-                  { label: 'Preview', kind: 'preview', onClick: () => onPreview(c, hand.images) },
                   { label: 'Choose', kind: 'accept', onClick: () => onChoose(c, hand.images) },
                 ]}
               />
@@ -2533,7 +2586,7 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
                  *
                  * THE PREVIEW DOES NOT BREAK THAT (ADR-0068), and it is worth
                  * saying so here rather than leaving the next reader to assume the
-                 * rule was forgotten. A row gained a Preview button, not a
+                 * rule was forgotten. A row's name became openable, not a
                  * picture: the art is fetched when a card is actually opened, so
                  * the cost is one image for the card someone asked about instead
                  * of eight for cards nobody has. The URLs were already in hand
@@ -2545,10 +2598,10 @@ const Start = ({ onCreated }: { onCreated: (deck: api.Deck) => void }): React.JS
                   <CardRow
                     key={c.oracleId}
                     card={c}
-                    actions={[
-                      { label: 'Preview', kind: 'preview', onClick: () => previewCommander(c) },
-                      { label: 'Choose', kind: 'accept', onClick: () => choose(c) },
-                    ]}
+                    onPreview={() => {
+                      previewCommander(c)
+                    }}
+                    actions={[{ label: 'Choose', kind: 'accept', onClick: () => choose(c) }]}
                   />
                 ))}
               </div>
