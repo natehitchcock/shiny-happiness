@@ -258,6 +258,25 @@ state the ranker cannot see), and excluding them from the metric (they are
 
 ## 18.6 Efficiency — and the fair rate, derived
 
+> **SUPERSEDED IN WHOLE BY
+> [ADR-0070](adr/0070-an-effect-has-a-price-and-efficiency-is-what-is-left.md).**
+> Everything in this section describes a model that no longer ships. Efficiency
+> is now **the sum of the fitted mana prices of a card's effects, minus its mana
+> value** — a difference in MANA, routinely negative, with no vanilla-creature
+> baseline, no stat/impact exchange rate, and no `/ (MV + 1)` divisor. **Impact
+> is no longer an input**; the only thing efficiency takes from that module is
+> the Rate axis. `statPointsPerImpactPoint`, `vanillaStatline` and
+> `baseline.data.json` are gone from the codebase.
+>
+> The section is kept because it is the design record and because two of its
+> arguments survived the change and are worth having in one place: that the folk
+> "2/2 for 2" rule overprices big creatures by about 18%, and that a metric which
+> mixes an absolute quantity with a marginal one is making a category error. The
+> second is exactly why ADR-0070's prices are fitted rather than averaged.
+>
+> Read ADR-0070 for what ships. Nothing below is current.
+
+
 ### The baseline is measured, and the folk rule is wrong
 
 **332-odd vanilla creatures** — commander-legal, creature, and literally no rules

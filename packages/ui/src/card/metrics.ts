@@ -482,7 +482,7 @@ export const EFFICIENCY_CAVEAT =
  * sentence-openers (ADR-0066) is what lets these lines name them at all.
  *
  * NO CONSTANT IS QUOTED. The tier values live in `impact.ts` and `r` lives in
- * `baseline.data.json`, which is regenerated from the corpus; copy repeating
+ * `effect-prices.data.json`, which is refitted from the corpus; copy repeating
  * either goes stale the first time one moves with nothing to catch it, because
  * a UI string is not covered by the model's tests. Every number a reader needs
  * is already on the screen — the score, the ceiling, and `efficiencyWorking`'s

@@ -28,7 +28,7 @@ import bands from './impact/by-role.data.json' with { type: 'json' }
  * Rejected: computing this live. It needs all 31,782 commander-legal cards and
  * a sort per role, this package is PURE and has no database (AGENTS.md R1), and
  * the client has no corpus at all. Baked, regenerated, and dated — exactly the
- * arrangement `efficiency/baseline.data.json` already establishes for a number
+ * arrangement `efficiency/effect-prices.data.json` already establishes for a number
  * that is measured rather than invented.
  */
 

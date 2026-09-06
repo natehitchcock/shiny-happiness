@@ -15,6 +15,12 @@ source against the live corpus on 2026-09-05 — 31,782 commander-legal cards.
 Nothing here is quoted from a docblock without being re-measured, and two places
 where the docblocks have drifted are called out in §22.11.
 
+**`efficiency/baseline.data.json` no longer exists.** ADR-0070 replaced the
+efficiency model outright and deleted it; the sentence below that calls it stale
+is left as written because it was true of the model it described.
+`impact/by-role.data.json` is unaffected by that change and is still stale on
+ADR-0066's terms.
+
 **Re-measured after [ADR-0066](adr/0066-mana-and-taxes-are-rules-not-blind-spots.md)**,
 which renamed the four displayed axes, made `when` a trigger word, turned stakes
 into five tiers chosen by maximum, and gave mana production and taxes rules of
@@ -668,10 +674,18 @@ Five of these are worth reading twice:
 - **One rung for damage.** Deliberate — the kill rate is a slope and a slope
   forbids a boundary — but 1 damage and 10 damage price identically.
 
-Impact is an **input to efficiency**, which divides it by mana value along with a
-measured stat baseline (doc 18 §18.6). A change to any rung above moves every
-efficiency number too, and the exchange rate between them is refitted rather than
-held constant.
+**Impact is NOT an input to efficiency, as of
+[ADR-0070](adr/0070-an-effect-has-a-price-and-efficiency-is-what-is-left.md).**
+It was — efficiency divided it by mana value along with a measured stat
+baseline, and refitted an exchange rate against it, so a pass over any rung
+above moved every efficiency number twice. That coupling is gone. Efficiency is
+now the sum of the fitted mana prices of a card's effects minus its mana value,
+and the composite score above appears nowhere in it.
+
+**The one thing efficiency still reads from this module is Rate** (§22.5), as
+one priced feature among eighty-one. A rung moved there does move efficiency, by
+a little: the four tiers are priced 3.004 / 3.103 / 3.125 / 3.145 mana, a spread
+of 0.14 across the whole axis. Nothing else here reaches it.
 
 ---
 
