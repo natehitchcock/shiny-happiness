@@ -111,7 +111,8 @@ GET /api/v1/commanders/by-semantics?tags=&limit=
     → { items: Card[], matches: Record<OracleId, number>, total,
         images: ImageMap, datasetSnapshotId }
     tags is COMMA SEPARATED, and every member must be a known SynergyTag.
-    items are ranked by how many of `tags` each carries, then by name.
+    items are ranked by how many of `tags` each carries, then by card impact,
+    then by name. The WHOLE matching set is ranked before `limit` cuts it.
 
 GET /api/v1/commanders/quickdraw?seed=
     → { items: Card[], wildcard: OracleId | null, seed,
@@ -135,7 +136,27 @@ shape did not change** — only which tags clear the bar.
 How many of *your* picks a commander matched is a fact about the request, not
 about the card, and a `Card` that carried it would be a different `Card`
 depending on who asked. `total` is the size of the whole answer, so a full page
-can say whether it is all of them.
+can say whether it is all of them. `matches` and `images` cover the page that
+was returned, not the set it was cut from.
+
+**Ties break on impact, and the ranking happens before the cut**
+([ADR-0069](adr/0069-a-tiebreak-that-decides-every-row-is-the-sort.md)). The
+tiebreak used to be the name, which was fine for the occasional pair and wrong
+as a sort: pick one common semantic and every carrier matches one of one, so the
+alphabet decided the entire list — `creature-etb` has 645 carriers and answered
+with four Aangs and an Aatchik. The second term is now `cardImpact(card).score`
+(doc 22), a property of the card's own text; the name still breaks a genuine
+impact tie, so the order is deterministic. **`edhrec_rank` is still refused
+here** for ADR-0067 §5's reason — popularity may keep Route 2's random draw
+recognisable, but it must not answer "what is popular" inside a list whose
+heading says "what is this about".
+
+Because impact cannot be computed in SQL, the query narrows and never cuts:
+every carrier is ranked and `limit` is applied to the ranked answer. Cutting
+first and ranking the page returns the impact-best of the alphabetically first
+`limit` rows, which is the same defect. The set is bounded by the corpus — 3,411
+commanders, 786 for the widest tag there is — and ranking `creature-etb`'s 645
+costs 6.5 ms.
 
 **`seed` on `quickdraw` is required, and the endpoint holds no randomness.** The
 client generates one `crypto.randomUUID()` per deal; the three commanders are a

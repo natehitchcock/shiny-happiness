@@ -296,7 +296,7 @@ export const rankScoredBySemanticMatches = (
 /**
  * The same ranking, over cards whose impact has not been computed yet.
  *
- * Scores only the carriers, not everything handed in: impact is 8.7 µs a card
+ * Scores only the carriers, not everything handed in: impact is ~8.2 µs a card
  * measured over the live corpus (27.95 ms for all 3,411), and the cards that
  * carry none of the picks are dropped before it is asked. That is the whole
  * difference — 6.5 ms to rank `creature-etb`'s 645 carriers against 29 ms to
