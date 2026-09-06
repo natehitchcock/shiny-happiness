@@ -10882,7 +10882,7 @@ export const Workspace = ({
                            * different reading tasks. A tick is scanned down the
                            * list; a number is compared with the other numbers on
                            * its own row \u2014 its mana value and its price \u2014 which
-                           * is what "per mana" and "$4.10" are for. Query
+                           * is what "mana" and "$4.10" are for. Query
                            * columns also come and go with each question asked,
                            * so a numeric block that stayed put is what lets the
                            * figures read straight down the column.

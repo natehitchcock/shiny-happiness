@@ -453,10 +453,22 @@ export const impactNotes = (
  * line says so rather than hiding it.
  */
 export const efficiencyWorking = (efficiency: EfficiencyView): string => {
+  /*
+   * A negative body is spelled "minus 0.236", not "-0.236".
+   *
+   * The clause sits between two em-dashes in running prose, and a bare
+   * hyphen-minus there reads as punctuation before it reads as a sign — which
+   * turns "its body is worth −0.236" into "its body, 0.236". A small body IS a
+   * negative contribution under ADR-0070 and the sentence has to survive
+   * saying so. The digits are still `metricValue`'s, unrounded, so the number
+   * a reader checks against the column is the same one.
+   */
   const body =
     efficiency.bodyValue === 0
       ? 'no body'
-      : `${metricValue(efficiency.bodyValue)} for its body`
+      : efficiency.bodyValue < 0
+        ? `minus ${metricValue(Math.abs(efficiency.bodyValue))} for its body`
+        : `${metricValue(efficiency.bodyValue)} for its body`
   return `The format charges ${metricValue(efficiency.worth)} mana for a card like this — ${metricValue(efficiency.effectValue)} for what it does, ${body} — against the ${metricValue(efficiency.cost)} it asks for.`
 }
 

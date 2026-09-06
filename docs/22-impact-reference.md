@@ -90,9 +90,19 @@ graveyard or fixing colours names nothing this model counts. That is stated in
 §22.13 and in the pane, and it is not patched.
 
 **Zero means zero.** A card with no rules text scores exactly `0`, and only such
-a card does. That is not a rounding convenience: the vanilla creatures are what
-`efficiency.ts` calibrates its baseline against, and a measuring stick with a
-nonzero reading at zero cannot calibrate anything. The emptiness check runs twice
+a card does. That is not a rounding convenience: it is what makes `impact=0` an
+answerable question about vanilla creatures, and a measuring stick with a
+nonzero reading at zero is not measuring from anywhere.
+
+The reason ORIGINALLY given for this was that the vanilla creatures are what
+`efficiency.ts` calibrates its baseline against. **That reason expired with
+[ADR-0070](adr/0070-an-effect-has-a-price-and-efficiency-is-what-is-left.md)** —
+`efficiency.ts` has no baseline and no longer reads this score at all. The rule
+stays, on the argument above, which never depended on efficiency; it is recorded
+here rather than quietly reworded because a rule whose only stated justification
+has gone is worth looking at again rather than inheriting.
+
+The emptiness check runs twice
 — once on the raw string, once after reminder text is stripped — because a basic
 Forest's entire printed text is the parenthetical `({T}: Add {G}.)` and it walked
 past the first check into the `none` floor of 0.425.

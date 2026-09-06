@@ -548,7 +548,10 @@ describe('efficiencyWorking', () => {
       bodyValue: -0.236,
       cost: 2,
     }
-    expect(efficiencyWorking(smallBody)).toContain('-0.236 for its body')
+    // "minus 0.236", not "-0.236": the clause sits between two em-dashes, and a
+    // bare hyphen there reads as punctuation before it reads as a sign.
+    expect(efficiencyWorking(smallBody)).toContain('minus 0.236 for its body')
+    expect(efficiencyWorking(smallBody)).not.toContain('-0.236')
     expect(efficiencyWorking(smallBody)).not.toContain('no body')
   })
 

@@ -118,7 +118,11 @@ describe('cardEfficiency', () => {
   it('counts a repeated role or tag once', () => {
     // `roles` is a list, and a card that somehow carried a duplicate must not
     // be charged for it twice.
-    const dup = card({ manaValue: 1, roles: ['ramp', 'ramp'], synergyProduces: ['treasure', 'treasure'] })
+    const dup = card({
+      manaValue: 1,
+      roles: ['ramp', 'ramp'],
+      synergyProduces: ['treasure', 'treasure'],
+    })
     expect(cardEfficiency(dup, withRole('ramp', 1)).worth).toBe(3.5)
   })
 
@@ -202,7 +206,12 @@ describe('cardEfficiency', () => {
   })
 
   it('splits worth into the two halves the pane prints, and they add up', () => {
-    const bear = creature({ manaValue: 2, power: '2', toughness: '2', synergyProduces: ['landfall'] })
+    const bear = creature({
+      manaValue: 2,
+      power: '2',
+      toughness: '2',
+      synergyProduces: ['landfall'],
+    })
     const value = cardEfficiency(bear, FIXTURE)
     expect(value.effectValue + value.bodyValue).toBeCloseTo(value.worth, 5)
     expect(value.worth - value.cost).toBeCloseTo(value.score, 5)
@@ -214,7 +223,13 @@ describe('cardEfficiency', () => {
       card({ manaValue: 0, types: ['artifact'] }),
       card({ manaValue: 16, types: ['sorcery'], typeLine: 'Sorcery', oracleText: 'Draw a card.' }),
       creature({ manaValue: 1, power: '*', toughness: '*' }),
-      card({ manaValue: 0, types: ['land'], typeLine: 'Land', roles: ['land'], oracleText: '{T}: Add {G}.' }),
+      card({
+        manaValue: 0,
+        types: ['land'],
+        typeLine: 'Land',
+        roles: ['land'],
+        oracleText: '{T}: Add {G}.',
+      }),
     ]
     for (const shape of shapes) {
       expect(Number.isFinite(cardEfficiency(shape, FIXTURE).score)).toBe(true)
@@ -255,10 +270,7 @@ describe('the shipped prices', () => {
     // The naive sum of per-effect means predicts 3.99 against an actual 3.29 —
     // a 1.21x inflation. Removing that is what the least-squares fit is FOR, so
     // a regeneration that reintroduces it must fail here.
-    expect(EFFECT_PRICES.fit.meanPredictedManaValue).toBeCloseTo(
-      EFFECT_PRICES.fit.meanManaValue,
-      1,
-    )
+    expect(EFFECT_PRICES.fit.meanPredictedManaValue).toBeCloseTo(EFFECT_PRICES.fit.meanManaValue, 1)
   })
 
   it('beats the roles-only fit it was measured against', () => {
@@ -314,6 +326,30 @@ describe('assertUsablePrices', () => {
     expect(() =>
       assertUsablePrices({ ...FIXTURE, rate: { 'one-shot': 2, activated: 2, triggered: 2 } }),
     ).toThrow(/Rate tier "upkeep"/)
+  })
+
+  it('refuses a BIASED fit, which is the naive model coming back', () => {
+    // The 1.21x inflation is the single defect the least-squares fit exists to
+    // remove, and unlike a bad coefficient it is visible from the file alone.
+    // A refit that reintroduced it would otherwise ship: every price is
+    // present, finite and non-zero, so no other guard here fires.
+    expect(() =>
+      assertUsablePrices({
+        ...FIXTURE,
+        fit: { ...FIXTURE.fit, meanManaValue: 3.2911, meanPredictedManaValue: 3.994 },
+      }),
+    ).toThrow(/the fit is biased/)
+  })
+
+  it('accepts the small drift a real refit has', () => {
+    // Half a mana of slack: the shipped fit lands within 0.0004, so the guard
+    // must not fire on an honest regeneration.
+    expect(() =>
+      assertUsablePrices({
+        ...FIXTURE,
+        fit: { ...FIXTURE.fit, meanManaValue: 3.2911, meanPredictedManaValue: 3.35 },
+      }),
+    ).not.toThrow()
   })
 
   it('refuses a non-finite price, which JSON can carry as a null', () => {

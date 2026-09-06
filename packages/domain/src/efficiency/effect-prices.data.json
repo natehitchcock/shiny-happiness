@@ -43,7 +43,7 @@
     "meanManaValue": 3.2911,
     "meanPredictedManaValue": 3.2907,
     "meanAbsoluteError": 0.9503,
-    "crossValidatedMeanAbsoluteError": 0.9533,
+    "crossValidatedMeanAbsoluteError": 0.9537,
     "rootMeanSquaredError": 1.2802,
     "r2": 0.4609
   },

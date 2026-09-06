@@ -140,7 +140,7 @@ Four groups, 81 features. Each earned its place against the one before it:
 | roles only | 20 | 1.4122 | 1.4136 |
 | + `synergyProduces` | 74 | 1.3866 | 1.3906 |
 | + Rate | 78 | 1.2132 | 1.2167 |
-| + the body | 81 | **0.9503** | **0.9533** |
+| + the body | 81 | **0.9503** | **0.9537** |
 
 **Roles** are 20 buckets and leave **11,231 cards** in the catch-all `synergy`,
 whose fitted price came out at **3.286** — the corpus mean of 3.291 to within a
@@ -160,12 +160,31 @@ the model becomes a type-line model in disguise. Dropping them costs 0.009 mana
 of error and is the difference between coefficients a reader can check against a
 card and coefficients they cannot.
 
-A produced tag needs **50 cards** before it is priced, which is the
-cross-validated optimum rather than a taste: sweeping 1 / 10 / 20 / 50 / 100 /
-300 / 1000 puts held-out error at its minimum at 50 (0.9533), with all 326 tags
-priced doing better in sample (0.9454) and worse out of it (0.9554). 54 tags
-survive. A tag below the threshold contributes nothing, which is the honest
-reading of "the corpus has not shown us what this costs".
+A produced tag needs **50 cards** before it is priced. Sweeping 1 / 10 / 20 / 50
+/ 100 / 300 / 1000, five-fold held-out error reads 0.9554 / 0.9542 / **0.9533**
+/ 0.9537 / 0.9542 / 0.9549 / 0.9560 mana.
+
+**Both ends of that sweep are real and the middle is not.** Pricing all 326 tags
+fits the corpus best in sample (0.9454) and predicts a held-out card worst —
+overfitting drawn from life — and at 1000 real effects go unpriced. But 20
+through 100 span nine ten-thousandths of a mana, and naming any point in that as
+the minimum is reading noise. An earlier draft of this ADR did exactly that and
+called 50 "the cross-validated optimum"; it is not, 20 is, by 0.0004.
+
+50 is chosen inside the flat region on a reason the sweep cannot see: at 20 the
+table gains 27 more coefficients fitted from twenty-odd cards each, and those
+are at once the least trustworthy numbers in the file and the ones a reader is
+most likely to look up and query. **54 tags survive.** A tag below the threshold
+contributes nothing, which is the honest reading of "the corpus has not shown us
+what this costs".
+
+**The held-out figures above are leak-free, and the first draft's were not.**
+Which tags clear the threshold is itself a decision made from data, so choosing
+them once over the whole corpus and then holding out a fifth of it lets the
+held-out cards help decide which of their own features exist. `featureSpace` is
+rebuilt from the training fold for exactly this reason. The leak was worth
+0.0004 mana at this threshold — small, and the difference between a number that
+means what it says and one that flatters.
 
 **Rate**, the axis `impact.ts` calls `persistence`, is **the one thing taken
 from the impact module**. The composite `impact.score` appears nowhere. Its four
@@ -235,7 +254,7 @@ rather than one. Both forms were measured:
 
 | body form | MAE | CV MAE | coefficients |
 | --- | ---: | ---: | --- |
-| power and toughness separately | **0.9503** | **0.9533** | offset −1.8486, power 0.4402, toughness 0.3663 |
+| power and toughness separately | **0.9503** | **0.9537** | offset −1.8486, power 0.4402, toughness 0.3663 |
 | one summed `P+T` | 0.9505 | 0.9535 | offset −1.8559, per point 0.4029 |
 
 The split fits better on both, by two ten-thousandths of a mana — which is
@@ -387,7 +406,10 @@ packages/domain/src/efficiency.test.ts
 
 It cannot be skimmed past, and it goes green the moment the generator is run
 against a corpus database and its output committed. `pnpm test` is red until
-then, deliberately, and this is the only failure.
+then, deliberately, and **this is the only failure this change causes**. A
+worktree with no `DATABASE_URL` and no `LW_ALLOW_NO_DB=1` also fails
+`packages/db/src/database-required.test.ts`, which is environmental, predates
+this change, and is exactly what that environment variable exists to declare.
 
 `efficiency.ts` refuses a structurally dead file outright — a table of zeroes
 makes every card worth nothing, so efficiency becomes exactly `−manaValue`,

@@ -47,7 +47,14 @@ export interface AnnotatedCandidate {
    * that rounding belongs in `impact.ts` where BOTH sides read it.
    */
   readonly impact: number
-  /** `cardEfficiency(card).score`. Same rule, same reasoning, smaller scale. */
+  /**
+   * `cardEfficiency(card).score`. Same rule and same reasoning as `impact`.
+   *
+   * DIFFERENT SCALE, and it is not a smaller one: this is a difference in MANA
+   * (ADR-0070), running about −11 to +11 with 43% of the corpus below zero. It
+   * was a small positive ratio before, so a threshold a user learned then means
+   * something else now.
+   */
   readonly efficiency: number
 }
 
@@ -198,9 +205,15 @@ const evaluateTerm = (
     /*
      * The two card-intrinsic metrics (doc 18). Unlike `price`, `power` and
      * `toughness` these are never null — `cardImpact` and `cardEfficiency` are
-     * total, and a card with no rules text scores a real 0 rather than an
-     * absent one — so there is no "no data" branch to get wrong and `impact=0`
-     * is an answerable question about vanilla creatures.
+     * total — so there is no "no data" branch to get wrong.
+     *
+     * `impact=0` is an answerable question about vanilla creatures, because 0
+     * is that model's floor and only a card with no rules text reaches it.
+     * `eff=0` IS NOT THE SAME QUESTION: efficiency is a difference in mana
+     * (ADR-0070), so 0 means "priced at exactly what it costs" and sits in the
+     * middle of the distribution — a vanilla bear is +0.811 and a Forest is
+     * +0.1. `eff<0` is the query that asks something, and it asks for the cards
+     * that cost more than they are worth.
      */
     case 'impact':
       return compareNumbers(candidate.impact, op, Number(value))

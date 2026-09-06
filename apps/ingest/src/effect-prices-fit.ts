@@ -91,11 +91,20 @@ const MEMBERSHIP_TAGS: ReadonlySet<string> = new Set([
 /**
  * A produced tag needs this many cards before the fit will price it.
  *
- * CHOSEN BY CROSS-VALIDATION, not by taste: sweeping the threshold over
- * 1/10/20/50/100/300/1000 puts the five-fold error at its minimum here. Below
- * it the long tail of subtypes overfits — pricing every one of the 326 tags
- * fits the corpus better in sample and predicts a held-out card worse — and
- * above it real effects go unpriced. 54 tags survive.
+ * BOUNDED BY CROSS-VALIDATION AND THEN CHOSEN, and the distinction matters
+ * because the first draft of this comment claimed the threshold was the
+ * measured optimum and it is not. Sweeping 1/10/20/50/100/300/1000, held-out
+ * error reads 0.9554 / 0.9542 / 0.9533 / 0.9537 / 0.9542 / 0.9549 / 0.9560
+ * mana. Both ENDS are real: pricing every one of the 326 tags fits the corpus
+ * best in sample (0.9454) and predicts a held-out card worst, which is
+ * overfitting drawn from life; and at 1000 real effects go unpriced. The middle
+ * — 20 through 100 — is FLAT, spanning nine ten-thousandths of a mana, and
+ * calling any point in it the minimum is reading noise.
+ *
+ * 50 is chosen inside that flat region on a reason the sweep cannot see: at 20
+ * the table gains 27 more coefficients fitted from twenty-odd cards each, and
+ * those are simultaneously the least trustworthy numbers in the file and the
+ * ones a reader is most likely to look up and query. 54 tags survive.
  */
 const MIN_PRODUCE_SUPPORT = 50
 
@@ -121,6 +130,14 @@ interface DesignRow {
 /**
  * Gauss-Jordan with partial pivoting. Eighty-odd features, so the cubic cost is
  * microseconds and a library would be a dependency for one function.
+ *
+ * IT THROWS ON A DEAD PIVOT RATHER THAN SKIPPING THE COLUMN. Skipping leaves
+ * that row un-reduced and returns a β that is wrong but finite and non-zero —
+ * which `assertUsablePrices` would wave through, because it is neither zeroes
+ * nor NaN. A plausible-looking price table is the one failure this whole file
+ * is built to prevent, so the degenerate case is loud. With `RIDGE_LAMBDA` on
+ * the diagonal it should be unreachable, and that is the point: if it ever
+ * fires, the ridge term is not doing what its docblock claims.
  */
 const solve = (A: readonly (readonly number[])[], b: readonly number[]): number[] => {
   const n = b.length
@@ -138,7 +155,11 @@ const solve = (A: readonly (readonly number[])[], b: readonly number[]): number[
     const head = M[col]
     if (head === undefined) continue
     const d = head[col] ?? 0
-    if (Math.abs(d) < 1e-12) continue
+    if (Math.abs(d) < 1e-12) {
+      throw new Error(
+        `effect-price fit is singular at feature ${String(col)} — the ridge term is not conditioning it`,
+      )
+    }
     for (let j = col; j <= n; j++) head[j] = (head[j] ?? 0) / d
     for (let r = 0; r < n; r++) {
       if (r === col) continue
@@ -211,7 +232,23 @@ const round = (n: number, places = 4): number => {
  * what makes the fit unbiased — the mean prediction lands on the corpus mean
  * exactly, which is the 1.21x inflation of the naive model being removed.
  */
-export const fitEffectPrices = (cards: readonly EfficiencyInput[]): FitResult => {
+/**
+ * The feature space, chosen from a set of cards.
+ *
+ * SEPARATED OUT SO CROSS-VALIDATION CAN REBUILD IT PER FOLD. Which produced
+ * tags clear `MIN_PRODUCE_SUPPORT` is itself a decision made from data, so
+ * choosing them once over the whole corpus and then "holding out" a fifth of it
+ * leaks: the held-out cards helped decide which of their own features exist.
+ * The leak is small at a threshold of 50 over 31,782 rows, and it is the
+ * difference between a number that means what it says and one that flatters.
+ */
+const featureSpace = (
+  cards: readonly EfficiencyInput[],
+): {
+  names: readonly string[]
+  featurise: (card: EfficiencyInput) => DesignRow
+  pricedTags: readonly string[]
+} => {
   const support = new Map<string, number>()
   for (const card of cards) {
     for (const tag of new Set(card.synergyProduces)) {
@@ -248,6 +285,9 @@ export const fitEffectPrices = (cards: readonly EfficiencyInput[]): FitResult =>
         val.push(value)
       }
     }
+    // Through a `Set`, so a row that somehow carried a duplicate is counted
+    // once — `ridgeFit` accumulates `x_a·x_b` over the index list and a repeat
+    // would square that feature's own contribution.
     for (const role of new Set(card.roles)) push(`role:${role}`)
     for (const tag of new Set(card.synergyProduces)) push(`produces:${tag}`)
     push(`rate:${cardImpact(card).persistence}`)
@@ -261,6 +301,12 @@ export const fitEffectPrices = (cards: readonly EfficiencyInput[]): FitResult =>
     }
     return { idx, val }
   }
+  return { names, featurise, pricedTags }
+}
+
+export const fitEffectPrices = (cards: readonly EfficiencyInput[]): FitResult => {
+  const { names, featurise, pricedTags } = featureSpace(cards)
+  const index = new Map(names.map((name, at) => [name, at]))
 
   const design = cards.map(featurise)
   const y = cards.map((c) => c.manaValue)
@@ -279,26 +325,38 @@ export const fitEffectPrices = (cards: readonly EfficiencyInput[]): FitResult =>
   })
   const sst = y.reduce((a, b) => a + (b - meanManaValue) ** 2, 0)
 
-  // Five-fold, by index rather than at random, so the figure a reader
-  // reproduces is the figure that was published. It is the number that chose
-  // `MIN_PRODUCE_SUPPORT`, so it has to be in the file.
+  /*
+   * Five-fold, by index rather than at random, so the figure a reader
+   * reproduces is the figure that was published. It is the number that chose
+   * `MIN_PRODUCE_SUPPORT`, so it has to be in the file.
+   *
+   * THE FEATURE SPACE IS REBUILT FROM THE TRAINING FOLD, not reused from the
+   * full corpus — see `featureSpace`. A held-out card carrying a tag the
+   * training fold could not price contributes nothing from it, which is exactly
+   * what would happen to a card the corpus has never seen.
+   */
   const K = 5
   let cvSae = 0
   for (let k = 0; k < K; k++) {
-    const train: DesignRow[] = []
+    const trainCards: EfficiencyInput[] = []
     const trainY: number[] = []
-    const test: number[] = []
-    design.forEach((row, i) => {
-      if (i % K === k) test.push(i)
+    const test: EfficiencyInput[] = []
+    cards.forEach((card, i) => {
+      if (i % K === k) test.push(card)
       else {
-        train.push(row)
-        trainY.push(y[i] ?? 0)
+        trainCards.push(card)
+        trainY.push(card.manaValue)
       }
     })
-    const foldBeta = ridgeFit(train, trainY, names.length, RIDGE_LAMBDA)
-    for (const i of test) {
-      const row = design[i]
-      if (row !== undefined) cvSae += Math.abs(dot(row, foldBeta) - (y[i] ?? 0))
+    const fold = featureSpace(trainCards)
+    const foldBeta = ridgeFit(
+      trainCards.map(fold.featurise),
+      trainY,
+      fold.names.length,
+      RIDGE_LAMBDA,
+    )
+    for (const card of test) {
+      cvSae += Math.abs(dot(fold.featurise(card), foldBeta) - card.manaValue)
     }
   }
 

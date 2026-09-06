@@ -91,13 +91,15 @@ describe('fitEffectPrices', () => {
   it('prices a body, and gives a card with no statline nothing from it', () => {
     // Creatures cost 1 per point of power here and nothing else varies.
     const corpus = [
-      ...many(40, (i) => card({
-        manaValue: (i % 4) + 1,
-        typeLine: 'Creature — Bear',
-        types: ['creature'],
-        power: String((i % 4) + 1),
-        toughness: '1',
-      })),
+      ...many(40, (i) =>
+        card({
+          manaValue: (i % 4) + 1,
+          typeLine: 'Creature — Bear',
+          types: ['creature'],
+          power: String((i % 4) + 1),
+          toughness: '1',
+        }),
+      ),
       ...many(40, () => card({ manaValue: 2 })),
     ]
     const fitted = fitEffectPrices(corpus)
@@ -158,6 +160,43 @@ describe('fitEffectPrices', () => {
     ]
     const fitted = fitEffectPrices(corpus)
     expect(fitted.rate['upkeep']!).toBeGreaterThan(fitted.rate['one-shot']!)
+  })
+
+  it('holds out the FEATURE CHOICE too, not just the rows', () => {
+    /*
+     * Which produced tags clear the support threshold is itself decided from
+     * data, so a cross-validated figure that picked them over the whole corpus
+     * would let the held-out cards help decide which of their own features
+     * exist. `featureSpace` is rebuilt per fold to stop that.
+     *
+     * Constructed so the leak would be VISIBLE: `treasure` sits at 60 cards, so
+     * it clears 50 over the whole corpus and misses it in every training fold
+     * (48 of 60). If the fold reused the corpus-wide feature space it would
+     * price `treasure` and predict those cards nearly perfectly; rebuilding per
+     * fold means it cannot, and the held-out error has to exceed the in-sample
+     * error by a visible margin.
+     */
+    const corpus = [
+      ...many(200, () => card({ manaValue: 2 })),
+      ...many(60, () => card({ manaValue: 8, synergyProduces: ['treasure'] })),
+    ]
+    const fitted = fitEffectPrices(corpus)
+    expect(fitted.produces['treasure']).toBeDefined()
+    // In sample the fit is near-exact, because over the whole corpus `treasure`
+    // IS priced and explains those 60 cards completely.
+    expect(fitted.fit.meanAbsoluteError).toBeLessThan(0.1)
+    /*
+     * Held out it cannot be, and the gap is the whole test. Rebuilt per fold,
+     * `treasure` never clears the threshold, the held-out cards are predicted
+     * at the base rate instead of at 8, and the error is 2.13. Reusing the
+     * corpus-wide feature space gives 0.05.
+     *
+     * VERIFIED BY MUTATION, not by reasoning: the first version of this test
+     * asserted `cvMAE > MAE`, which is true of both — 0.0514 against 0.0413 —
+     * and passed against a deliberately leaky implementation. The separation
+     * has to be a magnitude, because that is what the leak actually changes.
+     */
+    expect(fitted.fit.crossValidatedMeanAbsoluteError).toBeGreaterThan(1)
   })
 
   it('publishes every figure `efficiency.ts` guards on', () => {

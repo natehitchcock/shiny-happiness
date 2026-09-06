@@ -20,8 +20,16 @@ import prices from './efficiency/effect-prices.data.json' with { type: 'json' }
  * a mean mana value of 3.99 against an actual 3.29 — a 1.21x systematic
  * inflation — and misses by 1.69 mana on average. A least-squares fit asks the
  * different and correct question: what does this effect add to the price of a
- * card that already has the others? Wincon falls from a naive 3.85 to 1.90,
- * equipment from 2.38 to 0.81, board wipe from 4.56 to 3.39.
+ * card that already has the others? Fitted over roles alone, so that the two
+ * columns are the same quantity: wincon falls from a naive 3.85 to 1.88,
+ * equipment from 2.38 to 0.81, board wipe from 4.56 to 3.38.
+ *
+ * DO NOT EXPECT THOSE THREE IN `effect-prices.data.json`. The shipped fit has
+ * the Rate tiers in it, and they carry the constant — about 3 mana — so every
+ * role price there is that much lower again and several are negative. The
+ * comparison above is roles-against-roles because that is the only pair of
+ * numbers that means anything; ADR-0070 §4.1 has the same table with the same
+ * caveat.
  *
  * IMPACT IS NOT AN INPUT. The composite `cardImpact().score` appears nowhere
  * here; the previous model made it a term and refitted an exchange rate against
@@ -132,6 +140,24 @@ export const assertUsablePrices = (from: EffectPrices): EffectPrices => {
   }
   if (!everything.every((n) => Number.isFinite(n))) {
     throw new Error('effect-prices.data.json holds a non-finite price')
+  }
+  /*
+   * The one QUALITY check that belongs at load rather than in a test.
+   *
+   * A fit whose mean prediction has drifted off the corpus mean is the naive
+   * model's 1.21x inflation coming back — the single defect the least-squares
+   * fit exists to remove — and unlike a bad coefficient it is visible from the
+   * file alone, in two numbers the generator already publishes. Half a mana is
+   * deliberately slack: the shipped fit lands within 0.0004, so anything that
+   * trips this is broken rather than merely drifting.
+   *
+   * Everything sharper than this — the error ladder, the held-out gap — stays
+   * in `efficiency.test.ts`, where a threshold can be read and argued with.
+   */
+  if (Math.abs(from.fit.meanPredictedManaValue - from.fit.meanManaValue) > 0.5) {
+    throw new Error(
+      `effect-prices.data.json predicts a mean mana value of ${String(from.fit.meanPredictedManaValue)} against a corpus mean of ${String(from.fit.meanManaValue)} — the fit is biased`,
+    )
   }
   return from
 }
@@ -273,7 +299,9 @@ export const cardEfficiency = (
   const bodyValue =
     statline === null
       ? 0
-      : from.body.hasBody + from.body.power * statline.power + from.body.toughness * statline.toughness
+      : from.body.hasBody +
+        from.body.power * statline.power +
+        from.body.toughness * statline.toughness
 
   const round = (n: number): number => Math.round(n * 1000) / 1000
   const worth = effectValue + bodyValue

@@ -393,7 +393,8 @@ paragraphs still stands.
 **Every card now says how big it is and what it costs you.**
 [Doc 18](18-card-impact-and-efficiency.md) is built: two CARD-INTRINSIC metrics,
 `impact` (breadth × persistence × stakes, discounted for symmetry) and
-`efficiency` (surplus stat points per mana), on every recommendation item and on
+`efficiency` (surplus stat points per mana — superseded, see the ADR-0070 note
+above), on every recommendation item and on
 card detail. Deck-relative impact was offered and declined — the deck already
 has three deck-relative numbers per row — and the known cost is stated rather
 than patched: Sol Ring scores 0.68 and Rhystic Study 0.81, which was accepted
@@ -432,7 +433,8 @@ for them, and the column list is saved to the deck on every add and every remove
   that is split is WHERE a column lands, and the split is a function of its
   `kind`: a tick beside the name, a number beside the other numbers. A tick is
   scanned down the list; a number is compared with the mana value and the price
-  on its own row, which is what "per mana" and "$4.10" are for.
+  on its own row, which is what "mana" and "$4.10" are for (it read "per mana"
+  until ADR-0070 removed the divisor).
 - **The two metrics are the deck's `DEFAULT_COLUMNS`**, read through the domain's
   `columnsFor`, so `null` means the defaults and `[]` means the builder cleared
   them and gets none back. Removing one PATCHes optimistically and rolls back
