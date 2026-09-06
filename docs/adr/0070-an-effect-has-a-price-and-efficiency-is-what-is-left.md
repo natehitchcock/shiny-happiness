@@ -359,6 +359,16 @@ the same 31,782 cards, so the coefficients should be close — but "should be
 close" is not a measurement, and an unverified price table is exactly the
 failure this file is designed around.
 
+**There is one reason to expect them NOT to be identical, and it is worth
+knowing before the regeneration is compared.** The stand-in's `roles` and
+`synergyProduces` were derived FRESH by running the current `deriveRoles` and
+`deriveSynergy` over the oracle text. The generator reads the values STORED in
+the `cards` table, which is what the app also reads — so the generator is
+right — but if any of those rows predate a derivation rule that has since
+changed, the two fits see different features for those cards. That is not a bug
+in either; it is the ordinary reason a data file has to be regenerated where the
+data lives.
+
 So the check is a **red test** rather than a comment:
 
 ```
