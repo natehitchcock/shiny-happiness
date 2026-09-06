@@ -1282,3 +1282,94 @@ describe('previewing a commander before choosing it', () => {
     expect(pane.getAttribute('role')).toBeNull()
   })
 })
+
+/*
+ * The carrier list draws five, not sixty (ADR-0068 §12).
+ *
+ * The endpoint's limit is sixty and every one was rendered, so answering "what
+ * is this deck about" with a single common pick — 645 commanders carry
+ * `creature-etb` — put a sixty-item scroll where a choice belonged. The rest
+ * are one press away and were fetched with the first five, so expanding costs
+ * no request and cannot fail.
+ */
+describe('the carrier list is bounded', () => {
+  /** Sixty distinct carriers, named so their order is checkable. */
+  const many = Array.from({ length: 60 }, (_, i) => ({
+    ...KRENKO,
+    oracleId: `carrier-${String(i).padStart(2, '0')}`,
+    name: `Carrier ${String(i).padStart(2, '0')}`,
+  }))
+  const serveMany = (): void => {
+    mocked.commandersBySemantics.mockResolvedValue({
+      items: many,
+      matches: Object.fromEntries(many.map((c) => [c.oracleId, 1])),
+      total: 645,
+    })
+  }
+  const pickOne = async (): Promise<void> => {
+    await show()
+    await waitFor(() => expect(chips()).toHaveLength(SAMPLE))
+    await click(within(region(SEMANTICS)).getAllByRole('button', { pressed: false })[0]!)
+    await waitFor(() =>
+      expect(
+        screen.getByRole('list', { name: 'Commanders carrying the chosen semantics' }),
+      ).toBeDefined(),
+    )
+  }
+  const items = (): HTMLElement[] =>
+    within(
+      screen.getByRole('list', { name: 'Commanders carrying the chosen semantics' }),
+    ).getAllByRole('listitem')
+  const expander = (): HTMLElement =>
+    screen.getByRole('button', { name: /See all \d+ that matched|Show fewer/ })
+
+  it('draws five of the sixty that came back', async () => {
+    serveMany()
+    await pickOne()
+    expect(items()).toHaveLength(5)
+  })
+
+  it('says the deck-wide total, and that five are drawn', async () => {
+    serveMany()
+    await pickOne()
+    // The 645 is the corpus answer; the 5 is what is on the page. Reporting
+    // only one of them is what made the old list read as "these are all of
+    // them".
+    expect(screen.getByText(/645 commanders carry 1 pick, best 5 first\./)).toBeDefined()
+  })
+
+  it('opens the rest without another request', async () => {
+    serveMany()
+    await pickOne()
+    const before = mocked.commandersBySemantics.mock.calls.length
+    await click(expander())
+    expect(items()).toHaveLength(60)
+    expect(mocked.commandersBySemantics.mock.calls).toHaveLength(before)
+  })
+
+  it('collapses back to five', async () => {
+    serveMany()
+    await pickOne()
+    await click(expander())
+    await click(expander())
+    expect(items()).toHaveLength(5)
+  })
+
+  it('announces the change rather than swapping the list silently', async () => {
+    serveMany()
+    await pickOne()
+    await click(expander())
+    expect(screen.getByLabelText('Commanders found').textContent).toContain('All 60 commanders')
+  })
+
+  it('draws no expander when everything already fits', async () => {
+    mocked.commandersBySemantics.mockResolvedValue({
+      items: [KRENKO, LATHRIL],
+      matches: { [KRENKO.oracleId]: 1, [LATHRIL.oracleId]: 1 },
+      total: 2,
+    })
+    await pickOne()
+    expect(items()).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: /See all \d+ that matched/ })).toBeNull()
+  })
+})

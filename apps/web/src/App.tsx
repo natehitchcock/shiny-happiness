@@ -1471,6 +1471,16 @@ const SemanticPick = ({
  * No colour filter. There is no deck yet, so there is no identity to filter by
  * — the commander the builder picks is what will decide it.
  */
+/**
+ * How many matching commanders are drawn before the reader asks for the rest.
+ *
+ * The endpoint's limit is sixty and every one of them was rendered, so two
+ * picks answered "what is this deck about" with a sixty-item scroll. Five is
+ * the number a reader compares against each other at a glance; the other
+ * fifty-five are one press away and were fetched with the first five.
+ */
+const CARRIER_PREVIEW = 5
+
 const SemanticEntry = ({
   onChoose,
   onPreview,
@@ -1490,6 +1500,20 @@ const SemanticEntry = ({
     images: Record<string, api.ImageUris>
   } | null>(null)
   const [looking, setLooking] = useState(false)
+  /**
+   * Whether the carrier list is showing all of what came back (ADR-0068).
+   *
+   * The endpoint sends up to sixty and the list rendered every one of them, so
+   * answering "what is this deck about" with two picks put sixty commanders on
+   * the page — a scroll, not a choice. Five is what a reader compares; the rest
+   * are reachable and never fetched twice, exactly as the semantics offer above
+   * reaches its own sixty-six.
+   *
+   * Reset whenever the picks change, in the fetch effect: an expansion is a
+   * statement about the list in front of the reader, and a new list is a new
+   * question.
+   */
+  const [allCarriers, setAllCarriers] = useState(false)
   /**
    * TWO always-mounted live regions (see the workspace's, and `Quickbuild`'s).
    *
@@ -1625,6 +1649,7 @@ const SemanticEntry = ({
           total: r.total,
           images: r.images ?? {},
         })
+        setAllCarriers(false)
         setLooking(false)
         setFound(
           `${plural(r.total, 'commander')} carry ${plural(picked.length, 'chosen semantic')}.`,
@@ -1669,6 +1694,10 @@ const SemanticEntry = ({
     // does not tell a reader whether the list they were on is still there.
     setAnnouncement(`${String(SEMANTIC_OFFER_SAMPLE)} new semantics offered.`)
   }
+
+  /** The carriers actually drawn: the best five, or all of them once asked. */
+  const shownCarriers =
+    carriers === null ? [] : allCarriers ? carriers.items : carriers.items.slice(0, CARRIER_PREVIEW)
 
   return (
     <section className="start-route" aria-labelledby={headingId}>
@@ -1765,17 +1794,19 @@ const SemanticEntry = ({
       {picked.length > 0 ? (
         <div className="start-carriers">
           {looking && carriers === null ? <p className="note">Looking…</p> : null}
+          {/* Sliced at render, never at fetch: the rest are already in hand, so
+              expanding costs no request and cannot fail. */}
           {carriers !== null && carriers.items.length === 0 ? (
             <p className="problem">
               No commander carries all of those together. Drop one of the picks.
             </p>
           ) : null}
-          {carriers !== null && carriers.items.length > 0 ? (
+          {carriers !== null && shownCarriers.length > 0 ? (
             <>
               <p className="note">
                 {plural(carriers.total, 'commander')} carry {plural(picked.length, 'pick')}
-                {carriers.total > carriers.items.length
-                  ? `, best ${String(carriers.items.length)} first`
+                {shownCarriers.length < carriers.total
+                  ? `, best ${String(shownCarriers.length)} first`
                   : ''}
                 .
               </p>
@@ -1789,7 +1820,7 @@ const SemanticEntry = ({
                 className="start-carrier-list"
                 aria-label="Commanders carrying the chosen semantics"
               >
-                {carriers.items.map((c) => (
+                {shownCarriers.map((c) => (
                   <li key={c.oracleId}>
                     <span className="sr">
                       {`Matches ${String(carriers.matches[c.oracleId] ?? 0)} of ${String(
@@ -1819,6 +1850,26 @@ const SemanticEntry = ({
                   </li>
                 ))}
               </ul>
+              {carriers.items.length > CARRIER_PREVIEW ? (
+                <button
+                  type="button"
+                  className="act"
+                  aria-expanded={allCarriers}
+                  onClick={() => {
+                    const next = !allCarriers
+                    setAllCarriers(next)
+                    setFound(
+                      next
+                        ? `All ${String(carriers.items.length)} commanders shown, best first.`
+                        : `Back to the best ${String(CARRIER_PREVIEW)} commanders.`,
+                    )
+                  }}
+                >
+                  {allCarriers
+                    ? 'Show fewer'
+                    : `See all ${String(carriers.items.length)} that matched`}
+                </button>
+              ) : null}
             </>
           ) : null}
         </div>
