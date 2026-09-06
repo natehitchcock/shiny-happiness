@@ -493,46 +493,59 @@ describe('impactNotes', () => {
 })
 
 describe('efficiencyWorking', () => {
-  /** `cardEfficiency(WRATH_OF_GOD)` — a noncreature, so no stat term at all. */
+  /** `cardEfficiency(WRATH_OF_GOD)` — a noncreature, so no body term at all. */
   const wrath: EfficiencyView = {
-    score: 0.549,
-    statSurplus: 0,
-    effectValue: 2.744,
-    baseline: 6.781,
-    cost: 5,
+    score: 0.127,
+    worth: 4.127,
+    effectValue: 4.127,
+    bodyValue: 0,
+    cost: 4,
   }
 
-  /** `cardEfficiency(RAGAVAN)` — a creature over the going rate, so both terms count. */
-  const overRate: EfficiencyView = {
-    score: 0.198,
-    statSurplus: 0.034,
-    effectValue: 0.362,
-    baseline: 2.966,
-    cost: 2,
+  /** `cardEfficiency(CRATERHOOF_BEHEMOTH)` — a creature, and a card that costs more than it is worth. */
+  const overpriced: EfficiencyView = {
+    score: -2.54,
+    worth: 5.46,
+    effectValue: 3.276,
+    bodyValue: 2.184,
+    cost: 8,
   }
 
-  it('shows both terms and the denominator, so the rate can be checked', () => {
+  it('shows both halves of the price and the cost they are measured against', () => {
     // The number alone invites "higher is better, therefore better card". The
-    // arithmetic is what shows a reader that the divisor is cost.
-    expect(efficiencyWorking(overRate)).toBe(
-      '0.034 of body above the 2.966 this mana usually buys, plus 0.362 for its text, over 2 — its mana plus the card itself.',
+    // arithmetic is what shows a reader that the answer is a subtraction.
+    expect(efficiencyWorking(overpriced)).toBe(
+      'The format charges 5.46 mana for a card like this — 3.276 for what it does, 2.184 for its body — against the 8 it asks for.',
     )
   })
 
-  it('does not claim a noncreature has a body it fell short of', () => {
-    // `statSurplus` is 0 both for a noncreature and for a creature under the
-    // rate, and the payload cannot tell them apart — so the phrase must be true
-    // of both, and the baseline is not quoted at a card it does not apply to.
-    expect(efficiencyWorking(wrath)).toContain('No surplus body')
-    expect(efficiencyWorking(wrath)).not.toContain('6.781')
-    expect(efficiencyWorking(wrath)).toContain('2.744 for its text')
+  it('says "no body" only for a card that has none', () => {
+    // Under ADR-0070 `bodyValue` is 0 exclusively for a card with no printed
+    // statline. A creature whose body is merely small gets a NEGATIVE body
+    // term, and the line reports it rather than rounding it away to a phrase.
+    expect(efficiencyWorking(wrath)).toContain('no body')
+    expect(efficiencyWorking(wrath)).toContain('4.127 for what it does')
+    const smallBody: EfficiencyView = {
+      score: 0.811,
+      worth: 2.811,
+      effectValue: 3.047,
+      bodyValue: -0.236,
+      cost: 2,
+    }
+    expect(efficiencyWorking(smallBody)).toContain('-0.236 for its body')
+    expect(efficiencyWorking(smallBody)).not.toContain('no body')
   })
 
-  it('carries the caveat that a ratio needs', () => {
-    // The first efficiency formula rated Grizzly Bears 2.00 against Wrath of
-    // God 0.69 (`efficiency.ts`). The shipped one measures surpluses and no
-    // longer does that, but it still divides by cost.
+  it('reads a negative score as a price, not as an error', () => {
+    // 43% of the corpus is negative, so the sentence has to survive one.
+    expect(efficiencyWorking(overpriced)).toContain('against the 8 it asks for')
+  })
+
+  it('carries the caveat that names the blind spot', () => {
+    // The model prices what it can NAME. A card whose text it cannot read is
+    // priced at roughly the corpus average, so a cheap illegible card reads as
+    // a bargain — which is the misreading the caveat exists to head off.
     expect(EFFICIENCY_CAVEAT).toContain('not a ranking')
-    expect(EFFICIENCY_CAVEAT).toContain('out-rate a bomb')
+    expect(EFFICIENCY_CAVEAT).toContain('cannot read')
   })
 })

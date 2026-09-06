@@ -93,7 +93,7 @@ const FIXTURES: readonly CardView[] = [
       scales: false,
       fragile: false,
     },
-    efficiency: { score: 1.081, statSurplus: 4.219, effectValue: 1.184, baseline: 6.781, cost: 5 },
+    efficiency: { score: -0.42, worth: 3.58, effectValue: 3.106, bodyValue: 0.474, cost: 4 },
   },
   {
     oracleId: 'f2',
@@ -127,7 +127,7 @@ const FIXTURES: readonly CardView[] = [
       scales: false,
       fragile: false,
     },
-    efficiency: { score: 0.152, statSurplus: 0, effectValue: 0.305, baseline: 2.966, cost: 2 },
+    efficiency: { score: 1.907, worth: 2.907, effectValue: 2.907, bodyValue: 0, cost: 1 },
   },
   {
     oracleId: 'f3',
@@ -154,7 +154,7 @@ const FIXTURES: readonly CardView[] = [
       scales: false,
       fragile: false,
     },
-    efficiency: { score: 0.038, statSurplus: 0, effectValue: 0.191, baseline: 6.781, cost: 5 },
+    efficiency: { score: -0.914, worth: 3.086, effectValue: 2.492, bodyValue: 0.594, cost: 4 },
   },
   {
     oracleId: 'f4',

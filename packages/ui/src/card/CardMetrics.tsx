@@ -198,11 +198,14 @@ export const CardMetrics = ({
                 ? null
                 : explain({ label: EFFICIENCY_ALGORITHM_LABEL, lines: efficiencyAlgorithm() })}
             </span>
-            {/* "per mana" rather than a bare float: the unit is what stops this
-                being read as a second score on the same scale as impact. */}
+            {/* "mana" rather than a bare float: the unit is what stops this
+                being read as a second score on the same scale as impact. It
+                said "per mana" until ADR-0070, when the metric stopped
+                dividing — it is a difference between two mana figures now, so
+                the denominator it used to name no longer exists. */}
             <span className="rt-metric-value">
               {metricValue(efficiency.score)}
-              <span className="rt-metric-of"> per mana</span>
+              <span className="rt-metric-of"> mana</span>
             </span>
           </p>
           <p className="rt-metric-note">{efficiencyWorking(efficiency)}</p>

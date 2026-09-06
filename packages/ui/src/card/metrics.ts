@@ -71,10 +71,11 @@ export interface ImpactRoleView {
 
 /** `CardEfficiency` from `@roundtable/domain`, as a view model. Same rule. */
 export interface EfficiencyView {
+  /** `worth − cost`, in MANA. Negative is meaningful and is not clamped. */
   readonly score: number
-  readonly statSurplus: number
+  readonly worth: number
   readonly effectValue: number
-  readonly baseline: number
+  readonly bodyValue: number
   readonly cost: number
 }
 
@@ -434,39 +435,34 @@ export const impactNotes = (
  *
  * WHY NO METER FOR THIS ONE. Impact has an exact, reachable ceiling that the
  * model itself defines, so a proportion of it is a true statement. Efficiency
- * is a ratio with no ceiling at all — `(surplus + r × impact) / (MV + 1)` grows
- * with both terms — so any bar would need a maximum invented in this file, and
- * an invented maximum is exactly the unstated range this whole file exists to
- * remove. Drawing one would be the more polished lie.
+ * is a difference between two mana figures with no ceiling at either end — it
+ * runs from about −11 to about +11 over the corpus — so any bar would need a
+ * maximum invented in this file, and an invented maximum is exactly the
+ * unstated range this whole file exists to remove.
  *
- * What replaces it is the working. Both numerator terms and the denominator are
- * already on the wire, and showing them is what stops the reader concluding
- * "higher is better, therefore better card" — the misreading that sank the
- * FIRST efficiency formula, which rated Grizzly Bears 2.00 against Wrath of God
- * 0.69 (`efficiency.ts`). The shipped formula measures surpluses and no longer
- * does that, but it still divides by cost, so a cheap small card can still
- * out-rate a bomb and the interface has to say so rather than hope.
+ * What replaces it is the working. Both halves of the price and the cost they
+ * are measured against are already on the wire, and showing them is what stops
+ * the reader concluding "higher is better, therefore better card". The model
+ * prices what it can NAME, so a card whose text it cannot read is priced at
+ * roughly what an average card costs — which makes a cheap illegible card look
+ * efficient. That is a blind spot, and the caveat below is where it is said.
  *
- * `statSurplus === 0` is deliberately phrased as "no surplus body" rather than
- * "no body": it is 0 both for a noncreature, which has no body term at all, and
- * for a creature at or under the going rate, and the payload cannot tell those
- * apart. A phrase that is true of both beats a guess that is wrong for one.
+ * `bodyValue === 0` is deliberately phrased as "no body": under ADR-0070 it is
+ * 0 only for a card with no printed statline, and never for a creature whose
+ * body is merely small — a small body is a NEGATIVE contribution now, and the
+ * line says so rather than hiding it.
  */
 export const efficiencyWorking = (efficiency: EfficiencyView): string => {
-  // The baseline is named only when there is a surplus to measure against it.
-  // It is a vanilla-creature figure (`efficiency.ts`), so quoting it beside a
-  // noncreature's zero would answer a question nobody asked with a number that
-  // does not apply to the card.
   const body =
-    efficiency.statSurplus === 0
-      ? 'No surplus body'
-      : `${metricValue(efficiency.statSurplus)} of body above the ${metricValue(efficiency.baseline)} this mana usually buys`
-  return `${body}, plus ${metricValue(efficiency.effectValue)} for its text, over ${metricValue(efficiency.cost)} — its mana plus the card itself.`
+    efficiency.bodyValue === 0
+      ? 'no body'
+      : `${metricValue(efficiency.bodyValue)} for its body`
+  return `The format charges ${metricValue(efficiency.worth)} mana for a card like this — ${metricValue(efficiency.effectValue)} for what it does, ${body} — against the ${metricValue(efficiency.cost)} it asks for.`
 }
 
-/** The caveat that has to travel with a ratio. */
+/** The caveat that has to travel with a difference the model can only half see. */
 export const EFFICIENCY_CAVEAT =
-  'A rate, not a ranking: it divides by cost, so a small cheap card can out-rate a bomb.'
+  'A price, not a ranking: the model prices only what it can name, so a cheap card it cannot read still reads as a bargain.'
 
 /**
  * HOW THE NUMBER WAS ARRIVED AT — the explanation behind the `Hint`.
@@ -517,22 +513,24 @@ export const impactAlgorithm = (): readonly string[] => [
 ]
 
 /**
- * The same, for the ratio. Companion to `efficiencyWorking`, which prints this
- * card's three actual terms; this says what they are.
+ * The same, for the price. Companion to `efficiencyWorking`, which prints this
+ * card's actual terms; this says what they are.
  *
- * The one thing a reader cannot guess is the `+ 1` in the denominator, so it is
- * named outright. The second is that BOTH terms are surpluses — the correction
- * that rejected the first formula for rating Grizzly Bears three times Wrath of
- * God (doc 18 §18.6) — so "above what the mana already buys" carries it.
+ * The two things a reader cannot guess are that the number is in MANA rather
+ * than a rate, and that a negative one is a real reading rather than a bug —
+ * both are said in the first two lines. The third is that the prices are
+ * MARGINAL, which is why "what it adds to a card that already has the others"
+ * is spelled out rather than left as "average".
  */
 export const efficiencyAlgorithm = (): readonly string[] => [
-  'What the card gives you above what its mana already buys, per mana.',
-  'Body — a creature’s power plus toughness, above what a creature of that cost normally has. The going rate is measured from the only cards whose whole contribution is their body: the ones with no rules text at all. It is lower than the old “a 2/2 for two” rule predicts, and the gap widens as cards get expensive.',
-  'A body below that rate counts as nothing rather than as a debt. A card is not improved by doing less.',
-  'Text — the impact above, converted into body at the rate the format itself trades the two: what the average creature at each cost gives up in stats to have rules text at all. Measured from the corpus, not chosen.',
-  'Both halves are surpluses, which is the whole of what this gets right. A vanilla creature gives you exactly the going rate and nothing else, so it correctly scores zero.',
-  'Divided by the mana cost plus one, and the plus one is the card itself — a spell costs you a card as well as its mana. It also keeps a nought-cost card from dividing by nothing.',
-  'A noncreature has no body term at all. It is not a creature missing one, so it gets neither the surplus nor a penalty.',
+  'What the format normally charges for a card like this, minus what this one costs. The answer is in mana.',
+  'Negative is a real answer, not a floor. It means the card costs more than the corpus charges for what it does, and that is worth knowing.',
+  'Every effect carries a price learned from the corpus — its roles, the events it produces, whether it happens once or repeats, and its body. The card is worth the sum of them.',
+  'The prices are what an effect ADDS to a card that already has the others. Averaging each effect on its own double-counts, because the average draw spell also ramps and also removes, and it overprices the format by about a fifth.',
+  'A body is priced too, so a good rate reads as a good rate: a 6/6 for four is worth more than four mana of body. A point of power costs a little more than a point of toughness.',
+  'A card with no printed power and toughness contributes nothing from its body. It is not a creature missing one.',
+  'Nothing is divided, so there is no cheapness bonus built into the arithmetic and a nought-cost card is not a special case.',
+  'The limit is real: the model prices only what it can name. A card whose text it cannot read is priced at about what an average card costs, so a cheap one still reads as a bargain.',
 ]
 
 /** Accessible names for the two triggers. */

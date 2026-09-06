@@ -215,7 +215,16 @@ export interface Recommendation {
   readonly bracketFlags: readonly BracketFlag[]
   readonly reasons: readonly [Reason, ...Reason[]]
   /**
-   * How much this card does, and how much of it you get for the mana (doc 18).
+   * How much this card does, and what it is worth against what it costs.
+   *
+   * `efficiency` KEPT ITS NAME AND ITS TYPE'S NAME AND CHANGED WHAT IT MEANS
+   * (ADR-0070), which is the reason that ADR exists. It used to be stat points
+   * of surplus per mana, floored at zero; it is now a DIFFERENCE IN MANA —
+   * what the corpus charges for the card's effects minus what the card asks —
+   * and it is routinely negative. Every field inside `CardEfficiency` changed
+   * with it. A client that draws the number without reading the unit will draw
+   * a plausible wrong thing, which is why the unit moved in the UI in the same
+   * change.
    *
    * BESIDE `reasons`, NOT INSIDE IT, and the argument is pillar P4 rather than
    * convenience. A `Reason` answers "why was this card suggested to me, in this

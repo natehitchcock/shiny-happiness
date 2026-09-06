@@ -1,34 +1,49 @@
 import { describe, expect, it } from 'vitest'
 import {
-  EFFICIENCY_BASELINE,
+  EFFECT_PRICES,
+  assertUsablePrices,
   cardEfficiency,
-  vanillaStatline,
-  type EfficiencyBaseline,
+  type EffectPrices,
   type EfficiencyInput,
 } from './efficiency.js'
-import { cardImpact } from './impact.js'
+import { ROLE_PRECEDENCE } from './role.js'
 
 /**
- * A FIXED baseline for the arithmetic tests (doc 18 §18.6).
+ * A FIXED price table for the arithmetic tests (ADR-0070).
  *
- * The shipped `EFFICIENCY_BASELINE` is regenerated from the corpus and is
- * expected to move as power creep continues; a test that pinned a number
- * computed from it would go red on the next regeneration for no reason anyone
- * could act on. The tests that must hold whatever the corpus says use this
- * fixture; the two that check the shipped file is sane say so in their names.
+ * The shipped `EFFECT_PRICES` is refitted from the corpus and is expected to
+ * move as power creep continues; a test that pinned a number computed from it
+ * would go red on the next regeneration for no reason anyone could act on. The
+ * tests that must hold whatever the corpus says use this fixture; the ones that
+ * check the shipped file say so in their names.
+ *
+ * Round numbers, chosen so every expectation below can be verified by hand.
  */
-const FIXTURE: EfficiencyBaseline = {
-  vanillaStatlineByManaValue: {
-    '1': { n: 29, statline: 3 },
-    '2': { n: 75, statline: 4 },
-    '4': { n: 64, statline: 7 },
-    // Deliberately below MIN_SAMPLE, so this row must be IGNORED in favour of
-    // the fit — 99 is a number the fit would never produce.
-    '8': { n: 2, statline: 99 },
+const FIXTURE: EffectPrices = {
+  source: 'corpus-database',
+  generatedAt: '2026-09-06',
+  corpus: { commanderLegal: 31782 },
+  fit: {
+    ridgeLambda: 1,
+    minProduceSupport: 50,
+    features: 81,
+    meanManaValue: 3.2911,
+    meanPredictedManaValue: 3.2907,
+    meanAbsoluteError: 0.95,
+    crossValidatedMeanAbsoluteError: 0.95,
+    rootMeanSquaredError: 1.28,
+    r2: 0.46,
   },
-  vanillaStatlineFit: { slope: 2, intercept: 1 },
-  statPointsPerImpactPoint: 0.5,
+  roles: Object.fromEntries(ROLE_PRECEDENCE.map((role) => [role, 0])),
+  produces: { treasure: 0.5, landfall: 0.25 },
+  rate: { 'one-shot': 2, activated: 2, triggered: 2, upkeep: 3 },
+  body: { hasBody: -2, power: 0.5, toughness: 0.25 },
 }
+
+const withRole = (role: string, price: number): EffectPrices => ({
+  ...FIXTURE,
+  roles: { ...FIXTURE.roles, [role]: price },
+})
 
 const card = (over: Partial<EfficiencyInput>): EfficiencyInput => ({
   name: 'Test Card',
@@ -39,171 +54,269 @@ const card = (over: Partial<EfficiencyInput>): EfficiencyInput => ({
   types: ['artifact'],
   power: null,
   toughness: null,
+  roles: ['synergy'],
+  synergyProduces: [],
   ...over,
 })
 
 const creature = (over: Partial<EfficiencyInput>): EfficiencyInput =>
   card({ typeLine: 'Creature — Bear', types: ['creature'], ...over })
 
-describe('vanillaStatline', () => {
-  it('uses the measured mean where the sample supports it', () => {
-    expect(vanillaStatline(2, FIXTURE)).toBe(4)
-  })
-
-  it('falls back to the fit where the sample is too thin to trust', () => {
-    // Two vanilla creatures at eight mana would let one oddity move the row by
-    // whole points of P+T.
-    expect(vanillaStatline(8, FIXTURE)).toBe(17)
-  })
-
-  it('falls back to the fit for a mana value the table does not cover', () => {
-    expect(vanillaStatline(10, FIXTURE)).toBe(21)
-  })
-
-  it('rounds a fractional mana value to the nearest bucket', () => {
-    expect(vanillaStatline(1.5, FIXTURE)).toBe(4)
-  })
-
-  it('never returns a negative baseline', () => {
-    const falling: EfficiencyBaseline = {
-      ...FIXTURE,
-      vanillaStatlineByManaValue: {},
-      vanillaStatlineFit: { slope: 2, intercept: -10 },
-    }
-    expect(vanillaStatline(0, falling)).toBe(0)
-  })
-})
-
 describe('cardEfficiency', () => {
-  it('is zero for a creature that is exactly the going rate', () => {
-    // A vanilla creature gives you what the mana buys and nothing else, so it
-    // is the origin of the scale by construction.
-    const bear = creature({ manaValue: 2, power: '2', toughness: '2' })
-    expect(cardEfficiency(bear, FIXTURE).score).toBe(0)
-  })
-
-  it('does NOT charge a body smaller than the going rate', () => {
-    // Llanowar Elves is a 1/1 for one against a vanilla rate near 3. Charging it
-    // −1 would say the card would be better if it did nothing at all.
-    const elves = creature({
-      name: 'Llanowar Elves',
-      manaValue: 1,
-      power: '1',
-      toughness: '1',
-      oracleText: '{T}: Add {G}.',
+  it('is what the corpus charges for the card, minus what the card asks', () => {
+    // Rate 2 (one-shot) + role 1.5 = 3.5 of worth against 2 mana of cost.
+    const spell = card({
+      typeLine: 'Sorcery',
+      types: ['sorcery'],
+      manaValue: 2,
+      roles: ['board-wipe'],
+      oracleText: 'Destroy all creatures.',
     })
-    const value = cardEfficiency(elves, FIXTURE)
-    expect(value.statSurplus).toBe(0)
-    expect(value.score).toBeGreaterThan(0)
+    const value = cardEfficiency(spell, withRole('board-wipe', 1.5))
+    expect(value.worth).toBe(3.5)
+    expect(value.cost).toBe(2)
+    expect(value.score).toBe(1.5)
   })
 
-  it('credits a body above the going rate', () => {
-    const big = creature({ manaValue: 2, power: '4', toughness: '4' })
-    expect(cardEfficiency(big, FIXTURE).statSurplus).toBe(4)
-    // (4 surplus + 0 text) / (2 mana + 1 card), rounded to three places on the
-    // way out so the value is stable across platforms.
-    expect(cardEfficiency(big, FIXTURE).score).toBe(1.333)
-  })
-
-  it('gives a noncreature no stat term rather than a penalty', () => {
-    // A spell is not a creature that is MISSING a body.
-    const bolt = card({
-      name: 'Lightning Bolt',
-      typeLine: 'Instant',
-      types: ['instant'],
-      manaValue: 1,
-      oracleText: 'Lightning Bolt deals 3 damage to any target.',
+  it('IS NEGATIVE when a card costs more than the format charges for it', () => {
+    // The whole point of the change: the metric this replaces floored at zero
+    // and could not say that a card is a bad rate. Rate 2, no other price, six
+    // mana of cost.
+    const overpriced = card({
+      typeLine: 'Sorcery',
+      types: ['sorcery'],
+      manaValue: 6,
+      roles: ['synergy'],
     })
-    const value = cardEfficiency(bolt, FIXTURE)
-    expect(value.statSurplus).toBe(0)
-    expect(value.effectValue).toBeCloseTo(0.5 * cardImpact(bolt).score, 5)
+    expect(cardEfficiency(overpriced, FIXTURE).score).toBe(-4)
   })
 
-  it('gives no stat term to a creature whose power is not a number', () => {
-    // Magic prints `*`. Reading it as 0 would claim Tarmogoyf has no body.
-    const goyf = creature({ manaValue: 2, power: '*', toughness: '1+*' })
-    expect(cardEfficiency(goyf, FIXTURE).statSurplus).toBe(0)
-  })
-
-  it('divides by the mana plus the card, so a free spell is finite', () => {
-    const free = card({
-      typeLine: 'Instant',
-      types: ['instant'],
-      manaValue: 0,
-      oracleText: 'Destroy target creature.',
-    })
+  it('divides by nothing, so a nought-cost card is finite and not special', () => {
+    // There is no `MV + 1` any more, because the score is a DIFFERENCE in mana
+    // rather than a rate — nothing is ever divided, so nothing can divide by 0.
+    const free = card({ typeLine: 'Instant', types: ['instant'], manaValue: 0 })
     const value = cardEfficiency(free, FIXTURE)
-    expect(value.cost).toBe(1)
-    expect(Number.isFinite(value.score)).toBe(true)
-    expect(value.score).toBeGreaterThan(0)
+    expect(value.cost).toBe(0)
+    expect(value.score).toBe(2)
   })
 
-  it('scales the text term by the baseline exchange rate', () => {
-    const wrath = card({
-      name: 'Wrath of God',
+  it('sums every role a card holds, not just its primary', () => {
+    const both = card({
+      manaValue: 3,
+      roles: ['spot-removal', 'token-maker'],
       typeLine: 'Sorcery',
       types: ['sorcery'],
-      manaValue: 4,
-      oracleText: "Destroy all creatures. They can't be regenerated.",
     })
-    const doubled: EfficiencyBaseline = { ...FIXTURE, statPointsPerImpactPoint: 1 }
-    expect(cardEfficiency(wrath, doubled).score).toBeCloseTo(
-      cardEfficiency(wrath, FIXTURE).score * 2,
-      5,
-    )
+    const prices: EffectPrices = {
+      ...FIXTURE,
+      roles: { ...FIXTURE.roles, 'spot-removal': 1, 'token-maker': 0.5 },
+    }
+    // 2 (one-shot) + 1 + 0.5 = 3.5.
+    expect(cardEfficiency(both, prices).worth).toBe(3.5)
   })
 
-  it('rates a wrath above a vanilla bear — the check that rejected the scoped formula', () => {
-    // `(P+T + r × impact) / MV` rates Grizzly Bears 2.00 and Wrath of God 0.69,
-    // because it mixes an absolute body with a marginal text price (doc 18
-    // §18.6). Measuring both as surpluses is what fixes it, and this is the
-    // assertion that would fail if anyone put the absolute body back.
-    const bear = creature({ name: 'Grizzly Bears', manaValue: 2, power: '2', toughness: '2' })
-    const wrath = card({
-      name: 'Wrath of God',
-      typeLine: 'Sorcery',
-      types: ['sorcery'],
-      manaValue: 4,
-      oracleText: "Destroy all creatures. They can't be regenerated.",
-    })
-    expect(cardEfficiency(wrath, FIXTURE).score).toBeGreaterThan(
-      cardEfficiency(bear, FIXTURE).score,
-    )
+  it('counts a repeated role or tag once', () => {
+    // `roles` is a list, and a card that somehow carried a duplicate must not
+    // be charged for it twice.
+    const dup = card({ manaValue: 1, roles: ['ramp', 'ramp'], synergyProduces: ['treasure', 'treasure'] })
+    expect(cardEfficiency(dup, withRole('ramp', 1)).worth).toBe(3.5)
   })
 
-  it('is never negative for any of the shapes a card can take', () => {
+  it('prices what the card PRODUCES, and ignores a tag the fit could not price', () => {
+    const treasure = card({ manaValue: 2, synergyProduces: ['treasure'] })
+    expect(cardEfficiency(treasure, FIXTURE).worth).toBe(2.5)
+    // `lifegain` is not in the fixture's table at all. Absence means "the
+    // corpus has not shown us what this costs", so it adds nothing rather than
+    // throwing or contributing a mean.
+    const unpriced = card({ manaValue: 2, synergyProduces: ['lifegain'] })
+    expect(cardEfficiency(unpriced, FIXTURE).worth).toBe(2)
+  })
+
+  it('takes Rate from the impact classifier, and nothing else from it', () => {
+    // An upkeep trigger is priced at the `upkeep` tier — 3 rather than 2 — and
+    // that is the ONLY thing efficiency reads out of `impact.ts`. The composite
+    // impact score appears nowhere in the arithmetic.
+    const upkeep = card({
+      typeLine: 'Enchantment',
+      types: ['enchantment'],
+      manaValue: 2,
+      oracleText: 'At the beginning of your upkeep, draw a card.',
+    })
+    expect(cardEfficiency(upkeep, FIXTURE).effectValue).toBe(3)
+  })
+
+  describe('the body', () => {
+    it('is priced, so a good rate reads as a good rate', () => {
+      // A 6/6 for four: −2 + 3 + 1.5 = 2.5 of body on top of 2 of Rate, against
+      // four mana. The metric this replaces could not say this — a vanilla
+      // creature was zero by construction, whatever its statline.
+      const big = creature({ manaValue: 4, power: '6', toughness: '6' })
+      const value = cardEfficiency(big, FIXTURE)
+      expect(value.bodyValue).toBe(2.5)
+      expect(value.score).toBe(0.5)
+    })
+
+    it('is negative for a body that is not worth having', () => {
+      const tiny = creature({ manaValue: 4, power: '1', toughness: '1' })
+      expect(cardEfficiency(tiny, FIXTURE).bodyValue).toBe(-1.25)
+    })
+
+    it('CONTRIBUTES EXACTLY ZERO for a noncreature — offset included', () => {
+      // The one silent error this file can make. A noncreature is not a
+      // creature that is missing a body; it has none. If the `hasBody` offset
+      // leaked through with a zero statline attached, every instant and sorcery
+      // in the format would be repriced by −2 at once and nothing would fail.
+      const bolt = card({
+        name: 'Lightning Bolt',
+        typeLine: 'Instant',
+        types: ['instant'],
+        manaValue: 1,
+        oracleText: 'Lightning Bolt deals 3 damage to any target.',
+      })
+      expect(cardEfficiency(bolt, FIXTURE).bodyValue).toBe(0)
+      expect(cardEfficiency(bolt, FIXTURE).worth).toBe(cardEfficiency(bolt, FIXTURE).effectValue)
+    })
+
+    it('contributes exactly zero for a creature whose power is not a number', () => {
+      // Magic prints `*`. Reading it as 0 would claim Tarmogoyf has no body,
+      // and it would then collect the `hasBody` offset for a statline nobody
+      // can name.
+      const goyf = creature({ manaValue: 2, power: '*', toughness: '1+*' })
+      expect(cardEfficiency(goyf, FIXTURE).bodyValue).toBe(0)
+    })
+
+    it('contributes exactly zero for a creature with no printed statline', () => {
+      const bodiless = creature({ manaValue: 2, power: null, toughness: null })
+      expect(cardEfficiency(bodiless, FIXTURE).bodyValue).toBe(0)
+    })
+
+    it('prices power and toughness separately', () => {
+      // They are two features and not one, because the corpus prices them
+      // differently — a point of power is worth more than a point of toughness.
+      const wide = creature({ manaValue: 2, power: '4', toughness: '1' })
+      const tall = creature({ manaValue: 2, power: '1', toughness: '4' })
+      expect(cardEfficiency(wide, FIXTURE).bodyValue).toBeGreaterThan(
+        cardEfficiency(tall, FIXTURE).bodyValue,
+      )
+    })
+  })
+
+  it('splits worth into the two halves the pane prints, and they add up', () => {
+    const bear = creature({ manaValue: 2, power: '2', toughness: '2', synergyProduces: ['landfall'] })
+    const value = cardEfficiency(bear, FIXTURE)
+    expect(value.effectValue + value.bodyValue).toBeCloseTo(value.worth, 5)
+    expect(value.worth - value.cost).toBeCloseTo(value.score, 5)
+  })
+
+  it('is total over every shape a card can take', () => {
     const shapes = [
       creature({ manaValue: 6, power: '0', toughness: '1' }),
       card({ manaValue: 0, types: ['artifact'] }),
       card({ manaValue: 16, types: ['sorcery'], typeLine: 'Sorcery', oracleText: 'Draw a card.' }),
       creature({ manaValue: 1, power: '*', toughness: '*' }),
+      card({ manaValue: 0, types: ['land'], typeLine: 'Land', roles: ['land'], oracleText: '{T}: Add {G}.' }),
     ]
     for (const shape of shapes) {
-      expect(cardEfficiency(shape, FIXTURE).score).toBeGreaterThanOrEqual(0)
+      expect(Number.isFinite(cardEfficiency(shape, FIXTURE).score)).toBe(true)
     }
   })
 })
 
-describe('the shipped baseline', () => {
-  it('is a real measurement, not a placeholder', () => {
-    // An empty corpus would produce a file in which every card is infinitely
-    // efficient and nothing downstream would fail to say so.
-    expect(EFFICIENCY_BASELINE.statPointsPerImpactPoint).toBeGreaterThan(0)
-    expect(EFFICIENCY_BASELINE.vanillaStatlineFit.slope).toBeGreaterThan(0)
-    expect(Object.keys(EFFICIENCY_BASELINE.vanillaStatlineByManaValue).length).toBeGreaterThan(4)
+describe('the shipped prices', () => {
+  /**
+   * THIS TEST IS RED ON PURPOSE UNTIL THE GENERATOR HAS BEEN RUN.
+   *
+   * `pnpm --filter @roundtable/ingest effect-prices` writes `corpus-database`.
+   * Anything else is a stand-in fitted somewhere the generator does not run —
+   * the file currently shipped was fit over Scryfall's oracle bulk export in a
+   * worktree with no `DATABASE_URL`, over the same 31,782 commander-legal cards
+   * but not the same rows.
+   *
+   * A stand-in is not a wrong number, it is an UNVERIFIED one, and the failure
+   * this file is designed around is a price table that is quietly not the one
+   * anybody measured. So the check is a red test rather than a comment: it
+   * cannot be skimmed past, and it goes green the moment the generator is run
+   * against a corpus database and its output committed.
+   */
+  it('are measured from the corpus database', () => {
+    expect(EFFECT_PRICES.source).toBe('corpus-database')
   })
 
-  it('rises with mana value, because a bigger body costs more', () => {
-    for (let mv = 1; mv < 6; mv++) {
-      expect(vanillaStatline(mv + 1)).toBeGreaterThan(vanillaStatline(mv))
-    }
+  it('is a real fit, not a placeholder', () => {
+    // A file of zeroes makes every card worth nothing, so efficiency becomes
+    // exactly `−manaValue` and every column silently sorts by cheapness.
+    expect(Object.keys(EFFECT_PRICES.roles)).toHaveLength(ROLE_PRECEDENCE.length)
+    expect(Object.keys(EFFECT_PRICES.produces).length).toBeGreaterThan(20)
+    expect(EFFECT_PRICES.fit.features).toBeGreaterThan(50)
+    expect(EFFECT_PRICES.corpus.commanderLegal).toBeGreaterThan(30000)
   })
 
-  it('contradicts the folk "2/2 for 2" rule at four mana', () => {
-    // The rule predicts 8; the corpus says under 7. Pinned loosely so a
-    // regeneration cannot break it, but tightly enough to catch a baseline that
-    // has silently become the folk rule.
-    expect(vanillaStatline(4)).toBeLessThan(7.5)
-    expect(vanillaStatline(4)).toBeGreaterThan(6)
+  it('is unbiased: the mean price it predicts is the corpus mean', () => {
+    // The naive sum of per-effect means predicts 3.99 against an actual 3.29 —
+    // a 1.21x inflation. Removing that is what the least-squares fit is FOR, so
+    // a regeneration that reintroduces it must fail here.
+    expect(EFFECT_PRICES.fit.meanPredictedManaValue).toBeCloseTo(
+      EFFECT_PRICES.fit.meanManaValue,
+      1,
+    )
+  })
+
+  it('beats the roles-only fit it was measured against', () => {
+    // Roles alone reach 1.41 mana of mean absolute error. Every feature added
+    // since had to earn its place against that number.
+    expect(EFFECT_PRICES.fit.meanAbsoluteError).toBeLessThan(1.41)
+    // And it must not be overfitting: held-out error within a tenth of a mana
+    // of in-sample error.
+    expect(
+      EFFECT_PRICES.fit.crossValidatedMeanAbsoluteError - EFFECT_PRICES.fit.meanAbsoluteError,
+    ).toBeLessThan(0.1)
+  })
+
+  it('prices a body, and prices power above toughness', () => {
+    expect(EFFECT_PRICES.body.power).toBeGreaterThan(0)
+    expect(EFFECT_PRICES.body.toughness).toBeGreaterThan(0)
+    expect(EFFECT_PRICES.body.power).toBeGreaterThan(EFFECT_PRICES.body.toughness)
+    // Having a body at all is an offset against those two, not a bonus on top:
+    // a 0/0 creature is not worth more than a spell that does the same thing.
+    expect(EFFECT_PRICES.body.hasBody).toBeLessThan(0)
+  })
+
+  it('passes its own guard', () => {
+    expect(() => assertUsablePrices(EFFECT_PRICES)).not.toThrow()
+  })
+})
+
+describe('assertUsablePrices', () => {
+  it('refuses a table of zeroes rather than scoring every card wrong', () => {
+    // The failure that matters, because nothing downstream would report it: a
+    // dead table makes every card worth nothing, so efficiency is exactly
+    // `−manaValue`, every column sorts by cheapness, and every number on the
+    // screen is confidently wrong.
+    expect(() =>
+      assertUsablePrices({
+        ...FIXTURE,
+        roles: Object.fromEntries(ROLE_PRECEDENCE.map((r) => [r, 0])),
+        produces: {},
+        rate: { 'one-shot': 0, activated: 0, triggered: 0, upkeep: 0 },
+        body: { hasBody: 0, power: 0, toughness: 0 },
+      }),
+    ).toThrow(/all zeroes/)
+  })
+
+  it('refuses a table missing a role', () => {
+    const { land: _dropped, ...rest } = FIXTURE.roles
+    expect(() => assertUsablePrices({ ...FIXTURE, roles: rest })).toThrow(/role "land"/)
+  })
+
+  it('refuses a table missing a Rate tier', () => {
+    expect(() =>
+      assertUsablePrices({ ...FIXTURE, rate: { 'one-shot': 2, activated: 2, triggered: 2 } }),
+    ).toThrow(/Rate tier "upkeep"/)
+  })
+
+  it('refuses a non-finite price, which JSON can carry as a null', () => {
+    expect(() =>
+      assertUsablePrices({ ...FIXTURE, body: { ...FIXTURE.body, power: Number.NaN } }),
+    ).toThrow(/non-finite/)
   })
 })

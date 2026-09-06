@@ -22,11 +22,11 @@ const WRATH_IMPACT: ImpactView = {
 
 /** `cardEfficiency(WRATH_OF_GOD)`, verbatim. */
 const WRATH_EFFICIENCY: EfficiencyView = {
-  score: 0.549,
-  statSurplus: 0,
-  effectValue: 2.744,
-  baseline: 6.781,
-  cost: 5,
+  score: 0.127,
+  worth: 4.127,
+  effectValue: 4.127,
+  bodyValue: 0,
+  cost: 4,
 }
 
 /** `cardImpact(FOREST)` / `cardEfficiency(FOREST)` — the degenerate pair. */
@@ -41,11 +41,11 @@ const LAND_IMPACT: ImpactView = {
   fragile: false,
 }
 const LAND_EFFICIENCY: EfficiencyView = {
-  score: 0,
-  statSurplus: 0,
-  effectValue: 0,
-  baseline: 0.541,
-  cost: 1,
+  score: 0.1,
+  worth: 0.1,
+  effectValue: 0.1,
+  bodyValue: 0,
+  cost: 0,
 }
 
 /**
@@ -109,8 +109,10 @@ describe('CardMetrics — the scale is on the screen', () => {
 
   it('labels efficiency with its unit rather than a second bare score', () => {
     render(<CardMetrics impact={WRATH_IMPACT} efficiency={WRATH_EFFICIENCY} />)
-    expect(within(metrics()).getByText('0.549')).toBeDefined()
-    expect(within(metrics()).getByText('per mana')).toBeDefined()
+    expect(within(metrics()).getByText('0.127')).toBeDefined()
+    // "mana", not "per mana": ADR-0070 removed the divisor, so the unit is the
+    // same one a mana cost is in.
+    expect(within(metrics()).getByText('mana')).toBeDefined()
   })
 
   it('draws no meter for efficiency, which has no ceiling to draw one against', () => {
@@ -227,7 +229,7 @@ describe('CardMetrics — degenerate and absent', () => {
   it('draws the half it has when only one metric is present', () => {
     render(<CardMetrics impact={WRATH_IMPACT} />)
     expect(within(metrics()).getByText('6.12')).toBeDefined()
-    expect(within(metrics()).queryByText('per mana')).toBeNull()
+    expect(within(metrics()).queryByText('mana')).toBeNull()
   })
 })
 

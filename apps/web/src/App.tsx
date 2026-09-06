@@ -6554,13 +6554,19 @@ const METRIC_LABELS: Readonly<Record<ColumnMetric, string>> = {
  *
  * `6.12` on its own is unreadable, and a cell has no room for the meter and the
  * working that `CardMetrics` draws. What it does have room for is the accessible
- * name, so the scale rides there: "Impact 6.12 of 18.48", "Efficiency 0.549 per
+ * name, so the scale rides there: "Impact 6.12 of 18.48", "Efficiency 0.127
  * mana". Taken from `IMPACT_MAX` in `@roundtable/ui` rather than written out,
  * for the reason that constant exists — a range typed twice is a range that
  * disagrees with itself the day the model moves a rung.
+ *
+ * EFFICIENCY IS IN MANA AND NOT "PER MANA" (ADR-0070). It stopped being a rate
+ * when it stopped dividing: it is now what the corpus charges for the card
+ * minus what the card costs, so the unit is the same one the mana cost is in
+ * and the word after the number has to say so. A stale "per mana" here would be
+ * the interface asserting a denominator the model no longer has.
  */
 const metricScale = (metric: ColumnMetric): string =>
-  metric === 'impact' ? `of ${metricValue(IMPACT_MAX)}` : 'per mana'
+  metric === 'impact' ? `of ${metricValue(IMPACT_MAX)}` : 'mana'
 
 /**
  * One row's value for one metric, or `undefined` when the row has none.
@@ -6768,12 +6774,13 @@ const NO_FACTS: SortFacts = { cards: new Map(), prices: new Map() }
  * What one row is worth on one key. `null` means WE DO NOT KNOW.
  *
  * The distinction between "no value" and "zero" is the whole of this function
- * and it is not pedantry. A land really does have an efficiency of 0 — the
- * metric is total, a noncreature with no rules text scores `0 / (mv + 1)` — and
- * it belongs at the bottom of "highest first" because that is what it measured.
+ * and it is not pedantry, and ADR-0070 sharpened it: efficiency is a difference
+ * in mana now, so ZERO IS A MEASUREMENT — a card priced at exactly what it
+ * costs — and NEGATIVE is another one. Both belong in the middle and at the
+ * bottom of "highest first" respectively, because that is what they measured.
  * A row whose metrics this build did not send, or whose card has not hydrated
- * yet, measured NOTHING, and answering 0 for it would put an unknown card in
- * the same place as a Mountain and claim we had checked.
+ * yet, measured NOTHING, and answering 0 for it would put an unknown card among
+ * the fairly-priced ones and claim we had checked.
  *
  * This is the same argument `columnRank` makes for a metric column that has no
  * values: a sort key with nothing behind it must contribute nothing, because
@@ -6960,7 +6967,7 @@ const FILTER_FIELDS: readonly (readonly [string, string])[] = [
   // A range that stops below a fifteenth of the pool sends a builder looking
   // for a threshold to the wrong end of the scale.
   ['impact>=6', 'how much the card does (0–18)'],
-  ['eff>=1.5', 'what you get per mana (a small ratio)'],
+  ['eff>=1', 'mana of value above its cost (negative is real)'],
   ['is:gamechanger', 'and permanent, land, vanilla, …'],
 ]
 
@@ -6985,7 +6992,7 @@ const FilterHelp = (): React.JSX.Element => (
               threshold for, and the column beside the row is where they see
               them. */}
           Try <code>impact&gt;=6 -t:land</code> for the heavy hitters that are not lands, or{' '}
-          <code>eff&gt;=1.5 mv&lt;=3</code> for cheap cards that punch up. Both compare against the
+          <code>eff&gt;=1 mv&lt;=3</code> for cheap cards that punch up. Both compare against the
           numbers in the impact and efficiency columns exactly as shown.
         </span>
       </>

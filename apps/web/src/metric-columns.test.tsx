@@ -69,6 +69,10 @@ const WRATH_INPUT: EfficiencyInput = {
   types: ['sorcery'],
   power: null,
   toughness: null,
+  // ADR-0070: the model's vocabulary is the card's own derivations, so a
+  // fixture has to carry them. Wrath of God's real ones.
+  roles: ['board-wipe'],
+  synergyProduces: ['creature-death'],
 }
 
 const BEARS_INPUT: EfficiencyInput = {
@@ -80,6 +84,8 @@ const BEARS_INPUT: EfficiencyInput = {
   types: ['creature'],
   power: '2',
   toughness: '2',
+  roles: ['synergy'],
+  synergyProduces: [],
 }
 
 const impactOf = (input: EfficiencyInput): CardImpact => cardImpact(input)
