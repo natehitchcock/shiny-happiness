@@ -1674,8 +1674,8 @@ const SemanticEntry = ({
     <section className="start-route" aria-labelledby={headingId}>
       <h3 id={headingId}>Or start from what the deck is about</h3>
       <p className="note">
-        Pick one or more and see which commanders carry them. Every one of these has at least twenty
-        commanders and a hundred and fifty cards behind it.
+        Pick one or more and see which commanders carry them. Every one of these has at least ten
+        commanders and seventy cards behind it.
       </p>
 
       {failed && offers === null ? (

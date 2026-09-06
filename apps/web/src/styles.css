@@ -2545,6 +2545,27 @@ select {
    * flow and made sticky instead — a card stays beside the list while the reader
    * scrolls the candidates under it, which is the comparison this is for.
    */
+  /*
+   * `.start`'s own `margin: 8vh auto` must not survive inside this row.
+   *
+   * MEASURED IN A BROWSER, which is the only way this was ever going to be
+   * found: an `auto` side margin on a flex item absorbs ALL the free space on
+   * that side, and it wins against the parent's `justify-content`. So the
+   * centred column kept 820px of margin on each side at 2560px wide, the
+   * `justify-content: center` above did precisely nothing, and `.start-detail`
+   * was flung to the far right edge of the viewport with 844px of dead space
+   * between it and the content it describes — against a `gap` that says 24px.
+   *
+   * Zeroing the SIDE margins only. The `8vh` top is what aligns the column
+   * under the masthead and is not this rule's business. Centring is then the
+   * flex line's job, which is what `justify-content: center` was written to do
+   * and could not while the auto margins were there.
+   */
+  .start-layout > .start {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
   .start-layout[data-preview='open'] > .start-detail {
     flex: 0 0 21rem;
     max-width: 21rem;
