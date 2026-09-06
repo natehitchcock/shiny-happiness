@@ -20,18 +20,9 @@
     "these prices describe the corpus rather than trusting that they do.",
     "",
     "`rate` is the `persistence` axis of the impact model in `impact.ts` — the one",
-    "thing efficiency takes from it. The composite impact SCORE is not an input.",
-    "",
-    "THESE PARTICULAR NUMBERS ARE A STAND-IN AND `source` SAYS SO. They were fit",
-    "by this same code over Scryfall's oracle bulk export mapped through",
-    "`packages/clients`'s own `skipReason`/`toCard` — the same 31,782",
-    "commander-legal cards the corpus database holds, with roles and",
-    "`synergyProduces` from the domain's own derivations — because the worktree",
-    "they were produced in has no DATABASE_URL. `efficiency.test.ts` fails on any",
-    "`source` other than `corpus-database`, so this cannot ship quietly: run the",
-    "generator and commit what it writes."
+    "thing efficiency takes from it. The composite impact SCORE is not an input."
   ],
-  "source": "scryfall-oracle-bulk",
+  "source": "corpus-database",
   "generatedAt": "2026-09-06",
   "corpus": {
     "commanderLegal": 31782

@@ -576,22 +576,51 @@ describeDb('API-01 contract', () => {
           .sort(),
       ).toEqual([HIGH_IMPACT, NAMER].sort())
 
-      // The same card, and only that card: efficiency is impact valued in stat
-      // points over the cost, so a textless card with no body scores zero too.
-      const efficient = await app.inject({
+      /*
+       * Efficiency needs a DIFFERENT discriminator, and ADR-0070 is why.
+       *
+       * This asserted the same two cards on the reasoning that "efficiency is
+       * impact valued in stat points over the cost, so a textless card with no
+       * body scores zero too". Both halves of that are now false: efficiency is
+       * the fitted price of a card's effects minus its mana value, it takes no
+       * input from the impact score, and zero is no longer where a card with
+       * nothing to say lands — a textless one-drop is comfortably positive
+       * because being a card at all is priced.
+       *
+       * So the old assertion is not adjusted to a new pair of ids; it is
+       * replaced, because what it claimed about the model has expired. What the
+       * test is FOR survives intact — proving the field is evaluated rather than
+       * waved through — and a partition proves that without pinning the model's
+       * arithmetic to a literal that the next refit invalidates. A route that
+       * ignored `eff` would answer both halves with the whole corpus, and the
+       * disjointness check is what catches it.
+       */
+      const positive = await app.inject({
         method: 'GET',
         url: '/api/v1/cards/search?q=' + encodeURIComponent('eff>0'),
       })
-      expect(efficient.statusCode).toBe(200)
-      // The same two cards: efficiency is impact valued over the cost, so a card
-      // with impact and a cost has efficiency too. The textless fixtures score
-      // zero on both, which is what makes either query a test of the field.
-      expect(
-        efficient
-          .json()
-          .items.map((c: Card) => c.oracleId)
-          .sort(),
-      ).toEqual([HIGH_IMPACT, NAMER].sort())
+      /*
+       * A threshold NO card can reach, which is what makes this a test.
+       *
+       * Every fixture here is cheap and carries a body, so all of them clear
+       * zero — an `eff<=0` complement is empty and proves nothing. The corpus
+       * maximum is about +10.7 mana (ADR-0070), so 100 is unreachable by
+       * construction and stays unreachable across a refit, which a literal list
+       * of ids would not.
+       *
+       * A route that accepted `eff` and never read it answers both of these
+       * with the same non-empty list. That is the silent-wrong-answer failure
+       * `UNSUPPORTED_FIELDS` exists to stop, and it is the only thing this pair
+       * is asserting.
+       */
+      const unreachable = await app.inject({
+        method: 'GET',
+        url: '/api/v1/cards/search?q=' + encodeURIComponent('eff>100'),
+      })
+      expect(positive.statusCode).toBe(200)
+      expect(unreachable.statusCode).toBe(200)
+      expect((positive.json().items as Card[]).length).toBeGreaterThan(0)
+      expect(unreachable.json().items).toEqual([])
 
       // And it is excluded from the complement, so the two halves partition the
       // corpus rather than both matching.
