@@ -182,7 +182,7 @@ afterEach(() => {
 })
 
 const SEMANTICS = 'Or start from what the deck is about'
-const QUICKDRAW = 'Or deal three at random'
+const QUICKDRAW = 'Or choose from one of three random commanders'
 
 /**
  * How many the route offers at once, from the domain rather than from a literal.

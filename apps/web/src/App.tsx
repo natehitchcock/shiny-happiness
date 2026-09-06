@@ -1946,9 +1946,9 @@ const QuickdrawEntry = ({
 
   return (
     <section className="start-route" aria-labelledby={headingId}>
-      <h3 id={headingId}>Or deal three at random</h3>
+      <h3 id={headingId}>Or choose from one of three random commanders</h3>
       <p className="note">
-        Two commanders you have a fair chance of recognising, and one from anywhere in the format.
+        Two commanders are commonly used, the wildcard is from the set of every possible commander.
       </p>
 
       {failed ? (
