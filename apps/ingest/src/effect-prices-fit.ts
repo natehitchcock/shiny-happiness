@@ -24,7 +24,7 @@
  * is defined against THAT model, and two copies of it would drift the day
  * either changed.
  */
-import { ROLE_PRECEDENCE, cardImpact } from '@roundtable/domain'
+import { ROLE_PRECEDENCE, cardImpact, efficiencyBody } from '@roundtable/domain'
 import type { CardType, EfficiencyInput, EffectPrices, Role, SynergyTag } from '@roundtable/domain'
 
 /** One `cards` row, narrowed to the columns the fit reads. */
@@ -186,22 +186,6 @@ const ridgeFit = (
 const dot = (row: DesignRow, beta: readonly number[]): number =>
   row.idx.reduce((sum, j, k) => sum + (beta[j] ?? 0) * (row.val[k] ?? 0), 0)
 
-/**
- * The body, read exactly as `efficiency.ts` reads it.
- *
- * Null for anything without a printed numeric power AND toughness, so a
- * noncreature and a Tarmogoyf both contribute zero from all three body
- * features rather than an offset with an invented statline attached.
- */
-const bodyOf = (card: EfficiencyInput): { power: number; toughness: number } | null => {
-  if (!card.types.includes('creature')) return null
-  if (card.power === null || card.toughness === null) return null
-  const power = Number(card.power)
-  const toughness = Number(card.toughness)
-  if (!Number.isFinite(power) || !Number.isFinite(toughness)) return null
-  return { power, toughness }
-}
-
 export interface FitResult {
   readonly roles: Record<string, number>
   readonly produces: Record<string, number>
@@ -267,7 +251,10 @@ export const fitEffectPrices = (cards: readonly EfficiencyInput[]): FitResult =>
     for (const role of new Set(card.roles)) push(`role:${role}`)
     for (const tag of new Set(card.synergyProduces)) push(`produces:${tag}`)
     push(`rate:${cardImpact(card).persistence}`)
-    const body = bodyOf(card)
+    // The domain's own reader, not a copy of it. The fit must define a body by
+    // exactly the rule `cardEfficiency` applies, or it prices coefficients
+    // against one definition and they are spent against another.
+    const body = efficiencyBody(card)
     if (body !== null) {
       idx.push(hasBodyAt, powerAt, toughnessAt)
       val.push(1, body.power, body.toughness)

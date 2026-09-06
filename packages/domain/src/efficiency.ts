@@ -190,8 +190,21 @@ export interface CardEfficiency {
  * state — treating it as 0 would claim Tarmogoyf has no body. Such a card gets
  * no body term at all and stands on its effects, which is the honest reading of
  * a body nobody can name.
+ *
+ * The `=== null` test is separate from the finiteness test and is load-bearing:
+ * `Number(null)` is `0`, which is finite, so folding the two would give 22
+ * commander-legal creatures with no printed power a 0/0 body and the `hasBody`
+ * offset that comes with it.
+ *
+ * EXPORTED FOR THE GENERATOR, which must read a body by exactly this rule or it
+ * fits coefficients under one definition and `cardEfficiency` applies them
+ * under another. That is the argument `effect-prices-fit.ts` already makes for
+ * importing `cardImpact` rather than reimplementing it, and the two copies of
+ * this function that existed before were identical only by luck.
  */
-const statlineOf = (card: EfficiencyInput): { power: number; toughness: number } | null => {
+export const efficiencyBody = (
+  card: EfficiencyInput,
+): { power: number; toughness: number } | null => {
   if (!card.types.includes('creature')) return null
   if (card.power === null || card.toughness === null) return null
   const power = Number(card.power)
@@ -256,7 +269,7 @@ export const cardEfficiency = (
     effectValue += from.produces[tag] ?? 0
   }
 
-  const statline = statlineOf(card)
+  const statline = efficiencyBody(card)
   const bodyValue =
     statline === null
       ? 0
